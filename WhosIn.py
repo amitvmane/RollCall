@@ -608,6 +608,13 @@ def start_roll_call(message):
         cid=message.chat.id
         chat['count']=0
 
+        if chat[cid]['txtIn']=='Nobody':
+            chat[cid]['txtIn']=""
+        if chat[cid]['txtOut']=='Nobody':
+            chat[cid]['txtOut']=""
+        if chat[cid]['txtMaybe']=='Nobody':
+            chat[cid]['txtMaybe']=""
+
         bot.send_message(message.chat.id, "Roll ended!")
         backslash='\n'
         bot.send_message(cid, 

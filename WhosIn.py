@@ -8,6 +8,7 @@ from config import API_KEY
 bot = telebot.TeleBot(API_KEY)
 
 chat={}
+commands=["/start","/help","/start_roll_call","/shh","/louder","/end_roll_call","/in","/out","/maybe","/set_title","/whos_in","/whos_out","/whos_maybe","/set_in_for","/sif","/set_out_for","/sof","/set_maybe_for","/smf",]
 
 def roll_call_already_started(message):
     try:
@@ -61,7 +62,7 @@ def create_txt_list(cid):
             chat[cid]['txtMaybe']+=f'{m}. {us}\n'
 
 
-@bot.message_handler(func=lambda message:message.text.lower()=="/start")  # START COMMAND
+@bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/start")  # START COMMAND
 def welcome_and_explanation(message):
     markup = ReplyKeyboardMarkup(row_width=3)         
     markup.add('/start_roll_call', '/in', '/out', '/maybe', '/whos_in', '/end_roll_call')        
@@ -71,7 +72,7 @@ Type /help to see all the commands
     ''', reply_markup=markup)
 
 
-@bot.message_handler(func=lambda message:message.text.lower()=="/help")  # HELP COMMAND
+@bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/help")  # HELP COMMAND
 def welcome_and_explanation(message):
     bot.send_message(message.chat.id, '''
 The commands are:
@@ -92,7 +93,7 @@ The commands are:
 -/louder || to disable minimum output for each command
 -/end_roll_call   || to end a roll call
     ''')
-@bot.message_handler(func=lambda message:message.text.lower()=="/start_roll_call")  # START ROLL CALL COMMAND
+@bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/start_roll_call")  # START ROLL CALL COMMAND
 def start_roll_call(message):
 
     contin=roll_call_already_started(message)
@@ -124,17 +125,17 @@ def start_roll_call(message):
         bot.send_message(message.chat.id, "Roll call with title: "+title+" started!")
         print("A roll call with title "+title+"has started")
 
-@bot.message_handler(func=lambda message:message.text.lower()=="/shh")
+@bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/shh")
 def shh(message):
     chat[message.chat.id]['shh']=True
     bot.send_message(message.chat.id, "Ok, i will keep quiet!")
 
-@bot.message_handler(func=lambda message:message.text.lower()=="/louder")
+@bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/louder")
 def shh(message):
     chat[message.chat.id]['shh']=False
     bot.send_message(message.chat.id, "Ok, i can hear you!")
 
-@bot.message_handler(func=lambda message:(message.text.split(" "))[0].lower() == "/in")  # IN COMMAND
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/in")  # IN COMMAND
 def in_user(message):
     contin=roll_call_not_started(message)
 
@@ -186,7 +187,7 @@ def in_user(message):
             bot.send_message(cid, 
 f"""Title - {chat[cid]['title']}:\n{'In:'+backslash+chat[cid]['txtIn']+backslash if chat[cid]['txtIn']!='' else ''}{'Out:'+backslash+chat[cid]['txtOut']+backslash if chat[cid]['txtOut']!='' else ''}{'Maybe:'+backslash+chat[cid]['txtMaybe'] if chat[cid]['txtMaybe']!='' else ''}""")
 
-@bot.message_handler(func=lambda message:(message.text.split(" "))[0].lower() == "/out")  # OUT COMMAND
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/out")  # OUT COMMAND
 def in_user(message):
     try:
         if chat[message.chat.id]['title']!='':
@@ -199,6 +200,11 @@ def in_user(message):
         msg = message.text
         cid = message.chat.id
         user = message.from_user.first_name  # name of user who not attendance
+        arr = msg.split(" ")
+
+        if len(arr) > 1:             
+            arr.pop(0)  # Define the comment
+            comment = ' '.join(arr)
 
         if 'usersAttendance' in chat[cid]:
             for us in chat[cid]['usersAttendance']:
@@ -224,14 +230,7 @@ def in_user(message):
             chat[cid]['usersNotAttendance'] = [user]  
             print(user+" it's OUT")    
 
-        arr = msg.split(" ")
-
-        if len(arr) > 1:             
-            arr.pop(0)  # Define the comment
-            comment = ' '.join(arr)
-
         # text with a list of users
-        
         if comment!='':
             chat[cid]['usersComments'][user]=comment
         else:
@@ -243,7 +242,8 @@ def in_user(message):
             backslash='\n'
             bot.send_message(cid, 
 f"""Title - {chat[cid]['title']}:\n{'In:'+backslash+chat[cid]['txtIn']+backslash if chat[cid]['txtIn']!='' else ''}{'Out:'+backslash+chat[cid]['txtOut']+backslash if chat[cid]['txtOut']!='' else ''}{'Maybe:'+backslash+chat[cid]['txtMaybe'] if chat[cid]['txtMaybe']!='' else ''}""")
-@bot.message_handler(func=lambda message:(message.text.split(" "))[0].lower() == "/maybe")  # MAYBE COMMAND
+
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/maybe")  # MAYBE COMMAND
 def in_user(message):
     try:
         if chat[message.chat.id]['title']!='':
@@ -257,7 +257,6 @@ def in_user(message):
         msg = message.text
         cid = message.chat.id
         user = message.from_user.first_name  # name of user who attendance
-
 
         arr = msg.split(" ")
 
@@ -301,7 +300,7 @@ def in_user(message):
             bot.send_message(cid, 
 f"""Title - {chat[cid]['title']}:\n{'In:'+backslash+chat[cid]['txtIn']+backslash if chat[cid]['txtIn']!='' else ''}{'Out:'+backslash+chat[cid]['txtOut']+backslash if chat[cid]['txtOut']!='' else ''}{'Maybe:'+backslash+chat[cid]['txtMaybe'] if chat[cid]['txtMaybe']!='' else ''}""")
 
-@bot.message_handler(func=lambda message:message.text.lower()=="/whos_in")  # WHOS IN COMMAND
+@bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/whos_in")  # WHOS IN COMMAND
 def in_user(message):
     try:
         if chat[message.chat.id]['title']!='':
@@ -330,7 +329,7 @@ In:
 {chat[cid]['txtIn']}""")  # list of who will attendance
 
 
-@bot.message_handler(func=lambda message:message.text.lower()=="/whos_out")  # WHOS IN COMMAND
+@bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/whos_out")  # WHOS IN COMMAND
 def in_user(message):
     cid = message.chat.id
     try:
@@ -358,7 +357,7 @@ Out:
 {chat[cid]['txtOut']}""")  # list of who will not attendance
 
 
-@bot.message_handler(func=lambda message:message.text.lower()=="/whos_maybe")  # WHOS IN COMMAND
+@bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/whos_maybe")  # WHOS IN COMMAND
 def in_user(message):
     cid = message.chat.id
     try:
@@ -385,7 +384,7 @@ Maybe:
 {chat[cid]['txtMaybe']}""")  # list of who will maybe attendance
 
 
-@bot.message_handler(func=lambda message:message.text.lower()=="/set_title")  # SET TITLE COMMAND
+@bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/set_title")  # SET TITLE COMMAND
 def in_user(message):
     try:
         if chat[message.chat.id]['title']!='':
@@ -411,9 +410,8 @@ def in_user(message):
             bot.send_message(cid, 'The roll call title is set to:'+ title)
             print(user+"The title has change to "+title)
 
-
-@bot.message_handler(func=lambda message:(message.text.split(" "))[0].lower() == "/set_in_for")
-@bot.message_handler(func=lambda message:(message.text.split(" "))[0].lower() == "/sif")
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/set_in_for")
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/sif")
 def in_user(message):
     try:
         if chat[message.chat.id]['title']!='':
@@ -421,12 +419,13 @@ def in_user(message):
     except:
         bot.send_message(message.chat.id, "Roll call is not active")
         contin=False
+
     if contin==True:
-        print(message.text)
         condition=True
         cid = message.chat.id
         msg = message.text
         arr=msg.split(" ")
+
         if len(arr)>1:
             comment=''
             userFor = arr[1]                        
@@ -476,8 +475,8 @@ f"""Title - {chat[cid]['title']}:\n{'In:'+backslash+chat[cid]['txtIn']+backslash
         else:
             bot.send_message(message.chat.id, "Input username is missing")
 
-@bot.message_handler(func=lambda message:(message.text.split(" "))[0].lower() == "/set_out_for")
-@bot.message_handler(func=lambda message:(message.text.split(" "))[0].lower() == "/sof")
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/set_out_for")
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/sof")
 def in_user(message):
     try:
         if chat[message.chat.id]['title']!='':
@@ -485,6 +484,7 @@ def in_user(message):
     except:
         bot.send_message(message.chat.id, "Roll call is not active")
         contin=False
+
     if contin==True:
         condition=True
         cid = message.chat.id
@@ -504,7 +504,7 @@ def in_user(message):
                     if us==userFor:
                         chat[cid]['usersMaybeAttendance'].remove(us)
 
-            if len(arr) > 1:                                  
+            if len(arr)>2:                                  
                 arr.pop(0)  
                 arr.pop(0)
                 comment=" ".join(arr)
@@ -538,8 +538,8 @@ f"""Title - {chat[cid]['title']}:\n{'In:'+backslash+chat[cid]['txtIn']+backslash
         else:
             bot.send_message(message.chat.id, "Input username is missing")
 
-@bot.message_handler(func=lambda message:(message.text.split(" "))[0].lower() == "/set_maybe_for")
-@bot.message_handler(func=lambda message:(message.text.split(" "))[0].lower() == "/smf")
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/set_maybe_for")
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/smf")
 def in_user(message):
     try:
         if chat[message.chat.id]['title']!='':
@@ -547,6 +547,7 @@ def in_user(message):
     except:
         bot.send_message(message.chat.id, "Roll call is not active")
         contin=False
+
     if contin==True:
         condition=True
         cid = message.chat.id
@@ -566,7 +567,7 @@ def in_user(message):
                     if us==userFor:
                         chat[cid]['usersAttendance'].remove(us)
 
-            if len(arr) > 1:                                  
+            if len(arr)>2:                                  
                 arr.pop(0)  
                 arr.pop(0)
                 comment=" ".join(arr)
@@ -599,6 +600,10 @@ def in_user(message):
  f"""Title - {chat[cid]['title']}:\n{'In:'+backslash+chat[cid]['txtIn']+backslash if chat[cid]['txtIn']!='' else ''}{'Out:'+backslash+chat[cid]['txtOut']+backslash if chat[cid]['txtOut']!='' else ''}{'Maybe:'+backslash+chat[cid]['txtMaybe'] if chat[cid]['txtMaybe']!='' else ''}""")
         else:
             bot.send_message(message.chat.id, "Input username is missing")
+
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].lower() not in commands and "/" in message.text)
+def unknowCommand(message):
+    bot.send_message(message.chat.id, "Unknown command, check the `/help` section", parse_mode="Markdown")
 
 @bot.message_handler(func=lambda message:message.text.lower()=="/end_roll_call")  #START ROLL CALL COMMAND
 def start_roll_call(message):

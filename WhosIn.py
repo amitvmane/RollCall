@@ -67,7 +67,7 @@ def welcome_and_explanation(message):
     markup = ReplyKeyboardMarkup(row_width=3)         
     markup.add('/start_roll_call', '/in', '/out', '/maybe', '/whos_in', '/end_roll_call')        
     bot.send_message(message.chat.id, '''
-Hi! im Whos_in_bot!
+Hi! im RollCall!
 Type /help to see all the commands
     ''', reply_markup=markup)
 

@@ -80,16 +80,24 @@ def set_admins(message):
 
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/unset_admins" and bot.get_chat_member(message.chat.id, message.from_user.id).status=='admin')  # START COMMAND
 def unset_admins(message):
+    try:
+        if chat[message.chat.id]:
+            pass
+    except:
+        chat[message.chat.id]={}
     chat[message.chat.id]['admins']=[]
 
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/start")  # START COMMAND
 def welcome_and_explanation(message):
+    try:
+        if chat[message.chat.id]:
+            pass
+    except:
+        chat[message.chat.id]={}
     if admin_rights(message):
         if bot.get_chat_member(message.chat.id,message.from_user.id).status not in ['admin', 'creator']:
             bot.send_message(message.chat.id, "Error - user does not have sufficient permissions for this operation")
             return
-
-    chat[message.chat.id] = {}
     markup = ReplyKeyboardMarkup(row_width=3)         
    # markup.add('/start_roll_call', '/in', '/out', '/maybe', '/whos_in', '/end_roll_call')    
     markup.add('/in', '/out', '/maybe', '/whos_in', '/whos_out', '/whos_maybe', '/shh', '/louder', '/start_roll_call', '/end_roll_call', '/help')    
@@ -121,6 +129,12 @@ The commands are:
     ''')
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/start_roll_call")  # START ROLL CALL COMMAND
 def start_roll_call(message):
+
+    try:
+        if chat[message.chat.id]:
+            pass
+    except:
+        chat[message.chat.id]={}
 
     if admin_rights(message):
         if bot.get_chat_member(message.chat.id,message.from_user.id).status not in ['admin', 'creator']:

@@ -1,5 +1,4 @@
 from re import IGNORECASE
-from turtle import back
 import telebot
 from telebot import types
 from telebot.types import ReplyKeyboardMarkup

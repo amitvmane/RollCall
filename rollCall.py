@@ -126,7 +126,8 @@ The commands are:
 -/louder || to disable minimum output for each command
 -/end_roll_call   || To end a roll call
     ''')
-@bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/start_roll_call")  # START ROLL CALL COMMAND
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/start_roll_call")  # START ROLL CALL COMMAND
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/src")
 def start_roll_call(message):
 
     try:
@@ -331,6 +332,7 @@ def maybe_user(message):
 f"""Title - {chat[cid]['title']}:\n{'In:'+backslash+chat[cid]['txtIn']+backslash if chat[cid]['txtIn']!='' else ''}{'Out:'+backslash+chat[cid]['txtOut']+backslash if chat[cid]['txtOut']!='' else ''}{'Maybe:'+backslash+chat[cid]['txtMaybe'] if chat[cid]['txtMaybe']!='' else ''}""")
 
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/whos_in")  # WHOS IN COMMAND
+@bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/wi")
 def whos_in(message):
     if roll_call_not_started(message):
         cid = message.chat.id
@@ -353,6 +355,7 @@ In:
 {chat[cid]['txtIn']}""")  # list of who will attendance
 
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/whos_out")  # WHOS IN COMMAND
+@bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/wo")
 def whos_out(message):
     cid = message.chat.id
     if roll_call_not_started(message):
@@ -374,6 +377,7 @@ Out:
 {chat[cid]['txtOut']}""")  # list of who will not attendance
 
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/whos_maybe")  # WHOS IN COMMAND
+@bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/wm")
 def whos_maybe(message):
     cid = message.chat.id
     if roll_call_not_started(message):
@@ -564,6 +568,7 @@ def set_maybe_for(message):
             bot.send_message(message.chat.id, "Input username is missing")
 
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower()=="/set_title")  # SET TITLE COMMAND
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower()=="/st")
 def set_title(message):
     if roll_call_not_started(message):
         cid = message.chat.id
@@ -584,7 +589,8 @@ def set_title(message):
             bot.send_message(cid, 'The roll call title is set to: '+ title)
             print(user+"The title has change to "+title)
 
-@bot.message_handler(func=lambda message:message.text.lower()=="/end_roll_call")  #START ROLL CALL COMMAND
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/end_roll_call")  # START ROLL CALL COMMAND
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/erc")
 def end_roll_call(message):
 
     if admin_rights(message):

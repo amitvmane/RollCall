@@ -584,10 +584,6 @@ def set_title(message):
             bot.send_message(cid, 'The roll call title is set to: '+ title)
             print(user+"The title has change to "+title)
 
-@bot.message_handler(func=lambda message:(message.text.split(" "))[0].lower() not in commands and "/" in message.text)
-def unknowCommand(message):
-    bot.send_message(message.chat.id, "Unknown command, check the `/help` section", parse_mode="Markdown")
-
 @bot.message_handler(func=lambda message:message.text.lower()=="/end_roll_call")  #START ROLL CALL COMMAND
 def end_roll_call(message):
 

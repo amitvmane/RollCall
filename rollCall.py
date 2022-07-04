@@ -3,8 +3,11 @@ import telebot
 from telebot import types
 from telebot.types import ReplyKeyboardMarkup
 from telebot.types import ReplyKeyboardRemove
-from config import API_KEY
-bot = telebot.TeleBot(API_KEY)
+import os
+from dotenv import load_dotenv
+load_dotenv()
+
+bot = telebot.TeleBot(os.getenv("API_KEY"))
 
 chat={}
 commands=["/start","/help","/start_roll_call","/shh","/louder","/end_roll_call","/in","/out","/maybe","/set_title","/whos_in","/whos_out","/whos_maybe","/set_in_for","/sif","/set_out_for","/sof","/set_maybe_for","/smf",]

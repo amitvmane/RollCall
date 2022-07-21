@@ -3,11 +3,12 @@ import telebot
 from telebot import types
 from telebot.types import ReplyKeyboardMarkup
 from telebot.types import ReplyKeyboardRemove
-import os
+import numpy
 from dotenv import load_dotenv
+import os
 load_dotenv()
-
 bot = telebot.TeleBot(os.getenv("API_KEY"))
+
 
 chat={}
 commands=["/start","/help","/start_roll_call","/shh","/louder","/end_roll_call","/in","/out","/maybe","/set_title","/whos_in","/whos_out","/whos_maybe","/set_in_for","/sif","/set_out_for","/sof","/set_maybe_for","/smf",]
@@ -33,31 +34,53 @@ def create_txt_list(cid):
     i=0
     for us in chat[cid]['usersAttendance']:
         i+=1
-        if us in chat[cid]['usersComments']:
-            comment=chat[cid]['usersComments'][us]
-            chat[cid]['txtIn']+=f'{i}. {us} ({comment})\n'
+        
+        if next((x for x in chat[cid]['usersComments'] if x["id"] == us["id"]), None)!=None:
+            for userComment in chat[cid]['usersComments']:
+                if userComment["id"] == us["id"]:
+                    comment=userComment["comment"]
+                    chat[cid]['txtIn']+=f'{i}. {us["name"]} ({comment})\n'
+                    print(f"{us['name']} ({comment})")
         else:
-            chat[cid]['txtIn']+=f'{i}. {us}\n'
+            chat[cid]['txtIn']+=f'{i}. {us["name"]}\n'
+            print(f"{us['name']}")
 
     chat[cid]['txtOut']=''
     o=0
     for us in chat[cid]['usersNotAttendance']:
+        print(chat[cid]['usersNotAttendance'])
         o+=1
-        if us in chat[cid]['usersComments']:
-            comment=chat[cid]['usersComments'][us]
-            chat[cid]['txtOut']+=f'{o}. {us} ({comment})\n'
+        if len(chat[cid]["usersComments"])>0:
+            for user in chat[cid]['usersComments']:
+                if user["id"]==us["id"]:
+                    comment=user["comment"]
+                    chat[cid]['txtOut']+=f'{o}. {us["name"]} ({comment})\n'
+                else:
+                    chat[cid]['txtOut']+=f'{o}. {us["name"]}\n'
         else:
-            chat[cid]['txtOut']+=f'{o}. {us}\n'
+            chat[cid]['txtOut']+=f'{o}. {us["name"]}\n'
     
     chat[cid]['txtMaybe']=''
     m=0
     for us in chat[cid]['usersMaybeAttendance']:
         m+=1
-        if us in chat[cid]['usersComments']:
-            comment=chat[cid]['usersComments'][us]
-            chat[cid]['txtMaybe']+=f'{m}. {us} ({comment})\n'
+        if len(chat[cid]["usersComments"])>0:
+            for user in chat[cid]['usersComments']:
+                if user["id"]==us["id"]:
+                    comment=user["comment"]
+                    chat[cid]['txtMaybe']+=f'{m}. {us["name"]} ({comment})\n'
+                else:
+                    chat[cid]['txtMaybe']+=f'{m}. {us["name"]}\n'
         else:
-            chat[cid]['txtMaybe']+=f'{m}. {us}\n'
+            chat[cid]['txtMaybe']+=f'{m}. {us["name"]}\n'
+
+def replace_repeated_name(cid, user):
+    allUsers=numpy.concatenate((chat[cid]["usersAttendance"],chat[cid]["usersNotAttendance"],chat[cid]["usersMaybeAttendance"]))
+    r=0
+    for us in allUsers:
+        if user["name"]==us["name"]:
+            if user["id"]!=us["id"]:
+                user["name"]+=f' ({user["username"]})'
 
 def admin_rights(message):
     try:
@@ -99,33 +122,32 @@ def welcome_and_explanation(message):
     if admin_rights(message):
         if bot.get_chat_member(message.chat.id,message.from_user.id).status not in ['admin', 'creator']:
             bot.send_message(message.chat.id, "Error - user does not have sufficient permissions for this operation")
-            return
-    markup = ReplyKeyboardRemove()             
+            return            
     bot.send_message(message.chat.id, '''
 Hi! im RollCall!
 Type /help to see all the commands
-    ''', reply_markup=markup)
+    ''')
 
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/help")  # HELP COMMAND
 def welcome_and_explanation(message):
     bot.send_message(message.chat.id, '''
 The commands are:
--/start  || To start the bot
--/help   || To see the commands
--/start_roll_call || To start a new roll call (optional title)
--/in || To let everybody know you will be attending (optional comment)
--/out || To let everybody know you wont be attending (optional comment)
--/maybe  || To let everybody know you dont know (optional comment)
--/whos_in || List of those who will go
--/whos_out || List of those who will not go
--/whos_maybe || List of those who maybe will go
--/set_title "title" || To set a title for the current roll call
--/set_in_for "name" || Allows you to respond for another user
--/set_out_for "name" || Allows you to respond for another user
--/set_maybe_for "name" || Allows you to respond for another user
--/shh || to apply minimum output for each command
--/louder || to disable minimum output for each command
--/end_roll_call   || To end a roll call
+-/start  - To start the bot
+-/help - To see the commands
+-/start_roll_call - To start a new roll call (optional title)
+-/in - To let everybody know you will be attending (optional comment)
+-/out - To let everybody know you wont be attending (optional comment)
+-/maybe - To let everybody know you dont know (optional comment)
+-/whos_in - List of those who will go
+-/whos_out - List of those who will not go
+-/whos_maybe - List of those who maybe will go
+-/set_title - To set a title for the current roll call
+-/set_in_for - Allows you to respond for another user
+-/set_out_for - Allows you to respond for another user
+-/set_maybe_for - Allows you to respond for another user
+-/shh - to apply minimum output for each command
+-/louder - to disable minimum output for each command
+-/end_roll_call - To end a roll call
     ''')
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/start_roll_call")  # START ROLL CALL COMMAND
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/src")
@@ -162,11 +184,43 @@ def start_roll_call(message):
         chat[cid]['usersNotAttendance']=[]
         chat[cid]['usersMaybeAttendance']=[]
         chat[cid]['usersAttendance']=[]
-        chat[cid]['usersComments']={}
+        chat[cid]['usersComments']=[]
         chat[cid]['shh']=False
+        chat[cid]["id"]=0
+
+        
 
         bot.send_message(message.chat.id, "Roll call with title: "+title+" started!")
         print("A roll call with title "+title+" has started")
+
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/delete_user")
+def delete_user(message):
+    cid=message.chat.id
+    if admin_rights(message):
+        if bot.get_chat_member(message.chat.id,message.from_user.id).status not in ['admin', 'creator']:
+            bot.send_message(message.chat.id, "Error - user does not have sufficient permissions for this operation")
+            return
+    
+    arr=message.text.split(" ")
+    if len(arr)>1:
+        arr.pop(0)
+        user=' '.join(arr)
+
+        userToRemove=next((x for x in chat[cid]['usersAttendance'] if x["name"] == user), None)
+        if userToRemove!=None:
+            chat[cid]['usersAttendance'].remove(userToRemove)
+            bot.send_message(message.chat.id, "The user has been removed from all lists")
+            return
+        userToRemove=next((x for x in chat[cid]['usersNotAttendance'] if x["name"] == user), None)
+        if userToRemove!=None:
+            chat[cid]['usersNotAttendance'].remove(userToRemove)
+            bot.send_message(message.chat.id, "The user has been removed from all lists")
+            return
+        userToRemove=next((x for x in chat[cid]['usersMaybeAttendance'] if x["name"] == user), None)
+        if userToRemove!=None:
+            chat[cid]['usersMaybeAttendance'].remove(userToRemove)
+            bot.send_message(message.chat.id, "The user has been removed from all lists")
+            return
 
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/shh")
 def shh(message):
@@ -183,96 +237,117 @@ def louder(message):
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/in")  # IN COMMAND
 def in_user(message):
     if roll_call_not_started(message):
+        print("IN COMMAND\n------------------------------------------------------------------")
         condition=True
         msg = message.text
         cid = message.chat.id  # chat id
-        user = message.from_user.first_name  # name of user who attendance
+        user = {"name":message.from_user.first_name, "username":message.from_user.username if message.from_user.username else "Null" , "id":message.from_user.id}
         comment = ''
+
+        replace_repeated_name(cid, user)
+
+        next((chat[cid]["usersComments"].remove(x) for x in chat[cid]['usersComments'] if x["id"] == user["id"]), None)
+
         arr = msg.split(" ")
         if len(arr) > 1:                                    
             arr.pop(0)
             comment = ' '.join(arr)
-
+        
         #CHECK USER IN OTHER LIST AND ADD IT
-        if 'usersNotAttendance' in chat[cid]:
-            if user in chat[cid]['usersNotAttendance']:
-                chat[cid]['usersNotAttendance'].remove(user)
-                print("Usuario removido")
-        if 'usersMaybeAttendance' in chat[cid]:
-            if user in chat[cid]['usersMaybeAttendance']:
-                chat[cid]['usersMaybeAttendance'].remove(user)
-                print("Usuario removido")
+        if len(chat[cid]["usersNotAttendance"])>0:
+            next((chat[cid]['usersNotAttendance'].remove(x) for x in chat[cid]['usersNotAttendance'] if x["id"] == user["id"]), None)
+        if len(chat[cid]["usersMaybeAttendance"])>0:
+            next((chat[cid]['usersMaybeAttendance'].remove(x) for x in chat[cid]['usersMaybeAttendance'] if x["id"] == user["id"]), None)
         if 'usersAttendance' in chat[cid]:             
             if user in chat[cid]['usersAttendance']:
-                if comment=="" and user not in chat[cid]['usersComments']:
+                if comment=="" and next((x for x in chat[cid]['usersComments'] if x["id"] == user["id"]), None)==None:
                     bot.send_message(cid,"No duplicate proxy please :-), Thanks!")
                     condition=False
                 else:
-                    chat[cid]['usersComments'].pop(user, None)
+                    for us in chat[cid]['usersComments']:
+                        if us["id"]==user["id"]:
+                            chat[cid]['usersComments'].remove(us)
             else:
-                # If the variable doesn't exists creates one
                 chat[cid]['usersAttendance'] += [user]
-                print(user+" it's IN")
+                print(user["name"]+" it's IN")
         else:                                          
             chat[cid]['usersAttendance'] = [user]
-            print(user+" it's IN")
+            print(user["name"] +" it's IN")
+
         #CHECK USER IN OTHER LIST AND ADD IT
 
         if comment!='':
-            chat[cid]['usersComments'][user]=comment
+            chat[cid]['usersComments']+=[{"id":user["id"], "comment":comment, "name":user["name"]}]
         else:
-            chat[cid]['usersComments'].pop(user, None)
-        
+            for us in chat[cid]['usersComments']:
+                if us["id"]==user["id"]:
+                    chat[cid]['usersComments'].remove(us)
+                    
+        print("Users Attendance:", chat[cid]["usersAttendance"])
+        print("Users Not Attendance:", chat[cid]["usersNotAttendance"])
+        print("Users Maybe Attendance", chat[cid]["usersMaybeAttendance"])
+        print("Comments list:", chat[cid]["usersComments"])
+
         create_txt_list(cid)
         
         if condition==True and chat[cid]['shh']==False:
+            markup=ReplyKeyboardRemove()
             backslash='\n'
             bot.send_message(cid, 
-f"""Title - {chat[cid]['title']}:\n{'In:'+backslash+chat[cid]['txtIn']+backslash if chat[cid]['txtIn']!='' else ''}{'Out:'+backslash+chat[cid]['txtOut']+backslash if chat[cid]['txtOut']!='' else ''}{'Maybe:'+backslash+chat[cid]['txtMaybe'] if chat[cid]['txtMaybe']!='' else ''}""")
+f"""Title - {chat[cid]['title']}:\n{'In:'+backslash+chat[cid]['txtIn']+backslash if chat[cid]['txtIn']!='' else ''}{'Out:'+backslash+chat[cid]['txtOut']+backslash if chat[cid]['txtOut']!='' else ''}{'Maybe:'+backslash+chat[cid]['txtMaybe'] if chat[cid]['txtMaybe']!='' else ''}""", reply_markup=markup)
 
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/out")  # OUT COMMAND
 def out_user(message):
     if roll_call_not_started(message):
+        print("OUT COMMAND\n------------------------------------------------------------------")
         condition=True
         comment = ''
         msg = message.text
         cid = message.chat.id
-        user = message.from_user.first_name  # name of user who not attendance
+        user = {"name":message.from_user.first_name, "username":message.from_user.username if message.from_user.username else "Null" , "id":message.from_user.id} # name of user who not attendance
         arr = msg.split(" ")
+
+        replace_repeated_name(cid, user)
+
+        next((chat[cid]["usersComments"].remove(x) for x in chat[cid]['usersComments'] if x["id"] == user["id"]), None)
 
         if len(arr) > 1:             
             arr.pop(0)  # Define the comment
             comment = ' '.join(arr)
 
-        if 'usersAttendance' in chat[cid]:
-            for us in chat[cid]['usersAttendance']:
-                if us==user:
-                    chat[cid]['usersAttendance'].remove(us)
-        if 'usersMaybeAttendance' in chat[cid]:
-            for us in chat[cid]['usersMaybeAttendance']:
-                if us==user:
-                    chat[cid]['usersMaybeAttendance'].remove(us)
-
+        if len(chat[cid]["usersAttendance"])>0:
+            next((chat[cid]['usersAttendance'].remove(x) for x in chat[cid]['usersAttendance'] if x["id"] == user["id"]), None)
+        if len(chat[cid]["usersMaybeAttendance"])>0:
+            next((chat[cid]['usersMaybeAttendance'].remove(x) for x in chat[cid]['usersMaybeAttendance'] if x["id"] == user["id"]), None)
 
         if 'usersNotAttendance' in chat[cid]:           
             if user in chat[cid]['usersNotAttendance']:
-                if comment=="" and user not in chat[cid]['usersComments']:
+                if comment=="" and next((x for x in chat[cid]['usersComments'] if x["id"] == user["id"]), None)==None:
                     bot.send_message(cid,"No duplicate proxy please :-), Thanks!")
                     condition=False
                 else:
-                    chat[cid]['usersComments'].pop(user, None)
+                    for us in chat[cid]['usersComments']:
+                        if us["id"]==user["id"]:
+                            chat[cid]['usersComments'].remove(us)
             else:
                 chat[cid]['usersNotAttendance'] += [user]     
-                print(user+" it's OUT")
+                print(user["name"]+" it's OUT")
         else:  # If the variable doesn't exists creates one
             chat[cid]['usersNotAttendance'] = [user]  
-            print(user+" it's OUT")    
+            print(user["name"]+" it's OUT")    
 
         # text with a list of users
         if comment!='':
-            chat[cid]['usersComments'][user]=comment
+            chat[cid]['usersComments']+=[{"id":user["id"], "comment":comment, "name":user["name"]}]
         else:
-            chat[cid]['usersComments'].pop(user, None)
+            for us in chat[cid]['usersComments']:
+                if us["id"]==user["id"]:
+                    chat[cid]['usersComments'].remove(us)
+
+        print("Users Attendance:", chat[cid]["usersAttendance"])
+        print("Users Not Attendance:", chat[cid]["usersNotAttendance"])
+        print("Users Maybe Attendance", chat[cid]["usersMaybeAttendance"])
+        print("Comments list:", chat[cid]["usersComments"])
 
         create_txt_list(cid)
 
@@ -284,46 +359,56 @@ f"""Title - {chat[cid]['title']}:\n{'In:'+backslash+chat[cid]['txtIn']+backslash
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/maybe")  # MAYBE COMMAND
 def maybe_user(message):
     if roll_call_not_started(message):
+        print("MAYBE COMMAND\n------------------------------------------------------------------")
         condition=True
         comment=''
         msg = message.text
         cid = message.chat.id
-        user = message.from_user.first_name  # name of user who attendance
+        user = {"name":message.from_user.first_name, "username":message.from_user.username if message.from_user.username else "Null" , "id":message.from_user.id}  # name of user who attendance
 
         arr = msg.split(" ")
+
+        replace_repeated_name(cid, user)
+
+        next((chat[cid]["usersComments"].remove(x) for x in chat[cid]['usersComments'] if x["id"] == user["id"]), None)
 
         if len(arr) > 1:                                    
             arr.pop(0)  # Define the comment
             comment = ' '.join(arr)
 
-        if 'usersAttendance' in chat[cid]:
-            for us in chat[cid]['usersAttendance']:
-                if us==user:
-                    chat[cid]['usersAttendance'].remove(us)
-        if 'usersNotAttendance' in chat[cid]:
-            for us in chat[cid]['usersNotAttendance']:
-                if us==user:
-                    chat[cid]['usersNotAttendance'].remove(us)
+        if len(chat[cid]["usersAttendance"])>0:
+            next((chat[cid]['usersAttendance'].remove(x) for x in chat[cid]['usersAttendance'] if x["id"] == user["id"]), None)
+        if len(chat[cid]["usersNotAttendance"])>0:
+            next((chat[cid]['usersNotAttendance'].remove(x) for x in chat[cid]['usersNotAttendance'] if x["id"] == user["id"]), None)
 
         if 'usersMaybeAttendance' in chat[cid]:             
             if user in chat[cid]['usersMaybeAttendance']:
-                if comment=="" and user not in chat[cid]['usersComments']:
+                if comment=="" and next((x for x in chat[cid]['usersComments'] if x["id"] == user["id"]), None)==None:
                     bot.send_message(cid,"No duplicate proxy please :-), Thanks!")
                     condition=False
                 else:
-                    chat[cid]['usersComments'].pop(user, None)
+                    for us in chat[cid]['usersComments']:
+                        if us["id"]==user["id"]:
+                            chat[cid]['usersComments'].remove(us)
             else:
                 chat[cid]['usersMaybeAttendance'] += [user]      
-                print(user+" it's MAYBE") 
+                print(user["name"]+" it's MAYBE") 
         else:                                               # if the variable doesn't exist it creates one
             chat[cid]['usersMaybeAttendance'] = [user]     
-            print(user+" it's MAYBE")   
+            print(user["name"]+" it's MAYBE")   
         # text list of who maybe attendance
        
         if comment!='':
-            chat[cid]['usersComments'][user]=comment
+            chat[cid]['usersComments']+=[{"id":user["id"], "comment":comment, "name":user["name"]}]
         else:
-            chat[cid]['usersComments'].pop(user, None)
+            for us in chat[cid]['usersComments']:
+                if us["id"]==user["id"]:
+                    chat[cid]['usersComments'].remove(us)
+
+        print("Users Attendance:", chat[cid]["usersAttendance"])
+        print("Users Not Attendance:", chat[cid]["usersNotAttendance"])
+        print("Users Maybe Attendance", chat[cid]["usersMaybeAttendance"])
+        print("Comments list:", chat[cid]["usersComments"])
 
         create_txt_list(cid)
 
@@ -333,67 +418,67 @@ def maybe_user(message):
 f"""Title - {chat[cid]['title']}:\n{'In:'+backslash+chat[cid]['txtIn']+backslash if chat[cid]['txtIn']!='' else ''}{'Out:'+backslash+chat[cid]['txtOut']+backslash if chat[cid]['txtOut']!='' else ''}{'Maybe:'+backslash+chat[cid]['txtMaybe'] if chat[cid]['txtMaybe']!='' else ''}""")
 
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/whos_in")  # WHOS IN COMMAND
-@bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/wi")
 def whos_in(message):
     if roll_call_not_started(message):
         cid = message.chat.id
         
-        if len(chat[cid]['usersAttendance'])==0:
-            chat[cid]['txtIn']='Nobody'
-        else:
-            chat[cid]['txtIn']=''
-            i=0
-            for us in chat[cid]['usersAttendance']:
-                i+=1
-                print(i)
-                if us in chat[cid]['usersComments']:
-                    comment=chat[cid]['usersComments'][us]
-                    chat[cid]['txtIn']+=f'{i}. {us} ({comment})\n'
-                else:
-                    chat[cid]['txtIn']+=f'{i}. {us}\n'
+        chat[cid]['txtIn']=''
+        i=0
+        for us in chat[cid]['usersAttendance']:
+            i+=1
+            if len(chat[cid]["usersComments"])>0:
+                for user in chat[cid]['usersComments']:
+                    if user["id"]==us["id"]:
+                        comment=user["comment"]
+                        chat[cid]['txtIn']+=f'{i}. {us["name"]} ({comment})\n'
+                    else:
+                        chat[cid]['txtIn']+=f'{i}. {us["name"]}\n'
+            else:
+                chat[cid]['txtIn']+=f'{i}. {us["name"]}\n'
         bot.send_message(message.chat.id, f"""
 In:
 {chat[cid]['txtIn']}""")  # list of who will attendance
 
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/whos_out")  # WHOS IN COMMAND
-@bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/wo")
 def whos_out(message):
     cid = message.chat.id
     if roll_call_not_started(message):
-        if len(chat[cid]['usersNotAttendance'])==0:
-            chat[cid]['txtOut']='Nobody'
-        else:
-            chat[cid]['txtOut']=''
-            o=0
-            for us in chat[cid]['usersNotAttendance']:
-                o+=1
-                if us in chat[cid]['usersComments']:
-                    comment=chat[cid]['usersComments'][us]
-                    chat[cid]['txtOut']+=f'{o}. {us} ({comment})\n'
-                else:
-                    chat[cid]['txtOut']+=f'{o}. {us}\n'
+        chat[cid]['txtOut']=''
+        o=0
+        for us in chat[cid]['usersNotAttendance']:
+            o+=1
+            if len(chat[cid]["usersComments"])>0:
+                for user in chat[cid]['usersComments']:
+                    if user["id"]==us["id"]:
+                        comment=user["comment"]
+                        chat[cid]['txtOut']+=f'{o}. {us["name"]} ({comment})\n'
+                    else:
+                        chat[cid]['txtOut']+=f'{o}. {us["name"]}\n'
+            else:
+                chat[cid]['txtOut']+=f'{o}. {us["name"]}\n'
         
         bot.send_message(message.chat.id, f"""
 Out:
 {chat[cid]['txtOut']}""")  # list of who will not attendance
 
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/whos_maybe")  # WHOS IN COMMAND
-@bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/wm")
 def whos_maybe(message):
     cid = message.chat.id
     if roll_call_not_started(message):
-        if len(chat[cid]['usersMaybeAttendance'])==0:
-            chat[cid]['txtMaybe']='Nobody'
-        else:
-            chat[cid]['txtMaybe']=''
-            m=0
-            for us in chat[cid]['usersMaybeAttendance']:
-                m+=1
-                if us in chat[cid]['usersComments']:
-                    comment=chat[cid]['usersComments'][us]
-                    chat[cid]['txtMaybe']+=f'{m}. {us} ({comment})\n'
-                else:
-                    chat[cid]['txtMaybe']+=f'{m}. {us}\n'
+        chat[cid]['txtMaybe']=''
+        m=0
+        for us in chat[cid]['usersMaybeAttendance']:
+            m+=1
+            if len(chat[cid]["usersComments"])>0:
+                for user in chat[cid]['usersComments']:
+                    if user["id"]==us["id"]:
+                        comment=user["comment"]
+                        chat[cid]['txtMaybe']+=f'{m}. {us["name"]} ({comment})\n'
+                    else:
+                        chat[cid]['txtMaybe']+=f'{m}. {us["name"]}\n'
+            else:
+                chat[cid]['txtMaybe']+=f'{m}. {us["name"]}\n'
+
         bot.send_message(message.chat.id, f"""
 Maybe:
 {chat[cid]['txtMaybe']}""")  # list of who will maybe attendance
@@ -409,43 +494,59 @@ def set_in_for(message):
 
         if len(arr)>1:
             comment=''
-            userFor = arr[1]                        
+            chat[cid]["id"]+=1
+            userFor = {"name":arr[1], "id":arr[1]}                        
 
-            if 'usersNotAttendance' in chat[cid]:
-                for us in chat[cid]['usersNotAttendance']:
-                    if us==userFor:
-                        chat[cid]['usersNotAttendance'].remove(us)
-                        print("Usuario removido")
-            if 'usersMaybeAttendance' in chat[cid]:
-                for us in chat[cid]['usersMaybeAttendance']:
-                    if us==userFor:
-                        chat[cid]['usersMaybeAttendance'].remove(us)
+            next((chat[cid]["usersComments"].remove(x) for x in chat[cid]['usersComments'] if x["name"] == userFor["name"]), None)
 
+            if len(chat[cid]["usersNotAttendance"])>0:
+                for us in chat[cid]["usersNotAttendance"]:
+                    if us["name"]==userFor["name"] and us["id"]==userFor["id"]:
+                        chat[cid]['usersNotAttendance'].remove(userFor)
+                    elif us["name"]==userFor["name"] and us["id"]!=userFor["id"]:
+                        bot.send_message(cid, "No duplicate proxy please :-), Thanks!")
+                        return
+
+            if len(chat[cid]["usersMaybeAttendance"])>0:
+                for us in chat[cid]["usersMaybeAttendance"]:
+                    if us["name"]==userFor["name"] and us["id"]==userFor["id"]:
+                        chat[cid]['usersMaybeAttendance'].remove(userFor)
+                    elif us["name"]==userFor["name"] and us["id"]!=userFor["id"]:
+                        bot.send_message(cid, "No duplicate proxy please :-), Thanks!")
+                        return
+
+            if len(chat[cid]["usersAttendance"])>0:
+                if next((bot.send_message(cid, "No duplicate proxy please :-), Thanks!") for x in chat[cid]['usersAttendance'] if x["name"] == userFor["name"] and x["id"] != userFor["id"]), None)!=None:
+                    return
+            
             if len(arr) > 2:                                  
                 arr.pop(0)  
                 arr.pop(0)
                 comment=" ".join(arr)
             
             if 'usersAttendance' in chat[cid]:             
-                if userFor in chat[cid]['usersAttendance']:
-                    if comment=="" and userFor not in chat[cid]['usersComments']:
+                if next((x for x in chat[cid]['usersAttendance'] if x["name"] == userFor["name"] and x["id"] == userFor["id"]), None)!=None:
+                    if comment=="" and next((x for x in chat[cid]['usersComments'] if x["name"] == userFor["name"]), None)==None:
                         bot.send_message(cid,"No duplicate proxy please :-), Thanks!")
                         condition=False
                     else:
-                        chat[cid]['usersComments'].pop(userFor, None)
+                        for us in chat[cid]['usersComments']:
+                            if us["id"]==userFor["id"]:
+                                chat[cid]['usersComments'].remove(us)
                 else:
                     # If the variable doesn't exists creates one
                     chat[cid]['usersAttendance'] += [userFor]
-                    print(userFor+" it's IN")
+                    print(userFor["name"]+" it's IN")
             else:                                          
                 chat[cid]['usersAttendance'] = [userFor] 
-                print(userFor+" it's IN")
+                print(userFor["name"]+" it's IN")
 
             if comment!='':
-                chat[cid]['usersComments'][userFor]=comment
+                chat[cid]['usersComments']+=[{"id":userFor["id"], "comment":comment, "name":userFor["name"]}]
             else:
-                chat[cid]['usersComments'].pop(userFor, None)
-            chat[cid]['txtIn']=''
+                for us in chat[cid]['usersComments']:
+                    if us["id"]==userFor["id"]:
+                        chat[cid]['usersComments'].remove(us)
             
             create_txt_list(cid)
 
@@ -464,19 +565,33 @@ def set_out_for(message):
         cid = message.chat.id
         msg = message.text
         arr=msg.split(" ")
+
         if len(arr)>1:
             comment=''
-            userFor = arr[1]                        
+            chat[cid]["id"]+=1
+            userFor = {"name":arr[1], "id":arr[1]}                        
 
-            if 'usersAttendance' in chat[cid]:
-                for us in chat[cid]['usersAttendance']:
-                    if us==userFor:
-                        chat[cid]['usersAttendance'].remove(us)
-                        print("Usuario removido")
-            if 'usersMaybeAttendance' in chat[cid]:
-                for us in chat[cid]['usersMaybeAttendance']:
-                    if us==userFor:
-                        chat[cid]['usersMaybeAttendance'].remove(us)
+            next((chat[cid]["usersComments"].remove(x) for x in chat[cid]['usersComments'] if x["name"] == userFor["name"]), None)
+
+            if len(chat[cid]["usersAttendance"])>0:
+                for us in chat[cid]["usersAttendance"]:
+                    if us["name"]==userFor["name"] and us["id"]==userFor["id"]:
+                        chat[cid]['usersAttendance'].remove(userFor)
+                    elif us["name"]==userFor["name"] and us["id"]!=userFor["id"]:
+                        bot.send_message(cid, "No duplicate proxy please :-), Thanks!")
+                        return
+
+            if len(chat[cid]["usersMaybeAttendance"])>0:
+                for us in chat[cid]["usersMaybeAttendance"]:
+                    if us["name"]==userFor["name"] and us["id"]==userFor["id"]:
+                        chat[cid]['usersMaybeAttendance'].remove(userFor)
+                    elif us["name"]==userFor["name"] and us["id"]!=userFor["id"]:
+                        bot.send_message(cid, "No duplicate proxy please :-), Thanks!")
+                        return
+
+            if len(chat[cid]["usersNotAttendance"])>0:
+                if next((bot.send_message(cid, "No duplicate proxy please :-), Thanks!") for x in chat[cid]['usersNotAttendance'] if x["name"] == userFor["name"] and x["id"] != userFor["id"]), None)!=None:
+                    return
 
             if len(arr)>2:                                  
                 arr.pop(0)  
@@ -484,24 +599,28 @@ def set_out_for(message):
                 comment=" ".join(arr)
             
             if 'usersNotAttendance' in chat[cid]:             
-                if userFor in chat[cid]['usersNotAttendance']:
-                    if comment=="" and userFor not in chat[cid]['usersComments']:
+                if next((x for x in chat[cid]['usersNotAttendance'] if x["name"] == userFor["name"] and x["id"] == userFor["id"]), None)!=None:
+                    if comment=="" and next((x for x in chat[cid]['usersComments'] if x["name"] == userFor["name"]), None)==None:
                         bot.send_message(cid,"No duplicate proxy please :-), Thanks!")
                         condition=False
                     else:
-                        chat[cid]['usersComments'].pop(userFor, None)
+                        for us in chat[cid]['usersComments']:
+                            if us["id"]==userFor["id"]:
+                                chat[cid]['usersComments'].remove(us)
                 else:
                     # If the variable doesn't exists creates one
                     chat[cid]['usersNotAttendance'] += [userFor]
-                    print(userFor+" it's OUT")
+                    print(userFor["name"]+" it's OUT")
             else:                                          
                 chat[cid]['usersNotAttendance'] = [userFor] 
-                print(userFor+" it's OUT")
+                print(userFor["name"]+" it's OUT")
 
             if comment!='':
-                chat[cid]['usersComments'][userFor]=comment
+                chat[cid]['usersComments']+=[{"id":userFor["id"], "comment":comment, "name":userFor["name"]}]
             else:
-                chat[cid]['usersComments'].pop(userFor, None)
+                for us in chat[cid]['usersComments']:
+                    if us["id"]==userFor["id"]:
+                        chat[cid]['usersComments'].remove(us)
             
             create_txt_list(cid)
 
@@ -520,19 +639,33 @@ def set_maybe_for(message):
         cid = message.chat.id
         msg = message.text
         arr=msg.split(" ")
+        
         if len(arr)>1:
             comment=''
-            userFor = arr[1]                        
+            chat[cid]["id"]+=1
+            userFor = {"name":arr[1], "id":arr[1]}                           
 
-            if 'usersNotAttendance' in chat[cid]:
-                for us in chat[cid]['usersNotAttendance']:
-                    if us==userFor:
-                        chat[cid]['usersNotAttendance'].remove(us)
-                        print("Usuario removido")
-            if 'usersAttendance' in chat[cid]:
-                for us in chat[cid]['usersAttendance']:
-                    if us==userFor:
-                        chat[cid]['usersAttendance'].remove(us)
+            next((chat[cid]["usersComments"].remove(x) for x in chat[cid]['usersComments'] if x["name"] == userFor["name"]), None)
+
+            if len(chat[cid]["usersAttendance"])>0:
+                for us in chat[cid]["usersAttendance"]:
+                    if us["name"]==userFor["name"] and us["id"]==userFor["id"]:
+                        chat[cid]['usersAttendance'].remove(userFor)
+                    elif us["name"]==userFor["name"] and us["id"]!=userFor["id"]:
+                        bot.send_message(cid, "No duplicate proxy please :-), Thanks!")
+                        return
+
+            if len(chat[cid]["usersNotAttendance"])>0:
+                for us in chat[cid]["usersNotAttendance"]:
+                    if us["name"]==userFor["name"] and us["id"]==userFor["id"]:
+                        chat[cid]['usersNotAttendance'].remove(userFor)
+                    elif us["name"]==userFor["name"] and us["id"]!=userFor["id"]:
+                        bot.send_message(cid, "No duplicate proxy please :-), Thanks!")
+                        return
+
+            if len(chat[cid]["usersMaybeAttendance"])>0:
+                if next((bot.send_message(cid, "No duplicate proxy please :-), Thanks!") for x in chat[cid]['usersMaybeAttendance'] if x["name"] == userFor["name"] and x["id"] != userFor["id"]), None)!=None:
+                    return
 
             if len(arr)>2:                                  
                 arr.pop(0)  
@@ -540,24 +673,28 @@ def set_maybe_for(message):
                 comment=" ".join(arr)
             
             if 'usersMaybeAttendance' in chat[cid]:             
-                if userFor in chat[cid]['usersMaybeAttendance']:
-                    if comment=="" and userFor not in chat[cid]['usersComments']:
-                        bot.send_message(cid,"No duplicate proxy please :-), Thanks!")
+                if next((x for x in chat[cid]['usersMaybeAttendance'] if x["name"] == userFor["name"] and x["id"] == userFor["id"]), None)!=None:
+                    if comment=="" and next((x for x in chat[cid]['usersComments'] if x["name"] == userFor["name"]), None)==None:
+                        bot.send_message(cid,"That name already exists!")
                         condition=False
                     else:
-                        chat[cid]['usersComments'].pop(userFor, None)
+                        for us in chat[cid]['usersComments']:
+                            if us["id"]==userFor["id"]:
+                                chat[cid]['usersComments'].remove(us)
                 else:
                     # If the variable doesn't exists creates one
                     chat[cid]['usersMaybeAttendance'] += [userFor]
-                    print(userFor+" it's MAYBE")
+                    print(userFor["name"]+" it's MAYBE")
             else:                                          
                 chat[cid]['usersMaybeAttendance'] = [userFor] 
-                print(userFor+" it's MAYBE")
+                print(userFor["name"]+" it's MAYBE")
 
             if comment!='':
-                chat[cid]['usersComments'][userFor]=comment
+                chat[cid]['usersComments']+=[{"id":userFor["id"], "comment":comment, "name":userFor["name"]}]
             else:
-                chat[cid]['usersComments'].pop(userFor, None)
+                for us in chat[cid]['usersComments']:
+                    if us["id"]==userFor["id"]:
+                        chat[cid]['usersComments'].remove(us)
         
             create_txt_list(cid)
 
@@ -569,7 +706,7 @@ def set_maybe_for(message):
             bot.send_message(message.chat.id, "Input username is missing")
 
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower()=="/set_title")  # SET TITLE COMMAND
-@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower()=="/st")
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/st")
 def set_title(message):
     if roll_call_not_started(message):
         cid = message.chat.id
@@ -590,7 +727,7 @@ def set_title(message):
             bot.send_message(cid, 'The roll call title is set to: '+ title)
             print(user+"The title has change to "+title)
 
-@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/end_roll_call")  # START ROLL CALL COMMAND
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/end_roll_call")  #START ROLL CALL COMMAND
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/erc")
 def end_roll_call(message):
 

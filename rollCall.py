@@ -100,9 +100,7 @@ def welcome_and_explanation(message):
         if bot.get_chat_member(message.chat.id,message.from_user.id).status not in ['admin', 'creator']:
             bot.send_message(message.chat.id, "Error - user does not have sufficient permissions for this operation")
             return
-    markup = ReplyKeyboardMarkup(row_width=3)         
-   # markup.add('/start_roll_call', '/in', '/out', '/maybe', '/whos_in', '/end_roll_call')    
-    markup.add('/in', '/out', '/maybe', '/whos_in', '/whos_out', '/whos_maybe', '/shh', '/louder', '/start_roll_call', '/end_roll_call', '/help')    
+    markup = ReplyKeyboardRemove()             
     bot.send_message(message.chat.id, '''
 Hi! im RollCall!
 Type /help to see all the commands

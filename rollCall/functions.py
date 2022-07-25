@@ -5,7 +5,6 @@ import logging
 #USELESS IN NEW FEATURE
 def roll_call_already_started(message, chat):
     try:
-        print(len(chat[message.chat.id]["rollCalls"])==1)
         if len(chat[message.chat.id]["rollCalls"])==1:
             logging.error(f"Roll call with title {chat[message.chat.id]['rollCalls'][0].title} is still in progress")
             return False

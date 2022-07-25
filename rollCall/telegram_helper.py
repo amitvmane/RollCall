@@ -39,7 +39,7 @@ def welcome_and_explanation(message):
 
 #HELP COMMAND WITH ALL THE COMMANDS
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/help")
-def welcome_and_explanation(message):
+def help_commands(message):
     #HELP MSG
     bot.send_message(message.chat.id, '''The commands are:\n-/start  - To start the bot\n-/help - To see the commands\n-/start_roll_call - To start a new roll call (optional title)\n-/in - To let everybody know you will be attending (optional comment)\n-/out - To let everybody know you wont be attending (optional comment)\n-/maybe - To let everybody know you dont know (optional comment)\n-/whos_in - List of those who will go\n-/whos_out - List of those who will not go\n-/whos_maybe - List of those who maybe will go\n-/set_title - To set a title for the current roll call\n-/set_in_for - Allows you to respond for another user\n-/set_out_for - Allows you to respond for another user\n-/set_maybe_for - Allows you to respond for another user\n-/shh - to apply minimum output for each command\n-/louder - to disable minimum output for each command\n-/end_roll_call - To end a roll call
     ''')
@@ -120,6 +120,49 @@ def start_roll_call(message):
     except rollCallAlreadyStarted as e:
         bot.send_message(cid, e)
 
+#SET A LIMIT FOR IN LIST
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/set_limit")
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/sl")
+def wait_limit(message):
+    try:
+        #CHECK FOR RC ALREADY RUNNING
+        if roll_call_not_started(message, chat)==False:
+            raise rollCallNotStarted("Roll call is not active")
+        #CHECK FOR PARAMETERS MISSING
+        elif len(message.text.split(" "))<=1 or int(message.text.split(" ")[1])<0:
+            raise parameterMissing("Input limit is missing or it's not a positive number")
+
+        else:
+            print(len(message.text.split(" "))<=1 and int(message.text.split(" ")[1])>0)
+            #DEFINING VARIABLES
+            msg = message.text
+            cid = message.chat.id
+            comment=""
+            limit=int(msg.split(" ")[1])
+
+            #SETTING THE LIMIT TO INLIST
+            chat[cid]["rollCalls"][0].inListLimit=limit
+            logging.info(f"In list limit has been set to {limit}")
+            bot.send_message(cid, f"In list limit has been set to {limit}")
+
+            #MOVING USERS IF IN LIST HAS ALREADY REACH THE LIMIT
+            if len(chat[cid]["rollCalls"][0].inList)>limit:
+                chat[cid]["rollCalls"][0].waitList.extend(chat[cid]["rollCalls"][0].inList[limit:])
+                chat[cid]["rollCalls"][0].inList=chat[cid]["rollCalls"][0].inList[:limit]
+            elif len(chat[cid]["rollCalls"][0].inList)<limit:
+                a=int(limit-len(chat[cid]["rollCalls"][0].inList))
+                chat[cid]["rollCalls"][0].inList.extend(chat[cid]["rollCalls"][0].waitList[:limit-len(chat[cid]["rollCalls"][0].inList)])
+                chat[cid]["rollCalls"][0].waitList=chat[cid]["rollCalls"][0].waitList[a:]
+
+            # PRINTING THE LIST
+            if send_list(message, chat):
+                bot.send_message(cid, chat[cid]["rollCalls"][0].allList())
+
+    except parameterMissing as e:
+        bot.send_message(message.chat.id, e)
+    except rollCallNotStarted as e:
+        bot.send_message(message.chat.id, e)
+
 
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/delete_user")
 def delete_user(message):
@@ -129,7 +172,7 @@ def delete_user(message):
             raise rollCallNotStarted("Roll call is not active")
         #CHECK FOR PARAMETER MISSING
         elif len(message.text.split(" "))<=1:
-            raise usernameMissing("Input username is missing")
+            raise parameterMissing("Input username is missing")
         #CHECK FOR ADMING RIGHTS
             if admin_rights(message, chat)==False:
                 raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
@@ -149,7 +192,7 @@ def delete_user(message):
 
     except rollCallNotStarted as e:
         bot.send_message(message.chat.id, e)
-    except usernameMissing as e:
+    except parameterMissing as e:
         bot.send_message(message.chat.id, e)
     except insufficientPermissions as e:
         bot.send_message(message.chat.id, e)
@@ -208,8 +251,11 @@ def in_user(message):
                 user.comment=comment
 
             #ADDING THE USER TO THE LIST
-            if chat[cid]["rollCalls"][0].addIn(user)=='AB':
+            result=chat[cid]["rollCalls"][0].addIn(user)
+            if result=='AB':
                 raise duplicateProxy("No duplicate proxy please :-), Thanks!")
+            elif result=='AC':
+                bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
 
             # PRINTING THE LIST
             if send_list(message, chat):
@@ -243,8 +289,14 @@ def out_user(message):
                 user.comment=comment
 
             #ADDING THE USER TO THE LIST
-            if chat[cid]["rollCalls"][0].addOut(user)=='AB':
+            result=chat[cid]["rollCalls"][0].addOut(user)
+            if result=='AB':
                 raise duplicateProxy("No duplicate proxy please :-), Thanks!")
+            elif isinstance(result, User):
+                if type(result.user_id)==int:
+                    bot.send_message(cid, f"{'@'+result.username if result.username!=None else f'[{result.name}](tg://user?id={result.user_id})'} now you are in!", parse_mode="Markdown")
+                else:
+                    bot.send_message(cid, f"{result.name} now you are in!")
 
             #PRINTING THE LIST
             if send_list(message, chat):
@@ -278,8 +330,14 @@ def maybe_user(message):
                 user.comment=comment
 
             #ADDING THE USER TO THE LIST
-            if chat[cid]["rollCalls"][0].addMaybe(user)=='AB':
+            result=chat[cid]["rollCalls"][0].addMaybe(user)
+            if result=='AB':
                 raise duplicateProxy("No duplicate proxy please :-), Thanks!")
+            elif isinstance(result, User):
+                if type(result.user_id)==int:
+                    bot.send_message(cid, f"{'@'+result.username if result.username!=None else f'[{result.name}](tg://user?id={result.user_id})'} now you are in!", parse_mode="Markdown")
+                else:
+                    bot.send_message(cid, f"{result.name} now you are in!")
 
             #PRINTING THE LIST
             if send_list(message, chat):
@@ -300,7 +358,7 @@ def set_in_for(message):
             raise rollCallNotStarted("Roll call is not active")
         #CHECK FOR PARAMETERS MISSING
         elif len(message.text.split(" "))<=1:
-            raise usernameMissing("Input username is missing")
+            raise parameterMissing("Input username is missing")
 
         else:
 
@@ -317,15 +375,24 @@ def set_in_for(message):
                 user.comment=comment
 
                 #ADDING THE USER TO THE LIST
-                if chat[cid]["rollCalls"][0].addIn(user)=="AA":
-                    bot.send_message(cid, "That name already exists!")
-                    return
+                result=chat[cid]["rollCalls"][0].addIn(user)
+                if result=='AB':
+                    raise duplicateProxy("No duplicate proxy please :-), Thanks!")
+                elif result=='AC':
+                    bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
+                elif result=='AA':
+                    raise repeatlyName("That name already exists!")
+                elif isinstance(result, User):
+                    if type(result.user_id)==int:
+                        bot.send_message(cid, f"{'@'+result.username if result.username!=None else f'[{result.name}](tg://user?id={result.user_id})'} now you are in!", parse_mode="Markdown")
+                    else:
+                        bot.send_message(cid, f"{result.name} now you are in!")
 
                 # PRINTING THE LIST
                 if send_list(message, chat):
                     bot.send_message(cid, chat[cid]["rollCalls"][0].allList())
 
-    except usernameMissing as e:
+    except parameterMissing as e:
         bot.send_message(message.chat.id, e)
     except rollCallNotStarted as e:
         bot.send_message(message.chat.id, e)
@@ -342,7 +409,7 @@ def set_out_for(message):
             raise rollCallNotStarted("Roll call is not active")
         #CHECK FOR PARAMETERS MISSING
         elif len(message.text.split(" "))<=1:
-            raise usernameMissing("Input username is missing")
+            raise parameterMissing("Input username is missing")
 
         else:
 
@@ -359,15 +426,24 @@ def set_out_for(message):
                 user.comment=comment
 
                 #ADDING THE USER TO THE LIST
-                if chat[cid]["rollCalls"][0].addOut(user)=="AA":
-                    bot.send_message(cid, "That name already exists!")
-                    return
+                result=chat[cid]["rollCalls"][0].addOut(user)
+                if result=='AB':
+                    raise duplicateProxy("No duplicate proxy please :-), Thanks!")
+                elif result=='AC':
+                    bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
+                elif result=='AA':
+                    raise repeatlyName("That name already exists!")
+                elif isinstance(result, User):
+                    if type(result.user_id)==int:
+                        bot.send_message(cid, f"{'@'+result.username if result.username!=None else f'[{result.name}](tg://user?id={result.user_id})'} now you are in!", parse_mode="Markdown")
+                    else:
+                        bot.send_message(cid, f"{result.name} now you are in!")
 
                 # PRINTING THE LIST
                 if send_list(message, chat):
                     bot.send_message(cid, chat[cid]["rollCalls"][0].allList())
     
-    except usernameMissing as e:
+    except parameterMissing as e:
         bot.send_message(message.chat.id, e)
     except rollCallNotStarted as e:
         bot.send_message(message.chat.id, e)
@@ -384,7 +460,7 @@ def set_maybe_for(message):
             raise rollCallNotStarted("Roll call is not active")
         #CHECK FOR PARAMETERS MISSING
         elif len(message.text.split(" "))<=1:
-            raise usernameMissing("Input username is missing")
+            raise parameterMissing("Input username is missing")
 
         else:
 
@@ -401,15 +477,27 @@ def set_maybe_for(message):
                 user.comment=comment
 
                 #ADDING THE USER TO THE LIST
-                if chat[cid]["rollCalls"][0].addMaybe(user)=="AA":
-                    bot.send_message(cid, "That name already exists!")
+                result=chat[cid]["rollCalls"][0].addMaybe(user)
+
+                if result=='AB':
+                    raise duplicateProxy("No duplicate proxy please :-), Thanks!")
+                elif result=='AC':
+                    bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
+                elif result=='AA':
+                    raise repeatlyName("That name already exists!")
+                elif isinstance(result, User):
+                    if type(result.user_id)==int:
+                        bot.send_message(cid, f"{'@'+result.username if result.username!=None else f'[{result.name}](tg://user?id={result.user_id})'} now you are in!", parse_mode="Markdown")
+                    else:
+                        bot.send_message(cid, f"{result.name} now you are in!")
+                        
 
                 # PRINTING THE LIST
                 if send_list(message, chat):
                     bot.send_message(cid, chat[cid]["rollCalls"][0].allList())
                     return
     
-    except usernameMissing as e:
+    except parameterMissing as e:
         bot.send_message(message.chat.id, e)
     except rollCallNotStarted as e:
         bot.send_message(message.chat.id, e)
@@ -471,6 +559,23 @@ def whos_maybe(message):
         bot.send_message("Roll call is not active")
 
 
+@bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/whos_waiting")  # WHOS IN COMMAND
+def whos_waiting(message):
+    try:
+        #CHECK FOR RC ALREADY RUNNING
+        if roll_call_not_started(message, chat)==False:
+            raise rollCallNotStarted("Roll call is not active")
+        else:
+        
+            #DEFINING VARIABLES
+            cid = message.chat.id
+            
+            #PRINTING LIST
+            bot.send_message(cid, chat[cid]["rollCalls"][0].waitListText())
+
+    except rollCallNotStarted as e:
+        bot.send_message("Roll call is not active")
+
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower()=="/set_title")  # SET TITLE COMMAND
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/st")
 def set_title(message):
@@ -527,7 +632,7 @@ def end_roll_call(message):
             #SENDING LIST
             bot.send_message(message.chat.id, "Roll ended!")
 
-            bot.send_message(cid, "Title - "+chat[cid]["rollCalls"][0].title+"\n"+chat[cid]["rollCalls"][0].inListText() + chat[cid]["rollCalls"][0].outListText() + chat[cid]["rollCalls"][0].maybeListText())
+            bot.send_message(cid, "Title - "+chat[cid]["rollCalls"][0].title+"\n"+chat[cid]["rollCalls"][0].inListText() + chat[cid]["rollCalls"][0].outListText() + chat[cid]["rollCalls"][0].maybeListText() + chat[cid]["rollCalls"][0].waitListText())
 
             logging.info("The roll call "+chat[cid]["rollCalls"][0].title+" has ended")
 

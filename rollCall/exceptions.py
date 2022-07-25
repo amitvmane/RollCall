@@ -13,5 +13,5 @@ class duplicateProxy(Exception):
 class repeatlyName(Exception):
     pass
 
-class usernameMissing(Exception):
+class parameterMissing(Exception):
     pass

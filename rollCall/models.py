@@ -17,6 +17,8 @@ class RollCall:
         self.inList= []
         self.outList= []
         self.maybeList= []
+        self.inListLimit=None
+        self.waitList= []
         self.createdDate= datetime.datetime.utcnow
 
     #RETURN INLIST
@@ -47,12 +49,23 @@ class RollCall:
         for user in self.maybeList:
             i+=1
             txt+= f"{i}. {user}\n" 
-        return txt+'\n' if len(self.maybeList)>0 else "Maybe:\nNobody"
+        return txt+'\n' if len(self.maybeList)>0 else "Maybe:\nNobody\n\n"
 
+    #RETURN WAITLIST
+    def waitListText(self):
+        backslash="\n"
+        txt=f'Waiting:\n'
+        i=0
+        for user in self.waitList:
+            i+=1
+            txt+= f"{i}. {user}\n" 
+        return (txt+'\n' if len(self.waitList)>0 else "Waiting:\nNobody") if self.inListLimit!=None else ""
+
+    #RETURN ALL THE STATES
     def allList(self):
         backslash="\n"
 
-        txt="Title - "+self.title+"\n"+(self.inListText() if self.inListText()!='In:\nNobody\n\n' else '')+(self.outListText() if self.outListText()!='Out:\nNobody\n\n' else '')+(self.maybeListText() if self.maybeListText()!='Maybe:\nNobody' else '')
+        txt="Title - "+self.title+"\n"+(self.inListText() if self.inListText()!='In:\nNobody\n\n' else '')+(self.outListText() if self.outListText()!='Out:\nNobody\n\n' else '')+(self.maybeListText() if self.maybeListText()!='Maybe:\nNobody\n\n' else '')+(self.waitListText() if self.waitListText()!='Waiting:\nNobody' else '')
         return txt
 
     #DELETE A USER
@@ -75,18 +88,34 @@ class RollCall:
     #ADD A NEW USER TO IN LIST
     def addIn(self, user):
 
+        #ERROR FOR REPEATLY NAME IN SET COMMANDS
         if type(user.user_id)==str: 
             for us in allNames:
                 if user.name==us.name and user.user_id!=us.user_id:
                     return 'AA'
 
         #ERROR FOR DUPLICATE USER IN THE SAME STATE
-        for us in self.inList:
-            if us.user_id == user.user_id and us.comment == user.comment:
-                return "AB"
-            elif us.user_id==user.user_id and us.comment != user.comment:
-                us.comment=user.comment
-                return
+        if self.inListLimit==None:
+            for us in self.inList:
+                if us.user_id == user.user_id and us.comment == user.comment:
+                    return "AB"
+                elif us.user_id==user.user_id and us.comment != user.comment:
+                    us.comment=user.comment
+                    return
+        else:
+            for us in self.inList:
+                if us.user_id == user.user_id and us.comment == user.comment:
+                    return "AB"
+                elif us.user_id==user.user_id and us.comment != user.comment:
+                    us.comment=user.comment
+                    return
+
+            for us in self.waitList:
+                if us.user_id == user.user_id and us.comment == user.comment:
+                    return "AB"
+                elif us.user_id==user.user_id and us.comment != user.comment:
+                    us.comment=user.comment
+                    return
 
         #REMOVE THE USER FROM OTHER STATE
         for us in self.outList:
@@ -100,17 +129,30 @@ class RollCall:
                 self.maybeList.remove(us)
                 allNames.remove(us)
 
+        #REMOVE THE USER FROM OTHER STATE
+        for us in self.waitList:
+            if us.user_id == user.user_id:
+                self.waitList.remove(us)
+                allNames.remove(us)
+
+        #WAITLIST FEATURE. ADD USER TO WAITLIST IF IN LIST IS FULL
+        if self.inListLimit!=None:
+            if len(self.inList)==int(self.inListLimit):
+                self.waitList.append(user)
+                allNames.append(user)
+                logging.info(f"The user {user.name} has been added to the Wait list")
+                return 'AC'
+
         #ADD THE USER TO THE STATE
         self.inList.append(user)
         allNames.append(user)
-
-        print(len(self.inList) + len(self.outList) + len(self.maybeList))
 
         logging.info(f"User {user.name} has change his state to in")
 
     #ADD A NEW USER TO OUT LIST
     def addOut(self, user):
 
+        #ERROR FOR REPEATLY NAME IN SET COMMANDS
         if type(user.user_id)==str: 
             for us in allNames:
                 if user.name==us.name and user.user_id!=us.user_id:
@@ -136,17 +178,25 @@ class RollCall:
                 self.maybeList.remove(us)
                 allNames.remove(us)
 
+        if len(self.inList)<int(self.inListLimit) and len(self.waitList)>0:
+            result=self.waitList[0]
+            self.inList.append(self.waitList[0])
+            self.waitList.pop(0)
+            self.outList.append(user)  
+            allNames.append(user)
+            logging.info(f"User {user.name} has change his state to out")
+            return result
+
         #ADD THE USER TO THE STATE
         self.outList.append(user)  
         allNames.append(user)
-
-        print(len(self.inList) + len(self.outList) + len(self.maybeList))
 
         logging.info(f"User {user.name} has change his state to out")
 
     #ADD A NEW USER TO MAYBE LIST
     def addMaybe(self, user):
 
+        #ERROR FOR REPEATLY NAME IN SET COMMANDS
         if type(user.user_id)==str: 
             for us in allNames:
                 if user.name==us.name and user.user_id!=us.user_id:
@@ -172,11 +222,18 @@ class RollCall:
                 self.inList.remove(us)
                 allNames.remove(us)
 
+        if len(self.inList)<int(self.inListLimit) and len(self.waitList)>0:
+            result=self.waitList[0]
+            self.inList.append(self.waitList[0])
+            self.waitList.pop(0)
+            self.maybeList.append(user)
+            allNames.append(user)
+            logging.info(f"User {user.name} has change his state to maybe")
+            return result
+
         #ADD THE USER TO THE STATE
         self.maybeList.append(user)
         allNames.append(user)
-    
-        print(len(self.inList) + len(self.outList) + len(self.maybeList))
 
         logging.info(f"User {user.name} has change his state to maybe")
 

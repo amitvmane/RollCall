@@ -99,6 +99,8 @@ class RollCall:
             for us in self.inList:
                 if us.user_id == user.user_id and us.comment == user.comment:
                     return "AB"
+                elif us.first_name==user.first_name and us.username == user.username and us.user_id!=user.user_id:
+                    return "AB"
                 elif us.user_id==user.user_id and us.comment != user.comment:
                     us.comment=user.comment
                     return
@@ -247,6 +249,7 @@ class User:
 
     def __init__(self, name, username, user_id):
         self.name=name
+        self.first_name=name
         self.username=username
         self.user_id=user_id
         self.comment=''

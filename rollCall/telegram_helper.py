@@ -7,7 +7,7 @@ from telebot.types import(
     ReplyKeyboardRemove
 )
 
-from config import TELEGRAM_TOKEN
+from config import TELEGRAM_TOKEN, ADMINS
 from exceptions import *
 from models import RollCall, User
 from functions import roll_call_already_started, roll_call_not_started, send_list, admin_rights
@@ -67,6 +67,15 @@ def unset_admins(message):
 
     #DEFINING NEW STATE OF ADMIN RIGTS
     chat[message.chat.id]["adminRigts"]=False
+
+#SEND ANNOUNCEMENTS TO ALL GROUPS
+@bot.message_handler(func=lambda message:message.text.lower().split("@")[0].split(" ")[0]=="/broadcast" and message.from_user.id in ADMINS)
+def broadcast(message):
+    if len(message.text.split(" "))>1:
+        for i in chat:
+            bot.send_message(i, msg)
+    else:
+        bot.send_message(message.chat.id, "Message is missing")
 
 #START A ROLL CALL
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/start_roll_call")

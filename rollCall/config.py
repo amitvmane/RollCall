@@ -13,3 +13,5 @@ logging.basicConfig(
 )
 
 TELEGRAM_TOKEN=os.environ.get("API_KEY")
+
+ADMINS=[int(os.environ.get("admin1")), int(os.environ.get("admin2"))]

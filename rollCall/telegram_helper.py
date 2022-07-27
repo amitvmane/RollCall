@@ -403,6 +403,8 @@ def set_in_for(message):
         bot.send_message(message.chat.id, e)
     except duplicateProxy as e:
         bot.send_message(message.chat.id, e)
+    except repeatlyName as e:
+        bot.send_message(message.chat.id, e)
 
 
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/set_out_for")
@@ -454,7 +456,8 @@ def set_out_for(message):
         bot.send_message(message.chat.id, e)
     except duplicateProxy as e:
         bot.send_message(message.chat.id, e)
-
+    except repeatlyName as e:
+        bot.send_message(message.chat.id, e)
 
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/set_maybe_for")
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/smf")
@@ -508,7 +511,8 @@ def set_maybe_for(message):
         bot.send_message(message.chat.id, e)
     except duplicateProxy as e:
         bot.send_message(message.chat.id, e)
-
+    except repeatlyName as e:
+        bot.send_message(message.chat.id, e)
 
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/whos_in")  # WHOS IN COMMAND
 def whos_in(message):

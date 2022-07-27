@@ -163,10 +163,6 @@ def wait_limit(message):
                 chat[cid]["rollCalls"][0].inList.extend(chat[cid]["rollCalls"][0].waitList[:limit-len(chat[cid]["rollCalls"][0].inList)])
                 chat[cid]["rollCalls"][0].waitList=chat[cid]["rollCalls"][0].waitList[a:]
 
-            # PRINTING THE LIST
-            if send_list(message, chat):
-                bot.send_message(cid, chat[cid]["rollCalls"][0].allList())
-
     except parameterMissing as e:
         bot.send_message(message.chat.id, e)
     except rollCallNotStarted as e:

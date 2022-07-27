@@ -430,7 +430,7 @@ def set_out_for(message):
 
             #CREATING THE USER OBJECT
             if len(arr)>1:
-                user = User(arr[1], None, arr[1])  
+                user = User(arr[1], None, arr[1]) 
                 comment=" ".join(arr[2:]) if len(arr)>2 else ""
                 user.comment=comment
 

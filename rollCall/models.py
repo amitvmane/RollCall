@@ -73,16 +73,25 @@ class RollCall:
         for us in self.inList:
             if us.name==name:
                 self.inList.remove(us)
+                for n in allNames:
+                    if n.name==name:
+                        allNames.remove(n)
                 return True
 
         for us in self.outList:
             if us.name==name:
                 self.outList.remove(us)
+                for n in allNames:
+                    if n.name==name:
+                        allNames.remove(n)
                 return True
 
         for us in self.maybeList:
             if us.name==name:
                 self.maybeList.remove(us)
+                for n in allNames:
+                    if n.name==name:
+                        allNames.remove(n)
                 return True
 
     #ADD A NEW USER TO IN LIST
@@ -93,6 +102,10 @@ class RollCall:
             for us in allNames:
                 if user.name==us.name and user.user_id!=us.user_id:
                     return 'AA'
+
+        for us in allNames:
+            if us.first_name==user.first_name and us.username == user.username and us.user_id!=user.user_id:
+                return "AB"
 
         #ERROR FOR DUPLICATE USER IN THE SAME STATE
         if self.inListLimit==None:
@@ -107,6 +120,8 @@ class RollCall:
         else:
             for us in self.inList:
                 if us.user_id == user.user_id and us.comment == user.comment:
+                    return "AB"
+                elif us.first_name==user.first_name and us.username == user.username and us.user_id!=user.user_id:
                     return "AB"
                 elif us.user_id==user.user_id and us.comment != user.comment:
                     us.comment=user.comment
@@ -160,10 +175,16 @@ class RollCall:
                 if user.name==us.name and user.user_id!=us.user_id:
                     return 'AA'
 
+        for us in allNames:
+            if us.first_name==user.first_name and us.username == user.username and us.user_id!=user.user_id:
+                return "AB"
+
         #ERROR FOR DUPLICATE USER IN THE SAME STATE
         for us in self.outList:
             if us.user_id == user.user_id and us.comment == user.comment:
                 return 'AB'
+            elif us.first_name==user.first_name and us.username == user.username and us.user_id!=user.user_id:
+                return "AB"
             elif us.user_id==user.user_id and us.comment != user.comment:
                 us.comment=user.comment
                 return
@@ -211,10 +232,14 @@ class RollCall:
                 if user.name==us.name and user.user_id!=us.user_id:
                     return 'AA'
 
+        for us in allNames:
+            if us.first_name==user.first_name and us.username == user.username and us.user_id!=user.user_id:
+                return "AB"
+
         #ERROR FOR DUPLICATE USER IN THE SAME STATE
         for us in self.maybeList:
             if us.user_id == user.user_id and us.comment == user.comment:
-                return "AB" 
+                return "AB"
             elif us.user_id==user.user_id and us.comment != user.comment:
                 us.comment=user.comment
                 return

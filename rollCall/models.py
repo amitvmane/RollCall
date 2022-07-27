@@ -180,14 +180,21 @@ class RollCall:
                 self.maybeList.remove(us)
                 allNames.remove(us)
 
-        if len(self.inList)<int(self.inListLimit) and len(self.waitList)>0:
-            result=self.waitList[0]
-            self.inList.append(self.waitList[0])
-            self.waitList.pop(0)
-            self.outList.append(user)  
-            allNames.append(user)
-            logging.info(f"User {user.name} has change his state to out")
-            return result
+        if self.inListLimit!=None:
+            for us in self.waitList:
+                if us.user_id==user.user_id:
+                    self.waitList.remove(us)
+                    allNames.remove(us)
+
+        if self.inListLimit!=None:
+            if len(self.inList)<int(self.inListLimit) and len(self.waitList)>0:
+                result=self.waitList[0]
+                self.inList.append(self.waitList[0])
+                self.waitList.pop(0)
+                self.outList.append(user)  
+                allNames.append(user)
+                logging.info(f"User {user.name} has change his state to out")
+                return result
 
         #ADD THE USER TO THE STATE
         self.outList.append(user)  
@@ -224,14 +231,21 @@ class RollCall:
                 self.inList.remove(us)
                 allNames.remove(us)
 
-        if len(self.inList)<int(self.inListLimit) and len(self.waitList)>0:
-            result=self.waitList[0]
-            self.inList.append(self.waitList[0])
-            self.waitList.pop(0)
-            self.maybeList.append(user)
-            allNames.append(user)
-            logging.info(f"User {user.name} has change his state to maybe")
-            return result
+        if self.inListLimit!=None:
+            for us in self.waitList:
+                if us.user_id==user.user_id:
+                    self.waitList.remove(us)
+                    allNames.remove(us)
+
+        if self.inListLimit!=None:
+            if len(self.inList)<int(self.inListLimit) and len(self.waitList)>0:
+                result=self.waitList[0]
+                self.inList.append(self.waitList[0])
+                self.waitList.pop(0)
+                self.maybeList.append(user)
+                allNames.append(user)
+                logging.info(f"User {user.name} has change his state to maybe")
+                return result
 
         #ADD THE USER TO THE STATE
         self.maybeList.append(user)

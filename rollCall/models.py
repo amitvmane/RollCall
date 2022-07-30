@@ -4,11 +4,6 @@ import datetime
 from config import TELEGRAM_TOKEN
 from exceptions import *
 
-#LIST WITH ALL USER NAMES. IT IS USED TO DETECT IF THERE ARE REPEATED NAMES
-allNames=[]
-
-
-
 class RollCall:
     #THIS IS THE ROLLCALL OBJECT
 
@@ -17,8 +12,10 @@ class RollCall:
         self.inList= []
         self.outList= []
         self.maybeList= []
-        self.inListLimit=None
         self.waitList= []
+        self.inListLimit=None
+        self.reminder="Off"
+        self.reminderTime=None
         self.createdDate= datetime.datetime.utcnow
 
     #RETURN INLIST
@@ -69,7 +66,7 @@ class RollCall:
         return txt
 
     #DELETE A USER
-    def delete_user(self, name):
+    def delete_user(self, name, allNames):
         for us in self.inList:
             if us.name==name:
                 self.inList.remove(us)
@@ -95,7 +92,7 @@ class RollCall:
                 return True
 
     #ADD A NEW USER TO IN LIST
-    def addIn(self, user):
+    def addIn(self, user, allNames):
 
         #ERROR FOR REPEATLY NAME IN SET COMMANDS
         if type(user.user_id)==str: 
@@ -167,8 +164,7 @@ class RollCall:
         logging.info(f"User {user.name} has change his state to in")
 
     #ADD A NEW USER TO OUT LIST
-    def addOut(self, user):
-
+    def addOut(self, user, allNames):
         #ERROR FOR REPEATLY NAME IN SET COMMANDS
         if type(user.user_id)==str: 
             for us in allNames:
@@ -224,8 +220,7 @@ class RollCall:
         logging.info(f"User {user.name} has change his state to out")
 
     #ADD A NEW USER TO MAYBE LIST
-    def addMaybe(self, user):
-
+    def addMaybe(self, user, allNames):
         #ERROR FOR REPEATLY NAME IN SET COMMANDS
         if type(user.user_id)==str: 
             for us in allNames:
@@ -286,7 +281,7 @@ class User:
 
     #USER OBJECT
 
-    def __init__(self, name, username, user_id):
+    def __init__(self, name, username, user_id, allNames):
         self.name=name
         self.first_name=name
         self.username=username

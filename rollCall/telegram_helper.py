@@ -72,8 +72,9 @@ def unset_admins(message):
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0].split(" ")[0]=="/broadcast" and message.from_user.id in ADMINS)
 def broadcast(message):
     if len(message.text.split(" "))>1:
-        for i in chat:
-            bot.send_message(i, msg)
+        msg=message.text.split(" ")[1:]
+        for k in chat:
+            bot.send_message(k, " ".join(msg))
     else:
         bot.send_message(message.chat.id, "Message is missing")
 
@@ -114,6 +115,7 @@ def start_roll_call(message):
             ###DEFAULT CONFIG###
 
             chat[cid]['shh']=False
+            chat[cid]['allNames']=[]
 
             if "adminRights" not in chat[cid]:
                 chat[cid]["adminRights"]=False
@@ -142,7 +144,6 @@ def wait_limit(message):
             raise parameterMissing("Input limit is missing or it's not a positive number")
 
         else:
-            print(len(message.text.split(" "))<=1 and int(message.text.split(" ")[1])>0)
             #DEFINING VARIABLES
             msg = message.text
             cid = message.chat.id
@@ -168,6 +169,23 @@ def wait_limit(message):
     except rollCallNotStarted as e:
         bot.send_message(message.chat.id, e)
 
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/set_rolcall_time")
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/srt")
+def set_rollcall_time(message):
+    try:
+        #CHECK FOR RC ALREADY RUNNING
+        if roll_call_not_started(message, chat)==False:
+            raise rollCallNotStarted("Roll call is not active")
+        else:
+            #DEFINING VARIABLES
+            msg = message.text
+            cid = message.chat.id
+            dateTime=msg.split(" ")[1]
+
+            
+
+    except rollCallNotStarted as e:
+        bot.send_message(message.chat.id, e)
 
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/delete_user")
 def delete_user(message):
@@ -190,7 +208,7 @@ def delete_user(message):
                 
             #DELETE THE USER
             name=" ".join(arr[1:])
-            if chat[cid]["rollCalls"][0].delete_user(name)==True:
+            if chat[cid]["rollCalls"][0].delete_user(name, chat[cid]["allNames"])==True:
                 bot.send_message(cid, "The user was deleted!")
             else:
                 bot.send_message(cid, "That user wasn't found")
@@ -246,7 +264,7 @@ def in_user(message):
             msg = message.text
             cid = message.chat.id
             comment=""
-            user=User(message.from_user.first_name, message.from_user.username if  message.from_user.username!="" else "None", message.from_user.id)
+            user=User(message.from_user.first_name, message.from_user.username if  message.from_user.username!="" else "None", message.from_user.id, chat[cid]["allNames"])
             
             #DEFINING THE USER COMMENT
             arr = msg.split(" ")
@@ -256,7 +274,7 @@ def in_user(message):
                 user.comment=comment
 
             #ADDING THE USER TO THE LIST
-            result=chat[cid]["rollCalls"][0].addIn(user)
+            result=chat[cid]["rollCalls"][0].addIn(user, chat[cid]["allNames"])
             if result=='AB':
                 raise duplicateProxy("No duplicate proxy please :-), Thanks!")
             elif result=='AC':
@@ -284,7 +302,7 @@ def out_user(message):
             msg = message.text
             cid = message.chat.id
             comment=""
-            user = User(message.from_user.first_name, message.from_user.username, message.from_user.id)
+            user = User(message.from_user.first_name, message.from_user.username, message.from_user.id, chat[cid]["allNames"])
             
             #DEFINING THE USER COMMENT
             arr = msg.split(" ")
@@ -294,7 +312,7 @@ def out_user(message):
                 user.comment=comment
 
             #ADDING THE USER TO THE LIST
-            result=chat[cid]["rollCalls"][0].addOut(user)
+            result=chat[cid]["rollCalls"][0].addOut(user,chat[cid]["allNames"])
             if result=='AB':
                 raise duplicateProxy("No duplicate proxy please :-), Thanks!")
             elif isinstance(result, User):
@@ -325,7 +343,7 @@ def maybe_user(message):
             msg = message.text
             cid = message.chat.id
             comment=""
-            user = User(message.from_user.first_name, message.from_user.username, message.from_user.id)
+            user = User(message.from_user.first_name, message.from_user.username, message.from_user.id, chat[cid]["allNames"])
             
             #DEFINING THE USER COMMENT
             arr = msg.split(" ")
@@ -335,7 +353,7 @@ def maybe_user(message):
                 user.comment=comment
 
             #ADDING THE USER TO THE LIST
-            result=chat[cid]["rollCalls"][0].addMaybe(user)
+            result=chat[cid]["rollCalls"][0].addMaybe(user,chat[cid]["allNames"])
             if result=='AB':
                 raise duplicateProxy("No duplicate proxy please :-), Thanks!")
             elif isinstance(result, User):
@@ -375,12 +393,12 @@ def set_in_for(message):
 
             #CREATING THE USER OBJECT
             if len(arr)>1:
-                user = User(arr[1], None, arr[1])  
+                user = User(arr[1], None, arr[1], chat[cid]["allNames"])  
                 comment=" ".join(arr[2:]) if len(arr)>2 else ""
                 user.comment=comment
 
                 #ADDING THE USER TO THE LIST
-                result=chat[cid]["rollCalls"][0].addIn(user)
+                result=chat[cid]["rollCalls"][0].addIn(user, chat[cid]["allNames"])
                 if result=='AB':
                     raise duplicateProxy("No duplicate proxy please :-), Thanks!")
                 elif result=='AC':
@@ -428,12 +446,12 @@ def set_out_for(message):
 
             #CREATING THE USER OBJECT
             if len(arr)>1:
-                user = User(arr[1], None, arr[1]) 
+                user = User(arr[1], None, arr[1], chat[cid]["allNames"]) 
                 comment=" ".join(arr[2:]) if len(arr)>2 else ""
                 user.comment=comment
 
                 #ADDING THE USER TO THE LIST
-                result=chat[cid]["rollCalls"][0].addOut(user)
+                result=chat[cid]["rollCalls"][0].addOut(user, chat[cid]["allNames"])
                 if result=='AB':
                     raise duplicateProxy("No duplicate proxy please :-), Thanks!")
                 elif result=='AC':
@@ -480,12 +498,12 @@ def set_maybe_for(message):
 
             #CREATING THE USER OBJECT
             if len(arr)>1:
-                user = User(arr[1], None, arr[1])  
+                user = User(arr[1], None, arr[1], chat[cid]["allNames"])  
                 comment=" ".join(arr[2:]) if len(arr)>2 else ""
                 user.comment=comment
 
                 #ADDING THE USER TO THE LIST
-                result=chat[cid]["rollCalls"][0].addMaybe(user)
+                result=chat[cid]["rollCalls"][0].addMaybe(user, chat[cid]["allNames"])
 
                 if result=='AB':
                     raise duplicateProxy("No duplicate proxy please :-), Thanks!")

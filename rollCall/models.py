@@ -13,9 +13,9 @@ class RollCall:
         self.outList= []
         self.maybeList= []
         self.waitList= []
-        self.inListLimit=None
-        self.reminder="Off"
-        self.reminderTime=None
+        self.inListLimit=None #Waitlist feature
+        self.reminders=None #Reminder feature
+        self.finalizeDate=None #Reminder feature
         self.createdDate= datetime.datetime.utcnow
 
     #RETURN INLIST
@@ -273,8 +273,10 @@ class RollCall:
 
         logging.info(f"User {user.name} has change his state to maybe")
 
-    async def setTime(self, time):
+    async def finalize_time(self, time):
         #FUNCTION TO SCHEDULE ROLLCALLS ****NEXT FEATURE***
+        
+        self.finalizeDate=time
         pass
 
 class User:

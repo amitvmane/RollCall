@@ -6,6 +6,7 @@ from telebot.types import(
     ReplyKeyboardMarkup, 
     ReplyKeyboardRemove
 )
+import datetime
 
 from config import TELEGRAM_TOKEN, ADMINS
 from exceptions import *
@@ -176,15 +177,38 @@ def set_rollcall_time(message):
         #CHECK FOR RC ALREADY RUNNING
         if roll_call_not_started(message, chat)==False:
             raise rollCallNotStarted("Roll call is not active")
+        if len(message.text.split(" "))!=3:
+            raise parameterMissing("The correct format is\n/set_rollcall_time DD-MM-YYYY h:m")
+        
+        dateTime=message.text.split(" ")[1:]
+        date=dateTime[0]
+        time=dateTime[1]
+
+        if len(date.split("-")[0])!=2 or len(date.split("-")[1])!=2 or len(date.split("-")[2])!=4 or len(time.split(":")[0])!=2 or len(time.split(":")[1])!=2:
+            raise parameterMissing("The correct format is\n/set_rollcall_time DD-MM-YYYY h:m")
+  
         else:
             #DEFINING VARIABLES
             msg = message.text
             cid = message.chat.id
-            dateTime=msg.split(" ")[1]
+            
+
+            day=int(date.split("-")[0]) if date.split("-")[0][0]!="0" else int(date.split("-")[0][1])
+            month=int(date.split("-")[1]) if date.split("-")[1][0]!="0" else int(date.split("-")[1][1])
+            year=int(date.split("-")[2])
+
+            hour=int(time.split(":")[0]) if time.split(":")[0][0]!="0" else int(time.split(":")[0][1])
+            minutes=int(time.split(":")[1]) if time.split(":")[0][0]!="0" else int(time.split(":")[1][1])
+
+            if 0>=day or day>31 or 0>=month or month>12 or year<int(datetime.datetime.utcnow().year or hour>=24 or 0>=minutes>=60):
+                raise parameterMissing("The days, months and year must be up to 0")
 
             
 
+
     except rollCallNotStarted as e:
+        bot.send_message(message.chat.id, e)
+    except parameterMissing as e:
         bot.send_message(message.chat.id, e)
 
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/delete_user")

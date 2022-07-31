@@ -203,7 +203,10 @@ def set_rollcall_time(message):
             if 0>=day or day>31 or 0>=month or month>12 or year<int(datetime.datetime.utcnow().year or hour>=24 or 0>=minutes>=60):
                 raise parameterMissing("The days, months and year must be up to 0")
 
-            
+            complete_date=date+" "+time
+
+            chat[cid]["rollCalls"][0].finalize_time(complete_date)
+
 
 
     except rollCallNotStarted as e:

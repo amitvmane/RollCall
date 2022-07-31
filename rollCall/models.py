@@ -3,6 +3,7 @@ import datetime
 
 from config import TELEGRAM_TOKEN
 from exceptions import *
+from check_reminder import check
 
 class RollCall:
     #THIS IS THE ROLLCALL OBJECT
@@ -273,11 +274,9 @@ class RollCall:
 
         logging.info(f"User {user.name} has change his state to maybe")
 
-    async def finalize_time(self, time):
-        #FUNCTION TO SCHEDULE ROLLCALLS ****NEXT FEATURE***
-        
-        self.finalizeDate=time
-        pass
+    async def finalize_time(self, date):
+        self.finalizeDate=datetime.datetime.strptime(date, "%")
+
 
 class User:
 

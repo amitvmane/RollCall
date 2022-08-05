@@ -1,9 +1,14 @@
 import logging
-import datetime
+import asyncio
+import telebot
 
 from config import TELEGRAM_TOKEN
 from exceptions import *
 from check_reminder import check
+from functions import *
+from datetime import datetime
+
+bot = telebot.TeleBot(token=TELEGRAM_TOKEN)
 
 class RollCall:
     #THIS IS THE ROLLCALL OBJECT
@@ -15,9 +20,9 @@ class RollCall:
         self.maybeList= []
         self.waitList= []
         self.inListLimit=None #Waitlist feature
-        self.reminders=None #Reminder feature
+        self.reminder=None #Reminder feature
         self.finalizeDate=None #Reminder feature
-        self.createdDate= datetime.datetime.utcnow
+        self.createdDate= datetime.utcnow()
 
     #RETURN INLIST
     def inListText(self):
@@ -274,9 +279,53 @@ class RollCall:
 
         logging.info(f"User {user.name} has change his state to maybe")
 
-    async def finalize_time(self, date):
-        self.finalizeDate=datetime.datetime.strptime(date, "%")
+    async def finalize_time(self, date, chat, chat_id):
 
+        tz=pytz.timezone(chat['timezone'])
+        date=datetime.strptime(date, "%d-%m-%Y %H:%M")
+        date=tz.localize(date)
+
+        now_date_string=datetime.now(pytz.timezone(chat['timezone'])).strftime("%d-%m-%Y %H:%M")
+        now_date=datetime.strptime(now_date_string, "%d-%m-%Y %H:%M")
+        now_date=tz.localize(now_date)
+
+        if now_date>date:
+            bot.send_message(chat_id, "I can't go to the past :(")
+            return
+
+        self.finalizeDate=date
+
+       
+
+        if len(chat['waitingRC'])!=0:
+            chat['waitingRC'][0].cancel()
+            
+        print(chat['waitingRC'])
+
+        bot.send_message(chat_id, 'I will notify you when the event ends!')
+        task=asyncio.create_task(check(chat["rollCalls"][0], chat_id, chat['timezone']))
+        chat['waitingRC'].append(task)
+        await task
+
+        # if chat['rollCalls'][0].title in chat['reminders']:
+        #     print('here')
+        #     chat['reminders'][chat['rollCalls'][0].title].cancel()
+        #     chat['reminders'][chat['rollCalls'][0].title]=task
+        #     bot.send_message(chat_id, "The reminder has been set!")
+        # else:
+            
+        #     chat['reminders'][chat['rollCalls'][0].title]=task
+        #     print(chat['reminders'])
+        #     bot.send_message(chat_id, "The reminder has been set!")
+
+    async def set_reminder(self, hour, chat, chat_id):
+        await print('a')
+        self.reminder=hour
+
+        bot.send_message(chat_id, 'I will notify you when the event ends!')
+        task=asyncio.create_task(check(chat["rollCalls"][0], chat_id, chat['timezone']))
+        chat['waitingRC'].append(task)
+        await task
 
 class User:
 

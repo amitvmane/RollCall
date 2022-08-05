@@ -1,19 +1,24 @@
 import logging
 
 import time
+# from telebot.telebot import eleBot
 import telebot
 from telebot.types import(
     ReplyKeyboardMarkup, 
-    ReplyKeyboardRemove
+    ReplyKeyboardRemove,
+    ForceReply
 )
 import datetime
 
 from config import TELEGRAM_TOKEN, ADMINS
 from exceptions import *
 from models import RollCall, User
-from functions import roll_call_already_started, roll_call_not_started, send_list, admin_rights
+from check_reminder import check
+from functions import roll_call_already_started, roll_call_not_started, send_list, admin_rights, auto_complete_timezone, create_tasks
+import asyncio
 
 bot = telebot.TeleBot(token=TELEGRAM_TOKEN)
+
 
 chat={}
 
@@ -79,6 +84,24 @@ def broadcast(message):
     else:
         bot.send_message(message.chat.id, "Message is missing")
 
+
+@bot.message_handler(func=lambda message:message.text.lower().split("@")[0].split(" ")[0]=="/timezone")
+@bot.message_handler(func=lambda message:message.text.lower().split("@")[0].split(" ")[0]=="/tz")
+def config_timezone(message):
+    
+
+    msg=bot.send_message(message.chat.id, "Write your current location with this format: Continent/Country or Continent/State", reply_markup=ForceReply())
+    bot.register_next_step_handler(msg, manage_timezone)
+
+def manage_timezone(message):
+    print('hola')
+    response=auto_complete_timezone(message)
+    if response!=None:
+        bot.send_message(message.chat.id, f"Your timezone has been setted to {response}")
+        chat[message.chat.id]['timezone']=response
+    else:
+        bot.send_message(message.chat.id, f"Your timezone doesnt exists, try again")
+
 #START A ROLL CALL
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/start_roll_call")
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/src")
@@ -117,9 +140,18 @@ def start_roll_call(message):
 
             chat[cid]['shh']=False
             chat[cid]['allNames']=[]
+            
+            if 'timezone' not in chat[cid]:
+                chat[cid]['timezone']='UTC'
 
             if "adminRights" not in chat[cid]:
                 chat[cid]["adminRights"]=False
+
+            if "reminders" not in chat[cid]:
+                chat[cid]["reminders"]={}
+
+            if 'waitingRC' not in chat[cid]:
+                chat[cid]['waitingRC']=[]
 
             ###DEFAULT CONFIG###
 
@@ -168,50 +200,6 @@ def wait_limit(message):
     except parameterMissing as e:
         bot.send_message(message.chat.id, e)
     except rollCallNotStarted as e:
-        bot.send_message(message.chat.id, e)
-
-@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/set_rolcall_time")
-@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/srt")
-def set_rollcall_time(message):
-    try:
-        #CHECK FOR RC ALREADY RUNNING
-        if roll_call_not_started(message, chat)==False:
-            raise rollCallNotStarted("Roll call is not active")
-        if len(message.text.split(" "))!=3:
-            raise parameterMissing("The correct format is\n/set_rollcall_time DD-MM-YYYY h:m")
-        
-        dateTime=message.text.split(" ")[1:]
-        date=dateTime[0]
-        time=dateTime[1]
-
-        if len(date.split("-")[0])!=2 or len(date.split("-")[1])!=2 or len(date.split("-")[2])!=4 or len(time.split(":")[0])!=2 or len(time.split(":")[1])!=2:
-            raise parameterMissing("The correct format is\n/set_rollcall_time DD-MM-YYYY h:m")
-  
-        else:
-            #DEFINING VARIABLES
-            msg = message.text
-            cid = message.chat.id
-            
-
-            day=int(date.split("-")[0]) if date.split("-")[0][0]!="0" else int(date.split("-")[0][1])
-            month=int(date.split("-")[1]) if date.split("-")[1][0]!="0" else int(date.split("-")[1][1])
-            year=int(date.split("-")[2])
-
-            hour=int(time.split(":")[0]) if time.split(":")[0][0]!="0" else int(time.split(":")[0][1])
-            minutes=int(time.split(":")[1]) if time.split(":")[0][0]!="0" else int(time.split(":")[1][1])
-
-            if 0>=day or day>31 or 0>=month or month>12 or year<int(datetime.datetime.utcnow().year or hour>=24 or 0>=minutes>=60):
-                raise parameterMissing("The days, months and year must be up to 0")
-
-            complete_date=date+" "+time
-
-            chat[cid]["rollCalls"][0].finalize_time(complete_date)
-
-
-
-    except rollCallNotStarted as e:
-        bot.send_message(message.chat.id, e)
-    except parameterMissing as e:
         bot.send_message(message.chat.id, e)
 
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/delete_user")

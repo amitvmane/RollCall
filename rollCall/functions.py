@@ -1,5 +1,10 @@
 from exceptions import *
 import logging
+import Levenshtein
+import datetime
+import pytz
+import asyncio
+from check_reminder import check
 
 #FUNCTION TO RAISE RC ALREADY STARTED ERROR
 #USELESS IN NEW FEATURE
@@ -42,3 +47,21 @@ def send_list(message, chat):
         return False
     else:
         return True
+
+def auto_complete_timezone(timezone):
+    continent=timezone.text.split("/")[0]
+    place=timezone.text.split("/")[1].lower().replace(" ","_")
+
+    print(continent, place)
+
+    for tz in pytz.all_timezones:
+        if tz.split("/")[0].lower()==continent:
+            if len(tz.split("/"))==2:
+                diff=Levenshtein.distance(place, tz.split("/")[1].lower(), score_cutoff=int((len(place)*0.35)))
+
+            elif len(tz.split("/"))==3:
+                diff=Levenshtein.distance(place, tz.split("/")[2].lower(), score_cutoff=int((len(place)*0.35)))
+
+            if diff<=int((len(place)*0.35)):
+                return tz
+            

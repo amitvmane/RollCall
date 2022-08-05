@@ -1,8 +1,9 @@
 import logging
 
-import telebot
+import asyncio
 
 from telegram_helper import bot
+
 
 def main():
  

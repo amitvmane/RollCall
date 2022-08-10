@@ -1,24 +1,24 @@
 import logging
-
 import time
-# from telebot.telebot import eleBot
+import datetime
+import re
+import asyncio
+
 import telebot
 from telebot.types import(
     ReplyKeyboardMarkup, 
     ReplyKeyboardRemove,
     ForceReply
 )
-import datetime
+import pytz
 
 from config import TELEGRAM_TOKEN, ADMINS
 from exceptions import *
 from models import RollCall, User
-from check_reminder import check
-from functions import roll_call_already_started, roll_call_not_started, send_list, admin_rights, auto_complete_timezone, create_tasks
-import asyncio
+from functions import *
+from check_reminders import start
 
 bot = telebot.TeleBot(token=TELEGRAM_TOKEN)
-
 
 chat={}
 
@@ -47,7 +47,7 @@ def welcome_and_explanation(message):
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/help")
 def help_commands(message):
     #HELP MSG
-    bot.send_message(message.chat.id, '''The commands are:\n-/start  - To start the bot\n-/help - To see the commands\n-/start_roll_call - To start a new roll call (optional title)\n-/in - To let everybody know you will be attending (optional comment)\n-/out - To let everybody know you wont be attending (optional comment)\n-/maybe - To let everybody know you dont know (optional comment)\n-/whos_in - List of those who will go\n-/whos_out - List of those who will not go\n-/whos_maybe - List of those who maybe will go\n-/set_title - To set a title for the current roll call\n-/set_in_for - Allows you to respond for another user\n-/set_out_for - Allows you to respond for another user\n-/set_maybe_for - Allows you to respond for another user\n-/shh - to apply minimum output for each command\n-/louder - to disable minimum output for each command\n-/set_limit - To set a limit to IN state\n-/end_roll_call - To end a roll call
+    bot.send_message(message.chat.id, '''The commands are:\n-/start  - To start the bot\n-/help - To see the commands\n-/start_roll_call - To start a new roll call (optional title)\n-/in - To let everybody know you will be attending (optional comment)\n-/out - To let everybody know you wont be attending (optional comment)\n-/maybe - To let everybody know you dont know (optional comment)\n-/whos_in - List of those who will go\n-/whos_out - List of those who will not go\n-/whos_maybe - List of those who maybe will go\n-/set_title - To set a title for the current roll call\n-/set_in_for - Allows you to respond for another user\n-/set_out_for - Allows you to respond for another user\n-/set_maybe_for - Allows you to respond for another user\n-/shh - to apply minimum output for each command\n-/louder - to disable minimum output for each command\n-/set_limit - To set a limit to IN state\n-/end_roll_call - To end a roll call\n-/set_rollcall_time - To set a finalize time to the current rc. Accepts 2 parameters date (DD-MM-YYYY) and time (H:M). Write cancel to delete it\n-/set_rollcall_reminder - To set a reminder before the ends of the rc. Accepts 1 parameter, hours as integers. Write 'cancel' to delete the reminder\n-/timezone - To set your timezone, accepts 1 parameter (Continent/Country) or (Continent/State)
     ''')
 
 #SET ADMIN RIGHTS TO TRUE
@@ -80,27 +80,38 @@ def broadcast(message):
     if len(message.text.split(" "))>1:
         msg=message.text.split(" ")[1:]
         for k in chat:
+            print(k)
             bot.send_message(k, " ".join(msg))
     else:
         bot.send_message(message.chat.id, "Message is missing")
 
-
+#ADJUST TIMEZONE
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0].split(" ")[0]=="/timezone")
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0].split(" ")[0]=="/tz")
 def config_timezone(message):
+    # try:
+        msg=message.text
+        cid=message.chat.id
+
+        if len(msg.split(" "))<2:
+            raise parameterMissing("The correct format is: /timezone continent/country or continent/state")
+
+        bot.send_message(message.chat.id, "Write your current location with this format: Continent/Country or Continent/State", reply_markup=ForceReply())
+
+        response=auto_complete_timezone(" ".join(msg.split(" ")[1:]))
+
+        if message.chat.id not in chat:
+            chat[message.chat.id]={}
+
+        if response!=None:
+            bot.send_message(message.chat.id, f"Your timezone has been set to {response}")
+            chat[message.chat.id]['timezone']=response
+        else:
+            bot.send_message(message.chat.id, f"Your timezone doesnt exists, if you can't found your timezone, check this <a href='https://gist.github.com/heyalexej/8bf688fd67d7199be4a1682b3eec7568'>website</a>",parse_mode='HTML')
     
-
-    msg=bot.send_message(message.chat.id, "Write your current location with this format: Continent/Country or Continent/State", reply_markup=ForceReply())
-    bot.register_next_step_handler(msg, manage_timezone)
-
-def manage_timezone(message):
-    print('hola')
-    response=auto_complete_timezone(message)
-    if response!=None:
-        bot.send_message(message.chat.id, f"Your timezone has been setted to {response}")
-        chat[message.chat.id]['timezone']=response
-    else:
-        bot.send_message(message.chat.id, f"Your timezone doesnt exists, try again")
+    # except Exception as e:
+    #     print(e)
+    #     bot.send_message(cid, e)
 
 #START A ROLL CALL
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/start_roll_call")
@@ -115,7 +126,9 @@ def start_roll_call(message):
     #IF THIS CHAT DOESN'T HAVE A STORAGE, CREATES ONE
     if cid not in chat:
         chat[cid]={}
-        chat[cid]["rollCalls"]=[]
+        
+    if 'rollCalls' not in chat[cid]:
+        chat[cid]['rollCalls']=[]
 
     try:
         #CHECK IF ADMIN_RIGHTS ARE ON
@@ -151,7 +164,7 @@ def start_roll_call(message):
                 chat[cid]["reminders"]={}
 
             if 'waitingRC' not in chat[cid]:
-                chat[cid]['waitingRC']=[]
+                chat[cid]['tasks']=[]
 
             ###DEFAULT CONFIG###
 
@@ -163,6 +176,85 @@ def start_roll_call(message):
         bot.send_message(cid, e)
     except rollCallAlreadyStarted as e:
         bot.send_message(cid, e)
+
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/set_rollcall_time")
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/srt")
+def set_rollcall_time(message):
+    try:
+        if roll_call_not_started(message, chat)==False:
+            raise rollCallNotStarted("Roll call is not active")
+
+        if (message.text.split(" ")[1]).lower()=='cancel':
+                chat[message.chat.id]['rollCalls'][0].finalizeDate=None
+                chat[message.chat.id]['rollCalls'][0].reminder=None
+                bot.send_message(message.chat.id, "Finalize time has been deleted")
+
+        elif len(message.text.split(" "))!=3: 
+            raise parameterMissing("invalid datetime format, refer help section for details")
+
+        input_datetime=" ".join(message.text.split(" ")[1:])
+       
+        tz=pytz.timezone(chat[message.chat.id]['timezone'])
+        date=datetime.datetime.strptime(input_datetime, "%d-%m-%Y %H:%M")
+        date=tz.localize(date)
+
+        now_date_string=datetime.datetime.now(pytz.timezone(chat[message.chat.id]['timezone'])).strftime("%d-%m-%Y %H:%M")
+        now_date=datetime.datetime.strptime(now_date_string, "%d-%m-%Y %H:%M")
+        now_date=tz.localize(now_date)
+
+        if now_date>date:
+            raise timeError("Please provide valid future datetime.")
+
+        else:
+            cid=message.chat.id
+
+            if chat[cid]['rollCalls'][0].finalizeDate==None:
+                chat[cid]['rollCalls'][0].finalizeDate=date
+                bot.send_message(cid, 'Event notification time is set.')
+                asyncio.run(start(chat[cid]['rollCalls'][0], chat[cid]['timezone'], cid))
+            else:
+                chat[cid]['rollCalls'][0].finalizeDate=date
+                
+    except parameterMissing as e:
+        bot.send_message(message.chat.id, e)
+    except rollCallNotStarted as e:
+        bot.send_message(message.chat.id, e)
+    except ValueError as e:
+        bot.send_message(message.chat.id, e)
+    except timeError as e:
+        bot.send_message(message.chat.id, e)
+
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/set_rollcall_reminder")
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/srr")
+def reminder(message):
+    try:
+        if roll_call_not_started(message, chat)==False:
+            raise rollCallNotStarted("Roll call is not active")
+
+        if (message.text.split(" ")[1]).lower()=='cancel':
+            chat[message.chat.id]['rollCalls'][0].reminder=None
+            bot.send_message(message.chat.id, "Notification Alarm deactivated.")
+
+        elif len(message.text.split(" "))!=2 and not message.text.split(" ")[1].isdigit():
+            raise parameterMissing("The format is /set_rollcall_reminder hours")
+        elif int(message.text.split(" ")[1])<0:
+            raise incorrectParameter("Hours must be positive")
+        else:
+            cid=message.chat.id
+            hour=message.text.split(" ")[1]
+
+            if chat[cid]['rollCalls'][0].finalizeDate!=None:
+                chat[cid]['rollCalls'][0].reminder=hour if hour !=0 else None
+                bot.send_message(cid, f'I will remind {hour}hour/s before the event! Thank you!')
+            else:
+                bot.send_message(cid, "First you need to set a finalize time for the current rollcall")
+                
+    except parameterMissing as e:
+        bot.send_message(message.chat.id, e)
+    except rollCallNotStarted as e:
+        bot.send_message(message.chat.id, e)
+    except ValueError as e:
+        bot.send_message(message.chat.id, 'The correct format is: DD-MM-YYYY H:M')
 
 #SET A LIMIT FOR IN LIST
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/set_limit")

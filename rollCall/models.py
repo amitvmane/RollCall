@@ -4,7 +4,6 @@ import telebot
 
 from config import TELEGRAM_TOKEN
 from exceptions import *
-from check_reminder import check
 from functions import *
 from datetime import datetime
 

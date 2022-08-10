@@ -15,3 +15,9 @@ class repeatlyName(Exception):
 
 class parameterMissing(Exception):
     pass
+
+class timeError(Exception):
+    pass
+
+class incorrectParameter(Exception):
+    pass

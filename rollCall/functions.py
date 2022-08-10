@@ -4,7 +4,6 @@ import Levenshtein
 import datetime
 import pytz
 import asyncio
-from check_reminder import check
 
 #FUNCTION TO RAISE RC ALREADY STARTED ERROR
 #USELESS IN NEW FEATURE
@@ -49,10 +48,15 @@ def send_list(message, chat):
         return True
 
 def auto_complete_timezone(timezone):
-    continent=timezone.text.split("/")[0]
-    place=timezone.text.split("/")[1].lower().replace(" ","_")
+    continent=timezone.split("/")[0].lower()
+    place=timezone.split("/")[1].lower().replace(" ","_")
 
-    print(continent, place)
+    if place=='india':
+        place='calcutta'
+    if place=='argentina':
+        place='buenos_aires'
+
+    print(continent+place)
 
     for tz in pytz.all_timezones:
         if tz.split("/")[0].lower()==continent:

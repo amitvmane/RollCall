@@ -3,6 +3,7 @@ import time
 import datetime
 import re
 import asyncio
+import json
 
 import telebot
 from telebot.types import(
@@ -79,9 +80,15 @@ def unset_admins(message):
 def broadcast(message):
     if len(message.text.split(" "))>1:
         msg=message.text.split(" ")[1:]
-        for k in chat:
-            print(k)
-            bot.send_message(k, " ".join(msg))
+        try:
+            with open('./database.json', 'r') as read_file:
+                data=json.load(read_file)
+        except Exception as e:
+            print(e)
+            return
+
+        for k in data:
+            bot.send_message(int(k), " ".join(msg))
     else:
         bot.send_message(message.chat.id, "Message is missing")
 
@@ -122,6 +129,17 @@ def start_roll_call(message):
     cid = message.chat.id
     msg = message.text
     title=''
+
+    try:
+        with open('./database.json', 'r') as read_file:
+            database=json.load(read_file)
+    except:
+        with open('./database.json', 'w') as read_file:
+            database={}
+        
+    if cid not in database:
+        with open('./database.json', 'w') as write_file:
+            json.dump({cid:'chat_id'}, write_file)
 
     #IF THIS CHAT DOESN'T HAVE A STORAGE, CREATES ONE
     if cid not in chat:
@@ -242,6 +260,12 @@ def reminder(message):
         else:
             cid=message.chat.id
             hour=message.text.split(" ")[1]
+            
+            if len(hour)>1:
+                if hour[0]=='0':
+                    hour=hour[1]
+                else:
+                    pass
 
             if chat[cid]['rollCalls'][0].finalizeDate!=None:
                 chat[cid]['rollCalls'][0].reminder=hour if hour !=0 else None

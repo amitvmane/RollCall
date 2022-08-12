@@ -27,7 +27,7 @@ async def check(rollcall, timezone, chat_id):
 
         if rollcall.reminder!=None:
 
-            reminder_time=rollcall.finalizeDate-timedelta(minutes=int(rollcall.reminder))
+            reminder_time=rollcall.finalizeDate-timedelta(hours=int(rollcall.reminder))
 
             if now_day>=reminder_time.day and now_hour>=reminder_time.hour and now_minute>=reminder_time.minute:
                 bot.send_message(chat_id, f'Gentle reminder! event with title - {rollcall.title} is {rollcall.reminder} hour/s away')   

@@ -96,14 +96,14 @@ def broadcast(message):
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0].split(" ")[0]=="/timezone")
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0].split(" ")[0]=="/tz")
 def config_timezone(message):
-    # try:
+    try:
         msg=message.text
         cid=message.chat.id
 
         if len(msg.split(" "))<2:
             raise parameterMissing("The correct format is: /timezone continent/country or continent/state")
-
-        bot.send_message(message.chat.id, "Write your current location with this format: Continent/Country or Continent/State", reply_markup=ForceReply())
+        if len(msg.split(" ")[1].split("/"))!=2:
+            raise parameterMissing("The correct format is: /timezone continent/country or continent/state")
 
         response=auto_complete_timezone(" ".join(msg.split(" ")[1:]))
 
@@ -116,9 +116,9 @@ def config_timezone(message):
         else:
             bot.send_message(message.chat.id, f"Your timezone doesnt exists, if you can't found your timezone, check this <a href='https://gist.github.com/heyalexej/8bf688fd67d7199be4a1682b3eec7568'>website</a>",parse_mode='HTML')
     
-    # except Exception as e:
-    #     print(e)
-    #     bot.send_message(cid, e)
+    except Exception as e:
+        print(e)
+        bot.send_message(cid, e)
 
 #START A ROLL CALL
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/start_roll_call")
@@ -266,6 +266,11 @@ def reminder(message):
                     hour=hour[1]
                 else:
                     pass
+            
+            if hour<1:
+                raise incorrectParameter("Hours must be higher than 1")
+            if chat[cid]['rollCalls'][0].finalizeDate - datetime.timedelta(hours=hour)<datetime.datetime.now(pytz.timezone(chat[message.chat.id]['timezone'])):
+                raise incorrectParameter("Reminder notification time is less than current time, please set it correctly.")
 
             if chat[cid]['rollCalls'][0].finalizeDate!=None:
                 chat[cid]['rollCalls'][0].reminder=hour if hour !=0 else None
@@ -280,6 +285,22 @@ def reminder(message):
     except ValueError as e:
         bot.send_message(message.chat.id, 'The correct format is: DD-MM-YYYY H:M')
 
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/when")
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/w")
+def when(message):
+    try:
+        if roll_call_not_started(message, chat)==False:
+            raise rollCallNotStarted("Roll call is not active")
+        if chat[message.chat.id]['rollCalls'][0].finalizeDate==None:
+            raise incorrectParameter("There is no start time for the event")
+        else:
+            cid=message.chat.id
+            
+            bot.send_message(cid, f"The event with title {chat[message.chat.id]['rollCalls'][0].title} will start on {chat[message.chat.id]['rollCalls'][0].finalizeDate.strftime('%d-%m-%Y %H:%M')}!")
+                
+    except rollCallNotStarted as e:
+        bot.send_message(message.chat.id, e)
+        
 #SET A LIMIT FOR IN LIST
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/set_limit")
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/sl")

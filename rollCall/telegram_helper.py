@@ -258,7 +258,7 @@ async def set_rollcall_time(message):
             if chat[cid]['rollCalls'][0].finalizeDate==None:
                 chat[cid]['rollCalls'][0].finalizeDate=date
                 await bot.send_message(cid, 'Event notification time is set.')
-                asyncio.create_task(start(chat[cid]['rollCalls'][0], chat[cid]['rollCalls'][0].timezone, cid))
+                asyncio.ensure_future(start(chat[cid]['rollCalls'][0], chat[cid]['rollCalls'][0].timezone, cid))
             else:
                 chat[cid]['rollCalls'][0].finalizeDate=date
                 

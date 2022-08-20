@@ -1,0 +1,7 @@
+[
+    {"Version": 2,
+    "Description": "Reminder feature fixed, /version command, /location command, few visuals changes",
+    "DeployedOnProd": "Y",
+    "DeployedDatetime":""
+    }
+]

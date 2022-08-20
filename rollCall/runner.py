@@ -5,12 +5,12 @@ import asyncio
 from telegram_helper import bot
 
 
-def main():
+async def main():
  
     logging.info("Bot started!")
 
     try:
-        bot.infinity_polling()
+        await bot.infinity_polling()
 
     except Exception as e:
         logging.error(f"Something went wrong! {e}")
@@ -18,4 +18,4 @@ def main():
     logging.info("Bot shutting down.")
 
 if __name__=="__main__":
-    main()
+    asyncio.run(main())

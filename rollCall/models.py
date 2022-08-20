@@ -281,7 +281,7 @@ class RollCall:
         logging.info(f"User {user.name} has change his state to maybe")
 
     async def finalize_time(self, date, chat, chat_id):
-
+        print('creating task')
         tz=pytz.timezone(chat['timezone'])
         date=datetime.strptime(date, "%d-%m-%Y %H:%M")
         date=tz.localize(date)
@@ -296,17 +296,14 @@ class RollCall:
 
         self.finalizeDate=date
 
-       
-
-        if len(chat['waitingRC'])!=0:
-            chat['waitingRC'][0].cancel()
-            
-        print(chat['waitingRC'])
 
         bot.send_message(chat_id, 'I will notify you when the event ends!')
-        task=asyncio.create_task(check(chat["rollCalls"][0], chat_id, chat['timezone']))
-        chat['waitingRC'].append(task)
-        await task
+
+        if len(chat['waitingRC'])==0:
+            print('creating task')
+            task=asyncio.create_task(check(chat["rollCalls"][0], chat_id, chat['timezone']))
+            chat['waitingRC'].append(task)
+            await task
 
         # if chat['rollCalls'][0].title in chat['reminders']:
         #     print('here')

@@ -3,9 +3,10 @@ from datetime import datetime, timedelta
 import asyncio
 from config import TELEGRAM_TOKEN
 import telebot
+from telebot.async_telebot import AsyncTeleBot
 
 
-bot = telebot.TeleBot(token=TELEGRAM_TOKEN)
+bot = AsyncTeleBot(token=TELEGRAM_TOKEN)
 
 async def check(rollcall, timezone, chat_id):
     while True:
@@ -30,7 +31,7 @@ async def check(rollcall, timezone, chat_id):
             reminder_time=rollcall.finalizeDate-timedelta(hours=int(rollcall.reminder))
 
             if now_day>=reminder_time.day and now_hour>=reminder_time.hour and now_minute>=reminder_time.minute:
-                bot.send_message(chat_id, f'Gentle reminder! event with title - {rollcall.title} is {rollcall.reminder} hour/s away')   
+                await bot.send_message(chat_id, f'Gentle reminder! event with title - {rollcall.title} is {rollcall.reminder} hour/s away')   
                 rollcall.reminder=None
             else:
                 print('Waiting 60 seconds to remind..')
@@ -40,7 +41,7 @@ async def check(rollcall, timezone, chat_id):
         if rollcall.finalizeDate!=None and rollcall.reminder==None:
 
             if (now_day>=rollcall.finalizeDate.day)and (now_hour>=rollcall.finalizeDate.hour) and (now_minute>=rollcall.finalizeDate.minute):
-                bot.send_message(chat_id, f' Event with title - {rollcall.title} is started ! Have a good time. Cheers!')
+                await bot.send_message(chat_id, f' Event with title - {rollcall.title} is started ! Have a good time. Cheers!')
                 rollcall.finalizeDate=None
                 break
             else:
@@ -50,6 +51,7 @@ async def check(rollcall, timezone, chat_id):
         
 
 async def start(rollcall, timezone, chat_id):
+    print("Has set a reminder ",rollcall.title)
     current_sec = int(datetime.now().strftime("%S"))
     delay = 60 - current_sec
     if delay == 60:

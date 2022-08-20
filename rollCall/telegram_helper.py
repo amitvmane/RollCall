@@ -112,12 +112,11 @@ def config_timezone(message):
 
         if response!=None:
             bot.send_message(message.chat.id, f"Your timezone has been set to {response}")
-            chat[message.chat.id]['timezone']=response
+            chat[message.chat.id]['rollCalls'][0].timezone=response
         else:
             bot.send_message(message.chat.id, f"Your timezone doesnt exists, if you can't found your timezone, check this <a href='https://gist.github.com/heyalexej/8bf688fd67d7199be4a1682b3eec7568'>website</a>",parse_mode='HTML')
     
     except Exception as e:
-        print(e)
         bot.send_message(cid, e)
 
 #START A ROLL CALL
@@ -171,9 +170,6 @@ def start_roll_call(message):
 
             chat[cid]['shh']=False
             chat[cid]['allNames']=[]
-            
-            if 'timezone' not in chat[cid]:
-                chat[cid]['timezone']='UTC'
 
             if "adminRights" not in chat[cid]:
                 chat[cid]["adminRights"]=False
@@ -202,21 +198,25 @@ def set_rollcall_time(message):
         if roll_call_not_started(message, chat)==False:
             raise rollCallNotStarted("Roll call is not active")
 
+        if len(message.text.split(" "))==1: 
+            raise parameterMissing("invalid datetime format, refer help section for details")
+
         if (message.text.split(" ")[1]).lower()=='cancel':
                 chat[message.chat.id]['rollCalls'][0].finalizeDate=None
                 chat[message.chat.id]['rollCalls'][0].reminder=None
-                bot.send_message(message.chat.id, "Finalize time has been deleted")
+                bot.send_message(message.chat.id, "Reminder time is canceled.")
+                return
 
-        elif len(message.text.split(" "))!=3: 
+        elif len(message.text.split(" "))<2: 
             raise parameterMissing("invalid datetime format, refer help section for details")
 
         input_datetime=" ".join(message.text.split(" ")[1:])
        
-        tz=pytz.timezone(chat[message.chat.id]['timezone'])
+        tz=pytz.timezone(chat[message.chat.id]['rollCalls'][0].timezone)
         date=datetime.datetime.strptime(input_datetime, "%d-%m-%Y %H:%M")
         date=tz.localize(date)
 
-        now_date_string=datetime.datetime.now(pytz.timezone(chat[message.chat.id]['timezone'])).strftime("%d-%m-%Y %H:%M")
+        now_date_string=datetime.datetime.now(pytz.timezone(chat[message.chat.id]['rollCalls'][0].timezone)).strftime("%d-%m-%Y %H:%M")
         now_date=datetime.datetime.strptime(now_date_string, "%d-%m-%Y %H:%M")
         now_date=tz.localize(now_date)
 
@@ -229,7 +229,7 @@ def set_rollcall_time(message):
             if chat[cid]['rollCalls'][0].finalizeDate==None:
                 chat[cid]['rollCalls'][0].finalizeDate=date
                 bot.send_message(cid, 'Event notification time is set.')
-                asyncio.run(start(chat[cid]['rollCalls'][0], chat[cid]['timezone'], cid))
+                asyncio.run(start(chat[cid]['rollCalls'][0], chat[cid]['rollCalls'][0].timezone, cid))
             else:
                 chat[cid]['rollCalls'][0].finalizeDate=date
                 
@@ -249,12 +249,16 @@ def reminder(message):
         if roll_call_not_started(message, chat)==False:
             raise rollCallNotStarted("Roll call is not active")
 
+        if len(message.text.split(" "))==1: 
+            raise parameterMissing("The format is /set_rollcall_reminder hours")
+
         if (message.text.split(" ")[1]).lower()=='cancel':
             chat[message.chat.id]['rollCalls'][0].reminder=None
-            bot.send_message(message.chat.id, "Notification Alarm deactivated.")
+            bot.send_message(message.chat.id, "Reminder Notification is canceled.")
 
         elif len(message.text.split(" "))!=2 and not message.text.split(" ")[1].isdigit():
             raise parameterMissing("The format is /set_rollcall_reminder hours")
+
         elif int(message.text.split(" ")[1])<0:
             raise incorrectParameter("Hours must be positive")
         else:
@@ -263,17 +267,17 @@ def reminder(message):
             
             if len(hour)>1:
                 if hour[0]=='0':
-                    hour=hour[1]
+                    hour=int(hour[1])
                 else:
                     pass
             
-            if hour<1:
+            if int(hour)<1:
                 raise incorrectParameter("Hours must be higher than 1")
-            if chat[cid]['rollCalls'][0].finalizeDate - datetime.timedelta(hours=hour)<datetime.datetime.now(pytz.timezone(chat[message.chat.id]['timezone'])):
+            if chat[cid]['rollCalls'][0].finalizeDate - datetime.timedelta(hours=int(hour))<datetime.datetime.now(pytz.timezone(chat[message.chat.id]['rollCalls'][0].timezone)):
                 raise incorrectParameter("Reminder notification time is less than current time, please set it correctly.")
 
             if chat[cid]['rollCalls'][0].finalizeDate!=None:
-                chat[cid]['rollCalls'][0].reminder=hour if hour !=0 else None
+                chat[cid]['rollCalls'][0].reminder=int(hour) if hour !=0 else None
                 bot.send_message(cid, f'I will remind {hour}hour/s before the event! Thank you!')
             else:
                 bot.send_message(cid, "First you need to set a finalize time for the current rollcall")
@@ -300,7 +304,31 @@ def when(message):
                 
     except rollCallNotStarted as e:
         bot.send_message(message.chat.id, e)
-        
+    except incorrectParameter as e:
+        bot.send_message(message.chat.id, e)
+      
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/location")
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/loc")
+def set_location(message):
+    try:
+        if roll_call_not_started(message, chat)==False:
+            raise rollCallNotStarted("Roll call is not active")
+        if len(message.text.split(" "))<2:
+            raise incorrectParameter("The correct format is /location place")
+        else:
+            cid=message.chat.id
+            msg=message.text
+            place=" ".join(msg.split(" ")[1:])
+
+            chat[cid]['rollCalls'][0].location=place
+
+            bot.send_message(cid, f"The rollcall with title - {chat[cid]['rollCalls'][0].title} has a new location!")
+
+    except rollCallNotStarted as e:
+        bot.send_message(message.chat.id, e)
+    except incorrectParameter as e:
+        bot.send_message(message.chat.id, e)
+
 #SET A LIMIT FOR IN LIST
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/set_limit")
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/sl")

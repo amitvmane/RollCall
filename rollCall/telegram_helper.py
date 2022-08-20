@@ -102,6 +102,7 @@ async def broadcast(message):
             with open('./database.json', 'r') as read_file:
                 data=json.load(read_file)
         except Exception as e:
+            print(traceback.format_exc())
             print(e)
             return
 
@@ -135,6 +136,7 @@ async def config_timezone(message):
             await bot.send_message(message.chat.id, f"Your timezone doesnt exists, if you can't found your timezone, check this <a href='https://gist.github.com/heyalexej/8bf688fd67d7199be4a1682b3eec7568'>website</a>",parse_mode='HTML')
     
     except Exception as e:
+        print(traceback.format_exc())
         await bot.send_message(cid, e)
 
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0].split(" ")[0]=="/version")
@@ -162,6 +164,7 @@ async def start_roll_call(message):
         with open('./database.json', 'r') as read_file:
             database=json.load(read_file)
     except:
+        print(traceback.format_exc())
         with open('./database.json', 'w') as read_file:
             database={}
         
@@ -216,8 +219,10 @@ async def start_roll_call(message):
             await bot.send_message(message.chat.id, f"Roll call with title: {title} started!")
 
     except insufficientPermissions as e:
+        print(traceback.format_exc())
         await bot.send_message(cid, e)
     except rollCallAlreadyStarted as e:
+        print(traceback.format_exc())
         await bot.send_message(cid, e)
 
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/set_rollcall_time")
@@ -263,12 +268,16 @@ async def set_rollcall_time(message):
                 chat[cid]['rollCalls'][0].finalizeDate=date
                 
     except parameterMissing as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
     except rollCallNotStarted as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
     except ValueError as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
     except timeError as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
 
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/set_rollcall_reminder")
@@ -316,10 +325,13 @@ async def reminder(message):
                 await bot.send_message(cid, "First you need to set a finalize time for the current rollcall")
                 
     except parameterMissing as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
     except rollCallNotStarted as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
     except ValueError as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, 'The correct format is: DD-MM-YYYY H:M')
 
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/when")
@@ -336,8 +348,10 @@ async def when(message):
             await bot.send_message(cid, f"The event with title {chat[message.chat.id]['rollCalls'][0].title} will start on {chat[message.chat.id]['rollCalls'][0].finalizeDate.strftime('%d-%m-%Y %H:%M')}!")
                 
     except rollCallNotStarted as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
     except incorrectParameter as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
       
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/location")
@@ -358,8 +372,10 @@ async def set_location(message):
             await bot.send_message(cid, f"The rollcall with title - {chat[cid]['rollCalls'][0].title} has a new location!")
 
     except rollCallNotStarted as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
     except incorrectParameter as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
 
 #SET A LIMIT FOR IN LIST
@@ -396,8 +412,10 @@ async def wait_limit(message):
                 chat[cid]["rollCalls"][0].waitList=chat[cid]["rollCalls"][0].waitList[a:]
 
     except parameterMissing as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
     except rollCallNotStarted as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
 
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/delete_user")
@@ -427,10 +445,13 @@ async def delete_user(message):
                 await bot.send_message(cid, "That user wasn't found")
 
     except rollCallNotStarted as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
     except parameterMissing as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
     except insufficientPermissions as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
 
 
@@ -447,6 +468,7 @@ async def shh(message):
             await bot.send_message(message.chat.id, "Ok, i will keep quiet!")
             
     except rollCallNotStarted as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, "Roll call is not active")
 
 
@@ -463,6 +485,7 @@ async def louder(message):
             await bot.send_message(message.chat.id, "Ok, i can hear you!")
 
     except rollCallNotStarted as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, "Roll call is not active")
 
 
@@ -498,8 +521,10 @@ async def in_user(message):
                 await bot.send_message(cid, chat[cid]["rollCalls"][0].allList())
 
     except duplicateProxy as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
     except rollCallNotStarted as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
         
 
@@ -539,8 +564,10 @@ async def out_user(message):
                 await bot.send_message(cid, chat[cid]["rollCalls"][0].allList())
           
     except duplicateProxy as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
     except rollCallNotStarted as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
 
 
@@ -580,8 +607,10 @@ async def maybe_user(message):
                 await bot.send_message(cid, chat[cid]["rollCalls"][0].allList())
           
     except duplicateProxy as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
     except rollCallNotStarted as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
 
 
@@ -629,12 +658,16 @@ async def set_in_for(message):
                     await bot.send_message(cid, chat[cid]["rollCalls"][0].allList())
 
     except parameterMissing as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
     except rollCallNotStarted as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
     except duplicateProxy as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
     except repeatlyName as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
 
 
@@ -682,12 +715,16 @@ async def set_out_for(message):
                     await bot.send_message(cid, chat[cid]["rollCalls"][0].allList())
     
     except parameterMissing as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
     except rollCallNotStarted as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
     except duplicateProxy as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
     except repeatlyName as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
 
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/set_maybe_for")
@@ -737,12 +774,16 @@ async def set_maybe_for(message):
                     return
     
     except parameterMissing as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
     except rollCallNotStarted as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
     except duplicateProxy as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
     except repeatlyName as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
 
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/whos_in")  # WHOS IN COMMAND
@@ -760,6 +801,7 @@ async def whos_in(message):
             await bot.send_message(cid, chat[cid]["rollCalls"][0].inListText())
 
     except rollCallNotStarted as e:
+        print(traceback.format_exc())
         await bot.send_message("Roll call is not active")
 
 
@@ -778,6 +820,7 @@ async def whos_out(message):
             await bot.send_message(cid, chat[cid]["rollCalls"][0].outListText())
 
     except rollCallNotStarted as e:
+        print(traceback.format_exc())
         await bot.send_message("Roll call is not active")
 
 
@@ -796,6 +839,7 @@ async def whos_maybe(message):
             await bot.send_message(cid, chat[cid]["rollCalls"][0].maybeListText())
 
     except rollCallNotStarted as e:
+        print(traceback.format_exc())
         await bot.send_message("Roll call is not active")
 
 
@@ -814,6 +858,7 @@ async def whos_waiting(message):
             await bot.send_message(cid, chat[cid]["rollCalls"][0].waitListText())
 
     except rollCallNotStarted as e:
+        print(traceback.format_exc())
         await bot.send_message("Roll call is not active")
 
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower()=="/set_title")  # SET TITLE COMMAND
@@ -850,6 +895,7 @@ async def set_title(message):
             logging.info(user+"-"+"The title has change to "+title)
 
     except rollCallNotStarted as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, "Roll call is not active")
 
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/end_roll_call")  #START ROLL CALL COMMAND
@@ -880,8 +926,10 @@ async def end_roll_call(message):
             chat[cid]["rollCalls"].pop(0)
 
     except rollCallNotStarted as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
     except insufficientPermissions as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
 
 

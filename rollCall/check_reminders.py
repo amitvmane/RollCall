@@ -4,6 +4,7 @@ import asyncio
 from config import TELEGRAM_TOKEN
 import telebot
 from telebot.async_telebot import AsyncTeleBot
+import traceback
 
 
 bot = AsyncTeleBot(token=TELEGRAM_TOKEN)

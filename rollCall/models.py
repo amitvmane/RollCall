@@ -68,8 +68,16 @@ class RollCall:
     #RETURN ALL THE STATES
     def allList(self):
         backslash="\n"
+        try:
 
-        txt="Title - "+self.title+f"\nEvent time: {self.finalizeDate.replace(tzinfo=None)} {self.timezone}\nLocation: {self.location}\n\n"+(self.inListText() if self.inListText()!='In:\nNobody\n\n' else '')+(self.outListText() if self.outListText()!='Out:\nNobody\n\n' else '')+(self.maybeListText() if self.maybeListText()!='Maybe:\nNobody\n\n' else '')+(self.waitListText() if self.waitListText()!='Waiting:\nNobody' else '')+'Max limit: '+('♾' if self.inListLimit==None else str(self.inListLimit))
+            _datetime=self.finalizeDate.strftime('%d-%m-%Y %H:%M')
+            
+
+        except:
+            _datetime='Yet to decide'
+
+
+        txt="Title - "+self.title+f"\nEvent time: {_datetime} {self.timezone if _datetime !='Yet to decide' else ''}\nLocation: {self.location if self.location!=None else 'Yet to decide'}\n\n"+(self.inListText() if self.inListText()!='In:\nNobody\n\n' else '')+(self.outListText() if self.outListText()!='Out:\nNobody\n\n' else '')+(self.maybeListText() if self.maybeListText()!='Maybe:\nNobody\n\n' else '')+(self.waitListText() if self.waitListText()!='Waiting:\nNobody' else '')+'Max limit: '+('♾' if self.inListLimit==None else str(self.inListLimit))
         return txt
 
     #DELETE A USER

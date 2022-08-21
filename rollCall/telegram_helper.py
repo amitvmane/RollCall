@@ -108,7 +108,7 @@ async def broadcast(message):
             return
 
         for k in data:
-            await bot.send_message(int(k), " ".join(msg))
+            await bot.send_message(int(k["chat_id"]), " ".join(msg))
     else:
         await bot.send_message(message.chat.id, "Message is missing")
 
@@ -143,14 +143,13 @@ async def config_timezone(message):
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0].split(" ")[0]=="/version")
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0].split(" ")[0]=="/v")
 async def version_command(message):
-    file=open('./version.json')
+    file=open('version.json')
     data=json.load(file)
     for i in data:
-        print(i)
         if i["DeployedOnProd"]=='Y':
             txt=''
             txt+=f'Version: {i["Version"]}\nDescription: {i["Description"]}\nDeployed: {i["DeployedOnProd"]}\nDeployed datetime: {i["DeployedDatetime"]}'
-            await bot.send_message(message.chat.id, txt)
+            print(txt)
 
 #START A ROLL CALL
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/start_roll_call")
@@ -170,9 +169,15 @@ async def start_roll_call(message):
         with open('./database.json', 'w') as read_file:
             database={}
         
-    if cid not in database:
+    cond=True
+    for i in database:
+        if int(i['chat_id'])==message.chat.id:
+            cond=False
+
+    if cond==True:
+        database.append({'chat_id':cid})
         with open('./database.json', 'w') as write_file:
-            json.dump({cid:'chat_id'}, write_file)
+            json.dump(database, write_file)
 
     #IF THIS CHAT DOESN'T HAVE A STORAGE, CREATES ONE
     if cid not in chat:

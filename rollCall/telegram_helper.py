@@ -143,13 +143,13 @@ async def config_timezone(message):
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0].split(" ")[0]=="/version")
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0].split(" ")[0]=="/v")
 async def version_command(message):
-    file=open('version.json')
+    file=open('./version.json')
     data=json.load(file)
     for i in data:
         if i["DeployedOnProd"]=='Y':
             txt=''
             txt+=f'Version: {i["Version"]}\nDescription: {i["Description"]}\nDeployed: {i["DeployedOnProd"]}\nDeployed datetime: {i["DeployedDatetime"]}'
-            print(txt)
+            await bot.send_message(message.chat.id, txt)
 
 #START A ROLL CALL
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/start_roll_call")
@@ -352,7 +352,7 @@ async def when(message):
         else:
             cid=message.chat.id
             
-            await bot.send_message(cid, f"The event with title {chat[message.chat.id]['rollCalls'][0].title} will start on {chat[message.chat.id]['rollCalls'][0].finalizeDate.strftime('%d-%m-%Y %H:%M')}!")
+            await bot.send_message(cid, f"The event with title {chat[message.chat.id]['rollCalls'][0].title} will start at {chat[message.chat.id]['rollCalls'][0].finalizeDate.strftime('%d-%m-%Y %H:%M')}!")
                 
     except rollCallNotStarted as e:
         print(traceback.format_exc())

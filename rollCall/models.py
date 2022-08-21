@@ -301,7 +301,7 @@ class RollCall:
 
         if len(chat['waitingRC'])==0:
             print('creating task')
-            task=asyncio.ensure_future(check(chat["rollCalls"][0], chat_id, chat['timezone']))
+            task=asyncio.create_task(check(chat["rollCalls"][0], chat_id, chat['timezone']))
             chat['waitingRC'].append(task)
             await task
 
@@ -321,7 +321,7 @@ class RollCall:
         self.reminder=hour
 
         bot.send_message(chat_id, 'I will notify you when the event ends!')
-        task=asyncio.ensure_future(check(chat["rollCalls"][0], chat_id, chat['timezone']))
+        task=asyncio.create_task(check(chat["rollCalls"][0], chat_id, chat['timezone']))
         chat['waitingRC'].append(task)
         await task
 

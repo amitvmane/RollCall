@@ -19,6 +19,7 @@ from exceptions import *
 from models import RollCall, User
 from functions import *
 from check_reminders import start
+import traceback
 
 bot = AsyncTeleBot(token=TELEGRAM_TOKEN)
 

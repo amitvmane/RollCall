@@ -143,13 +143,14 @@ async def config_timezone(message):
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0].split(" ")[0]=="/version")
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0].split(" ")[0]=="/v")
 async def version_command(message):
-    file=open('version.json')
+    file=open('./version.json')
     data=json.load(file)
     for i in data:
+        print(i)
         if i["DeployedOnProd"]=='Y':
             txt=''
             txt+=f'Version: {i["Version"]}\nDescription: {i["Description"]}\nDeployed: {i["DeployedOnProd"]}\nDeployed datetime: {i["DeployedDatetime"]}'
-            print(txt)
+            await bot.send_message(message.chat.id, txt)
 
 #START A ROLL CALL
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/start_roll_call")

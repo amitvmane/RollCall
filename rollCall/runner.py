@@ -9,8 +9,8 @@ async def main():
  
     logging.info("Bot started!")
 
-    try:
-        await bot.infinity_polling()
+    try: 
+        await bot.polling(non_stop=True, timeout=40)
 
     except Exception as e:
         logging.error(f"Something went wrong! {e}")

@@ -270,7 +270,7 @@ async def set_rollcall_time(message):
 
             if chat[cid]['rollCalls'][0].finalizeDate==None:
                 chat[cid]['rollCalls'][0].finalizeDate=date
-                await bot.send_message(cid, 'Event notification time is set.')
+                await bot.send_message(cid, f"Event notification time is set to {chat[cid]['rollCalls'][0].finalizeDate.strftime('%d-%m-%Y %H:%M')} {chat[cid]['rollCalls'][0].timezone}")
                 asyncio.create_task(start(chat[cid]['rollCalls'], chat[cid]['rollCalls'][0].timezone, cid))
             else:
                 chat[cid]['rollCalls'][0].finalizeDate=date
@@ -341,7 +341,7 @@ async def reminder(message):
         await bot.send_message(message.chat.id, e)
     except ValueError as e:
         print(traceback.format_exc())
-        await bot.send_message(message.chat.id, 'The correct format is: DD-MM-YYYY H:M')
+        await bot.send_message(message.chat.id, '/set_rollcall_reminder HH')
 
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/when")
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/w")

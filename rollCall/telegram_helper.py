@@ -341,7 +341,7 @@ async def reminder(message):
         await bot.send_message(message.chat.id, e)
     except ValueError as e:
         print(traceback.format_exc())
-        await bot.send_message(message.chat.id, '/set_rollcall_reminder HH')
+        await bot.send_message(message.chat.id, 'The correct format is /set_rollcall_reminder HH')
 
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/when")
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/w")

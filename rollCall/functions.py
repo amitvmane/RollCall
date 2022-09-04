@@ -56,8 +56,6 @@ def auto_complete_timezone(timezone):
     if place=='argentina':
         place='buenos_aires'
 
-    print(continent+place)
-
     for tz in pytz.all_timezones:
         if tz.split("/")[0].lower()==continent:
             if len(tz.split("/"))==2:

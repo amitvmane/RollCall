@@ -54,7 +54,7 @@ async def help_commands(message):
     ''')
 
 #SET ADMIN RIGHTS TO TRUE
-@bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/set_admins")  # START COMMAND
+@bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/set_admins") 
 async def set_admins(message):
 
     response=await bot.get_chat_member(message.chat.id, message.from_user.id)
@@ -75,7 +75,7 @@ async def set_admins(message):
     await bot.send_message(message.chat.id, 'Admin permissions activated')
 
 #SET ADMIN RIGHTS TO FALSE
-@bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/unset_admins")  # START COMMAND
+@bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/unset_admins")  
 async def unset_admins(message):
 
     response=await bot.get_chat_member(message.chat.id, message.from_user.id)
@@ -140,6 +140,7 @@ async def config_timezone(message):
         print(traceback.format_exc())
         await bot.send_message(cid, e)
 
+#Version command
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0].split(" ")[0]=="/version")
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0].split(" ")[0]=="/v")
 async def version_command(message):
@@ -270,7 +271,7 @@ async def set_rollcall_time(message):
             if chat[cid]['rollCalls'][0].finalizeDate==None:
                 chat[cid]['rollCalls'][0].finalizeDate=date
                 await bot.send_message(cid, 'Event notification time is set.')
-                asyncio.create_task(start(chat[cid]['rollCalls'][0], chat[cid]['rollCalls'][0].timezone, cid))
+                asyncio.create_task(start(chat[cid]['rollCalls'], chat[cid]['rollCalls'][0].timezone, cid))
             else:
                 chat[cid]['rollCalls'][0].finalizeDate=date
                 
@@ -325,7 +326,6 @@ async def reminder(message):
                 raise incorrectParameter("Reminder notification time is less than current time, please set it correctly.")
 
             if chat[cid]['rollCalls'][0].finalizeDate!=None:
-                print('aca toy')
                 chat[cid]['rollCalls'][0].reminder=int(hour) if hour !=0 else None
                 await bot.send_message(cid, f'I will remind {hour}hour/s before the event! Thank you!')
             else:
@@ -336,6 +336,8 @@ async def reminder(message):
         await bot.send_message(message.chat.id, e)
     except rollCallNotStarted as e:
         print(traceback.format_exc())
+        await bot.send_message(message.chat.id, e)
+    except incorrectParameter as e:
         await bot.send_message(message.chat.id, e)
     except ValueError as e:
         print(traceback.format_exc())

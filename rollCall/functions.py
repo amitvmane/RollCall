@@ -4,6 +4,10 @@ import Levenshtein
 import datetime
 import pytz
 import asyncio
+from telebot.async_telebot import AsyncTeleBot
+from config import TELEGRAM_TOKEN
+
+bot=AsyncTeleBot(TELEGRAM_TOKEN)
 
 #FUNCTION TO RAISE RC ALREADY STARTED ERROR
 #USELESS IN NEW FEATURE

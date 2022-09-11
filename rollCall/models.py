@@ -27,7 +27,6 @@ class RollCall:
 
     #RETURN INLIST
     def inListText(self):
-        backslash="\n"
         txt=f'In:\n'
         i=0
         for user in self.inList:
@@ -37,7 +36,6 @@ class RollCall:
     
     #RETURN OUTLIST
     def outListText(self):
-        backslash="\n"
         txt=f'Out:\n'
         i=0
         for user in self.outList:
@@ -47,7 +45,6 @@ class RollCall:
     
     #RETURN MAYBELIST
     def maybeListText(self):
-        backslash="\n"
         txt=f'Maybe:\n'
         i=0
         for user in self.maybeList:
@@ -57,7 +54,6 @@ class RollCall:
 
     #RETURN WAITLIST
     def waitListText(self):
-        backslash="\n"
         txt=f'Waiting:\n'
         i=0
         for user in self.waitList:
@@ -67,17 +63,21 @@ class RollCall:
 
     #RETURN ALL THE STATES
     def allList(self):
-        backslash="\n"
         try:
-
             _datetime=self.finalizeDate.strftime('%d-%m-%Y %H:%M')
-            
-
         except:
             _datetime='Yet to decide'
 
-
         txt="Title - "+self.title+f"\nEvent time: {_datetime} {self.timezone if _datetime !='Yet to decide' else ''}\nLocation: {self.location if self.location!=None else 'Yet to decide'}\n\n"+(self.inListText() if self.inListText()!='In:\nNobody\n\n' else '')+(self.outListText() if self.outListText()!='Out:\nNobody\n\n' else '')+(self.maybeListText() if self.maybeListText()!='Maybe:\nNobody\n\n' else '')+(self.waitListText() if self.waitListText()!='Waiting:\nNobody' else '')+'Max limit: '+('♾' if self.inListLimit==None else str(self.inListLimit))
+        return txt
+
+    def finishList(self):
+        try:
+            _datetime=self.finalizeDate.strftime('%d-%m-%Y %H:%M')
+        except:
+            _datetime=''
+
+        txt="Title - "+self.title+f"\nEvent time: {_datetime if _datetime != '' else 'None'} {self.timezone if _datetime !='' else ''}\nLocation: {self.location if self.location!=None else 'None'}\n\n"+(self.inListText() if self.inListText()!='In:\nNobody\n\n' else 'In:\nNobody\n\n')+(self.outListText() if self.outListText()!='Out:\nNobody\n\n' else 'Out:\nNobody\n\n')+(self.maybeListText() if self.maybeListText()!='Maybe:\nNobody\n\n' else 'Maybe:\nNobody\n\n')+(self.waitListText() if self.waitListText()!='Waiting:\nNobody' else '')+'Max limit: '+('♾' if self.inListLimit==None else str(self.inListLimit))
         return txt
 
     #DELETE A USER

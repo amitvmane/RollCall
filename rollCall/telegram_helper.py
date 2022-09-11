@@ -50,7 +50,7 @@ async def welcome_and_explanation(message):
 @bot.message_handler(func=lambda message:message.text.lower().split("@")[0]=="/help")
 async def help_commands(message):
     #HELP MSG
-    await bot.send_message(message.chat.id, '''The commands are:\n-/start  - To start the bot\n-/help - To see the commands\n-/start_roll_call - To start a new roll call (optional title)\n-/in - To let everybody know you will be attending (optional comment)\n-/out - To let everybody know you wont be attending (optional comment)\n-/maybe - To let everybody know you dont know (optional comment)\n-/whos_in - List of those who will go\n-/whos_out - List of those who will not go\n-/whos_maybe - List of those who maybe will go\n-/set_title - To set a title for the current roll call\n-/set_in_for - Allows you to respond for another user\n-/set_out_for - Allows you to respond for another user\n-/set_maybe_for - Allows you to respond for another user\n-/shh - to apply minimum output for each command\n-/louder - to disable minimum output for each command\n-/set_limit - To set a limit to IN state\n-/end_roll_call - To end a roll call\n-/set_rollcall_time - To set a finalize time to the current rc. Accepts 2 parameters date (DD-MM-YYYY) and time (H:M). Write cancel to delete it\n-/set_rollcall_reminder - To set a reminder before the ends of the rc. Accepts 1 parameter, hours as integers. Write 'cancel' to delete the reminder\n-/timezone - To set your timezone, accepts 1 parameter (Continent/Country) or (Continent/State)
+    await bot.send_message(message.chat.id, '''The commands are:\n-/start  - To start the bot\n-/help - To see the commands\n-/start_roll_call - To start a new roll call (optional title)\n-/in - To let everybody know you will be attending (optional comment)\n-/out - To let everybody know you wont be attending (optional comment)\n-/maybe - To let everybody know you dont know (optional comment)\n-/whos_in - List of those who will go\n-/whos_out - List of those who will not go\n-/whos_maybe - List of those who maybe will go\n-/set_title - To set a title for the current roll call\n-/set_in_for - Allows you to respond for another user\n-/set_out_for - Allows you to respond for another user\n-/set_maybe_for - Allows you to respond for another user\n-/shh - to apply minimum output for each command\n-/louder - to disable minimum output for each command\n-/set_limit - To set a limit to IN state\n-/end_roll_call - To end a roll call\n-/set_rollcall_time - To set a finalize time to the current rc. Accepts 2 parameters date (DD-MM-YYYY) and time (H:M). Write cancel to delete it\n-/set_rollcall_reminder - To set a reminder before the ends of the rc. Accepts 1 parameter, hours as integers. Write 'cancel' to delete the reminder\n-/timezone - To set your timezone, accepts 1 parameter (Continent/Country) or (Continent/State)\n-/when - To check the start time of a roll call\n-/location - To check the location of a roll call
     ''')
 
 #SET ADMIN RIGHTS TO TRUE
@@ -162,14 +162,10 @@ async def start_roll_call(message):
     msg = message.text
     title=''
 
-    try:
-        with open('./database.json', 'r') as read_file:
-            database=json.load(read_file)
-    except:
-        print(traceback.format_exc())
-        with open('./database.json', 'w') as read_file:
-            database={}
-        
+    with open('./database.json', 'r') as read_file:
+        database=json.load(read_file)
+        read_file.close()
+    
     cond=True
     for i in database:
         if int(i['chat_id'])==message.chat.id:
@@ -370,7 +366,7 @@ async def set_location(message):
         if roll_call_not_started(message, chat)==False:
             raise rollCallNotStarted("Roll call is not active")
         if len(message.text.split(" "))<2:
-            raise incorrectParameter("The correct format is /location place")
+            raise incorrectParameter("Input parameter missing. Refer help section for details")
         else:
             cid=message.chat.id
             msg=message.text
@@ -927,7 +923,7 @@ async def end_roll_call(message):
             #SENDING LIST
             await bot.send_message(message.chat.id, "Roll ended!")
 
-            await bot.send_message(cid, "Title - "+chat[cid]["rollCalls"][0].title+"\n"+chat[cid]["rollCalls"][0].inListText() + chat[cid]["rollCalls"][0].outListText() + chat[cid]["rollCalls"][0].maybeListText() + chat[cid]["rollCalls"][0].waitListText())
+            await bot.send_message(cid, chat[cid]['rollCalls'][0].finishList())
 
             logging.info("The roll call "+chat[cid]["rollCalls"][0].title+" has ended")
 

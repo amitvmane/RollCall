@@ -108,7 +108,10 @@ async def broadcast(message):
             return
 
         for k in data:
-            await bot.send_message(int(k["chat_id"]), " ".join(msg))
+            try:
+                await bot.send_message(int(k["chat_id"]), " ".join(msg))
+            except:
+                pass
     else:
         await bot.send_message(message.chat.id, "Message is missing")
 

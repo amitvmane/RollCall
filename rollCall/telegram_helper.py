@@ -36,7 +36,7 @@ async def welcome_and_explanation(message):
     #IF THIS CHAT DOESN'T HAVE A STORAGE, CREATES ONE
     if cid not in chat:
         chat[cid]={}
-        chat[cid]["rollCalls"]=[]
+        chat[cid]["rollCalls"]=rc_number]
 
     #CHECK FOR ADMIN RIGHTS
     if admin_rights(message, chat)==False:
@@ -192,10 +192,6 @@ async def start_roll_call(message):
         if admin_rights(message, chat)==False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
 
-        #CHECK IF EXISTS A ROLL CALL
-        if roll_call_already_started(message, chat)==False:
-            raise rollCallAlreadyStarted(f"Roll call with title {chat[message.chat.id]['rollCalls'][0].title} is still in progress")
-
         else:
 
             #SET THE RC TITLE
@@ -223,7 +219,7 @@ async def start_roll_call(message):
             ###DEFAULT CONFIG###
 
             #ADD RC TO LIST
-            chat[cid]["rollCalls"].append(RollCall(title, None)) #None it's for later add the scheduler feature
+            chat[cid]["rollCalls"].rc_numberppend(RollCall(title, None)) #None it's for later add the scheduler feature
             await bot.send_message(message.chat.id, f"Roll call with title: {title} started!")
 
     except insufficientPermissions as e:
@@ -239,13 +235,15 @@ async def set_rollcall_time(message):
     try:
         if roll_call_not_started(message, chat)==False:
             raise rollCallNotStarted("Roll call is not active")
+        if len(message.text.split(" "))>5:
+            rc_number=message.text.split(" ")[-1]
 
         if len(message.text.split(" "))==1: 
             raise parameterMissing("invalid datetime format, refer help section for details")
 
         if (message.text.split(" ")[1]).lower()=='cancel':
-                chat[message.chat.id]['rollCalls'][0].finalizeDate=None
-                chat[message.chat.id]['rollCalls'][0].reminder=None
+                chat[message.chat.id]['rollCalls'][rc_number].finalizeDate=None
+                chat[message.chat.id]['rollCalls'][rc_number].reminder=None
                 await bot.send_message(message.chat.id, "Reminder time is canceled.")
                 return
 
@@ -254,11 +252,11 @@ async def set_rollcall_time(message):
 
         input_datetime=" ".join(message.text.split(" ")[1:])
        
-        tz=pytz.timezone(chat[message.chat.id]['rollCalls'][0].timezone)
+        tz=pytz.timezone(chat[message.chat.id]['rollCalls'][rc_number].timezone)
         date=datetime.datetime.strptime(input_datetime, "%d-%m-%Y %H:%M")
         date=tz.localize(date)
 
-        now_date_string=datetime.datetime.now(pytz.timezone(chat[message.chat.id]['rollCalls'][0].timezone)).strftime("%d-%m-%Y %H:%M")
+        now_date_string=datetime.datetime.now(pytz.timezone(chat[message.chat.id]['rollCalls'][rc_number].timezone)).strftime("%d-%m-%Y %H:%M")
         now_date=datetime.datetime.strptime(now_date_string, "%d-%m-%Y %H:%M")
         now_date=tz.localize(now_date)
 
@@ -268,12 +266,12 @@ async def set_rollcall_time(message):
         else:
             cid=message.chat.id
 
-            if chat[cid]['rollCalls'][0].finalizeDate==None:
-                chat[cid]['rollCalls'][0].finalizeDate=date
-                await bot.send_message(cid, f"Event notification time is set to {chat[cid]['rollCalls'][0].finalizeDate.strftime('%d-%m-%Y %H:%M')} {chat[cid]['rollCalls'][0].timezone}")
-                asyncio.create_task(start(chat[cid]['rollCalls'], chat[cid]['rollCalls'][0].timezone, cid))
+            if chat[cid]['rollCalls'][rc_number].finalizeDate==None:
+                chat[cid]['rollCalls'][rc_number].finalizeDate=date
+                await bot.send_message(cid, f"Event notification time is set to {chat[cid]['rollCalls'][rc_number].finalizeDate.strftime('%d-%m-%Y %H:%M')} {chat[cid]['rollCalls'][rc_number].timezone}")
+                asyncio.create_task(start(chat[cid]['rollCalls'], chat[cid]['rollCalls'][rc_number].timezone, cid))
             else:
-                chat[cid]['rollCalls'][0].finalizeDate=date
+                chat[cid]['rollCalls'][rc_number].finalizeDate=date
                 
     except parameterMissing as e:
         print(traceback.format_exc())
@@ -294,15 +292,17 @@ async def reminder(message):
     try:
         if roll_call_not_started(message, chat)==False:
             raise rollCallNotStarted("Roll call is not active")
+        if len(message.text.split(" "))>5:
+            rc_number=message.text.split(" ")[-1]
 
-        if chat[message.chat.id]['rollCalls'][0].finalizeDate==None:
+        if chat[message.chat.id]['rollCalls'][rc_number].finalizeDate==None:
             raise parameterMissing('First you need to set a finalize time for the current rollcall')
 
         if len(message.text.split(" "))==1: 
             raise parameterMissing("The format is /set_rollcall_reminder hours")
 
         if (message.text.split(" ")[1]).lower()=='cancel':
-            chat[message.chat.id]['rollCalls'][0].reminder=None
+            chat[message.chat.id]['rollCalls'][rc_number].reminder=None
             await bot.send_message(message.chat.id, "Reminder Notification is canceled.")
 
         elif len(message.text.split(" "))!=2 and not message.text.split(" ")[1].isdigit():
@@ -322,11 +322,11 @@ async def reminder(message):
             
             if int(hour)<1:
                 raise incorrectParameter("Hours must be higher than 1")
-            if chat[cid]['rollCalls'][0].finalizeDate - datetime.timedelta(hours=int(hour))<datetime.datetime.now(pytz.timezone(chat[message.chat.id]['rollCalls'][0].timezone)):
+            if chat[cid]['rollCalls'][rc_number].finalizeDate - datetime.timedelta(hours=int(hour))<datetime.datetime.now(pytz.timezone(chat[message.chat.id]['rollCalls'][rc_number].timezone)):
                 raise incorrectParameter("Reminder notification time is less than current time, please set it correctly.")
 
-            if chat[cid]['rollCalls'][0].finalizeDate!=None:
-                chat[cid]['rollCalls'][0].reminder=int(hour) if hour !=0 else None
+            if chat[cid]['rollCalls'][rc_number].finalizeDate!=None:
+                chat[cid]['rollCalls'][rc_number].reminder=int(hour) if hour !=0 else None
                 await bot.send_message(cid, f'I will remind {hour}hour/s before the event! Thank you!')
             else:
                 await bot.send_message(cid, "First you need to set a finalize time for the current rollcall")
@@ -369,6 +369,8 @@ async def set_location(message):
     try:
         if roll_call_not_started(message, chat)==False:
             raise rollCallNotStarted("Roll call is not active")
+        if len(message.text.split(" "))>5:
+            rc_number=message.text.split(" ")[-1]
         if len(message.text.split(" "))<2:
             raise incorrectParameter("The correct format is /location place")
         else:
@@ -376,9 +378,9 @@ async def set_location(message):
             msg=message.text
             place=" ".join(msg.split(" ")[1:])
 
-            chat[cid]['rollCalls'][0].location=place
+            chat[cid]['rollCalls'][rc_number].location=place
 
-            await bot.send_message(cid, f"The rollcall with title - {chat[cid]['rollCalls'][0].title} has a new location!")
+            await bot.send_message(cid, f"The rollcall with title - {chat[cid]['rollCalls'][rc_number].title} has a new location!")
 
     except rollCallNotStarted as e:
         print(traceback.format_exc())
@@ -407,18 +409,18 @@ async def wait_limit(message):
             limit=int(msg.split(" ")[1])
 
             #SETTING THE LIMIT TO INLIST
-            chat[cid]["rollCalls"][0].inListLimit=limit
+            chat[cid]["rollCalls"][rc_number].inListLimit=limit
             logging.info(f"Max limit of attendees is set to {limit}")
             await bot.send_message(cid, f"Max limit of attendees is set to {limit}")
 
             #MOVING USERS IF IN LIST HAS ALREADY REACH THE LIMIT
-            if len(chat[cid]["rollCalls"][0].inList)>limit:
-                chat[cid]["rollCalls"][0].waitList.extend(chat[cid]["rollCalls"][0].inList[limit:])
-                chat[cid]["rollCalls"][0].inList=chat[cid]["rollCalls"][0].inList[:limit]
-            elif len(chat[cid]["rollCalls"][0].inList)<limit:
-                a=int(limit-len(chat[cid]["rollCalls"][0].inList))
-                chat[cid]["rollCalls"][0].inList.extend(chat[cid]["rollCalls"][0].waitList[:limit-len(chat[cid]["rollCalls"][0].inList)])
-                chat[cid]["rollCalls"][0].waitList=chat[cid]["rollCalls"][0].waitList[a:]
+            if len(chat[cid]["rollCalls"][rc_number].inList)>limit:
+                chat[cid]["rollCalls"][rc_number].waitList.extend(chat[cid]["rollCalls"][rc_number].inList[limit:])
+                chat[cid]["rollCalls"][rc_number].inList=chat[cid]["rollCalls"][rc_number].inList[:limit]
+            elif len(chat[cid]["rollCalls"][rc_number].inList)<limit:
+                a=int(limit-len(chat[cid]["rollCalls"][rc_number].inList))
+                chat[cid]["rollCalls"][rc_number].inList.extend(chat[cid]["rollCalls"][rc_number].waitList[:limit-len(chat[cid]["rollCalls"][rc_number].inList)])
+                chat[cid]["rollCalls"][rc_number].waitList=chat[cid]["rollCalls"][rc_number].waitList[a:]
 
     except parameterMissing as e:
         print(traceback.format_exc())
@@ -448,7 +450,7 @@ async def delete_user(message):
                 
             #DELETE THE USER
             name=" ".join(arr[1:])
-            if chat[cid]["rollCalls"][0].delete_user(name, chat[cid]["allNames"])==True:
+            if chat[cid]["rollCalls"][rc_number].delete_user(name, chat[cid]["allNames"])==True:
                 await bot.send_message(cid, "The user was deleted!")
             else:
                 await bot.send_message(cid, "That user wasn't found")
@@ -519,7 +521,7 @@ async def in_user(message):
                 user.comment=comment
 
             #ADDING THE USER TO THE LIST
-            result=chat[cid]["rollCalls"][0].addIn(user, chat[cid]["allNames"])
+            result=chat[cid]["rollCalls"][rc_number].addIn(user, chat[cid]["allNames"])
             if result=='AB':
                 raise duplicateProxy("No duplicate proxy please :-), Thanks!")
             elif result=='AC':
@@ -527,7 +529,7 @@ async def in_user(message):
 
             # PRINTING THE LIST
             if send_list(message, chat):
-                await bot.send_message(cid, chat[cid]["rollCalls"][0].allList())
+                await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList())
 
     except duplicateProxy as e:
         print(traceback.format_exc())
@@ -559,7 +561,7 @@ async def out_user(message):
                 user.comment=comment
 
             #ADDING THE USER TO THE LIST
-            result=chat[cid]["rollCalls"][0].addOut(user,chat[cid]["allNames"])
+            result=chat[cid]["rollCalls"][rc_number].addOut(user,chat[cid]["allNames"])
             if result=='AB':
                 raise duplicateProxy("No duplicate proxy please :-), Thanks!")
             elif isinstance(result, User):
@@ -570,7 +572,7 @@ async def out_user(message):
 
             #PRINTING THE LIST
             if send_list(message, chat):
-                await bot.send_message(cid, chat[cid]["rollCalls"][0].allList())
+                await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList())
           
     except duplicateProxy as e:
         print(traceback.format_exc())
@@ -602,7 +604,7 @@ async def maybe_user(message):
                 user.comment=comment
 
             #ADDING THE USER TO THE LIST
-            result=chat[cid]["rollCalls"][0].addMaybe(user,chat[cid]["allNames"])
+            result=chat[cid]["rollCalls"][rc_number].addMaybe(user,chat[cid]["allNames"])
             if result=='AB':
                 raise duplicateProxy("No duplicate proxy please :-), Thanks!")
             elif isinstance(result, User):
@@ -613,7 +615,7 @@ async def maybe_user(message):
 
             #PRINTING THE LIST
             if send_list(message, chat):
-                await bot.send_message(cid, chat[cid]["rollCalls"][0].allList())
+                await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList())
           
     except duplicateProxy as e:
         print(traceback.format_exc())
@@ -649,7 +651,7 @@ async def set_in_for(message):
                 user.comment=comment
 
                 #ADDING THE USER TO THE LIST
-                result=chat[cid]["rollCalls"][0].addIn(user, chat[cid]["allNames"])
+                result=chat[cid]["rollCalls"][rc_number].addIn(user, chat[cid]["allNames"])
                 if result=='AB':
                     raise duplicateProxy("No duplicate proxy please :-), Thanks!")
                 elif result=='AC':
@@ -664,7 +666,7 @@ async def set_in_for(message):
 
                 # PRINTING THE LIST
                 if send_list(message, chat):
-                    await bot.send_message(cid, chat[cid]["rollCalls"][0].allList())
+                    await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList())
 
     except parameterMissing as e:
         print(traceback.format_exc())
@@ -706,7 +708,7 @@ async def set_out_for(message):
                 user.comment=comment
 
                 #ADDING THE USER TO THE LIST
-                result=chat[cid]["rollCalls"][0].addOut(user, chat[cid]["allNames"])
+                result=chat[cid]["rollCalls"][rc_number].addOut(user, chat[cid]["allNames"])
                 if result=='AB':
                     raise duplicateProxy("No duplicate proxy please :-), Thanks!")
                 elif result=='AC':
@@ -721,7 +723,7 @@ async def set_out_for(message):
 
                 # PRINTING THE LIST
                 if send_list(message, chat):
-                    await bot.send_message(cid, chat[cid]["rollCalls"][0].allList())
+                    await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList())
     
     except parameterMissing as e:
         print(traceback.format_exc())
@@ -762,7 +764,7 @@ async def set_maybe_for(message):
                 user.comment=comment
 
                 #ADDING THE USER TO THE LIST
-                result=chat[cid]["rollCalls"][0].addMaybe(user, chat[cid]["allNames"])
+                result=chat[cid]["rollCalls"][rc_number].addMaybe(user, chat[cid]["allNames"])
 
                 if result=='AB':
                     raise duplicateProxy("No duplicate proxy please :-), Thanks!")
@@ -779,7 +781,7 @@ async def set_maybe_for(message):
 
                 # PRINTING THE LIST
                 if send_list(message, chat):
-                    await bot.send_message(cid, chat[cid]["rollCalls"][0].allList())
+                    await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList())
                     return
     
     except parameterMissing as e:
@@ -807,7 +809,7 @@ async def whos_in(message):
             cid = message.chat.id
             
             #PRINTING LIST
-            await bot.send_message(cid, chat[cid]["rollCalls"][0].inListText())
+            await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].inListText())
 
     except rollCallNotStarted as e:
         print(traceback.format_exc())
@@ -826,7 +828,7 @@ async def whos_out(message):
             cid = message.chat.id
             
             #PRINTING LIST
-            await bot.send_message(cid, chat[cid]["rollCalls"][0].outListText())
+            await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].outListText())
 
     except rollCallNotStarted as e:
         print(traceback.format_exc())
@@ -845,7 +847,7 @@ async def whos_maybe(message):
             cid = message.chat.id
             
             #PRINTING LIST
-            await bot.send_message(cid, chat[cid]["rollCalls"][0].maybeListText())
+            await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].maybeListText())
 
     except rollCallNotStarted as e:
         print(traceback.format_exc())
@@ -864,7 +866,7 @@ async def whos_waiting(message):
             cid = message.chat.id
             
             #PRINTING LIST
-            await bot.send_message(cid, chat[cid]["rollCalls"][0].waitListText())
+            await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].waitListText())
 
     except rollCallNotStarted as e:
         print(traceback.format_exc())
@@ -893,12 +895,12 @@ async def set_title(message):
             #DEFINING TITLE FOR RC
             if len(arr) > 1:
                 title = " ".join(arr[1:])
-                chat[cid]["rollCalls"][0].title=title
+                chat[cid]["rollCalls"][rc_number].title=title
                 await bot.send_message(cid, 'The roll call title is set to: '+ title)
             
             else:
                 title='<Empty>'
-                chat[cid]["rollCalls"][0].title=title
+                chat[cid]["rollCalls"][rc_number].title=title
                 await bot.send_message(cid, 'The roll call title is set to: '+ title)
 
             logging.info(user+"-"+"The title has change to "+title)
@@ -927,12 +929,12 @@ async def end_roll_call(message):
             #SENDING LIST
             await bot.send_message(message.chat.id, "Roll ended!")
 
-            await bot.send_message(cid, "Title - "+chat[cid]["rollCalls"][0].title+"\n"+chat[cid]["rollCalls"][0].inListText() + chat[cid]["rollCalls"][0].outListText() + chat[cid]["rollCalls"][0].maybeListText() + chat[cid]["rollCalls"][0].waitListText())
+            await bot.send_message(cid, "Title - "+chat[cid]["rollCalls"][rc_number].title+"\n"+chat[cid]["rollCalls"][rc_number].inListText() + chat[cid]["rollCalls"][rc_number].outListText() + chat[cid]["rollCalls"][rc_number].maybeListText() + chat[cid]["rollCalls"][rc_number].waitListText())
 
-            logging.info("The roll call "+chat[cid]["rollCalls"][0].title+" has ended")
+            logging.info("The roll call "+chat[cid]["rollCalls"][rc_number].title+" has ended")
 
             #DELETING RC
-            chat[cid]["rollCalls"].pop(0)
+            chat[cid]["rollCalls"].rc_numberop(0)
 
     except rollCallNotStarted as e:
         print(traceback.format_exc())

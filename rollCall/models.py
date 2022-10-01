@@ -7,12 +7,14 @@ from exceptions import *
 from functions import *
 from datetime import datetime
 
+import traceback
+
 bot = telebot.TeleBot(token=TELEGRAM_TOKEN)
 
 class RollCall:
     #THIS IS THE ROLLCALL OBJECT
 
-    def __init__(self, title, finishDate):
+    def __init__(self, title):
         self.title= title
         self.inList= []
         self.outList= []
@@ -82,29 +84,35 @@ class RollCall:
 
     #DELETE A USER
     def delete_user(self, name, allNames):
-        for us in self.inList:
-            if us.name==name:
-                self.inList.remove(us)
-                for n in allNames:
-                    if n.name==name:
-                        allNames.remove(n)
-                return True
+        try:
+            for us in self.inList:
+                print(us)
+                if us.name==name:
+                    self.inList.remove(us)
+                    for n in allNames:
+                        if n.name==name:
+                            allNames.remove(n)
+                    return True
 
-        for us in self.outList:
-            if us.name==name:
-                self.outList.remove(us)
-                for n in allNames:
-                    if n.name==name:
-                        allNames.remove(n)
-                return True
+            for us in self.outList:
+                print(us)
+                if us.name==name:
+                    self.outList.remove(us)
+                    for n in allNames:
+                        if n.name==name:
+                            allNames.remove(n)
+                    return True
 
-        for us in self.maybeList:
-            if us.name==name:
-                self.maybeList.remove(us)
-                for n in allNames:
-                    if n.name==name:
-                        allNames.remove(n)
-                return True
+            for us in self.maybeList:
+                print(us)
+                if us.name==name:
+                    self.maybeList.remove(us)
+                    for n in allNames:
+                        if n.name==name:
+                            allNames.remove(n)
+                    return True
+        except:
+            print(traceback.format_exc())
 
     #ADD A NEW USER TO IN LIST
     def addIn(self, user, allNames):

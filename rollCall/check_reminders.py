@@ -48,9 +48,8 @@ async def check(rollcalls, timezone, chat_id):
                 #CHECK ROLLCALL FINALIZE DATE
                 if rollcall.finalizeDate!=None and rollcall.reminder==None:
 
-                    print(now_date, rollcall.finalizeDate)
                     if now_date>=rollcall.finalizeDate:
-                        await bot.send_message(chat_id, f' Event with title - {rollcall.title} is started ! Have a good time. Cheers!\n\n{rollcall.allList()}')
+                        await bot.send_message(chat_id, f' Event with title - {rollcall.title} is started ! Have a good time. Cheers!\n\n{rollcall.finishList()}')
                         rollcalls.remove(rollcall)
                         rollcall.finalizeDate=None
                         
@@ -67,6 +66,7 @@ async def start(rollcalls, timezone, chat_id):
             delay = 0
         await asyncio.sleep(delay)
         await check(rollcalls, timezone, chat_id)
+        
     except Exception as e:
         print(e)
  

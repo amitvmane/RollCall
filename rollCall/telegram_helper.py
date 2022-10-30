@@ -342,6 +342,25 @@ async def reminder(message):
         print(traceback.format_exc())
         await bot.send_message(message.chat.id, 'The correct format is /set_rollcall_reminder HH')
 
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/event_fee")
+@bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/ef")
+async def event_fee(message):
+    try:
+        if roll_call_not_started(message, chat)==False:
+            raise rollCallNotStarted("Roll call is not active")
+        else:
+            cid=message.chat.id
+            pmts=" ".join(message.text.split(" ")[1:])
+
+            chat[message.chat.id]['rollCalls'][0].event_fee = pmts
+
+            await bot.send_message(cid, f"Now the Event Fee is {pmts}\nIndividual Fee is {(round(int(re.sub(r'[^0-9]', '', pmts))/len(chat[message.chat.id]['rollCalls'][0].inList), 2)) if len(chat[message.chat.id]['rollCalls'][0].inList)>0 else 0}\n\nAdditional unknown/penalty fees are not included and needs to be handled separately.")
+
+    except rollCallNotStarted as e:
+        await bot.send_message(message.chat.id, e)
+    except incorrectParameter as e:
+        await bot.send_message(message.chat.id, e)
+
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/when")
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/w")
 async def when(message):

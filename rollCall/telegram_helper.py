@@ -202,6 +202,10 @@ async def start_roll_call(message):
     if 'rollCalls' not in chat[cid]:
         chat[cid]['rollCalls']=[]
 
+    if len(chat[cid]['rollCalls'])>=3:
+        await bot.send_message(cid, "The maximum of rollcalls is 3. Please finish one to create another")
+        raise amountOfRollCallsReached("The maximum of rollcalls is 3. Please finish one to create another")
+
     try:
         # CHECK IF ADMIN_RIGHTS ARE ON
         if admin_rights(message, chat) == False:
@@ -270,9 +274,21 @@ async def set_rollcall_time(message):
         pmts=msg.split(" ")[1:]
 
         #IF RC_NUMBER IS SPECIFIED IN PARAMETERS THEN STORE THE VALUE
-        if (len(pmts)>2 or msg=='cancel' and len(pmts)>=2) and ":" in pmts[-1]:
-            rc_number=int(pmts[-1].replace(":",""))-1
-            pmts=pmts[:len(pmts)-2]
+        if "::" in pmts[-1]:
+            try:
+                rc_number=int(pmts[-1].replace("::",""))-1
+                del pmts[-1]
+            except:
+                raise incorrectParameter("The rollcall number must be a positive integer")
+
+            if len(chat[cid]['rollCalls'])<rc_number+1:
+                raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
+
+
+        
+        # if (len(pmts)>2 or msg=='cancel' and len(pmts)>=2) and ":" in pmts[-1]:
+        #     rc_number=int(pmts[-1].replace(":",""))-1
+        #     pmts=pmts[:len(pmts)-2]
           
         
         #CANCEL THE CURRENT REMINDER TIME
@@ -284,7 +300,7 @@ async def set_rollcall_time(message):
 
 
         #PARSING INPUT DATETIME
-        input_datetime=" ".join(pmts)
+        input_datetime=" ".join(pmts).strip()
 
         tz=pytz.timezone(chat[message.chat.id]['rollCalls'][rc_number].timezone)
         date=datetime.datetime.strptime(input_datetime, "%d-%m-%Y %H:%M")
@@ -310,20 +326,9 @@ async def set_rollcall_time(message):
             await bot.send_message(cid, f"Event notification time is set to {date.strftime('%d-%m-%Y %H:%M')} {chat[cid]['rollCalls'][rc_number].timezone}")
 
 
-    except parameterMissing as e:
+    except Exception as e:
         print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
-    except rollCallNotStarted as e:
-        print(traceback.format_exc())
-        await bot.send_message(message.chat.id, e)
-    except ValueError as e:
-        print(traceback.format_exc())
-        await bot.send_message(message.chat.id, e)
-    except timeError as e:
-        print(traceback.format_exc())
-        await bot.send_message(message.chat.id, e)
-    except:
-        print(traceback.format_exc())
 
 @ bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/set_rollcall_reminder")
 @ bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/srr")
@@ -342,9 +347,16 @@ async def reminder(message):
             if pmts[0][0]=="0":
                 pmts[0]=pmts[0][1]
 
-        #SET THE SPECIFIED RC NUMBER
-        if len(pmts)>=2 and ":" in pmts[-1]:
-            rc_number=int(pmts[-1].replace(":",""))-1
+        #IF RC_NUMBER IS SPECIFIED IN PARAMETERS THEN STORE THE VALUE
+        if "::" in pmts[-1]:
+            try:
+                rc_number=int(pmts[-1].replace("::",""))-1
+                del pmts[-1]
+            except:
+                raise incorrectParameter("The rollcall number must be a positive integer")
+
+            if len(chat[cid]['rollCalls'])<rc_number+1:
+                raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
 
         #IF NOT EXISTS A FINALIZE DATE, RAISE ERROR
         if chat[message.chat.id]['rollCalls'][rc_number].finalizeDate == None:
@@ -400,8 +412,15 @@ async def when(message):
         pmts=message.text.split(" ")[1:]
         rc_number=0
 
-        if len(pmts)>1 and ":" in pmts[-1]:
-            rc_number=int(pmts[-1].replace(":",""))-1
+        if "::" in pmts[-1]:
+            try:
+                rc_number=int(pmts[-1].replace("::",""))-1
+                del pmts[-1]
+            except:
+                raise incorrectParameter("The rollcall number must be a positive integer")
+
+            if len(chat[cid]['rollCalls'])<rc_number+1:
+                raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
 
         if chat[message.chat.id]['rollCalls'][rc_number].finalizeDate == None:
             raise incorrectParameter("There is no start time for the event")

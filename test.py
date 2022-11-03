@@ -1,3 +1,1 @@
-arr=[]
-arr.append([])
-print(arr)
+print(int(" 1"))

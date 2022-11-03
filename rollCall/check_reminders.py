@@ -37,10 +37,6 @@ async def check(rollcalls, timezone, chat_id):
                 now_date_string=datetime.now(pytz.timezone(timezone)).strftime("%d-%m-%Y %H:%M")
                 now_date=datetime.strptime(now_date_string, "%d-%m-%Y %H:%M")
                 now_date=tz.localize(now_date)
-                # now_day=now_date.day
-                # now_hour=now_date.hour
-                # now_minute=now_date.minute
-               
 
                 #CHECK ROLLCALL REMINDER
                 if rollcall.reminder!=None:
@@ -65,11 +61,6 @@ async def check(rollcalls, timezone, chat_id):
                 print(e)
 
         await asyncio.sleep(60)
-
-            
-            
-        
-        
 
 async def start(rollcalls, timezone, chat_id):
     try:

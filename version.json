@@ -3,5 +3,12 @@
     "Description": "Reminder feature fixed, /version command, /location command, few visuals changes",
     "DeployedOnProd": "Y",
     "DeployedDatetime":"20-08-2022 20:00 UTC"
+    },
+    {
+        "Version":2.1,
+        "Description":"introduction of fee split based on IN list , minor notification error code fixes , server timezone related changes, critical- Roll call was not ending post fee feature",
+        "DeployedOnProd":"Y",
+        "DeployedDatetime":"03-11-2022 00:30 UTC"
     }
+
 ]

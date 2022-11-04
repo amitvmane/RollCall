@@ -80,7 +80,9 @@ class RollCall:
         except:
             _datetime=''
 
-        txt="Title - "+self.title+f"\nEvent time: {_datetime if _datetime != '' else 'None'} {self.timezone if _datetime !='' else ''}\nLocation: {self.location if self.location!=None else 'None'}\nEvent Fee: {self.event_fee}\nIndividual Fee: {round(int(re.sub(r'[^0-9]', '', self.event_fee))/len(self.inList), 2) if len(self.inList)>0 else '0'}\n\n"+("Additional unknown/penalty fees are not included and needs to be handled separately.\n\n" if self.event_fee!=0 else '')+(self.inListText() if self.inListText()!='In:\nNobody\n\n' else 'In:\nNobody\n\n')+(self.outListText() if self.outListText()!='Out:\nNobody\n\n' else 'Out:\nNobody\n\n')+(self.maybeListText() if self.maybeListText()!='Maybe:\nNobody\n\n' else 'Maybe:\nNobody\n\n')+(self.waitListText() if self.waitListText()!='Waiting:\nNobody' else '')+'Max limit: '+('♾' if self.inListLimit==None else str(self.inListLimit))
+        txt="Title - "+self.title+f"\nEvent time: {_datetime if _datetime != '' else 'None'} {self.timezone if _datetime !='' else ''}\nLocation: {self.location if self.location!=None else 'None'}\nEvent Fee: {self.event_fee}\nIndividual Fee: {round(int(re.sub(r'[^0-9]', '', self.event_fee))/len(self.inList), 2) if len(self.inList)>0 and self.event_fee!=None else '0'}\n\n"+("Additional unknown/penalty fees are not included and needs to be handled separately.\n\n" if self.event_fee!=0 else '')+(self.inListText() if self.inListText()!='In:\nNobody\n\n' else 'In:\nNobody\n\n')+(self.outListText() if self.outListText()!='Out:\nNobody\n\n' else 'Out:\nNobody\n\n')+(self.maybeListText() if self.maybeListText()!='Maybe:\nNobody\n\n' else 'Maybe:\nNobody\n\n')+(self.waitListText() if self.waitListText()!='Waiting:\nNobody' else '')+'Max limit: '+('♾' if self.inListLimit==None else str(self.inListLimit))
+        print(txt)
+        
         return txt
 
     #DELETE A USER

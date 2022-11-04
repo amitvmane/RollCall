@@ -149,11 +149,18 @@ async def config_timezone(message):
 async def version_command(message):
     file=open('./version.json')
     data=json.load(file)
-    for i in data:
-        if i["DeployedOnProd"]=='Y':
+    for i in range(0,len(data)):
+
+        version=data[-1-i]
+ 
+        if version["DeployedOnProd"]=='Y':
             txt=''
-            txt+=f'Version: {i["Version"]}\nDescription: {i["Description"]}\nDeployed: {i["DeployedOnProd"]}\nDeployed datetime: {i["DeployedDatetime"]}'
+            txt+=f'Version: {version["Version"]}\nDescription: {version["Description"]}\nDeployed: {version["DeployedOnProd"]}\nDeployed datetime: {version["DeployedDatetime"]}'
             await bot.send_message(message.chat.id, txt)
+            break
+        
+
+
 
 #START A ROLL CALL
 @bot.message_handler(func=lambda message:(message.text.split(" "))[0].split("@")[0].lower() == "/start_roll_call")
@@ -354,7 +361,7 @@ async def event_fee(message):
 
             chat[message.chat.id]['rollCalls'][0].event_fee = pmts
 
-            await bot.send_message(cid, f"Now the Event Fee is {pmts}\nIndividual Fee is {(round(int(re.sub(r'[^0-9]', '', pmts))/len(chat[message.chat.id]['rollCalls'][0].inList), 2)) if len(chat[message.chat.id]['rollCalls'][0].inList)>0 else 0}\n\nAdditional unknown/penalty fees are not included and needs to be handled separately.")
+            await bot.send_message(cid, f"Now the Event Fee is {pmts}\n\nAdditional unknown/penalty fees are not included and needs to be handled separately.")
 
     except rollCallNotStarted as e:
         await bot.send_message(message.chat.id, e)
@@ -958,6 +965,9 @@ async def end_roll_call(message):
     except insufficientPermissions as e:
         print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
+    except Exception as e:
+        print(traceback.format_exc())
+
 
 
 

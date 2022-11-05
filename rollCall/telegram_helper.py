@@ -349,6 +349,7 @@ async def reminder(message):
         rc_number=0 #RC NUMBER DEFAULT
         pmts=msg.split(" ")[1:]
 
+        #IF NUMBER HAS 00:00 FORMAT
         if pmts[0]!='cancel' and len(pmts[0])==2:
             if pmts[0][0]=="0":
                 pmts[0]=pmts[0][1]
@@ -1113,6 +1114,7 @@ async def end_roll_call(message):
             # DEFINING VARIABLES
             cid=message.chat.id
             pmts=message.text.split(" ")[1:]
+            rc_number=0
 
             if len(pmts)==3 and ":" in pmts[-1]:
                 rc_number=int(pmts[-1][1])-1
@@ -1120,7 +1122,7 @@ async def end_roll_call(message):
             # SENDING LIST
             await bot.send_message(message.chat.id, "Roll ended!")
 
-            await bot.send_message(cid, "Title - "+chat[cid]["rollCalls"][rc_number].title+"\n"+chat[cid]["rollCalls"][rc_number].inListText() + chat[cid]["rollCalls"][rc_number].outListText() + chat[cid]["rollCalls"][rc_number].maybeListText() + chat[cid]["rollCalls"][rc_number].waitListText())
+            await bot.send_message(cid, chat[cid]['rollCalls'][rc_number].finishList())
 
             logging.info("The roll call "+chat[cid]["rollCalls"][rc_number].title+" has ended")
 

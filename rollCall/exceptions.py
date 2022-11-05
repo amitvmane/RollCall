@@ -21,3 +21,6 @@ class timeError(Exception):
 
 class incorrectParameter(Exception):
     pass
+
+class amountOfRollCallsReached(Exception):
+    pass

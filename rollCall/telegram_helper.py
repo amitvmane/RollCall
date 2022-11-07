@@ -99,6 +99,7 @@ async def broadcast(message):
         await bot.send_message(message.chat.id, "Message is missing")
 
     msg=message.text.split(" ")[1:]
+
     try:
         with open('./database.json', 'r') as read_file:
             data=json.load(read_file)
@@ -1159,7 +1160,7 @@ async def set_title(message):
     except Exception as e:
         await bot.send_message(message.chat.id, e)
 
-@ bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/end_roll_call")  #START ROLL CALL COMMAND
+@ bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/end_roll_call")  #END ROLL CALL COMMAND
 @ bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/erc")
 async def end_roll_call(message):
     try:

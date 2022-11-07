@@ -21,12 +21,12 @@ class RollCall:
         self.outList= []
         self.maybeList= []
         self.waitList= []
-        self.inListLimit=None #Waitlist feature
-        self.reminder=None #Reminder feature
-        self.finalizeDate=None #Reminder feature
-        self.timezone='Asia/Calcutta'
-        self.location=None
-        self.event_fee=None
+        self.inListLimit= None #Waitlist feature
+        self.reminder= None #Reminder feature
+        self.finalizeDate= None #Reminder feature
+        self.timezone= 'Asia/Calcutta'
+        self.location= None
+        self.event_fee= None
         self.createdDate= datetime.utcnow()
 
     #RETURN INLIST

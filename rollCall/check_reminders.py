@@ -49,7 +49,7 @@ async def check(rollcalls, timezone, chat_id):
                 if rollcall.finalizeDate!=None and rollcall.reminder==None:
 
                     if now_date>=rollcall.finalizeDate:
-                        await bot.send_message(chat_id, f' Event with title - {rollcall.title} is started ! Have a good time. Cheers!\n\n{rollcall.finishList()}')
+                        await bot.send_message(chat_id, f' Event with title - {rollcall.title} is started ! Have a good time. Cheers!\n\n{rollcall.finishList().replace("__RCID__", str(rollcalls.index(rollcall)+1))}')
                         rollcalls.remove(rollcall)
                         rollcall.finalizeDate=None
                         

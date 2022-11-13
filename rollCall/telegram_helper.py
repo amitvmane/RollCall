@@ -8,7 +8,8 @@ from telebot.async_telebot import AsyncTeleBot
 
 import pytz
 
-from config import TELEGRAM_TOKEN, ADMINS
+from functions import get_database_chats, get_database
+from config import TELEGRAM_TOKEN, ADMINS, CONN_DB
 from exceptions import *
 from models import RollCall, User
 from functions import *
@@ -16,29 +17,46 @@ from check_reminders import start
 import traceback
 
 bot = AsyncTeleBot(token=TELEGRAM_TOKEN)
-
-chat = {}
-
 logging.info("Bot already started")
+
+db=get_database_chats(CONN_DB)
 
 # START COMMAND, SIMPLE TEXT
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/start")
 async def welcome_and_explanation(message):
+    try:
+        cid = message.chat.id
+        resp=db.find_one({"chatId":cid})
+         
+        if resp==None:
+            chat={
 
-    cid = message.chat.id
+                "chatId":cid,
 
-    # IF THIS CHAT DOESN'T HAVE A STORAGE, CREATES ONE
-    if cid not in chat:
-        chat[cid] = {}
-        chat[cid]["rollCalls"] = []
+                "rollCalls":[],
 
-    # CHECK FOR ADMIN RIGHTS
-    if admin_rights(message, chat) == False:
-        await bot.send_message(message.chat.id, "Error - user does not have sufficient permissions for this operation")
-        return
+                "config":{
+                    "adminRights":False,
+                    "shh":False,
+                    "timezone":"Asia/Calcutta",
+                    "adminList":[]}
+            }
 
-    # START MSG
-    await bot.send_message(message.chat.id, 'Hi! im RollCall!\n\nType /help to see all the commands')
+            db.insert_one(chat)
+            resp=db.find_one({"chatId":cid})
+
+        # # CHECK FOR ADMIN RIGHTS
+        if resp['config']['adminRights']==True:
+
+            if not admin_rights(message):
+                await bot.send_message(message.chat.id, "Error - user does not have sufficient permissions for this operation")
+                return
+
+        # START MSG
+        await bot.send_message(message.chat.id, 'Hi! im RollCall!\n\nType /help to see all the commands')
+
+    except Exception as e:
+        print(e)
 
 # HELP COMMAND WITH ALL THE COMMANDS
 @ bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/help")
@@ -49,25 +67,22 @@ async def help_commands(message):
 # SET ADMIN RIGHTS TO TRUE
 @ bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/set_admins")
 async def set_admins(message):
-
+   
     #DEFINING VARIABLES
     cid=message.chat.id
-    msg=message.text
-
+    
     #Test if user has permissions to use this command
-    if  bot.get_chat_member(cid, message.from_user.id).status not in ['admin', 'creator']:
-        await bot.send_message(message.chat.id, "You don't have permissions to use this command :(")
-        
-    # IF THIS CHAT DOESN'T HAVE A STORAGE, CREATES ONE
-    if message.chat.id not in chat:
-        chat[cid]={}
-        chat[cid]["adminRigts"]=False
-        chat[cid]["rollCalls"]=[]
+    permissions = await bot.get_chat_member(cid, message.from_user.id)
 
+    if permissions.status not in ['admin', 'creator']:
+        await bot.send_message(cid, "You don't have permissions to use this command :(")
+        return
+        
     # DEFINING NEW STATE OF ADMIN RIGTS
-    chat[cid]["adminRigts"]=True
+    db.update_one({"chatId":cid}, {"$set":{"config.adminRights":True}})
 
     await bot.send_message(cid, 'Admin permissions activated')
+    
 
 # SET ADMIN RIGHTS TO FALSE
 @ bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/unset_admins")
@@ -75,42 +90,33 @@ async def unset_admins(message):
 
     #DEFINING VARIABLES
     cid=message.chat.id
-    msg=message.text
 
     #Test if user has permissions to use this command
-    if  bot.get_chat_member(cid, message.from_user.id).status not in ['admin', 'creator']:
-        await bot.send_message(message.chat.id, "You don't have permissions to use this command :(")
+    permissions = await bot.get_chat_member(cid, message.from_user.id)
 
-    # IF THIS CHAT DOESN'T HAVE A STORAGE, CREATES ONE
-    if message.chat.id not in chat:
-        chat[cid]={}
-        chat[cid]["adminRigts"]=False
-        chat[cid]["rollCalls"]=[]
+    if permissions.status not in ['admin', 'creator']:
+        await bot.send_message(cid, "You don't have permissions to use this command :(")
+        return
 
     # DEFINING NEW STATE OF ADMIN RIGTS
-    chat[cid]["adminRigts"]=False
+    db.update_one({"chatId":cid}, {"$set":{"config.adminRights":False}})
 
     await bot.send_message(cid, 'Admin permissions disabled')
 
 # SEND ANNOUNCEMENTS TO ALL GROUPS
 @ bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/broadcast" and message.from_user.id in ADMINS)
 async def broadcast(message):
+
     if len(message.text.split(" ")) < 1:
         await bot.send_message(message.chat.id, "Message is missing")
 
-    msg=message.text.split(" ")[1:]
+    msg = message.text.split(" ")[1:]
 
-    try:
-        with open('./database.json', 'r') as read_file:
-            data=json.load(read_file)
-    except Exception as e:
-        print(traceback.format_exc())
-        print(e)
-        return
+    ids = db.distinct("chatId")
 
-    for k in data:
+    for k in ids:
         try:
-            await bot.send_message(int(k["chat_id"]), " ".join(msg))
+            await bot.send_message(int(k), " ".join(msg))
         except:
             pass
 
@@ -129,18 +135,16 @@ async def config_timezone(message):
             raise parameterMissing(
                 "The correct format is: /timezone continent/country or continent/state")
 
-        if message.chat.id not in chat:
-            chat[message.chat.id]={}
-
         #Formating timezone
-        response=auto_complete_timezone(" ".join(msg.split(" ")[1:]))
+        timezone=auto_complete_timezone(" ".join(msg.split(" ")[1:]))
 
-        if response != None:
-            await bot.send_message(message.chat.id, f"Your timezone has been set to {response}")
-            for rollcall in chat[message.chat.id]['rollCalls']:
-                rollcall.timezone=response
+        if timezone != None:
+
+            db.update_one({"chatId":cid}, {"$set":{"config.timezone":timezone}})
+            await bot.send_message(message.chat.id, f"Your timezone has been set to {timezone}")
+
         else:
-            await bot.send_message(message.chat.id, f"Your timezone doesnt exists, if you can't found your timezone, check this <a href='https://gist.github.com/heyalexej/8bf688fd67d7199be4a1682b3eec7568'>website</a>", parse_mode = 'HTML')
+            await bot.send_message(message.chat.id, f"Your timezone doesn't exists, if you can't found your timezone, check this <a href='https://gist.github.com/heyalexej/8bf688fd67d7199be4a1682b3eec7568'>website</a>", parse_mode = 'HTML')
 
     except Exception as e:
         print(traceback.format_exc())
@@ -150,6 +154,7 @@ async def config_timezone(message):
 @ bot.message_handler(func = lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/version")
 @ bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/v")
 async def version_command(message):
+    
     file=open('./version.json')
     data=json.load(file)
     for i in range(0,len(data)):
@@ -166,15 +171,16 @@ async def version_command(message):
 @ bot.message_handler(func = lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/rollcalls")
 @ bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/r")
 async def show_reminders(message):
-    cid = message.chat.id
-    
 
-    if len(chat[cid]["rollCalls"])==0:
+    cid = message.chat.id
+    rollCalls = db.distinct("rollCalls")
+
+    if len(rollCalls)==0:
         await bot.send_message(cid, "There are not rollcalls yet")
 
-    for rollcall in chat[cid]["rollCalls"]:
-        id=chat[cid]['rollCalls'].index(rollcall)+1
-        await bot.send_message(cid, f"Rollcall number {id}\n\n"+rollcall.allList().replace("__RCID__", str(id)))
+    for rollCall in rollCalls:
+        id=rollCall['id']
+        await bot.send_message(cid, f"Rollcall number {id}\n\n"+rollCall.allList().replace("__RCID__", str(id)))
 
 # START A ROLL CALL
 @ bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/start_roll_call")
@@ -184,37 +190,19 @@ async def start_roll_call(message):
     # DEFINING VARIABLES
     cid=message.chat.id
     msg=message.text
+    resp = db.find_one({"chatId":cid})
     title=''
-
-    with open('./database.json', 'r') as read_file:
-        database=json.load(read_file)
-        read_file.close()
-    
-    cond=True
-    for i in database:
-        if int(i['chat_id']) == message.chat.id:
-            cond=False
-
-    if cond == True:
-        database.append({'chat_id': cid})
-        with open('./database.json', 'w') as write_file:
-            json.dump(database, write_file)
-
-    # IF THIS CHAT DOESN'T HAVE A STORAGE, CREATES ONE
-    if cid not in chat:
-        chat[cid]={}
-
-    if 'rollCalls' not in chat[cid]:
-        chat[cid]['rollCalls']=[]
 
     try:
 
-        if len(chat[cid]['rollCalls'])>=3:
+        if len(resp['rollCalls'])>=3:
             raise amountOfRollCallsReached("Allowed Maximum number of active roll calls per group is 3.")
 
-        # CHECK IF ADMIN_RIGHTS ARE ON
-        if admin_rights(message, chat) == False:
-            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
+        # CHECK FOR ADMIN RIGHTS
+        if resp['config']['adminRights']==True:
+            if not admin_rights(message):
+                await bot.send_message(message.chat.id, "Error - user does not have sufficient permissions for this operation")
+                return
 
         # SET THE RC TITLE
         arr=msg.split(" ")
@@ -226,26 +214,26 @@ async def start_roll_call(message):
 
         ###DEFAULT CONFIG###
 
-        chat[cid]['shh']=False
+        # chat[cid]['shh']=False
 
-        if "allNames" not in chat[cid]:
-            chat[cid]["allNames"]=[]
+        # if "allNames" not in chat[cid]:
+        #     chat[cid]["allNames"]=[]
 
-        if "adminRights" not in chat[cid]:
-            chat[cid]["adminRights"]=False
+        # if "adminRights" not in chat[cid]:
+        #     chat[cid]["adminRights"]=False
 
-        if "reminders" not in chat[cid]:
-            chat[cid]["reminders"]={}
+        # if "reminders" not in chat[cid]:
+        #     chat[cid]["reminders"]={}
 
-        if 'waitingRC' not in chat[cid]:
-            chat[cid]['tasks']=[]
+        # if 'waitingRC' not in chat[cid]:
+        #     chat[cid]['tasks']=[]
 
-        chat[cid]["allNames"].append([])
+        # chat[cid]["allNames"].append([])
 
         ###DEFAULT CONFIG###
-
         # ADD RC TO LIST
-        chat[cid]["rollCalls"].append(RollCall(title))
+        
+        db.update_one({"chatId":cid}, {"$push":{"rollCalls": RollCall('title').__dict__}})
         await bot.send_message(message.chat.id, f"Roll call with title: {title} started!")
 
     except Exception as e:

@@ -167,12 +167,14 @@ async def version_command(message):
 @ bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/r")
 async def show_reminders(message):
     cid = message.chat.id
+    
 
     if len(chat[cid]["rollCalls"])==0:
         await bot.send_message(cid, "There are not rollcalls yet")
 
     for rollcall in chat[cid]["rollCalls"]:
-        await bot.send_message(cid, f"Rollcall number {chat[cid]['rollCalls'].index(rollcall)+1}\n\n"+rollcall.allList())
+        id=chat[cid]['rollCalls'].index(rollcall)+1
+        await bot.send_message(cid, f"Rollcall number {id}\n\n"+rollcall.allList().replace("__RCID__", str(id)))
 
 # START A ROLL CALL
 @ bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/start_roll_call")
@@ -205,11 +207,11 @@ async def start_roll_call(message):
     if 'rollCalls' not in chat[cid]:
         chat[cid]['rollCalls']=[]
 
-    if len(chat[cid]['rollCalls'])>=3:
-        await bot.send_message(cid, "The maximum of rollcalls is 3. Please finish one to create another")
-        raise amountOfRollCallsReached("The maximum of rollcalls is 3. Please finish one to create another")
-
     try:
+
+        if len(chat[cid]['rollCalls'])>=3:
+            raise amountOfRollCallsReached("Allowed Maximum number of active roll calls per group is 3.")
+
         # CHECK IF ADMIN_RIGHTS ARE ON
         if admin_rights(message, chat) == False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
@@ -280,7 +282,7 @@ async def set_rollcall_time(message):
 
             if len(chat[cid]['rollCalls'])<rc_number+1:
                 raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
-        
+
         #CANCEL THE CURRENT REMINDER TIME
         if (pmts[0]).lower() == 'cancel':
             chat[message.chat.id]['rollCalls'][rc_number].finalizeDate=None
@@ -308,12 +310,26 @@ async def set_rollcall_time(message):
 
         if chat[cid]['rollCalls'][rc_number].finalizeDate == None:
             chat[cid]['rollCalls'][rc_number].finalizeDate=date
-            await bot.send_message(cid, f"Event notification time is set to {chat[cid]['rollCalls'][rc_number].finalizeDate.strftime('%d-%m-%Y %H:%M')} {chat[cid]['rollCalls'][rc_number].timezone}")
+
+            changed=False
+            if chat[cid]['rollCalls'][rc_number].reminder!=None:
+                chat[cid]['rollCalls'][rc_number].reminder=None
+                changed=True
+
+            backslash='\n'
+            await bot.send_message(cid, f"Event notification time is set to {chat[cid]['rollCalls'][rc_number].finalizeDate.strftime('%d-%m-%Y %H:%M')} {chat[cid]['rollCalls'][rc_number].timezone} {backslash*2+'Reminder has been reset!' if changed else ''}")
             asyncio.create_task(start(chat[cid]['rollCalls'], chat[cid]['rollCalls'][rc_number].timezone, cid))
         
         else:
             chat[cid]['rollCalls'][rc_number].finalizeDate=date
-            await bot.send_message(cid, f"Event notification time is set to {date.strftime('%d-%m-%Y %H:%M')} {chat[cid]['rollCalls'][rc_number].timezone}")
+            
+            changed=False
+            if chat[cid]['rollCalls'][rc_number].reminder!=None:
+                chat[cid]['rollCalls'][rc_number].reminder=None
+                changed=True
+
+            backslash='\n'
+            await bot.send_message(cid, f"Event notification time is set to {date.strftime('%d-%m-%Y %H:%M')} {chat[cid]['rollCalls'][rc_number].timezone} {backslash*2+'Reminder has been reset!' if changed else ''}")
 
 
     except Exception as e:
@@ -467,17 +483,14 @@ async def individual_fee(message):
 async def when(message):
     
     cid=message.chat.id
-    pmts=message.text.split(" ")[1:]
+    pmts=message.text.split(" ")
     rc_number=0
 
     try:
         if roll_call_not_started(message, chat) == False:
             raise rollCallNotStarted("Roll call is not active")
 
-        if chat[cid]['rollCalls'][rc_number].finalizeDate == None:
-            raise incorrectParameter("There is no start time for the event")
-        
-        #IF RC_NUMBER IS SPECIFIED, STORE IT
+         #IF RC_NUMBER IS SPECIFIED, STORE IT
         if len(pmts)>1 and "::" in pmts[-1]:
             try:
                 rc_number=int(pmts[-1].replace("::",""))-1
@@ -488,7 +501,10 @@ async def when(message):
             if len(chat[cid]['rollCalls'])<rc_number+1:
                 raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
 
-        await bot.send_message(cid, f"The event with title {chat[message.chat.id]['rollCalls'][0].title} will start at {chat[message.chat.id]['rollCalls'][0].finalizeDate.strftime('%d-%m-%Y %H:%M')}!")
+        if chat[cid]['rollCalls'][rc_number].finalizeDate == None:
+            raise incorrectParameter("There is no start time for the event")
+
+        await bot.send_message(cid, f"The event with title {chat[message.chat.id]['rollCalls'][rc_number].title} will start at {chat[message.chat.id]['rollCalls'][rc_number].finalizeDate.strftime('%d-%m-%Y %H:%M')}!")
 
     except Exception as e:
         await bot.send_message(cid, e)
@@ -566,7 +582,7 @@ async def wait_limit(message):
         # SETTING THE LIMIT TO INLIST
         chat[cid]["rollCalls"][rc_number].inListLimit=limit
         logging.info(f"Max limit of attendees is set to {limit}")
-        await bot.send_message(cid, f"Max limit of attendees is set to {limit}")
+        await bot.send_message(cid, f'Max limit of attendees is set to {limit}')
 
         # MOVING USERS IF IN LIST HAS ALREADY REACH THE LIMIT
         if len(chat[cid]["rollCalls"][rc_number].inList) > limit:
@@ -703,7 +719,7 @@ async def in_user(message):
 
         # PRINTING THE LIST
         if send_list(message, chat):
-            await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList())
+            await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList().replace("__RCID__", str(rc_number+1)))
 
     except Exception as e:
         await bot.send_message(message.chat.id, e)
@@ -758,7 +774,7 @@ async def out_user(message):
 
         # PRINTING THE LIST
         if send_list(message, chat):
-            await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList())
+            await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList().replace("__RCID__", str(rc_number+1)))
 
     except Exception as e:
         await bot.send_message(message.chat.id, e)
@@ -810,7 +826,7 @@ async def maybe_user(message):
 
         # PRINTING THE LIST
         if send_list(message, chat):
-            await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList())
+            await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList().replace("__RCID__", str(rc_number+1)))
 
     except Exception as e:
         await bot.send_message(message.chat.id, e)
@@ -870,7 +886,7 @@ async def set_in_for(message):
 
             # PRINTING THE LIST
             if send_list(message, chat):
-                await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList())
+                await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList().replace("__RCID__", str(rc_number+1)))
 
     except Exception as e:
         await bot.send_message(message.chat.id, e)
@@ -930,7 +946,7 @@ async def set_out_for(message):
 
             # PRINTING THE LIST
             if send_list(message, chat):
-                await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList())
+                await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList().replace("__RCID__", str(rc_number+1)))
 
     except Exception as e:
         await bot.send_message(message.chat.id, e)
@@ -995,7 +1011,7 @@ async def set_maybe_for(message):
 
             # PRINTING THE LIST
             if send_list(message, chat):
-                await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList())
+                await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList().replace("__RCID__", str(rc_number+1)))
                 return
 
     except Exception as e:
@@ -1191,7 +1207,7 @@ async def end_roll_call(message):
         # SENDING LIST
         await bot.send_message(message.chat.id, "Roll ended!")
 
-        await bot.send_message(cid, chat[cid]['rollCalls'][rc_number].finishList())
+        await bot.send_message(cid, chat[cid]['rollCalls'][rc_number].finishList().replace("__RCID__", str(rc_number+1)))
 
         logging.info("The roll call "+chat[cid]["rollCalls"][rc_number].title+" has ended")
 

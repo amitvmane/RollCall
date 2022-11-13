@@ -2,9 +2,9 @@ import pytz
 from datetime import datetime, timedelta
 import asyncio
 from config import TELEGRAM_TOKEN
-from telebot.async_telebot import AsyncTeleBot
+from telebot import TeleBot
 
-bot = AsyncTeleBot(token=TELEGRAM_TOKEN)
+bot = TeleBot(token=TELEGRAM_TOKEN)
 
 async def check(rollcalls, timezone, chat_id):
 
@@ -42,16 +42,18 @@ async def check(rollcalls, timezone, chat_id):
                     reminder_time=rollcall.finalizeDate-timedelta(hours=int(rollcall.reminder))
 
                     if now_date>=reminder_time:
-                        await bot.send_message(chat_id, f'Gentle reminder! event with title - {rollcall.title} is {rollcall.reminder} hour/s away')   
+                        bot.send_message(chat_id, f'Gentle reminder! event with title - {rollcall.title} is {rollcall.reminder} hour/s away')   
                         rollcall.reminder=None
+                        continue
 
                 #CHECK ROLLCALL FINALIZE DATE
                 if rollcall.finalizeDate!=None and rollcall.reminder==None:
 
                     if now_date>=rollcall.finalizeDate:
-                        await bot.send_message(chat_id, f' Event with title - {rollcall.title} is started ! Have a good time. Cheers!\n\n{rollcall.finishList().replace("__RCID__", str(rollcalls.index(rollcall)+1))}')
-                        rollcalls.remove(rollcall)
+                        bot.send_message(chat_id, f' Event with title - {rollcall.title} is started ! Have a good time. Cheers!\n\n{rollcall.finishList().replace("__RCID__", str(rollcalls.index(rollcall)+1))}')
+                        del rollcalls[rollcalls.index(rollcall)]
                         rollcall.finalizeDate=None
+                        continue
                         
             except Exception as e:
                 print(e)

@@ -1,12 +1,18 @@
 import pytz
 from datetime import datetime, timedelta
 import asyncio
+
 from config import TELEGRAM_TOKEN
-from telebot.async_telebot import AsyncTeleBot
 
-bot = AsyncTeleBot(token=TELEGRAM_TOKEN)
+from telebot import TeleBot
 
-async def check(rollcalls, timezone, chat_id):
+bot = TeleBot(token=TELEGRAM_TOKEN)
+
+async def check(chat_db):
+
+    timezone=chat_db['config']['timezone']
+    rollcalls=''
+    chat_id=int(chat_db['chatId'])
 
     current_sec = int(datetime.now().strftime("%S"))
     delay=0
@@ -58,14 +64,16 @@ async def check(rollcalls, timezone, chat_id):
 
         await asyncio.sleep(60)
  
-async def start(rollcalls, timezone, chat_id):
+async def start(cid):
     try:
+        chat_db=db.find_one({"chatId":cid})
+
         current_sec = int(datetime.now().strftime("%S"))
         delay = 60 - current_sec
         if delay == 60:
             delay = 0
         await asyncio.sleep(delay)
-        await check(rollcalls, timezone, chat_id)
+        await check(chat_db)
         
     except Exception as e:
         print(e)

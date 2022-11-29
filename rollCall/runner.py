@@ -3,6 +3,7 @@ import logging
 import asyncio
 
 from telegram_helper import bot
+from check_reminders import start
 
 
 async def main():

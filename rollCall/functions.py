@@ -1,10 +1,14 @@
 from exceptions import *
 import logging
+
 import Levenshtein
 import pytz
+
 from telebot import TeleBot
 from pymongo import MongoClient
+
 from config import TELEGRAM_TOKEN
+
 
 bot=TeleBot(TELEGRAM_TOKEN)
 
@@ -38,15 +42,14 @@ def roll_call_already_started(message, chat):
         return True
 
 #FUNCTION TO RAISE RC NOT STARTED ERROR
-def roll_call_not_started(message, chat):
-    try:
-        if len(chat[message.chat.id]["rollCalls"])==0:
-            logging.error("Roll call is not active")
-            return False
-        else:
-            return True
-    except:
-        return False
+# def roll_call_not_started(cid):
+
+#     if len(db['rollCalls'])==0:
+#         logging.error("Roll call is not active")
+#         return False
+
+#     return True
+        
 
 #FUNCTION TO RAISE NO ADMIN RIGHTS ERROR
 def admin_rights(message):

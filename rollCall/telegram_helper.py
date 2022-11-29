@@ -83,7 +83,6 @@ async def set_admins(message):
 
     await bot.send_message(cid, 'Admin permissions activated')
     
-
 # SET ADMIN RIGHTS TO FALSE
 @ bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/unset_admins")
 async def unset_admins(message):
@@ -170,17 +169,23 @@ async def version_command(message):
 #GET ALL ROLLCALLS OF THE CURRENT CHAT
 @ bot.message_handler(func = lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/rollcalls")
 @ bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/r")
-async def show_reminders(message):
+async def rollCalls(message):
+    try:
 
-    cid = message.chat.id
-    rollCalls = db.distinct("rollCalls")
+        cid = message.chat.id
+        rollCalls = db.distinct("rollCalls", {"chatId":cid})
 
-    if len(rollCalls)==0:
-        await bot.send_message(cid, "There are not rollcalls yet")
+        if len(rollCalls)==0:
+            await bot.send_message(cid, "There are not rollcalls yet")
 
-    for rollCall in rollCalls:
-        id=rollCall['id']
-        await bot.send_message(cid, f"Rollcall number {id}\n\n"+rollCall.allList().replace("__RCID__", str(id)))
+        for rollCall in rollCalls:
+            rollCall = RollCall(**rollCall)
+         
+            id=str(rollCall._id)
+            await bot.send_message(cid, f"Rollcall number {id}\n\n"+rollCall.allList().replace("__RCID__", id))
+    except Exception as e:
+        print(traceback.format_exc())
+        print(e)
 
 # START A ROLL CALL
 @ bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/start_roll_call")
@@ -191,10 +196,12 @@ async def start_roll_call(message):
     cid=message.chat.id
     msg=message.text
     resp = db.find_one({"chatId":cid})
+    ids_to_use=[1,2,3]
     title=''
 
     try:
 
+        #MAXIMUM ROLLCALLS ERROR
         if len(resp['rollCalls'])>=3:
             raise amountOfRollCallsReached("Allowed Maximum number of active roll calls per group is 3.")
 
@@ -204,6 +211,11 @@ async def start_roll_call(message):
                 await bot.send_message(message.chat.id, "Error - user does not have sufficient permissions for this operation")
                 return
 
+        if len(resp['rollCalls'])>0:
+            ids_used=db.distinct("rollCalls._id", {"chatId":cid})
+            ids_to_use=list(set(ids_to_use)-set(ids_used))
+            print(ids_to_use)
+
         # SET THE RC TITLE
         arr=msg.split(" ")
         if len(arr) > 1:
@@ -212,31 +224,12 @@ async def start_roll_call(message):
         else:
             title='<Empty>'
 
-        ###DEFAULT CONFIG###
-
-        # chat[cid]['shh']=False
-
-        # if "allNames" not in chat[cid]:
-        #     chat[cid]["allNames"]=[]
-
-        # if "adminRights" not in chat[cid]:
-        #     chat[cid]["adminRights"]=False
-
-        # if "reminders" not in chat[cid]:
-        #     chat[cid]["reminders"]={}
-
-        # if 'waitingRC' not in chat[cid]:
-        #     chat[cid]['tasks']=[]
-
-        # chat[cid]["allNames"].append([])
-
-        ###DEFAULT CONFIG###
         # ADD RC TO LIST
-        
-        db.update_one({"chatId":cid}, {"$push":{"rollCalls": RollCall('title').__dict__}})
+        db.update_one({"chatId":cid}, {"$push":{"rollCalls": RollCall(ids_to_use[0], title).__dict__}})
         await bot.send_message(message.chat.id, f"Roll call with title: {title} started!")
 
     except Exception as e:
+        print(traceback.format_exc())
         await bot.send_message(cid, e)
 
 #SET A ROLLCALL START TIME
@@ -244,49 +237,50 @@ async def start_roll_call(message):
 @ bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/srt")
 async def set_rollcall_time(message):
     try:
-        if roll_call_not_started(message, chat) == False:
-            raise rollCallNotStarted("Roll call is not active")
-        
-        if len(message.text.split(" ")) == 1:
-            raise parameterMissing(
-                "invalid datetime format, refer help section for details")
-
-        if len(message.text.split(" ")) < 2 and msg!='cancel':
-            raise parameterMissing(
-                "invalid datetime format, refer help section for details")
 
         cid=message.chat.id
         msg=message.text
-        rc_number=0 #DEFAULT RC NUMBER
+        rc_number=1 #DEFAULT RC NUMBER
         pmts=msg.split(" ")[1:]
+        chat_db=db.find_one({"chatId":cid})
+
+        if len(chat_db['rollCalls'])==0:
+            raise rollCallNotStarted("Roll call is not active")
+        
+        if len(message.text.split(" ")) <= 2 and pmts[0]!='cancel':
+            raise parameterMissing(
+                "invalid datetime format, refer help section for details")
 
         #IF RC_NUMBER IS SPECIFIED IN PARAMETERS THEN STORE THE VALUE
         if len(pmts)>1 and "::" in pmts[-1]:
             try:
-                rc_number=int(pmts[-1].replace("::",""))-1
+                rc_number=int(pmts[-1].replace("::",""))
                 del pmts[-1]
             except:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
-            if len(chat[cid]['rollCalls'])<rc_number+1:
+            if rc_number not in db.distinct("rollCalls._id", {"chatId":cid}):
                 raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
+
+        title=db.aggregate([{"chatId":cid, "rollCalls._id":rc_number}])
+ 
+        print(title)
+        return
 
         #CANCEL THE CURRENT REMINDER TIME
         if (pmts[0]).lower() == 'cancel':
-            chat[message.chat.id]['rollCalls'][rc_number].finalizeDate=None
-            chat[message.chat.id]['rollCalls'][rc_number].reminder=None
-            await bot.send_message(message.chat.id, "Reminder time is canceled.")
+            db.update_one({'chatId':cid, 'rollCalls._id':rc_number}, {"$set":{"rollCalls.$.finalizeDate":None, "rollCalls.$.reminder":None}})
+            await bot.send_message(message.chat.id, f"Reminder time of rollcall with title {rc['title']} has been canceled.")
             return
 
         #PARSING INPUT DATETIME
         input_datetime=" ".join(pmts).strip()
 
-        tz=pytz.timezone(chat[message.chat.id]['rollCalls'][rc_number].timezone)
+        tz=pytz.timezone(chat_db['config']['timezone'])
         date=datetime.datetime.strptime(input_datetime, "%d-%m-%Y %H:%M")
         date=tz.localize(date)
 
-        now_date_string=datetime.datetime.now(pytz.timezone(
-        chat[message.chat.id]['rollCalls'][rc_number].timezone)).strftime("%d-%m-%Y %H:%M")
+        now_date_string=datetime.datetime.now(tz).strftime("%d-%m-%Y %H:%M")
         now_date=datetime.datetime.strptime(now_date_string, "%d-%m-%Y %H:%M")
         now_date=tz.localize(now_date)
 
@@ -295,29 +289,24 @@ async def set_rollcall_time(message):
         #ERROR FOR INVALID DATETIME
         if now_date > date:
             raise timeError("Please provide valid future datetime.")
-
-        if chat[cid]['rollCalls'][rc_number].finalizeDate == None:
-            chat[cid]['rollCalls'][rc_number].finalizeDate=date
-
-            changed=False
-            if chat[cid]['rollCalls'][rc_number].reminder!=None:
-                chat[cid]['rollCalls'][rc_number].reminder=None
-                changed=True
-
-            backslash='\n'
-            await bot.send_message(cid, f"Event notification time is set to {chat[cid]['rollCalls'][rc_number].finalizeDate.strftime('%d-%m-%Y %H:%M')} {chat[cid]['rollCalls'][rc_number].timezone} {backslash*2+'Reminder has been reset!' if changed else ''}")
-            asyncio.create_task(start(chat[cid]['rollCalls'], chat[cid]['rollCalls'][rc_number].timezone, cid))
-        
-        else:
-            chat[cid]['rollCalls'][rc_number].finalizeDate=date
             
-            changed=False
-            if chat[cid]['rollCalls'][rc_number].reminder!=None:
-                chat[cid]['rollCalls'][rc_number].reminder=None
-                changed=True
+        db.update_one({'chatId':cid, 'rollCalls._id':rc_number}, {"$set":{"rollCalls.$.finalizeDate":date.strftime('%d-%m-%Y %H:%M'), "rollCalls.$.reminder":None}})
 
-            backslash='\n'
-            await bot.send_message(cid, f"Event notification time is set to {date.strftime('%d-%m-%Y %H:%M')} {chat[cid]['rollCalls'][rc_number].timezone} {backslash*2+'Reminder has been reset!' if changed else ''}")
+        await bot.send_message(cid, f"Title: {rc.title}\nID: {rc._id}\n\nEvent notification time is set to {date.strftime('%d-%m-%Y %H:%M')}. Reminder has been reset!")
+        
+        if all(_date == None for _date in chat_db['rollCalls'].distinct("finalizeDate")):
+            asyncio.create_task(start(cid))
+        
+        # else:
+        #     chat[cid]['rollCalls'][rc_number].finalizeDate=date
+            
+        #     changed=False
+        #     if chat[cid]['rollCalls'][rc_number].reminder!=None:
+        #         chat[cid]['rollCalls'][rc_number].reminder=None
+        #         changed=True
+
+        #     backslash='\n'
+        #     await bot.send_message(cid, f"Event notification time is set to {date.strftime('%d-%m-%Y %H:%M')} {chat[cid]['rollCalls'][rc_number].timezone} {backslash*2+'Reminder has been reset!' if changed else ''}")
 
 
     except Exception as e:
@@ -334,10 +323,11 @@ async def reminder(message):
     msg=message.text
     rc_number=0 #RC NUMBER DEFAULT
     pmts=msg.split(" ")[1:]
+    chat_db=db.find_one({"chatId":cid})
     
     try:
 
-        if roll_call_not_started(message, chat) == False:
+        if len(chat_db['rollCalls'])==0:
             raise rollCallNotStarted("Roll call is not active")
 
         #IF NUMBER HAS 00:00 FORMAT

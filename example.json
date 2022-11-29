@@ -1,0 +1,12 @@
+{
+
+    "chatId":12312321,
+
+    "rollCalls":[],
+
+    "config":{
+        "adminRights":false,
+        "shh":false,
+        "timezone":"Asia/Calcutta",
+        "adminList":[]}
+}

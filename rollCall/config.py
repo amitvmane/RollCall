@@ -12,7 +12,7 @@ logging.basicConfig(
 
 )
 
-TELEGRAM_TOKEN=os.environ.get("API_KEY")
-CONN_DB=os.environ.get("CONN_DB")
+TELEGRAM_TOKEN=os.environ.get("API_KEY") #API KEY OF TELEGRAM BOT
+CONN_DB=os.environ.get("CONN_DB") #URL OF MONGODB DATABASE, EX: mongodb://USERNAME:PASSWORD@URL/IP
 
 ADMINS=[int(os.environ.get("ADMIN1")), int(os.environ.get("ADMIN2"))]

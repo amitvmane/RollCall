@@ -15,6 +15,12 @@
         "Description":"Introduction of MRC feature (Multiple Roll Call), creating MRC with /src command, also you can interact with each one using ::<rc_number> at the end of all commands, Added new command (/Individual_Fee) to know how much needs to pay each user",
         "DeployedOnProd":"Y",
         "DeployedDatetime":"05-11-2022 06:00 UTC"
+    },
+    {
+        "Version":2.3,
+        "Description":"Some bugs and visual fixes",
+        "DeployedOnProd":"Y",
+        "DeployedDatetime":"29-11-2022 06:00 UTC"
     }
 
 ]

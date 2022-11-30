@@ -21,6 +21,7 @@ class RollCall:
         self.outList= []
         self.maybeList= []
         self.waitList= []
+        self.allNames= []
         self.inListLimit= None #Waitlist feature
         self.reminder= None #Reminder feature
         self.finalizeDate= None #Reminder feature
@@ -88,47 +89,49 @@ class RollCall:
         return txt
 
     #DELETE A USER
-    def delete_user(self, name, allNames):
+    def delete_user(self, name):
         try:
             for us in self.inList:
                 print(us)
                 if us.name==name:
                     self.inList.remove(us)
-                    for n in allNames:
+                    for n in self.allNames:
                         if n.name==name:
-                            allNames.remove(n)
+                            self.allNames.remove(n)
                     return True
 
             for us in self.outList:
                 print(us)
                 if us.name==name:
                     self.outList.remove(us)
-                    for n in allNames:
+                    for n in self.allNames:
                         if n.name==name:
-                            allNames.remove(n)
+                            self.allNames.remove(n)
                     return True
 
             for us in self.maybeList:
                 print(us)
                 if us.name==name:
                     self.maybeList.remove(us)
-                    for n in allNames:
+                    for n in self.allNames:
                         if n.name==name:
-                            allNames.remove(n)
+                            self.allNames.remove(n)
                     return True
         except:
             print(traceback.format_exc())
 
     #ADD A NEW USER TO IN LIST
-    def addIn(self, user, allNames):
+    def addIn(self, user):
+
+        print(self.allNames)
 
         #ERROR FOR REPEATLY NAME IN SET COMMANDS
         if type(user.user_id)==str: 
-            for us in allNames:
+            for us in self.allNames:
                 if user.name==us.name and user.user_id!=us.user_id:
                     return 'AA'
 
-        for us in allNames:
+        for us in self.allNames:
             if us.first_name==user.first_name and us.username == user.username and us.user_id!=user.user_id:
                 return "AB"
 
@@ -163,43 +166,46 @@ class RollCall:
         for us in self.outList:
             if us.user_id == user.user_id:
                 self.outList.remove(us)
-                allNames.remove(us)
+                self.allNames.remove(us)
 
         #REMOVE THE USER FROM OTHER STATE
         for us in self.maybeList:
             if us.user_id == user.user_id:
                 self.maybeList.remove(us)
-                allNames.remove(us)
+                self.allNames.remove(us)
 
         #REMOVE THE USER FROM OTHER STATE
         for us in self.waitList:
             if us.user_id == user.user_id:
                 self.waitList.remove(us)
-                allNames.remove(us)
+                self.allNames.remove(us)
 
         #WAITLIST FEATURE. ADD USER TO WAITLIST IF IN LIST IS FULL
         if self.inListLimit!=None:
             if len(self.inList)==int(self.inListLimit):
                 self.waitList.append(user)
-                allNames.append(user)
+                self.allNames.append(user)
                 logging.info(f"The user {user.name} has been added to the Wait list")
                 return 'AC'
 
         #ADD THE USER TO THE STATE
         self.inList.append(user)
-        allNames.append(user)
+        self.allNames.append(user)
 
         logging.info(f"User {user.name} has change his state to in")
 
     #ADD A NEW USER TO OUT LIST
-    def addOut(self, user, allNames):
+    def addOut(self, user):
+
+        print(self.allNames)
+
         #ERROR FOR REPEATLY NAME IN SET COMMANDS
         if type(user.user_id)==str: 
-            for us in allNames:
+            for us in self.allNames:
                 if user.name==us.name and user.user_id!=us.user_id:
                     return 'AA'
 
-        for us in allNames:
+        for us in self.allNames:
             if us.first_name==user.first_name and us.username == user.username and us.user_id!=user.user_id:
                 return "AB"
 
@@ -217,19 +223,19 @@ class RollCall:
         for us in self.inList:
             if us.user_id == user.user_id:
                 self.inList.remove(us)
-                allNames.remove(us)
+                self.allNames.remove(us)
 
         #REMOVE THE USER FROM OTHER STATE
         for us in self.maybeList:
             if us.user_id == user.user_id:
                 self.maybeList.remove(us)
-                allNames.remove(us)
+                self.allNames.remove(us)
 
         if self.inListLimit!=None:
             for us in self.waitList:
                 if us.user_id==user.user_id:
                     self.waitList.remove(us)
-                    allNames.remove(us)
+                    self.allNames.remove(us)
 
         if self.inListLimit!=None:
             if len(self.inList)<int(self.inListLimit) and len(self.waitList)>0:
@@ -237,25 +243,28 @@ class RollCall:
                 self.inList.append(self.waitList[0])
                 self.waitList.pop(0)
                 self.outList.append(user)  
-                allNames.append(user)
+                self.allNames.append(user)
                 logging.info(f"User {user.name} has change his state to out")
                 return result
 
         #ADD THE USER TO THE STATE
         self.outList.append(user)  
-        allNames.append(user)
+        self.allNames.append(user)
 
         logging.info(f"User {user.name} has change his state to out")
 
     #ADD A NEW USER TO MAYBE LIST
-    def addMaybe(self, user, allNames):
+    def addMaybe(self, user):
+
+        print(self.allNames)
+
         #ERROR FOR REPEATLY NAME IN SET COMMANDS
         if type(user.user_id)==str: 
-            for us in allNames:
+            for us in self.allNames:
                 if user.name==us.name and user.user_id!=us.user_id:
                     return 'AA'
 
-        for us in allNames:
+        for us in self.allNames:
             if us.first_name==user.first_name and us.username == user.username and us.user_id!=user.user_id:
                 return "AB"
 
@@ -271,19 +280,19 @@ class RollCall:
         for us in self.outList:
             if us.user_id == user.user_id:
                 self.outList.remove(us)
-                allNames.remove(us)
+                self.allNames.remove(us)
 
         #REMOVE THE USER FROM OTHER STATE
         for us in self.inList:
             if us.user_id == user.user_id:
                 self.inList.remove(us)
-                allNames.remove(us)
+                self.allNames.remove(us)
 
         if self.inListLimit!=None:
             for us in self.waitList:
                 if us.user_id==user.user_id:
                     self.waitList.remove(us)
-                    allNames.remove(us)
+                    self.allNames.remove(us)
 
         if self.inListLimit!=None:
             if len(self.inList)<int(self.inListLimit) and len(self.waitList)>0:
@@ -291,13 +300,13 @@ class RollCall:
                 self.inList.append(self.waitList[0])
                 self.waitList.pop(0)
                 self.maybeList.append(user)
-                allNames.append(user)
+                self.allNames.append(user)
                 logging.info(f"User {user.name} has change his state to maybe")
                 return result
 
         #ADD THE USER TO THE STATE
         self.maybeList.append(user)
-        allNames.append(user)
+        self.allNames.append(user)
 
         logging.info(f"User {user.name} has change his state to maybe")
 

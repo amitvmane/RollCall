@@ -15,8 +15,9 @@ bot = telebot.TeleBot(token=TELEGRAM_TOKEN)
 class RollCall:
     #THIS IS THE ROLLCALL OBJECT
 
-    def __init__(self, _id=None, title=None, inList=[], outList=[], maybeList=[], waitList=[], inListLimit=None, reminder=None, finalizeDate=None, timezone='Asia/Calcutta', location=None, event_fee=None, createdDate=datetime.utcnow().strftime("%d-%m-%Y %H:%M:%S")):
-        self._id=_id
+    def __init__(self, rcId, chatId, _id, title=None, inList=[], outList=[], maybeList=[], waitList=[], inListLimit=None, reminder=None, finalizeDate=None, timezone='Asia/Calcutta', location=None, event_fee=None, createdDate=datetime.utcnow()):
+        self.rcId=rcId
+        self.chatId=chatId
         self.title= title
         self.inList= inList
         self.outList= outList
@@ -25,14 +26,12 @@ class RollCall:
         self.inListLimit= inListLimit
         self.reminder= reminder
         self.finalizeDate= finalizeDate
-        self.timezone= timezone
+        #self.timezone= timezone
         self.location= location
         self.event_fee= event_fee
         self.createdDate= createdDate
 
-        print(_id, title, inList, outList, maybeList, waitList, inListLimit, reminder, finalizeDate, timezone, location, event_fee, createdDate)
-
-    
+        print(rcId, chatId, title, inList, outList, maybeList, waitList, inListLimit, reminder, finalizeDate, timezone, location, event_fee, createdDate)
 
     #RETURN INLIST
     def inListText(self):
@@ -77,7 +76,7 @@ class RollCall:
         except:
             _datetime='Yet to decide'
 
-        txt="Title: "+self.title+f'\nID: {self._id}'+f"\nEvent time: {_datetime} {self.timezone if _datetime !='Yet to decide' else ''}\nLocation: {self.location if self.location!=None else 'Yet to decide'}\n\n"+(self.inListText() if self.inListText()!='In:\nNobody\n\n' else '')+(self.outListText() if self.outListText()!='Out:\nNobody\n\n' else '')+(self.maybeListText() if self.maybeListText()!='Maybe:\nNobody\n\n' else '')+(self.waitListText() if self.waitListText()!='Waiting:\nNobody' else '')+'Max limit: '+('♾' if self.inListLimit==None else str(self.inListLimit))
+        txt="Title: "+self.title+f'\nID: {self.rcId}'+f"\nEvent time: {_datetime} {self.timezone if _datetime !='Yet to decide' else ''}\nLocation: {self.location if self.location!=None else 'Yet to decide'}\n\n"+(self.inListText() if self.inListText()!='In:\nNobody\n\n' else '')+(self.outListText() if self.outListText()!='Out:\nNobody\n\n' else '')+(self.maybeListText() if self.maybeListText()!='Maybe:\nNobody\n\n' else '')+(self.waitListText() if self.waitListText()!='Waiting:\nNobody' else '')+'Max limit: '+('♾' if self.inListLimit==None else str(self.inListLimit))
         return txt
 
     #RETURN THE FINISH LIST (ONLY IN ERC COMMAND)
@@ -88,7 +87,7 @@ class RollCall:
             _datetime=''
 
         backslash='\n'
-        txt="Title: "+self.title+'\nID: '+'__RCID__'+f"{(backslash+'Event time: ' + _datetime + ' ' + self.timezone) if _datetime != '' else ''}{(backslash+'Location:' + self.location) if self.location!=None else ''}{(backslash+'Event Fee: ' + str(self.event_fee)) if self.event_fee != None else backslash*2+'In case of paid event - reach out to organiser for payment contribution'}{(backslash + 'Individual Fee: ' + str((round(int(re.sub(r'[^0-9]', '', self.event_fee))/len(self.inList), 2)) if len(self.inList)>0 else '0')) if self.event_fee!=None else ''}\n\n"+("Additional unknown/penalty fees are not included and needs to be handled separately.\n\n" if self.event_fee!=None else '')+(self.inListText() if self.inListText()!='In:\nNobody\n\n' else 'In:\nNobody\n\n')+(self.outListText() if self.outListText()!='Out:\nNobody\n\n' else 'Out:\nNobody\n\n')+(self.maybeListText() if self.maybeListText()!='Maybe:\nNobody\n\n' else 'Maybe:\nNobody\n\n')+(self.waitListText() if self.waitListText()!='Waiting:\nNobody' else '')+'Max limit: '+('♾' if self.inListLimit==None else str(self.inListLimit))
+        txt="Title: "+self.title+'\nID: '+self.rcId+f"{(backslash+'Event time: ' + _datetime + ' ' + self.timezone) if _datetime != '' else ''}{(backslash+'Location:' + self.location) if self.location!=None else ''}{(backslash+'Event Fee: ' + str(self.event_fee)) if self.event_fee != None else backslash*2+'In case of paid event - reach out to organiser for payment contribution'}{(backslash + 'Individual Fee: ' + str((round(int(re.sub(r'[^0-9]', '', self.event_fee))/len(self.inList), 2)) if len(self.inList)>0 else '0')) if self.event_fee!=None else ''}\n\n"+("Additional unknown/penalty fees are not included and needs to be handled separately.\n\n" if self.event_fee!=None else '')+(self.inListText() if self.inListText()!='In:\nNobody\n\n' else 'In:\nNobody\n\n')+(self.outListText() if self.outListText()!='Out:\nNobody\n\n' else 'Out:\nNobody\n\n')+(self.maybeListText() if self.maybeListText()!='Maybe:\nNobody\n\n' else 'Maybe:\nNobody\n\n')+(self.waitListText() if self.waitListText()!='Waiting:\nNobody' else '')+'Max limit: '+('♾' if self.inListLimit==None else str(self.inListLimit))
         
         return txt
 

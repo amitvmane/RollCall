@@ -27,7 +27,9 @@ def get_database(CONN_DB):
     client = MongoClient(CONN_DB)
     db_base = client['rollCallDatabase']
 
-    return db_base
+    print(db_base['rollCalls'])
+
+    return db_base, db_base['chats'], db_base['rollCalls']
 
 #FUNCTION TO RAISE RC ALREADY STARTED ERROR
 #USELESS IN NEW FEATURE

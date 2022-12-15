@@ -2,10 +2,11 @@ import logging
 import asyncio
 import telebot
 
-from config import TELEGRAM_TOKEN
+from config import TELEGRAM_TOKEN, CONN_DB
 from exceptions import *
 from functions import *
 from datetime import datetime
+from functions import get_database_chats
 
 import re
 import traceback
@@ -14,8 +15,8 @@ bot = telebot.TeleBot(token=TELEGRAM_TOKEN)
 
 class RollCall:
     #THIS IS THE ROLLCALL OBJECT
-
-    def __init__(self, rcId, chatId, _id, title=None, inList=[], outList=[], maybeList=[], waitList=[], inListLimit=None, reminder=None, finalizeDate=None, timezone='Asia/Calcutta', location=None, event_fee=None, createdDate=datetime.utcnow()):
+    get_database_chats
+    def __init__(self, rcId, chatId, _id, title=None, inList=[], outList=[], maybeList=[], waitList=[], inListLimit=None, reminder=None, finalizeDate=None, location=None, event_fee=None, createdDate=datetime.utcnow()):
         self.rcId=rcId
         self.chatId=chatId
         self.title= title
@@ -23,15 +24,14 @@ class RollCall:
         self.outList= outList
         self.maybeList= maybeList
         self.waitList= waitList
+        self.allNames= []
         self.inListLimit= inListLimit
+        #self.timezone= get_database_chats(CONN_DB).distinct('config.timezone', {"chatId":chatId})
         self.reminder= reminder
         self.finalizeDate= finalizeDate
-        #self.timezone= timezone
         self.location= location
         self.event_fee= event_fee
         self.createdDate= createdDate
-
-        print(rcId, chatId, title, inList, outList, maybeList, waitList, inListLimit, reminder, finalizeDate, timezone, location, event_fee, createdDate)
 
     #RETURN INLIST
     def inListText(self):
@@ -76,7 +76,9 @@ class RollCall:
         except:
             _datetime='Yet to decide'
 
-        txt="Title: "+self.title+f'\nID: {self.rcId}'+f"\nEvent time: {_datetime} {self.timezone if _datetime !='Yet to decide' else ''}\nLocation: {self.location if self.location!=None else 'Yet to decide'}\n\n"+(self.inListText() if self.inListText()!='In:\nNobody\n\n' else '')+(self.outListText() if self.outListText()!='Out:\nNobody\n\n' else '')+(self.maybeListText() if self.maybeListText()!='Maybe:\nNobody\n\n' else '')+(self.waitListText() if self.waitListText()!='Waiting:\nNobody' else '')+'Max limit: '+('♾' if self.inListLimit==None else str(self.inListLimit))
+      
+
+        txt="Title: "+self.title+f'\nID: {self.rcId}'+f"\nEvent time: {_datetime} {'a' if _datetime !='Yet to decide' else ''}\nLocation: {self.location if self.location!=None else 'Yet to decide'}\n\n"+(self.inListText() if self.inListText()!='In:\nNobody\n\n' else '')+(self.outListText() if self.outListText()!='Out:\nNobody\n\n' else '')+(self.maybeListText() if self.maybeListText()!='Maybe:\nNobody\n\n' else '')+(self.waitListText() if self.waitListText()!='Waiting:\nNobody' else '')+'Max limit: '+('♾' if self.inListLimit==None else str(self.inListLimit))
         return txt
 
     #RETURN THE FINISH LIST (ONLY IN ERC COMMAND)
@@ -86,39 +88,39 @@ class RollCall:
         except:
             _datetime=''
 
+      
+
         backslash='\n'
-        txt="Title: "+self.title+'\nID: '+self.rcId+f"{(backslash+'Event time: ' + _datetime + ' ' + self.timezone) if _datetime != '' else ''}{(backslash+'Location:' + self.location) if self.location!=None else ''}{(backslash+'Event Fee: ' + str(self.event_fee)) if self.event_fee != None else backslash*2+'In case of paid event - reach out to organiser for payment contribution'}{(backslash + 'Individual Fee: ' + str((round(int(re.sub(r'[^0-9]', '', self.event_fee))/len(self.inList), 2)) if len(self.inList)>0 else '0')) if self.event_fee!=None else ''}\n\n"+("Additional unknown/penalty fees are not included and needs to be handled separately.\n\n" if self.event_fee!=None else '')+(self.inListText() if self.inListText()!='In:\nNobody\n\n' else 'In:\nNobody\n\n')+(self.outListText() if self.outListText()!='Out:\nNobody\n\n' else 'Out:\nNobody\n\n')+(self.maybeListText() if self.maybeListText()!='Maybe:\nNobody\n\n' else 'Maybe:\nNobody\n\n')+(self.waitListText() if self.waitListText()!='Waiting:\nNobody' else '')+'Max limit: '+('♾' if self.inListLimit==None else str(self.inListLimit))
+        txt="Title: "+self.title+'\nID: '+self.rcId+f"{(backslash+'Event time: ' + _datetime + ' ' + 'a') if _datetime != '' else ''}{(backslash+'Location:' + self.location) if self.location!=None else ''}{(backslash+'Event Fee: ' + str(self.event_fee)) if self.event_fee != None else backslash*2+'In case of paid event - reach out to organiser for payment contribution'}{(backslash + 'Individual Fee: ' + str((round(int(re.sub(r'[^0-9]', '', self.event_fee))/len(self.inList), 2)) if len(self.inList)>0 else '0')) if self.event_fee!=None else ''}\n\n"+("Additional unknown/penalty fees are not included and needs to be handled separately.\n\n" if self.event_fee!=None else '')+(self.inListText() if self.inListText()!='In:\nNobody\n\n' else 'In:\nNobody\n\n')+(self.outListText() if self.outListText()!='Out:\nNobody\n\n' else 'Out:\nNobody\n\n')+(self.maybeListText() if self.maybeListText()!='Maybe:\nNobody\n\n' else 'Maybe:\nNobody\n\n')+(self.waitListText() if self.waitListText()!='Waiting:\nNobody' else '')+'Max limit: '+('♾' if self.inListLimit==None else str(self.inListLimit))
         
         return txt
 
     #DELETE A USER
     def delete_user(self, name):
 
-        allNames= [*self.inList, *self.outList, *self.maybeList, *self.waitList]
-
         try:
             for us in self.inList:
                 if us.name==name:
                     self.inList.remove(us)
-                    for n in allNames:
+                    for n in self.allNames:
                         if n.name==name:
-                            allNames.remove(n)
+                            self.allNames.remove(n)
                     return True
 
             for us in self.outList:
                 if us.name==name:
                     self.outList.remove(us)
-                    for n in allNames:
+                    for n in self.allNames:
                         if n.name==name:
-                            allNames.remove(n)
+                            self.allNames.remove(n)
                     return True
 
             for us in self.maybeList:
                 if us.name==name:
                     self.maybeList.remove(us)
-                    for n in allNames:
+                    for n in self.allNames:
                         if n.name==name:
-                            allNames.remove(n)
+                            self.allNames.remove(n)
                     return True
         except:
             print(traceback.format_exc())
@@ -126,17 +128,11 @@ class RollCall:
     #ADD A NEW USER TO IN LIST
     def addIn(self, user):
 
-        allNames= [*self.inList, *self.outList, *self.maybeList, *self.waitList]
-
         #ERROR FOR REPEATLY NAME IN SET COMMANDS
         if type(user.user_id)==str: 
-            for us in allNames:
+            for us in self.allNames:
                 if user.name==us.name and user.user_id!=us.user_id:
                     return 'AA'
-
-        # for us in allNames:
-        #     if us.first_name==user.first_name and us.username == user.username and us.user_id!=user.user_id:
-        #         return "AB"
 
         #ERROR FOR DUPLICATE USER IN THE SAME STATE
         for us in self.inList:
@@ -155,34 +151,6 @@ class RollCall:
                 if us.user_id==user.user_id and us.comment != user.comment:
                     us.comment=user.comment
                     return
-            
-
-            # if us.user_id == user.user_id and us.comment == user.comment:
-            #     return "AB"
-            # elif us.first_name==user.first_name and us.username == user.username and us.user_id!=user.user_id:
-            #     return "AB"
-            # elif us.user_id==user.user_id and us.comment != user.comment:
-            #     us.comment=user.comment
-            #     return
-
-        # if self.inListLimit!=None:
-        #     for us in self.waitList:
-        #         if us.user_id == user.user_id and us.comment == user.comment:
-        #             return "AB"
-        #         elif us.user_id==user.user_id and us.comment != user.comment:
-        #             us.comment=user.comment
-        #             return
-
-
-        # else:
-        #     for us in self.inList:
-        #         if us.user_id == user.user_id and us.comment == user.comment:
-        #             return "AB"
-        #         elif us.first_name==user.first_name and us.username == user.username and us.user_id!=user.user_id:
-        #             return "AB"
-        #         elif us.user_id==user.user_id and us.comment != user.comment:
-        #             us.comment=user.comment
-        #             return
 
         #REMOVE THE USER FROM OTHER STATE
         if user.lastState!=None:
@@ -191,46 +159,44 @@ class RollCall:
                 for us in self.outList:
                     if us.user_id == user.user_id:
                         self.outList.remove(us)
-                        allNames.remove(us)
+                        self.allNames.remove(us)
 
             if user.lastState=='maybe':
                 for us in self.maybeList:
                     if us.user_id == user.user_id:
                         self.maybeList.remove(us)
-                        allNames.remove(us)
+                        self.allNames.remove(us)
 
             if user.lastState=='maybe':
                 for us in self.waitList:
                     if us.user_id == user.user_id:
                         self.waitList.remove(us)
-                        allNames.remove(us)
+                        self.allNames.remove(us)
 
             #WAITLIST FEATURE. ADD USER TO WAITLIST IF IN LIST IS FULL
             if self.inListLimit!=None:
                 if len(self.inList)==int(self.inListLimit):
                     self.waitList.append(user)
-                    allNames.append(user)
+                    self.allNames.append(user)
                     logging.info(f"The user {user.name} has been added to the Wait list")
                     return 'AC'
 
         #ADD THE USER TO THE STATE
         self.inList.append(user)
-        allNames.append(user)
+        self.allNames.append(user)
 
         logging.info(f"User {user.name} has change his state to in")
 
     #ADD A NEW USER TO OUT LIST
     def addOut(self, user):
 
-        allNames= [*self.inList, *self.outList, *self.maybeList, *self.waitList]
-
         #ERROR FOR REPEATLY NAME IN SET COMMANDS
         if type(user.user_id)==str: 
-            for us in allNames:
+            for us in self.allNames:
                 if user.name==us.name and user.user_id!=us.user_id:
                     return 'AA'
 
-        for us in allNames:
+        for us in self.allNames:
             if us.first_name==user.first_name and us.username == user.username and us.user_id!=user.user_id:
                 return "AB"
 
@@ -248,19 +214,19 @@ class RollCall:
         for us in self.inList:
             if us.user_id == user.user_id:
                 self.inList.remove(us)
-                allNames.remove(us)
+                self.allNames.remove(us)
 
         #REMOVE THE USER FROM OTHER STATE
         for us in self.maybeList:
             if us.user_id == user.user_id:
                 self.maybeList.remove(us)
-                allNames.remove(us)
+                self.allNames.remove(us)
 
         if self.inListLimit!=None:
             for us in self.waitList:
                 if us.user_id==user.user_id:
                     self.waitList.remove(us)
-                    allNames.remove(us)
+                    self.allNames.remove(us)
 
         if self.inListLimit!=None:
             if len(self.inList)<int(self.inListLimit) and len(self.waitList)>0:
@@ -268,28 +234,26 @@ class RollCall:
                 self.inList.append(self.waitList[0])
                 self.waitList.pop(0)
                 self.outList.append(user)  
-                allNames.append(user)
+                self.allNames.append(user)
                 logging.info(f"User {user.name} has change his state to out")
                 return result
 
         #ADD THE USER TO THE STATE
         self.outList.append(user)  
-        allNames.append(user)
+        self.allNames.append(user)
 
         logging.info(f"User {user.name} has change his state to out")
 
     #ADD A NEW USER TO MAYBE LIST
     def addMaybe(self, user):
 
-        allNames= [*self.inList, *self.outList, *self.maybeList, *self.waitList]
-
         #ERROR FOR REPEATLY NAME IN SET COMMANDS
         if type(user.user_id)==str: 
-            for us in allNames:
+            for us in self.allNames:
                 if user.name==us.name and user.user_id!=us.user_id:
                     return 'AA'
 
-        for us in allNames:
+        for us in self.allNames:
             if us.first_name==user.first_name and us.username == user.username and us.user_id!=user.user_id:
                 return "AB"
 
@@ -305,19 +269,19 @@ class RollCall:
         for us in self.outList:
             if us.user_id == user.user_id:
                 self.outList.remove(us)
-                allNames.remove(us)
+                self.allNames.remove(us)
 
         #REMOVE THE USER FROM OTHER STATE
         for us in self.inList:
             if us.user_id == user.user_id:
                 self.inList.remove(us)
-                allNames.remove(us)
+                self.allNames.remove(us)
 
         if self.inListLimit!=None:
             for us in self.waitList:
                 if us.user_id==user.user_id:
                     self.waitList.remove(us)
-                    allNames.remove(us)
+                    self.allNames.remove(us)
 
         if self.inListLimit!=None:
             if len(self.inList)<int(self.inListLimit) and len(self.waitList)>0:
@@ -325,13 +289,13 @@ class RollCall:
                 self.inList.append(self.waitList[0])
                 self.waitList.pop(0)
                 self.maybeList.append(user)
-                allNames.append(user)
+                self.allNames.append(user)
                 logging.info(f"User {user.name} has change his state to maybe")
                 return result
 
         #ADD THE USER TO THE STATE
         self.maybeList.append(user)
-        allNames.append(user)
+        self.allNames.append(user)
 
         logging.info(f"User {user.name} has change his state to maybe")
 
@@ -339,7 +303,7 @@ class User:
 
     #USER OBJECT
 
-    def __init__(self, name, username, user_id):
+    def __init__(self, name, username, user_id, allNames):
         self.name=name
         self.first_name=name
         self.username=username

@@ -272,7 +272,6 @@ async def set_rollcall_time(message):
 
         tz=pytz.timezone(mngoChats.distinct('config.timezone', {"chatId":cid})[0])
         date=datetime.datetime.strptime(input_datetime, "%d-%m-%Y %H:%M")
-        date=tz.localize(date)
 
         now_date_string=datetime.datetime.now(tz).strftime("%d-%m-%Y %H:%M")
         now_date=datetime.datetime.strptime(now_date_string, "%d-%m-%Y %H:%M")
@@ -281,12 +280,12 @@ async def set_rollcall_time(message):
         ###
 
         #ERROR FOR INVALID DATETIME
-        if now_date > date:
+        if now_date.replace(tzinfo=None) > date:
             raise timeError("Please provide valid future datetime.")
             
         mngoRollCalls.update_one({'rcId':rc_number, 'chatId':cid}, {"$set":{"finalizeDate":date, "reminder":None}})
 
-        await bot.send_message(cid, f"Title: {rc['title']}\nID: {rc['title']}\n\nEvent notification time is set to {date.strftime('%d-%m-%Y %H:%M')}. Reminder has been reset!")
+        await bot.send_message(cid, f"Title: {rc['title']}\nID: {rc['title']}\n\nEvent notification time is set to {date}. Reminder has been reset!")
         
         if all(i['finalizeDate'] == None for i in chatRollCalls):
             asyncio.create_task(start(cid))
@@ -351,7 +350,7 @@ async def reminder(message):
 
         hour=pmts[0]
         
-        if datetime.datetime.strptime(rc['finalizeDate'], '%d-%m-%Y %H:%M') - datetime.timedelta(hours=int(hour)) < datetime.datetime.now(pytz.timezone(mngoChats.distinct('config.timezone', {"chatId":cid})[0])).replace(tzinfo=None ):
+        if rc['finalizeDate'] - datetime.timedelta(hours=int(hour)) < datetime.datetime.now(pytz.timezone(mngoChats.distinct('config.timezone', {"chatId":cid})[0])).replace(tzinfo=None ):
             raise incorrectParameter("Reminder notification time is less than current time, please set it correctly.")
 
         mngoRollCalls.update_one({'chatId':cid, 'rcId':rc_number}, {"$set":{"reminder":int(hour)}})
@@ -480,7 +479,7 @@ async def when(message):
         if rc['finalizeDate'] == None:
             raise incorrectParameter("There is no start time for the event")
 
-        await bot.send_message(cid, f"The event with title {rc['title']} will start at {rc['finalizeDate']}!")
+        await bot.send_message(cid, f"The event with title {rc['title']} will start at {rc['finalizeDate'].strftime('%d-%m-%Y %H:%M')}!")
 
     except Exception as e:
         await bot.send_message(cid, e)
@@ -489,18 +488,18 @@ async def when(message):
 @ bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/location")
 @ bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/loc")
 async def set_location(message):
+    
     try:
+        cid=message.chat.id
+        msg=message.text
         chatRollCalls = list(mngoRollCalls.find({"chatId":cid}))
-
-
+        
         if len(chatRollCalls)==0:
             raise rollCallNotStarted("Roll call is not active")
           
         if len(message.text.split(" ")) < 2:
             raise incorrectParameter("The correct format is /location <place>")
        
-        cid=message.chat.id
-        msg=message.text
         pmts=msg.split(" ")[1:]
         rc_number=1
 
@@ -515,12 +514,14 @@ async def set_location(message):
                 raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
 
         place=" ".join(pmts)
+        rc = next((x for x in chatRollCalls if x['rcId'] == rc_number), None)
 
-        chat[cid]['rollCalls'][rc_number].location=place
+        mngoRollCalls.update_one({"chatId":cid, 'rcId':rc_number}, {"$set":{"location":place}})
 
-        await bot.send_message(cid, f"The rollcall with title - {chat[cid]['rollCalls'][0].title} has a new location!")
+        await bot.send_message(cid, f"The rollcall with title - {rc['title']} has a new location!")
 
     except Exception as e:
+        print(e)
         await bot.send_message(cid, e)
 
 # SET A LIMIT FOR IN LIST
@@ -529,6 +530,8 @@ async def set_location(message):
 async def wait_limit(message):
     try:
         chatRollCalls = list(mngoRollCalls.find({"chatId":cid}))
+        cid=message.chat.id
+        msg=message.text
 
         # CHECK FOR RC ALREADY RUNNING
         if len(chatRollCalls)==0:
@@ -540,40 +543,38 @@ async def wait_limit(message):
                 "Input limit is missing or it's not a positive number")
 
         # DEFINING VARIABLES
-        msg= message.text
-        cid= message.chat.id
-        comment=""
         pmts=msg.split(" ")[1:]
         rc_number=1
         limit=int(pmts[0])
 
-        try:
-            if "::" in pmts[-1]:
-                try:
-                    rc_number=int(pmts[-1].replace("::",""))-1
-                    del pmts[-1]
-                except:
-                    raise incorrectParameter("The rollcall number must be a positive integer")
+        if "::" in pmts[-1]:
+            try:
+                rc_number=int(pmts[-1].replace("::",""))-1
+                del pmts[-1]
+            except:
+                raise incorrectParameter("The rollcall number must be a positive integer")
 
-                if rc_number not in [i['rcId'] for i in chatRollCalls]:
-                    raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
-        except:
-            pass
-
+            if rc_number not in [i['rcId'] for i in chatRollCalls]:
+                raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
+    
+        rc = next((x for x in chatRollCalls if x['rcId'] == rc_number), None)
+        
         # SETTING THE LIMIT TO INLIST
-        chat[cid]["rollCalls"][rc_number].inListLimit=limit
+        rc['inListLimit']=limit
         logging.info(f"Max limit of attendees is set to {limit}")
         await bot.send_message(cid, f'Max limit of attendees is set to {limit}')
 
         # MOVING USERS IF IN LIST HAS ALREADY REACH THE LIMIT
-        if len(chat[cid]["rollCalls"][rc_number].inList) > limit:
-            chat[cid]["rollCalls"][rc_number].waitList.extend(chat[cid]["rollCalls"][rc_number].inList[limit:])
-            chat[cid]["rollCalls"][rc_number].inList=chat[cid]["rollCalls"][rc_number].inList[:limit]
-        elif len(chat[cid]["rollCalls"][rc_number].inList) < limit:
-            a=int(limit-len(chat[cid]["rollCalls"][rc_number].inList))
-            chat[cid]["rollCalls"][rc_number].inList.extend(
-                chat[cid]["rollCalls"][rc_number].waitList[: limit-len(chat[cid]["rollCalls"][rc_number].inList)])
-            chat[cid]["rollCalls"][rc_number].waitList=chat[cid]["rollCalls"][rc_number].waitList[a:]
+        if len(rc['inList']) > limit:
+            rc['waitList'].extend(rc['inList'][limit:])
+            rc['inList']=rc['inList'][:limit]
+        elif len(rc['inList']) < limit:
+            a=int(limit-len(rc['inList']))
+            rc['inList'].extend(
+                rc['waitList'][: limit-len(rc['inList'])])
+            rc['waitList']=rc['waitList'][a:]
+
+        mngoRollCalls.replace_one({"chatId":cid, 'rcId':rc_number}, rc)
 
     except parameterMissing as e:
         print(traceback.format_exc())
@@ -630,17 +631,11 @@ async def delete_user(message):
 @ bot.message_handler(func=lambda message:message.text.lower().split("@")[0] =="/shh")
 async def shh(message):
     try:
-        chatRollCalls = list(mngoRollCalls.find({"chatId":cid}))
+        cid = message.chat.id
 
-
-        # CHECK FOR RC ALREADY RUNNING
-        if len(chatRollCalls)==0:
-            raise rollCallNotStarted("Roll call is not active")
-        else:
-
-            # DESACTIVE THE MINIMUM OUTPUT FEATURE
-            chat[message.chat.id]['shh']=True
-            await bot.send_message(message.chat.id, "Ok, i will keep quiet!")
+        # DESACTIVE THE MINIMUM OUTPUT FEATURE
+        mngoChats.update_one({"chatId":cid}, {"$set":{"config.shh":True}})
+        await bot.send_message(message.chat.id, "Ok, i will keep quiet!")
 
     except rollCallNotStarted as e:
         print(traceback.format_exc())
@@ -650,17 +645,11 @@ async def shh(message):
 @ bot.message_handler(func=lambda message:message.text.lower().split("@")[0] =="/louder")
 async def louder(message):
     try:
-        chatRollCalls = list(mngoRollCalls.find({"chatId":cid}))
+        cid = message.chat.id
 
-
-        # CHECK FOR RC ALREADY RUNNING
-        if len(chatRollCalls)==0:
-            raise rollCallNotStarted("Roll call is not active")
-        else:
-
-            # DESACTIVE THE MINIMUM OUTPUT FEATURE
-            chat[message.chat.id]['shh']=False
-            await bot.send_message(message.chat.id, "Ok, i can hear you!")
+        # DESACTIVE THE MINIMUM OUTPUT FEATURE
+        mngoChats.update_one({"chatId":cid}, {"$set":{"config.shh":False}})
+        await bot.send_message(message.chat.id, "Ok, i can hear you!")
 
     except rollCallNotStarted as e:
         print(traceback.format_exc())
@@ -669,19 +658,17 @@ async def louder(message):
 @ bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/in")
 async def in_user(message):
     try:
-
+        # DEFINING VARIABLES
+        msg= message.text
+        cid= message.chat.id
+        pmts= msg.split(" ")
+        comment=""
+        rc_number=1
         chatRollCalls = list(mngoRollCalls.find({"chatId":cid}))
         
         # CHECK FOR RC ALREADY RUNNING
         if len(chatRollCalls)==0:
             raise rollCallNotStarted("Roll call is not active")
-
-        # DEFINING VARIABLES
-        msg= message.text
-        pmts= msg.split(" ")
-        cid= message.chat.id
-        comment=""
-        rc_number=1
 
         if len(pmts)>1 and "::" in pmts[-1]:
             try:
@@ -694,7 +681,8 @@ async def in_user(message):
             if rc_number not in [i['rcId'] for i in chatRollCalls]:
                 raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
 
-        user =User(message.from_user.first_name, message.from_user.username if message.from_user.username != "" else "None", message.from_user.id, chat[cid]["allNames"][rc_number])
+        rc = RollCall(**next((x for x in chatRollCalls if x['rcId'] == rc_number), None))
+        user =User(message.from_user.first_name, message.from_user.username if message.from_user.username != "" else "None", message.from_user.id, rc.allNames)
         
         # DEFINING THE USER COMMENT
         arr= msg.split(" ")
@@ -704,16 +692,15 @@ async def in_user(message):
             user.comment=comment
 
         # ADDING THE USER TO THE LIST
-        result=chat[cid]["rollCalls"][rc_number].addIn(
-            user, chat[cid]["allNames"][rc_number])
+        result=rc.addIn(user)
         if result == 'AB':
             raise duplicateProxy("No duplicate proxy please :-), Thanks!")
         elif result == 'AC':
             await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
 
         # PRINTING THE LIST
-        if send_list(message, chat):
-            await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList().replace("__RCID__", str(rc_number+1)))
+        if mngoChats.distinct('config.shh',{"chatId":cid})[0]==False:
+            await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number+1)))
 
     except Exception as e:
         await bot.send_message(message.chat.id, e)
@@ -770,7 +757,7 @@ async def out_user(message):
                 await bot.send_message(cid, f"{result.name} now you are in!")
 
         # PRINTING THE LIST
-        if send_list(message, chat):
+        if mngoChats.distinct('config.shh',{"chatId":cid})[0]==False:
             await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList().replace("__RCID__", str(rc_number+1)))
 
     except Exception as e:
@@ -825,7 +812,7 @@ async def maybe_user(message):
                 await bot.send_message(cid, f"{result.name} now you are in!")
 
         # PRINTING THE LIST
-        if send_list(message, chat):
+        if mngoChats.distinct('config.shh',{"chatId":cid})[0]==False:
             await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList().replace("__RCID__", str(rc_number+1)))
 
     except Exception as e:
@@ -888,7 +875,7 @@ async def set_in_for(message):
                     await bot.send_message(cid, f"{result.name} now you are in!")
 
             # PRINTING THE LIST
-            if send_list(message, chat):
+            if mngoChats.distinct('config.shh',{"chatId":cid})[0]==False:
                 await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList().replace("__RCID__", str(rc_number+1)))
 
     except Exception as e:
@@ -951,7 +938,7 @@ async def set_out_for(message):
                     await bot.send_message(cid, f"{result.name} now you are in!")
 
             # PRINTING THE LIST
-            if send_list(message, chat):
+            if mngoChats.distinct('config.shh',{"chatId":cid})[0]==False:
                 await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList().replace("__RCID__", str(rc_number+1)))
 
     except Exception as e:
@@ -1020,7 +1007,7 @@ async def set_maybe_for(message):
                     await bot.send_message(cid, f"{result.name} now you are in!")
 
             # PRINTING THE LIST
-            if send_list(message, chat):
+            if mngoChats.distinct('config.shh',{"chatId":cid})[0]==False:
                 await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList().replace("__RCID__", str(rc_number+1)))
                 return
 

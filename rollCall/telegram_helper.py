@@ -3,47 +3,52 @@ import datetime
 import re
 import asyncio
 import json
+import traceback
 
 from telebot.async_telebot import AsyncTeleBot
-
 import pytz
 
-from functions import get_database
 from config import TELEGRAM_TOKEN, ADMINS, CONN_DB
 from exceptions import *
-from models import RollCall, User
+from models import  User, Database
 from functions import *
 from check_reminders import start
-import traceback
+
 
 bot = AsyncTeleBot(token=TELEGRAM_TOKEN)
 logging.info("Bot already started")
-
-db, mngoChats, mngoRollCalls=get_database(CONN_DB)
-
 
 # START COMMAND, SIMPLE TEXT
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/start")
 async def welcome_and_explanation(message):
     try:
         cid = message.chat.id
-        resp=mngoChats.find_one({"chatId":cid})
-         
+        db = Database(CONN_DB, cid)
+        resp = db.chat_collection.find_one({"_id":cid})
+   
         if resp==None:
+
             chat={
 
-                "chatId":cid,
+                "_id":cid,
 
                 "config":{
                     "adminRights":False,
                     "shh":False,
                     "timezone":"Asia/Calcutta",
                     "adminList":[]}
+
             }
 
-            mngoChats.insert_one(chat)
-            resp=mngoChats.find_one({"chatId":cid})
+            rc = {
+                "_id":cid,
 
+                'rollCalls':[]
+            }
+
+            db.chat_collection.insert_one(chat)
+            db.rc_collection.insert_one(rc)
+            
         # # CHECK FOR ADMIN RIGHTS
         if resp['config']['adminRights']==True:
 
@@ -55,7 +60,7 @@ async def welcome_and_explanation(message):
         await bot.send_message(message.chat.id, 'Hi! im RollCall!\n\nType /help to see all the commands')
 
     except Exception as e:
-        print(e)
+        print(traceback.format_exc())
 
 # HELP COMMAND WITH ALL THE COMMANDS
 @ bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/help")
@@ -66,38 +71,44 @@ async def help_commands(message):
 # SET ADMIN RIGHTS TO TRUE
 @ bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/set_admins")
 async def set_admins(message):
-   
-    #DEFINING VARIABLES
-    cid=message.chat.id
-    
-    #Test if user has permissions to use this command
-    permissions = await bot.get_chat_member(cid, message.from_user.id)
+    try:
 
-    if permissions.status not in ['admin', 'creator']:
-        await bot.send_message(cid, "You don't have permissions to use this command :(")
-        return
+        #DEFINING VARIABLES
+        cid=message.chat.id
+        db = Database(CONN_DB, cid)
         
-    # DEFINING NEW STATE OF ADMIN RIGTS
-    mngoChats.update_one({"chatId":cid}, {"$set":{"config.adminRights":True}})
+        #ONLY ADMIN USERS CAN USE THIS COMMAND
+        user_permissions = await bot.get_chat_member(cid, message.from_user.id) 
 
-    await bot.send_message(cid, 'Admin permissions activated')
+        if user_permissions not in ['admin', 'creator']:
+            await bot.send_message(cid, "You don't have permissions to use this command :(")
+            return
+
+        # DEFINING NEW STATE OF ADMIN RIGTS
+        db.chat_collection.update_one({"_id":cid}, {"$set":{"config.adminRights":True}})
+
+        await bot.send_message(cid, 'Admin permissions activated')
+    
+    except:
+        print(traceback.format_exc())
     
 # SET ADMIN RIGHTS TO FALSE
 @ bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/unset_admins")
 async def unset_admins(message):
 
     #DEFINING VARIABLES
-    cid=message.chat.id
+    cid = message.chat.id
+    db = Database(CONN_DB, cid)
 
-    #Test if user has permissions to use this command
-    permissions = await bot.get_chat_member(cid, message.from_user.id)
+    #ONLY ADMIN USERS CAN USE THIS COMMAND
+    user_permissions = await bot.get_chat_member(cid, message.from_user.id) 
 
-    if permissions.status not in ['admin', 'creator']:
+    if user_permissions not in ['admin', 'creator']:
         await bot.send_message(cid, "You don't have permissions to use this command :(")
         return
 
     # DEFINING NEW STATE OF ADMIN RIGTS
-    mngoChats.update_one({"chatId":cid}, {"$set":{"config.adminRights":False}})
+    db.chat_collection.update_one({"_id":cid}, {"$set":{"config.adminRights":False}})
 
     await bot.send_message(cid, 'Admin permissions disabled')
 
@@ -105,12 +116,14 @@ async def unset_admins(message):
 @ bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/broadcast" and message.from_user.id in ADMINS)
 async def broadcast(message):
 
+    db = Database(CONN_DB)
+
     if len(message.text.split(" ")) < 1:
         await bot.send_message(message.chat.id, "Message is missing")
 
     msg = message.text.split(" ")[1:]
 
-    ids = mngoChats.distinct("chatId")
+    ids = db.chat_collection.distinct("_id")
 
     for k in ids:
         try:
@@ -123,8 +136,9 @@ async def broadcast(message):
 @ bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/tz")
 async def config_timezone(message):
     try:
-        msg=message.text
-        cid=message.chat.id
+        msg = message.text
+        cid = message.chat.id
+        db = Database(CONN_DB, cid)
 
         if len(msg.split(" ")) < 2:
             raise parameterMissing(
@@ -137,7 +151,7 @@ async def config_timezone(message):
         timezone=auto_complete_timezone(" ".join(msg.split(" ")[1:]))
 
         if timezone != None:
-            mngoChats.update_one({"chatId":cid}, {"$set":{"config.timezone":timezone}})
+            db.chat_collection.update_one({"_id":cid}, {"$set":{"config.timezone":timezone}})
             await bot.send_message(message.chat.id, f"Your timezone has been set to {timezone}")
 
         else:
@@ -166,22 +180,25 @@ async def version_command(message):
         
 #GET ALL ROLLCALLS OF THE CURRENT CHAT
 @ bot.message_handler(func = lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/rollcalls")
-@ bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/r")
+@ bot.message_handler(func = lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/r")
 async def rollCalls(message):
     try:
 
+        #DEFINING VARIABLES
         cid = message.chat.id
-        chatRollCalls = list(mngoRollCalls.find({"chatId":cid}))
+        db = Database(CONN_DB, cid)
+        chat_roll_calls = db.chat_roll_calls
+        chat_config = db.chat_config
 
-        if len(chatRollCalls)==0:
+        #ERROR IF NOT EXISTS ANY ROLLCALLS
+        if len(chat_roll_calls)==0:
             await bot.send_message(cid, "There are not rollcalls yet")
 
-        for rollCall in chatRollCalls:
-            del rollCall['_id']
-            rollCall = RollCall(**rollCall)
-         
-            id=str(rollCall.rcId)
-            await bot.send_message(cid, f"Rollcall number {id}\n\n"+rollCall.allList())
+        res = db.allRollCallsInfo(cid)
+
+        for r in res:
+            await bot.send_message(cid, r)
+    
     except Exception as e:
         print(traceback.format_exc())
         print(e)
@@ -191,27 +208,29 @@ async def rollCalls(message):
 @ bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/src")
 async def start_roll_call(message):
 
-    # DEFINING VARIABLES
-    cid=message.chat.id
-    msg=message.text
-    configChat = mngoChats.distinct('config', {"chatId":cid})[0]
-    chatRollCalls = list(mngoRollCalls.find({"chatId":cid}))
-    ids_to_use=[1,2,3]
-    title=''
 
     try:
+        # DEFINING VARIABLES
+        cid = message.chat.id
+        msg = message.text
+        title='<Empty>'
+        db = Database(CONN_DB, cid)
+        active_roll_calls = db.chat_roll_calls
+        chat_config = db.chat_config
+        ids_to_use = [1,2,3]
 
         #MAXIMUM ROLLCALLS ERROR
-        if len(chatRollCalls)>=3:
+        if len(active_roll_calls)>=3:
             raise amountOfRollCallsReached("Allowed Maximum number of active roll calls per group is 3.")
 
         # CHECK FOR ADMIN RIGHTS
-        if configChat['adminRights']==True:
+        if chat_config['adminRights']==True:
             if not admin_rights(message):
                 await bot.send_message(message.chat.id, "Error - user does not have sufficient permissions for this operation")
                 return
 
-        ids_used=[i['rcId'] for i in chatRollCalls]
+        #GET AVAILABLE ROLLCALLS ID'S
+        ids_used=[i['rcId'] for i in active_roll_calls]
         ids_to_use=list(set(ids_to_use)-set(ids_used))
 
         # SET THE RC TITLE
@@ -219,11 +238,30 @@ async def start_roll_call(message):
         if len(arr) > 1:
             arr.pop(0)
             title=' '.join(arr)
-        else:
-            title='<Empty>'
+       
+       
+        #CREATING ROLLCALL OBJECT
+        roll_call = {
 
-        # ADD RC TO LIST
-        mngoRollCalls.insert_one(RollCall(ids_to_use[0], cid, title).__dict__)
+            "rcId": ids_to_use[0],
+            "title": title,
+            "inList": [],
+            "outList": [],
+            "maybeList": [],
+            "waitList": [],
+            "allNames": [],
+            "inListLimit": None,
+            "reminder": None,
+            "finalizeDate": None,
+            "location": None,
+            "event_fee": None,
+            "createdDate": datetime.datetime.utcnow()
+
+        }
+
+        #UPDATING RC TO DB
+        db.rc_collection.update_one({"_id":cid}, {"$push":{"rollCalls":roll_call}})
+
         await bot.send_message(message.chat.id, f"Roll call with title: {title} started!")
 
     except Exception as e:
@@ -238,60 +276,51 @@ async def set_rollcall_time(message):
 
         cid = message.chat.id
         msg = message.text
-        rc_number = 1 #DEFAULT RC NUMBER
         pmts = msg.split(" ")[1:]
-        chatRollCalls = list(mngoRollCalls.find({"chatId":cid}))
+        db = Database(CONN_DB, cid)
+        chat_roll_calls = db.chat_roll_calls
+        chat_config = db.chat_config
 
-        if len(chatRollCalls)==0:
+        if len(chat_roll_calls)==0:
             raise rollCallNotStarted("Roll call is not active")
         
         if len(message.text.split(" ")) <= 2 and pmts[0]!='cancel':
             raise parameterMissing("invalid datetime format, refer help section for details")
 
-        #IF RC_NUMBER IS SPECIFIED IN PARAMETERS THEN STORE THE VALUE
-        if len(pmts)>1 and "::" in pmts[-1]:
-            try:
-                rc_number=int(pmts[-1].replace("::",""))
-                del pmts[-1]
-            except:
-                raise incorrectParameter("The rollcall number must be a positive integer")
+        #ASSIGN ROLLCALL ID
+        rc_number = get_rc_number(chat_roll_calls, pmts)
 
-            if rc_number not in [i['rcId'] for i in chatRollCalls]:
-                raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
-
-        rc = next((x for x in chatRollCalls if x['rcId'] == rc_number), None)
+        #GET ROLLCALL
+        rc = db.rollCallInfo(rc_number)
 
         #CANCEL THE CURRENT REMINDER TIME
         if (pmts[0]).lower() == 'cancel':
-            mngoRollCalls.update_one({'chatId':cid, 'rcId':rc_number}, {"$set":{"finalizeDate":None, "reminder":None}})
-            await bot.send_message(message.chat.id, f"Reminder time of rollcall with title {rc['title']} has been canceled.")
+            db.rc_collection.update_one({'_id':1873806303, 'rollCalls.rcId':1}, {"$set":{"rollCalls.$.finalizeDate":None, "rollCalls.$.reminder":None}})
+            await bot.send_message(message.chat.id, f"Title: {rc['title']}\nID: {rc['rcId']}\n\nReminder time has been canceled.")
             return
 
         #PARSING INPUT DATETIME
         input_datetime=" ".join(pmts).strip()
 
-        tz=pytz.timezone(mngoChats.distinct('config.timezone', {"chatId":cid})[0])
+        tz=pytz.timezone(chat_config['timezone'])
         date=datetime.datetime.strptime(input_datetime, "%d-%m-%Y %H:%M")
 
         now_date_string=datetime.datetime.now(tz).strftime("%d-%m-%Y %H:%M")
         now_date=datetime.datetime.strptime(now_date_string, "%d-%m-%Y %H:%M")
         now_date=tz.localize(now_date)
 
-        ###
-
         #ERROR FOR INVALID DATETIME
         if now_date.replace(tzinfo=None) > date:
             raise timeError("Please provide valid future datetime.")
             
-        mngoRollCalls.update_one({'rcId':rc_number, 'chatId':cid}, {"$set":{"finalizeDate":date, "reminder":None}})
+        db.rc_collection.update_one({'_id':1873806303, 'rollCalls.rcId':1}, {"$set":{"rollCalls.$.finalizeDate":date, "rollCalls.$.reminder":None}})
 
-        await bot.send_message(cid, f"Title: {rc['title']}\nID: {rc['title']}\n\nEvent notification time is set to {date}. Reminder has been reset!")
+        await bot.send_message(cid, f"Title: {rc['title']}\nID: {rc['rcId']}\n\nEvent notification time is set to {date}. Reminder has been reset!")
         
-        if all(i['finalizeDate'] == None for i in chatRollCalls):
+        if all(i['finalizeDate'] == None for i in chat_roll_calls):
             asyncio.create_task(start(cid))
         
     except Exception as e:
-        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
 
 #SET A ROLLCALL REMINDER
@@ -304,45 +333,38 @@ async def reminder(message):
     msg=message.text
     rc_number=1 #RC NUMBER DEFAULT
     pmts=msg.split(" ")[1:]
-    chatRollCalls = list(mngoRollCalls.find({"chatId":cid}))
+    db = Database(CONN_DB, cid)
+    chat_roll_calls = db.chat_roll_calls
+    chat_config = db.chat_config
 
     try:
-        if len(chatRollCalls)==0:
+        if len(chat_roll_calls)==0:
             raise rollCallNotStarted("Roll call is not active")
 
-        #IF NUMBER HAS 00:00 FORMAT
+        #IF NUMBER HAS 00:00 FORMAT REPLACE IT TO 0:0
         if pmts[0]!='cancel' and len(pmts[0])==2:
             if pmts[0][0]=="0":
                 pmts[0]=pmts[0][1]
 
-        #IF RC_NUMBER IS SPECIFIED IN PARAMETERS THEN STORE THE VALUE
-        if len(pmts)>1 and "::" in pmts[-1]:
-            try:
-                rc_number=int(pmts[-1].replace("::",""))-1
-                del pmts[-1]
-            except:
-                raise incorrectParameter("The rollcall number must be a positive integer")
-
-            if rc_number not in [i['rcId'] for i in chatRollCalls]:
-                raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
+        #ASSIGN ROLLCALL ID
+        rc_number = get_rc_number(chat_roll_calls, pmts)
         
-        rc = next((x for x in chatRollCalls if x['rcId'] == rc_number), None)
+        #GET ROLLCALL
+        rc = db.rollCallInfo(rc_number)
 
         #IF NOT EXISTS A FINALIZE DATE, RAISE ERROR
         if rc['finalizeDate'] == None:
-            raise parameterMissing(
-                'First you need to set a finalize time for the current rollcall')
+            raise parameterMissing('First you need to set a finalize time for the current rollcall')
 
         #CANCEL REMINDER
         if pmts[0].lower() == 'cancel':
-            mngoRollCalls.update_one({'chatId':cid, 'rcId':rc_number}, {"$set":{"reminder":None}})
+            db.rc_collection.update_one({'_id':1873806303, 'rollCalls.rcId':1}, {"$set":{"rollCalls.$.reminder":None}})
             await bot.send_message(message.chat.id, "Reminder Notification is canceled.")
             return
             
         #IF THERE ARE NOT PARAMETERS RAISE ERROR
         if len(pmts) == 0 or not pmts[0].isdigit(): 
-            raise parameterMissing(
-                "The format is /set_rollcall_reminder hours")
+            raise parameterMissing("The format is /set_rollcall_reminder hours")
 
         #IF HOUR IS NOT POSITIVE
         if int(pmts[0]) < 0 or int(pmts[0]) < 1:
@@ -350,11 +372,11 @@ async def reminder(message):
 
         hour=pmts[0]
         
-        if rc['finalizeDate'] - datetime.timedelta(hours=int(hour)) < datetime.datetime.now(pytz.timezone(mngoChats.distinct('config.timezone', {"chatId":cid})[0])).replace(tzinfo=None ):
+        #Reminder notification time is less than current time
+        if rc['finalizeDate'] - datetime.timedelta(hours=int(hour)) < datetime.datetime.now(pytz.timezone(chat_config['timezone'])).replace(tzinfo=None ):
             raise incorrectParameter("Reminder notification time is less than current time, please set it correctly.")
 
-        mngoRollCalls.update_one({'chatId':cid, 'rcId':rc_number}, {"$set":{"reminder":int(hour)}})
-
+        db.rc_collection.update_one({'_id':1873806303, 'rollCalls.rcId':1}, {"$set":{"rollCalls.$.reminder":hour}})
         await bot.send_message(cid, f'I will remind {hour} hour/s before the event! Thank you!')
         
     except ValueError as e:
@@ -373,23 +395,15 @@ async def event_fee(message):
     cid=message.chat.id
     pmts=message.text.split(" ")[1:]
     rc_number=1
-    chatRollCalls = list(mngoRollCalls.find({"chatId":cid}))
+    db = Database(CONN_DB, cid)
+    chat_roll_calls = db.chat_roll_calls
 
-    
     try:
-        if len(chatRollCalls)==0:
+        if len(chat_roll_calls)==0:
             raise rollCallNotStarted("Roll call is not active")
         
-        #IF RC_NUMBER IS SPECIFIED, STORE IT
-        if len(pmts)>1 and "::" in pmts[-1]:
-            try:
-                rc_number=int(pmts[-1].replace("::",""))-1
-                del pmts[-1]
-            except:
-                raise incorrectParameter("The rollcall number must be a positive integer")
-
-            if rc_number not in [i['rcId'] for i in chatRollCalls]:
-                raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
+        #ASSIGN ROLLCALL ID
+        rc_number = get_rc_number(chat_roll_calls, pmts)
         
         event_price=" ".join(pmts)
         event_price_number=re.findall('[0-9]+', event_price)
@@ -397,10 +411,7 @@ async def event_fee(message):
         if len(event_price_number)==0 or int(event_price_number[0])<=0:
             raise incorrectParameter("The correct format is '/event_fee Integer' Where 'Integer' it's up to 0 number")
 
-
-        mngoRollCalls.update_one({'chatId':cid, 'rcId':rc_number}, {"$set":{"event_fee":int(event_price)}})
-
-
+        db.rc_collection.update_one({'_id':cid, 'rollCalls.rcId':rc_number}, {"$set":{"rollCalls.$.event_fee":int(event_price)}})
         await bot.send_message(cid, f"Event Fee set to {event_price}\n\nAdditional unknown/penalty fees are not included and needs to be handled separately.")
 
     except Exception as e:
@@ -415,27 +426,20 @@ async def individual_fee(message):
     cid=message.chat.id
     pmts=message.text.split(" ")[1:]
     rc_number=1
-    chatRollCalls = list(mngoRollCalls.find({"chatId":cid}))
+    db = Database(CONN_DB, cid)
+    chat_roll_calls = db.chat_roll_calls
     
     try:
-        if len(chatRollCalls)==0:
+        if len(chat_roll_calls)==0:
             raise rollCallNotStarted("Roll call is not active")
         
-        #IF RC_NUMBER IS SPECIFIED, STORE IT
-        if len(pmts)>1 and "::" in pmts[-1]:
-            try:
-                rc_number=int(pmts[-1].replace("::",""))-1
-                del pmts[-1]
-            except:
-                raise incorrectParameter("The rollcall number must be a positive integer")
-
-            if rc_number not in [i['rcId'] for i in chatRollCalls]:
-                raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
+        #ASSIGN ROLLCALL ID
+        rc_number = get_rc_number(chat_roll_calls, pmts)
         
-        rc = RollCall(**next((x for x in chatRollCalls if x['rcId'] == rc_number), None))
+        rc = db.rollCallInfo(rc_number)
 
-        in_list=len(rc.inList)
-        event_price=int(re.sub(r'[^0-9]', "", str(rc.event_fee)))
+        in_list=len(rc['inList'])
+        event_price=int(re.sub(r'[^0-9]', "", str(rc['event_fee'])))
 
         if in_list>0:
             individual_fee=round(event_price/in_list, 2)
@@ -455,31 +459,23 @@ async def when(message):
     cid=message.chat.id
     pmts=message.text.split(" ")
     rc_number=1
-    chatRollCalls = list(mngoRollCalls.find({"chatId":cid}))
+    db = Database(CONN_DB, cid)
+    chat_roll_calls = db.chat_roll_calls
+    chat_config = db.chat_config
 
     try:
-        if len(chatRollCalls)==0:
+        if len(chat_roll_calls)==0:
             raise rollCallNotStarted("Roll call is not active")
 
-         #IF RC_NUMBER IS SPECIFIED, STORE IT
-        if len(pmts)>1 and "::" in pmts[-1]:
-            try:
-                rc_number=int(pmts[-1].replace("::",""))-1
-                del pmts[-1]
-            except:
-                raise incorrectParameter("The rollcall number must be a positive integer")
+        #ASSIGN ROLLCALL ID
+        rc_number = get_rc_number(chat_roll_calls, pmts)
 
-            if rc_number not in [i['rcId'] for i in chatRollCalls]:
-                raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
-
-        rc = next((x for x in chatRollCalls if x['rcId'] == rc_number), None)
-
-        print(rc)
+        rc = db.rollCallInfo(rc_number)
 
         if rc['finalizeDate'] == None:
             raise incorrectParameter("There is no start time for the event")
 
-        await bot.send_message(cid, f"The event with title {rc['title']} will start at {rc['finalizeDate'].strftime('%d-%m-%Y %H:%M')}!")
+        await bot.send_message(cid, f"The event with title {rc['title']} will start at {rc['finalizeDate'].strftime('%d-%m-%Y %H:%M')} {chat_config['timezone']}!")
 
     except Exception as e:
         await bot.send_message(cid, e)
@@ -492,32 +488,25 @@ async def set_location(message):
     try:
         cid=message.chat.id
         msg=message.text
-        chatRollCalls = list(mngoRollCalls.find({"chatId":cid}))
+        rc_number=1
+        db = Database(CONN_DB, cid)
+        chat_roll_calls = db.chat_roll_calls
         
-        if len(chatRollCalls)==0:
+        if len(chat_roll_calls)==0:
             raise rollCallNotStarted("Roll call is not active")
           
         if len(message.text.split(" ")) < 2:
             raise incorrectParameter("The correct format is /location <place>")
        
         pmts=msg.split(" ")[1:]
-        rc_number=1
-
-        if len(pmts)>1 and "::" in pmts[-1]:
-            try:
-                rc_number=int(pmts[-1].replace("::",""))-1
-                del pmts[-1]
-            except:
-                raise incorrectParameter("The rollcall number must be a positive integer")
-
-            if rc_number not in [i['rcId'] for i in chatRollCalls]:
-                raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
+        
+        #ASSIGN ROLLCALL ID
+        rc_number = get_rc_number(chat_roll_calls, pmts)
 
         place=" ".join(pmts)
-        rc = next((x for x in chatRollCalls if x['rcId'] == rc_number), None)
+        rc = db.rollCallInfo(rc_number)
 
-        mngoRollCalls.update_one({"chatId":cid, 'rcId':rc_number}, {"$set":{"location":place}})
-
+        db.rc_collection.update_one({'_id':cid, 'rollCalls.rcId':rc_number}, {"$set":{"rollCalls.$.location":place}})
         await bot.send_message(cid, f"The rollcall with title - {rc['title']} has a new location!")
 
     except Exception as e:
@@ -529,35 +518,29 @@ async def set_location(message):
 @ bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/sl")
 async def wait_limit(message):
     try:
-        chatRollCalls = list(mngoRollCalls.find({"chatId":cid}))
         cid=message.chat.id
         msg=message.text
+        rc_number=1
+        db = Database(CONN_DB, cid)
+        chat_roll_calls = db.chat_roll_calls
 
         # CHECK FOR RC ALREADY RUNNING
-        if len(chatRollCalls)==0:
+        if len(chat_roll_calls)==0:
             raise rollCallNotStarted("Roll call is not active")
 
         # CHECK FOR PARAMETERS MISSING
         if len(message.text.split(" ")) <= 1 or int(message.text.split(" ")[1])<0:
-            raise parameterMissing(
-                "Input limit is missing or it's not a positive number")
+            raise parameterMissing("Input limit is missing or it's not a positive number")
 
         # DEFINING VARIABLES
         pmts=msg.split(" ")[1:]
-        rc_number=1
         limit=int(pmts[0])
 
-        if "::" in pmts[-1]:
-            try:
-                rc_number=int(pmts[-1].replace("::",""))-1
-                del pmts[-1]
-            except:
-                raise incorrectParameter("The rollcall number must be a positive integer")
-
-            if rc_number not in [i['rcId'] for i in chatRollCalls]:
-                raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
+        #ASSIGN ROLLCALL ID
+        rc_number = get_rc_number(chat_roll_calls, pmts)
     
-        rc = next((x for x in chatRollCalls if x['rcId'] == rc_number), None)
+        #GET ROLLCALL
+        rc = db.rollCallInfo(rc_number)
         
         # SETTING THE LIMIT TO INLIST
         rc['inListLimit']=limit
@@ -574,13 +557,9 @@ async def wait_limit(message):
                 rc['waitList'][: limit-len(rc['inList'])])
             rc['waitList']=rc['waitList'][a:]
 
-        mngoRollCalls.replace_one({"chatId":cid, 'rcId':rc_number}, rc)
+        db.rc_collection.update_one({"_id":cid, "rollCalls.rcId":rc_number}, {"$set":{"rollCalls.$":rc}})
 
-    except parameterMissing as e:
-        print(traceback.format_exc())
-        await bot.send_message(message.chat.id, e)
-    except rollCallNotStarted as e:
-        print(traceback.format_exc())
+    except Exception as e:
         await bot.send_message(message.chat.id, e)
 
 #DELETE AN USER OF A ROLLCALL
@@ -588,39 +567,38 @@ async def wait_limit(message):
 async def delete_user(message):
     try:
 
-        chatRollCalls = list(mngoRollCalls.find({"chatId":cid}))
-
-
-        # CHECK FOR RC ALREADY RUNNING
-        if len(chatRollCalls)==0:
-            raise rollCallNotStarted("Roll call is not active")
-        # CHECK FOR PARAMETER MISSING
-        elif len(message.text.split(" ")) <= 1:
-            raise parameterMissing("Input username is missing")
-        # CHECK FOR ADMING RIGHTS
-        if admin_rights(message, chat) == False:
-            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
-
         # DEFINE VARIABLES
         msg=message.text
         cid=message.chat.id
         arr=msg.split(" ")
         rc_number=1
- 
-        if len(arr)>1 and "::" in arr[-1]:
-            try:
-                rc_number=int(arr[-1].replace("::",""))-1
-                del arr[-1]
-            except:
-                raise incorrectParameter("The rollcall number must be a positive integer")
+        db = Database(CONN_DB, cid)
+        chat_roll_calls = db.chat_roll_calls
+        chat_config = db.chat_config
 
-            if rc_number not in [i['rcId'] for i in chatRollCalls]:
-                raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
+        # CHECK FOR RC ALREADY RUNNING
+        if len(chat_roll_calls)==0:
+            raise rollCallNotStarted("Roll call is not active")
+
+        # CHECK FOR PARAMETER MISSING
+        elif len(message.text.split(" ")) <= 1:
+            raise parameterMissing("Input username is missing")
+
+        # CHECK FOR ADMIN RIGHTS
+        if chat_config['adminRights']==True:
+            if not admin_rights(message):
+                await bot.send_message(message.chat.id, "Error - user does not have sufficient permissions for this operation")
+                return
+
+        #ASSIGN ROLLCALL ID
+        rc_number = get_rc_number(chat_roll_calls, pmts)
         
         # DELETE THE USER
         name=" ".join(arr[1:])
-        if chat[cid]["rollCalls"][rc_number].delete_user(name, chat[cid]["allNames"][rc_number]) == True:
+
+        if db.delete_user(name, cid, rc_number):
             await bot.send_message(cid, "The user was deleted!")
+
         else:
             await bot.send_message(cid, "That user wasn't found")
 
@@ -632,9 +610,10 @@ async def delete_user(message):
 async def shh(message):
     try:
         cid = message.chat.id
+        db = Database(CONN_DB, cid)
 
         # DESACTIVE THE MINIMUM OUTPUT FEATURE
-        mngoChats.update_one({"chatId":cid}, {"$set":{"config.shh":True}})
+        db.chat_collection.update_one({"_id":cid}, {"$set":{"config.shh":True}})
         await bot.send_message(message.chat.id, "Ok, i will keep quiet!")
 
     except rollCallNotStarted as e:
@@ -646,15 +625,18 @@ async def shh(message):
 async def louder(message):
     try:
         cid = message.chat.id
+        db = Database(CONN_DB, cid)
+
 
         # DESACTIVE THE MINIMUM OUTPUT FEATURE
-        mngoChats.update_one({"chatId":cid}, {"$set":{"config.shh":False}})
+        db.chat_collection.update_one({"_id":cid}, {"$set":{"config.shh":False}})
         await bot.send_message(message.chat.id, "Ok, i can hear you!")
 
     except rollCallNotStarted as e:
         print(traceback.format_exc())
         await bot.send_message(message.chat.id, "Roll call is not active")
 
+#CHANGE STATE TO IN
 @ bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/in")
 async def in_user(message):
     try:
@@ -664,25 +646,18 @@ async def in_user(message):
         pmts= msg.split(" ")
         comment=""
         rc_number=1
-        chatRollCalls = list(mngoRollCalls.find({"chatId":cid}))
+        db = Database(CONN_DB, cid)
+        chat_roll_calls = db.chat_roll_calls
+        chat_config = db.chat_config
         
         # CHECK FOR RC ALREADY RUNNING
-        if len(chatRollCalls)==0:
+        if len(chat_roll_calls)==0:
             raise rollCallNotStarted("Roll call is not active")
 
-        if len(pmts)>1 and "::" in pmts[-1]:
-            try:
-                rc_number=int(pmts[-1].replace("::",""))-1
-                del pmts[-1]
-                msg=" ".join(pmts)
-            except:
-                raise incorrectParameter("The rollcall number must be a positive integer")
+        #ASSIGN ROLLCALL ID
+        rc_number = get_rc_number(chat_roll_calls, pmts)
 
-            if rc_number not in [i['rcId'] for i in chatRollCalls]:
-                raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
-
-        rc = RollCall(**next((x for x in chatRollCalls if x['rcId'] == rc_number), None))
-        user =User(message.from_user.first_name, message.from_user.username if message.from_user.username != "" else "None", message.from_user.id, rc.allNames)
+        user =User(message.from_user.first_name, message.from_user.username if message.from_user.username != "" else "None", message.from_user.id)
         
         # DEFINING THE USER COMMENT
         arr= msg.split(" ")
@@ -692,29 +667,25 @@ async def in_user(message):
             user.comment=comment
 
         # ADDING THE USER TO THE LIST
-        result=rc.addIn(user)
-        if result == 'AB':
+        result=db.addIn(user, cid, rc_number)
+
+        if result == 'Error 1':
             raise duplicateProxy("No duplicate proxy please :-), Thanks!")
         elif result == 'AC':
             await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
 
         # PRINTING THE LIST
-        if mngoChats.distinct('config.shh',{"chatId":cid})[0]==False:
-            await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number+1)))
+        if not chat_config['shh']:
+            await bot.send_message(cid, db.allList(cid, rc_number))
 
     except Exception as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
 
+#CHANGE STATE TO OUT
 @ bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/out")
 async def out_user(message):
     try:
-
-        chatRollCalls = list(mngoRollCalls.find({"chatId":cid}))
-
-        # CHECK FOR RC ALREADY RUNNING
-        if len(chatRollCalls)==0:
-            raise rollCallNotStarted("Roll call is not active")
-        
 
         # DEFINING VARIABLES
         msg= message.text
@@ -722,21 +693,18 @@ async def out_user(message):
         cid= message.chat.id
         comment=""
         rc_number=1
+        db = Database(CONN_DB, cid)
+        chat_roll_calls = db.chat_roll_calls
+        chat_config = db.chat_config
 
+        # CHECK FOR RC ALREADY RUNNING
+        if len(chat_roll_calls)==0:
+            raise rollCallNotStarted("Roll call is not active")
         
-        if len(pmts)>1 and "::" in pmts[-1]:
-            try:
-                rc_number=int(pmts[-1].replace("::",""))-1
-                del pmts[-1]
-                msg=" ".join(pmts)
-            except:
-                raise incorrectParameter("The rollcall number must be a positive integer")
-
-            if rc_number not in [i['rcId'] for i in chatRollCalls]:
-                raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
+        #ASSIGN ROLLCALL ID
+        rc_number = get_rc_number(chat_roll_calls, pmts)
         
-
-        user= User(message.from_user.first_name, message.from_user.username, message.from_user.id, chat[cid]["allNames"][rc_number])
+        user= User(message.from_user.first_name, message.from_user.username, message.from_user.id)
 
         # DEFINING THE USER COMMENT
         arr= msg.split(" ")
@@ -746,9 +714,9 @@ async def out_user(message):
             user.comment=comment
 
         # ADDING THE USER TO THE LIST
-        result=chat[cid]["rollCalls"][rc_number].addOut(
-            user, chat[cid]["allNames"][rc_number])
-        if result == 'AB':
+        result = db.addOut(user, cid, rc_number)
+
+        if result == 'Error 1':
             raise duplicateProxy("No duplicate proxy please :-), Thanks!")
         elif isinstance(result, User):
             if type(result.user_id) == int:
@@ -757,41 +725,35 @@ async def out_user(message):
                 await bot.send_message(cid, f"{result.name} now you are in!")
 
         # PRINTING THE LIST
-        if mngoChats.distinct('config.shh',{"chatId":cid})[0]==False:
-            await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList().replace("__RCID__", str(rc_number+1)))
+        if not chat_config['shh']:
+            await bot.send_message(cid, db.allList(cid, rc_number))
 
     except Exception as e:
         await bot.send_message(message.chat.id, e)
 
+#CHANGE STATE TO MAYBE
 @ bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/maybe")
 async def maybe_user(message):
     try:
-        chatRollCalls = list(mngoRollCalls.find({"chatId":cid}))
-
-
-        # CHECK FOR RC ALREADY RUNNING
-        if len(chatRollCalls)==0:
-            raise rollCallNotStarted("Roll call is not active")
 
         # DEFINING VARIABLES
         msg= message.text
-        pmts= msg.split(" ")
+        pmts = msg.split(" ")
         cid= message.chat.id
         comment=""
         rc_number=1
+        db = Database(CONN_DB, cid)
+        chat_roll_calls = db.chat_roll_calls
+        chat_config = db.chat_config
 
-        if len(pmts)>1 and "::" in pmts[-1]:
-            try:
-                rc_number=int(pmts[-1].replace("::",""))-1
-                del pmts[-1]
-                msg=" ".join(pmts)
-            except:
-                raise incorrectParameter("The rollcall number must be a positive integer")
+        # CHECK FOR RC ALREADY RUNNING
+        if len(chat_roll_calls)==0:
+            raise rollCallNotStarted("Roll call is not active")
 
-            if rc_number not in [i['rcId'] for i in chatRollCalls]:
-                raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
+        #ASSIGN ROLLCALL ID
+        rc_number = get_rc_number(chat_roll_calls, pmts)
     
-        user= User(message.from_user.first_name, message.from_user.username, message.from_user.id, chat[cid]["allNames"][rc_number])
+        user= User(message.from_user.first_name, message.from_user.username, message.from_user.id)
 
         # DEFINING THE USER COMMENT
         arr= msg.split(" ")
@@ -801,9 +763,9 @@ async def maybe_user(message):
             user.comment=comment
 
         # ADDING THE USER TO THE LIST
-        result=chat[cid]["rollCalls"][rc_number].addMaybe(
-            user, chat[cid]["allNames"][rc_number])
-        if result == 'AB':
+        result=db.addMaybe(user, cid, rc_number)
+
+        if result == 'Error 1':
             raise duplicateProxy("No duplicate proxy please :-), Thanks!")
         elif isinstance(result, User):
             if type(result.user_id) == int:
@@ -812,333 +774,314 @@ async def maybe_user(message):
                 await bot.send_message(cid, f"{result.name} now you are in!")
 
         # PRINTING THE LIST
-        if mngoChats.distinct('config.shh',{"chatId":cid})[0]==False:
-            await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList().replace("__RCID__", str(rc_number+1)))
+        if not chat_config['shh']:
+            await bot.send_message(cid, db.allList(cid, rc_number))
 
     except Exception as e:
         await bot.send_message(message.chat.id, e)
 
+#CHANGE STATE TO IN BUT FOR SOMEONE
 @ bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/set_in_for")
 @ bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/sif")
 async def set_in_for(message):
     try:
 
-        chatRollCalls = list(mngoRollCalls.find({"chatId":cid}))
-
-        # CHECK FOR RC ALREADY RUNNING
-        if len(chatRollCalls)==0:
-            raise rollCallNotStarted("Roll call is not active")
-        # CHECK FOR PARAMETERS MISSING
-        elif len(message.text.split(" ")) <= 1:
-            raise parameterMissing("Input username is missing")
-
         # DEFINING VARIABLES
         msg= message.text
         pmts= msg.split(" ")
-        cid= message.chat.id
-        comment=""
-        rc_number=1
+        cid = message.chat.id
+        comment = ""
+        rc_number = 1
+        arr = msg.split(" ")
+        db = Database(CONN_DB, cid)
+        chat_roll_calls = db.chat_roll_calls
+        chat_config = db.chat_config
 
-        if len(pmts)>1 and "::" in pmts[-1]:
-            try:
-                rc_number=int(pmts[-1].replace("::",""))-1
-                del pmts[-1]
-                msg=" ".join(pmts)
-            except:
-                raise incorrectParameter("The rollcall number must be a positive integer")
+        # CHECK FOR RC ALREADY RUNNING
+        if len(chat_roll_calls)==0:
+            raise rollCallNotStarted("Roll call is not active")
 
-            if rc_number not in [i['rcId'] for i in chatRollCalls]:
-                raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
+        # CHECK FOR PARAMETERS MISSING
+        elif len(arr) <= 1:
+            raise parameterMissing("Input username is missing")
+
+        #ASSIGN ROLLCALL ID
+        rc_number = get_rc_number(chat_roll_calls, pmts)
     
-        arr=msg.split(" ")
-
         # CREATING THE USER OBJECT
-        if len(arr) > 1:
-            user= User(arr[1], None, arr[1], chat[cid]["allNames"][rc_number])
-            comment =" ".join(arr[2: ]) if len(arr) > 2 else ""
-            user.comment=comment
+        user = User(arr[1], None, arr[1])
+        comment = " ".join(arr[2: ]) if len(arr) > 2 else ""
+        user.comment = comment
 
-            # ADDING THE USER TO THE LIST
-            result=chat[cid]["rollCalls"][rc_number].addIn(
-                user, chat[cid]["allNames"][rc_number])
-            if result == 'AB':
-                raise duplicateProxy(
-                    "No duplicate proxy please :-), Thanks!")
-            elif result == 'AC':
-                await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
-            elif result == 'AA':
-                raise repeatlyName("That name already exists!")
-            elif isinstance(result, User):
-                if type(result.user_id) == int:
-                    await bot.send_message(cid, f"{'@'+result.username if result.username!=None else f'[{result.name}](tg://user?id={result.user_id})'} now you are in!", parse_mode="Markdown")
-                else:
-                    await bot.send_message(cid, f"{result.name} now you are in!")
+        # ADDING THE USER TO THE LIST
+        result = db.addIn(user, cid, rc_number)
 
-            # PRINTING THE LIST
-            if mngoChats.distinct('config.shh',{"chatId":cid})[0]==False:
-                await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList().replace("__RCID__", str(rc_number+1)))
+        #DUPLICATE USER IN SAME STATE ERROR
+        if result == 'Error 1':
+            raise duplicateProxy("No duplicate proxy please :-), Thanks!")
+
+        #INLIST REACHED MAX USERS LIMIT ERROR
+        elif result == 'AC':
+            await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
+
+        #NAME ALREADY EXIST ERROR
+        elif result == 'Error 2':
+            raise repeatlyName("That name already exists!")
+
+        #NOTIFY USER THAT WAS MOVED FROM WAITLIST TO INLIST
+        elif type(result) == dict:
+
+            if type(result['user_id']) == int:
+                
+                name, username, user_id= result['name'], result['username'], result['user_id'] 
+                await bot.send_message(cid, f"{'@'+ username if username == None else f'[{name}](tg://user?id={user_id})'} now you are in!", parse_mode="Markdown")
+            
+            else:
+                await bot.send_message(cid, f"{result['name']} now you are in!")
+
+        # PRINTING THE LIST
+        if not chat_config['shh']:
+            await bot.send_message(cid, db.allList(cid, rc_number))
 
     except Exception as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
 
+#CHANGE STATE TO OUT BUT FOR SOMEONE
 @ bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/set_out_for")
 @ bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/sof")
 async def set_out_for(message):
     try:
 
-        chatRollCalls = list(mngoRollCalls.find({"chatId":cid}))
+        # DEFINING VARIABLES
+        msg= message.text
+        pmts= msg.split(" ")
+        cid = message.chat.id
+        comment = ""
+        rc_number = 1
+        arr = msg.split(" ")
+        db = Database(CONN_DB, cid)
+        chat_roll_calls = db.chat_roll_calls
+        chat_config = db.chat_config
         
         # CHECK FOR RC ALREADY RUNNING
-        if len(chatRollCalls)==0:
+        if len(chat_roll_calls) == 0:
             raise rollCallNotStarted("Roll call is not active")
+
         # CHECK FOR PARAMETERS MISSING
         if len(message.text.split(" ")) <= 1:
             raise parameterMissing("Input username is missing")
 
-        # DEFINING VARIABLES
-        msg= message.text
-        pmts= msg.split(" ")
-        cid= message.chat.id
-        comment=""
-        rc_number=1
-
-        if len(pmts)>1 and "::" in pmts[-1]:
-            try:
-                rc_number=int(pmts[-1].replace("::",""))-1
-                del pmts[-1]
-                msg=" ".join(pmts)
-            except:
-                raise incorrectParameter("The rollcall number must be a positive integer")
-
-            if rc_number not in [i['rcId'] for i in chatRollCalls]:
-                raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
+        #ASSIGN ROLLCALL ID
+        rc_number = get_rc_number(chat_roll_calls, pmts)
         
-        arr=msg.split(" ")
-
         # CREATING THE USER OBJECT
-        if len(arr) > 1:
-            user= User(arr[1], None, arr[1], chat[cid]["allNames"][rc_number])
-            comment =" ".join(arr[2: ]) if len(arr) > 2 else ""
-            user.comment=comment
+        user = User(arr[1], None, arr[1])
+        comment = " ".join(arr[2: ]) if len(arr) > 2 else ""
+        user.comment = comment
 
-            # ADDING THE USER TO THE LIST
-            result=chat[cid]["rollCalls"][rc_number].addOut(
-                user, chat[cid]["allNames"][rc_number])
-            if result == 'AB':
-                raise duplicateProxy(
-                    "No duplicate proxy please :-), Thanks!")
-            elif result == 'AC':
-                await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
-            elif result == 'AA':
-                raise repeatlyName("That name already exists!")
-            elif isinstance(result, User):
-                if type(result.user_id) == int:
-                    await bot.send_message(cid, f"{'@'+result.username if result.username!=None else f'[{result.name}](tg://user?id={result.user_id})'} now you are in!", parse_mode="Markdown")
-                else:
-                    await bot.send_message(cid, f"{result.name} now you are in!")
+        # ADDING THE USER TO THE LIST
+        result = db.addOut(user, cid, rc_number)
 
-            # PRINTING THE LIST
-            if mngoChats.distinct('config.shh',{"chatId":cid})[0]==False:
-                await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList().replace("__RCID__", str(rc_number+1)))
+        #DUPLICATE USER IN SAME STATE ERROR
+        if result == 'Error 1':
+            raise duplicateProxy("No duplicate proxy please :-), Thanks!")
+
+        #INLIST REACHED MAX USERS LIMIT ERROR
+        elif result == 'AC':
+            await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
+
+        #NAME ALREADY EXIST ERROR
+        elif result == 'Error 2':
+            raise repeatlyName("That name already exists!")
+
+        #NOTIFY USER THAT WAS MOVED FROM WAITLIST TO INLIST
+        elif type(result) == dict:
+
+            if type(result['user_id']) == int:
+
+                name, username, user_id= result['name'], result['username'], result['user_id'] 
+                await bot.send_message(cid, f"{'@'+username if username !=None else f'[{name}](tg://user?id={user_id})'} now you are in!", parse_mode="Markdown")
+            
+            else:
+                await bot.send_message(cid, f"{result['name']} now you are in!")
+
+        # PRINTING THE LIST
+        if not chat_config['shh']:
+            await bot.send_message(cid, db.allList(cid, rc_number))
 
     except Exception as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
 
+#CHANGE STATE TO MAYBE BUT FOR SOMEONE
 @ bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/set_maybe_for")
 @ bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/smf")
 async def set_maybe_for(message):
     try:
 
-        chatRollCalls = list(mngoRollCalls.find({"chatId":cid}))
-
-
-        # CHECK FOR RC ALREADY RUNNING
-        if len(chatRollCalls)==0:
-            raise rollCallNotStarted("Roll call is not active")
-        # CHECK FOR PARAMETERS MISSING
-        elif len(message.text.split(" ")) <= 1:
-            raise parameterMissing("Input username is missing")
-
-       
-
         # DEFINING VARIABLES
         msg= message.text
         pmts= msg.split(" ")
-        cid= message.chat.id
-        comment=""
-        rc_number=1
+        cid = message.chat.id
+        comment = ""
+        rc_number = 1
+        arr = msg.split(" ")
+        db = Database(CONN_DB, cid)
+        chat_roll_calls = db.chat_roll_calls
+        chat_config = db.chat_config
 
+        # CHECK FOR RC ALREADY RUNNING
+        if len(chat_roll_calls)==0:
+            raise rollCallNotStarted("Roll call is not active")
+
+        # CHECK FOR PARAMETERS MISSING
+        if len(message.text.split(" ")) <= 1:
+            raise parameterMissing("Input username is missing")
+
+        #ASSIGN ROLLCALL ID
+        rc_number = get_rc_number(chat_roll_calls, pmts)
         
-        if len(pmts)>1 and "::" in pmts[-1]:
-            try:
-                rc_number=int(pmts[-1].replace("::",""))-1
-                del pmts[-1]
-                msg=" ".join(pmts)
-            except:
-                raise incorrectParameter("The rollcall number must be a positive integer")
-
-            if rc_number not in [i['rcId'] for i in chatRollCalls]:
-                raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
-        
-
-        arr=msg.split(" ")
-
         # CREATING THE USER OBJECT
-        if len(arr) > 1:
-            user= User(arr[1], None, arr[1], chat[cid]["allNames"][rc_number])
-            comment =" ".join(arr[2: ]) if len(arr) > 2 else ""
-            user.comment=comment
+        user = User(arr[1], None, arr[1])
+        comment = " ".join(arr[2: ]) if len(arr) > 2 else ""
+        user.comment = comment
 
-            # ADDING THE USER TO THE LIST
-            result=chat[cid]["rollCalls"][rc_number].addMaybe(
-                user, chat[cid]["allNames"][rc_number])
+        # ADDING THE USER TO THE LIST
+        result = db.addMaybe(user, cid, rc_number)
 
-            if result == 'AB':
-                raise duplicateProxy(
-                    "No duplicate proxy please :-), Thanks!")
-            elif result == 'AC':
-                await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
-            elif result == 'AA':
-                raise repeatlyName("That name already exists!")
-            elif isinstance(result, User):
-                if type(result.user_id) == int:
-                    await bot.send_message(cid, f"{'@'+result.username if result.username!=None else f'[{result.name}](tg://user?id={result.user_id})'} now you are in!", parse_mode="Markdown")
-                else:
-                    await bot.send_message(cid, f"{result.name} now you are in!")
+        #DUPLICATE USER IN SAME STATE ERROR
+        if result == 'Error 1':
+            raise duplicateProxy("No duplicate proxy please :-), Thanks!")
 
-            # PRINTING THE LIST
-            if mngoChats.distinct('config.shh',{"chatId":cid})[0]==False:
-                await bot.send_message(cid, chat[cid]["rollCalls"][rc_number].allList().replace("__RCID__", str(rc_number+1)))
-                return
+        #INLIST REACHED MAX USERS LIMIT ERROR
+        elif result == 'AC':
+            await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
+
+        #NAME ALREADY EXIST ERROR
+        elif result == 'Error 2':
+            raise repeatlyName("That name already exists!")
+
+        #NOTIFY USER THAT WAS MOVED FROM WAITLIST TO INLIST
+        elif type(result) == dict:
+
+            if type(result['user_id']) == int:
+
+                name, username, user_id = result['name'], result['username'], result['user_id'] 
+                await bot.send_message(cid, f"{'@'+username if username !=None else f'[{name}](tg://user?id={user_id})'} now you are in!", parse_mode="Markdown")
+
+            else:
+                await bot.send_message(cid, f"{result.name} now you are in!")
+
+        # PRINTING THE LIST
+        if not chat_config['shh']:
+            await bot.send_message(cid, db.allList(cid, rc_number))
+            return
 
     except Exception as e:
         await bot.send_message(message.chat.id, e)
 
-@ bot.message_handler(func=lambda message:message.text.lower().split("@")[0].split(" ")[0] =="/whos_in")  # WHOS IN COMMAND
+#SEE WHOS IN ON A ROLLCALL
+@ bot.message_handler(func=lambda message:message.text.lower().split("@")[0].split(" ")[0] =="/whos_in")
 async def whos_in(message):
     try:
 
-        chatRollCalls = list(mngoRollCalls.find({"chatId":cid}))
+        # DEFINING VARIABLES
+        cid = message.chat.id
+        rc_number = 1
+        pmts=message.text.split(" ")[1:]
+        db = Database(CONN_DB, cid)
+        chat_roll_calls = db.chat_roll_calls
     
         # CHECK FOR RC ALREADY RUNNING
-        if len(chatRollCalls)==0:
+        if len(chat_roll_calls)==0:
             raise rollCallNotStarted("Roll call is not active")
         
-        # DEFINING VARIABLES
-        cid= message.chat.id
-        rc_number=1
-
-        pmts=message.text.split(" ")[1:]
-
-        if len(pmts)>1 and "::" in pmts[-1]:
-            try:
-                rc_number=int(pmts[-1].replace("::",""))-1
-                del pmts[-1]
-            except:
-                raise incorrectParameter("The rollcall number must be a positive integer")
-
-            if rc_number not in [i['rcId'] for i in chatRollCalls]:
-                raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
+        #ASSIGN ROLLCALL ID
+        rc_number = get_rc_number(chat_roll_calls, pmts)
         
         # PRINTING LIST
-        await bot.send_message(cid, f"{chat[cid]['rollCalls'][rc_number].title if len(chat[cid]['rollCalls'])>1 else ''}"+" "+chat[cid]["rollCalls"][rc_number].inListText())
+        rc = db.rollCallInfo(rc_number)
+        await bot.send_message(cid, f"{rc['title']} {db.inListText(cid, rc_number)}")
 
     except Exception as e:
         await bot.send_message(message.chat.id, e)
 
-@ bot.message_handler(func=lambda message:message.text.lower().split("@")[0].split(" ")[0] =="/whos_out")  # WHOS IN COMMAND
+#SEE WHOS OUT ON A ROLLCALL
+@ bot.message_handler(func=lambda message:message.text.lower().split("@")[0].split(" ")[0] =="/whos_out")
 async def whos_out(message):
     try:
 
-        chatRollCalls = list(mngoRollCalls.find({"chatId":cid}))
+        # DEFINING VARIABLES
+        cid = message.chat.id
+        rc_number = 1
+        pmts=message.text.split(" ")[1:]
+        db = Database(CONN_DB, cid)
+        chat_roll_calls = db.chat_roll_calls
 
         # CHECK FOR RC ALREADY RUNNING
-        if len(chatRollCalls)==0:
+        if len(chat_roll_calls)==0:
             raise rollCallNotStarted("Roll call is not active")
         
-        # DEFINING VARIABLES
-        cid= message.chat.id
-        rc_number=1
-
-        pmts=message.text.split(" ")[1:]
-
-        if len(pmts)>1 and "::" in pmts[-1]:
-            try:
-                rc_number=int(pmts[-1].replace("::",""))-1
-                del pmts[-1]
-            except:
-                raise incorrectParameter("The rollcall number must be a positive integer")
-
-            if rc_number not in [i['rcId'] for i in chatRollCalls]:
-                raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
+        #ASSIGN ROLLCALL ID
+        rc_number = get_rc_number(chat_roll_calls, pmts)
         
         # PRINTING LIST
-        await bot.send_message(cid, f"{chat[cid]['rollCalls'][rc_number].title if len(chat[cid]['rollCalls'])>1 else ''}"+" "+chat[cid]["rollCalls"][rc_number].outListText())
+        rc = db.rollCallInfo(rc_number)
+        await bot.send_message(cid, f"{rc['title']} {db.outListText(cid, rc_number)}")
 
     except Exception as e:
         await bot.send_message(message.chat.id, e)
 
-@ bot.message_handler(func=lambda message:message.text.lower().split("@")[0].split(" ")[0] =="/whos_maybe")  # WHOS IN COMMAND
+#SEE WHOS MAYBE ON A ROLLCALL
+@ bot.message_handler(func=lambda message:message.text.lower().split("@")[0].split(" ")[0] =="/whos_maybe")
 async def whos_maybe(message):
     try:
 
-        chatRollCalls = list(mngoRollCalls.find({"chatId":cid}))
-
+        # DEFINING VARIABLES
+        cid = message.chat.id
+        rc_number = 1
+        pmts=message.text.split(" ")[1:]
+        db = Database(CONN_DB, cid)
+        chat_roll_calls = db.chat_roll_calls
 
         # CHECK FOR RC ALREADY RUNNING
-        if len(chatRollCalls)==0:
+        if len(chat_roll_calls)==0:
             raise rollCallNotStarted("Roll call is not active")
        
-        # DEFINING VARIABLES
-        cid= message.chat.id
-        rc_number=1
-
-        pmts=message.text.split(" ")[1:]
-
-        if len(pmts)>1 and "::" in pmts[-1]:
-            try:
-                rc_number=int(pmts[-1].replace("::",""))-1
-                del pmts[-1]
-            except:
-                raise incorrectParameter("The rollcall number must be a positive integer")
-
-            if rc_number not in [i['rcId'] for i in chatRollCalls]:
-                raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
+        #ASSIGN ROLLCALL ID
+        rc_number = get_rc_number(chat_roll_calls, pmts)
         
         # PRINTING LIST
-        await bot.send_message(cid, f"{chat[cid]['rollCalls'][rc_number].title if len(chat[cid]['rollCalls'])>1 else ''}"+" "+chat[cid]["rollCalls"][rc_number].maybeListText())
+        rc = db.rollCallInfo(rc_number)
+        await bot.send_message(cid, f"{rc['title']} {db.maybeListText(cid, rc_number)}")
 
     except Exception as e:
         await bot.send_message(message.chat.id, e)
 
-@ bot.message_handler(func=lambda message:message.text.lower().split("@")[0].split(" ")[0] =="/whos_waiting")  # WHOS IN COMMAND
+#SEE WHOS WAITING ON A ROLLCALL
+@ bot.message_handler(func=lambda message:message.text.lower().split("@")[0].split(" ")[0] =="/whos_waiting")
 async def whos_waiting(message):
     try:
-        chatRollCalls = list(mngoRollCalls.find({"chatId":cid}))
+
+        # DEFINING VARIABLES
+        cid = message.chat.id
+        rc_number = 1
+        pmts=message.text.split(" ")[1:]
+        db = Database(CONN_DB, cid)
+        chat_roll_calls = db.chat_roll_calls
 
         # CHECK FOR RC ALREADY RUNNING
-        if len(chatRollCalls)==0:
+        if len(chat_roll_calls)==0:
             raise rollCallNotStarted("Roll call is not active")
         
-        # DEFINING VARIABLES
-        cid= message.chat.id
-        rc_number=1
-
-        pmts=message.text.split(" ")[1:]
-
-        if len(pmts)>1 and "::" in pmts[-1]:
-            try:
-                rc_number=int(pmts[-1].replace("::",""))-1
-                del pmts[-1]
-            except:
-                raise incorrectParameter("The rollcall number must be a positive integer")
-
-            if rc_number not in [i['rcId'] for i in chatRollCalls]:
-                raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
+        #ASSIGN ROLLCALL ID
+        rc_number = get_rc_number(chat_roll_calls, pmts)
         
         # PRINTING LIST
-        await bot.send_message(cid, f"{chat[cid]['rollCalls'][rc_number].title if len(chat[cid]['rollCalls'])>1 else ''}"+" "+chat[cid]["rollCalls"][rc_number].waitListText())
-
+        rc = db.rollCallInfo(rc_number)
+        await bot.send_message(cid, f"{rc['title']} {db.waitListText(cid, rc_number)}")
+        
     except Exception as e:
         await bot.send_message(message.chat.id, e)
 
@@ -1146,41 +1089,34 @@ async def whos_waiting(message):
 @ bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/st")
 async def set_title(message):
     try:
+        
+        # DEFINING VARIABLES
+        cid= message.chat.id
+        msg= message.text
+        pmts=msg.split(" ")[1:]
+        title = " ".join(pmts)
+        user= message.from_user.first_name
+        rc_number=1
+        db = Database(CONN_DB, cid)
+        chat_roll_calls = db.chat_roll_calls
 
-        chatRollCalls = list(mngoRollCalls.find({"chatId":cid}))
-
-           # CHECK FOR RC ALREADY RUNNING
-        if len(chatRollCalls)==0:
+        # CHECK FOR RC ALREADY RUNNING
+        if len(chat_roll_calls)==0:
             raise rollCallNotStarted("Roll call is not active")
+
         # CHECK FOR PARAMETERS MISSING
         elif len(message.text.split(" ")) <= 1:
             await bot.send_message(message.chat.id, "Input title is missing")
             return
 
-        # DEFINING VARIABLES
-        cid= message.chat.id
-        msg= message.text
-        pmts=msg.split(" ")[1:]
-        rc_number=1
-
-        if len(pmts)>1 and "::" in pmts[-1]:
-            try:
-                rc_number=int(pmts[-1].replace("::",""))-1
-                del pmts[-1]
-            except:
-                raise incorrectParameter("The rollcall number must be a positive integer")
-
-            if rc_number not in [i['rcId'] for i in chatRollCalls]:
-                raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
+        #ASSIGN ROLLCALL ID
+        rc_number = get_rc_number(chat_roll_calls, pmts)
         
-        title = " ".join(pmts)
-        user= message.from_user.first_name
-
         # DEFINING TITLE FOR RC
         if title=="":
             title="<Empty>"
 
-        chat[cid]["rollCalls"][rc_number].title=title
+        db.rc_collection.update_one({'_id':cid, 'rollCalls.rcId':rc_number}, {"$set":{"rollCalls.$.title":title}})
         await bot.send_message(cid, 'The roll call title is set to: ' + title)
 
         logging.info(user+"-"+"The title has change to "+title)
@@ -1193,43 +1129,38 @@ async def set_title(message):
 async def end_roll_call(message):
     try:
 
-        chatRollCalls = list(mngoRollCalls.find({"chatId":cid}))
+        # DEFINING VARIABLES
+        cid= message.chat.id
+        msg= message.text
+        rc_number=1
+        pmts = msg.split(" ")[1:]
+        db = Database(CONN_DB, cid)
+        chat_roll_calls = db.chat_roll_calls
+        chat_config = db.chat_config
 
         # CHECK FOR A RUNNING RC
-        if len(chatRollCalls)==0:
+        if len(chat_roll_calls)<=0:
             raise rollCallNotStarted("Roll call is not active")
 
-        # CHECK IF ADMIN_RIGHTS ARE ON
-        if admin_rights(message, chat) == False:
-            raise insufficientPermissions(
-                "Error - user does not have sufficient permissions for this operation")
+        # CHECK FOR ADMIN RIGHTS
+        if chat_config['adminRights']==True:
+            if not admin_rights(message):
+                await bot.send_message(message.chat.id, "Error - user does not have sufficient permissions for this operation")
+                return
 
-        # DEFINING VARIABLES
-        cid=message.chat.id
-        pmts=message.text.split(" ")[1:]
-        rc_number=1
-
-        if len(pmts)>1 and "::" in pmts[-1]:
-            try:
-                rc_number=int(pmts[-1].replace("::",""))-1
-                del pmts[-1]
-            except:
-                raise incorrectParameter("The rollcall number must be a positive integer")
-
-            if rc_number not in [i['rcId'] for i in chatRollCalls]:
-                raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
+        #ASSIGN ROLLCALL ID
+        rc_number = get_rc_number(chat_roll_calls, pmts)
         
         # SENDING LIST
         await bot.send_message(message.chat.id, "Roll ended!")
-
-        await bot.send_message(cid, chat[cid]['rollCalls'][rc_number].finishList().replace("__RCID__", str(rc_number+1)))
-
-        logging.info("The roll call "+chat[cid]["rollCalls"][rc_number].title+" has ended")
-
+        await bot.send_message(cid, db.finishList(cid, rc_number))
+        
         # DELETING RC
-        chat[cid]["rollCalls"].pop(rc_number)
+        db.finishRollCall(cid, rc_number)
+        logging.info("The roll call " + db.rollCallInfo(rc_number)['title'] + " has ended")
 
     except Exception as e:
+        print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
 
 

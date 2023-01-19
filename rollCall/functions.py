@@ -1,58 +1,37 @@
 from exceptions import *
 import logging
+import traceback
 
 import Levenshtein
 import pytz
-
 from telebot import TeleBot
-from pymongo import MongoClient
 
 from config import TELEGRAM_TOKEN
 
-
 bot=TeleBot(TELEGRAM_TOKEN)
 
+#COMPLETE ROLLCALL ID
+def get_rc_number(chat_roll_calls, pmts):
 
-#CONNECT DB
-def get_database_chats(CONN_DB):
-
-    client = MongoClient(CONN_DB)
-    db_base = client['rollCallDatabase']
-    db = db_base['chats']
-
-    return db
-
-def get_database(CONN_DB):
-
-    client = MongoClient(CONN_DB)
-    db_base = client['rollCallDatabase']
-
-    print(db_base['rollCalls'])
-
-    return db_base, db_base['chats'], db_base['rollCalls']
-
-#FUNCTION TO RAISE RC ALREADY STARTED ERROR
-#USELESS IN NEW FEATURE
-def roll_call_already_started(message, chat):
-    try:
-        if len(chat[message.chat.id]["rollCalls"])==1:
-            logging.error(f"Roll call with title {chat[message.chat.id]['rollCalls'][0].title} is still in progress")
-            return False
-        else:
-            return True
-    except:
-        return True
-
-#FUNCTION TO RAISE RC NOT STARTED ERROR
-# def roll_call_not_started(cid):
-
-#     if len(db['rollCalls'])==0:
-#         logging.error("Roll call is not active")
-#         return False
-
-#     return True
+    if len(pmts)>1 and "::" in pmts[-1]:
         
+        try:
 
+            rc_number=int(pmts[-1].replace("::",""))
+            del pmts[-1]
+
+            if rc_number not in [i['rcId'] for i in chat_roll_calls]:
+                raise incorrectParameter("The rollcall number doesn't exist, check /command to see all rollcalls")
+
+            return rc_number
+
+        except:
+            print(traceback.format_exc())
+            raise incorrectParameter("The rollcall number must be a positive integer")
+    
+    else:
+        return 1
+  
 #FUNCTION TO RAISE NO ADMIN RIGHTS ERROR
 def admin_rights(message):
     
@@ -62,14 +41,6 @@ def admin_rights(message):
 
     return True
     
-
-#FUNCTION TO CHECK IF SHH/LOUDER IS ACTIVE
-def send_list(message, chat):
-    if chat[message.chat.id]["shh"]:
-        return False
-    else:
-        return True
-
 def auto_complete_timezone(timezone):
     continent=timezone.split("/")[0].lower()
     place=timezone.split("/")[1].lower().replace(" ","_")

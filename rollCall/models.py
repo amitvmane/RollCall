@@ -1,325 +1,385 @@
-import logging
-import asyncio
 import telebot
+from pymongo import MongoClient
 
-from config import TELEGRAM_TOKEN, CONN_DB
+from config import TELEGRAM_TOKEN
 from exceptions import *
 from functions import *
-from datetime import datetime
-from functions import get_database_chats
 
 import re
 import traceback
+import logging
 
-bot = telebot.TeleBot(token=TELEGRAM_TOKEN)
+#CLASS TO MANAGE MONGO DATABASE
+class Database:
+    def __init__(self, CONN_DB, cid = None):
 
-class RollCall:
-    #THIS IS THE ROLLCALL OBJECT
-    get_database_chats
-    def __init__(self, rcId, chatId, _id, title=None, inList=[], outList=[], maybeList=[], waitList=[], inListLimit=None, reminder=None, finalizeDate=None, location=None, event_fee=None, createdDate=datetime.utcnow()):
-        self.rcId=rcId
-        self.chatId=chatId
-        self.title= title
-        self.inList= inList
-        self.outList= outList
-        self.maybeList= maybeList
-        self.waitList= waitList
-        self.allNames= []
-        self.inListLimit= inListLimit
-        #self.timezone= get_database_chats(CONN_DB).distinct('config.timezone', {"chatId":chatId})
-        self.reminder= reminder
-        self.finalizeDate= finalizeDate
-        self.location= location
-        self.event_fee= event_fee
-        self.createdDate= createdDate
+        #CONNECTION
+        self.client = MongoClient(CONN_DB)
+        self.db = self.client['rollCallDatabase']
+
+        #COLLECTIONS
+        self.chat_collection = self.db['chats']
+        self.rc_collection = self.db['rollCalls']
+
+        #CHAT INFO
+        self.chat_config = self.chat_collection.find_one({"_id":cid})['config']
+        self.chat_roll_calls = self.rc_collection.find_one({"_id":cid})['rollCalls']
 
     #RETURN INLIST
-    def inListText(self):
+    def inListText(self, cid, rc_id):
+
+        rc = self.rollCallInfo(rc_id)
+
         txt=f'In:\n'
         i=0
-        for user in self.inList:
+
+        for user in rc['inList']:
             i+=1
-            txt+= f"{i}. {user}\n"
-        return txt+'\n' if len(self.inList)>0 else "In:\nNobody\n\n"
-    
+            txt+= f"{i}. {user['name']} {('('+ user['comment'] + ')') if user['comment'] != '' else ''}\n"
+
+        return txt+'\n' if len(rc['inList'])>0 else "In:\nNobody\n\n"
+
     #RETURN OUTLIST
-    def outListText(self):
+    def outListText(self, cid, rc_id):
+
+        rc = self.rollCallInfo(rc_id)
+
         txt=f'Out:\n'
         i=0
-        for user in self.outList:
+
+        for user in rc['outList']:
             i+=1
-            txt+= f"{i}. {user}\n" 
-        return txt+'\n' if len(self.outList)>0 else "Out:\nNobody\n\n"
+            txt+= f"{i}. {user['name']} {('('+ user['comment'] + ')') if user['comment'] != '' else ''}\n" 
+
+        return txt+'\n' if len(rc['outList'])>0 else "Out:\nNobody\n\n"
     
     #RETURN MAYBELIST
-    def maybeListText(self):
+    def maybeListText(self, cid, rc_id):
+
+        rc = self.rollCallInfo(rc_id)
+
         txt=f'Maybe:\n'
         i=0
-        for user in self.maybeList:
+
+        for user in rc['maybeList']:
             i+=1
-            txt+= f"{i}. {user}\n" 
-        return txt+'\n' if len(self.maybeList)>0 else "Maybe:\nNobody\n\n"
+            txt+= f"{i}. {user['name']} {('('+ user['comment'] + ')') if user['comment'] != '' else ''}\n" 
+
+        return txt+'\n' if len(rc['maybeList'])>0 else "Maybe:\nNobody\n\n"
 
     #RETURN WAITLIST
-    def waitListText(self):
+    def waitListText(self, cid, rc_id):
+
+        rc = self.rollCallInfo(rc_id)
+
         txt=f'Waiting:\n'
         i=0
-        for user in self.waitList:
+
+        for user in rc['waitList']:
             i+=1
-            txt+= f"{i}. {user}\n" 
-        return (txt+'\n' if len(self.waitList)>0 else "Waiting:\nNobody") if self.inListLimit!=None else ""
+            txt+= f"{i}. {user['name']} {('('+ user['comment'] + ')') if user['comment'] != '' else ''}\n" 
+
+        return (txt+'\n' if len(rc['waitList'])>0 else "Waiting:\nNobody") if rc['inListLimit']!=None else ""
 
     #RETURN ALL THE STATES
-    def allList(self):
-        try:
-            _datetime=self.finalizeDate.strftime('%d-%m-%Y %H:%M')
-        except:
-            _datetime='Yet to decide'
+    def allList(self, cid, rc_id):
 
-      
+        rc = self.rollCallInfo(rc_id)
 
-        txt="Title: "+self.title+f'\nID: {self.rcId}'+f"\nEvent time: {_datetime} {'a' if _datetime !='Yet to decide' else ''}\nLocation: {self.location if self.location!=None else 'Yet to decide'}\n\n"+(self.inListText() if self.inListText()!='In:\nNobody\n\n' else '')+(self.outListText() if self.outListText()!='Out:\nNobody\n\n' else '')+(self.maybeListText() if self.maybeListText()!='Maybe:\nNobody\n\n' else '')+(self.waitListText() if self.waitListText()!='Waiting:\nNobody' else '')+'Max limit: '+('♾' if self.inListLimit==None else str(self.inListLimit))
-        return txt
+        createdDate = 'Yet to decide'
 
-    #RETURN THE FINISH LIST (ONLY IN ERC COMMAND)
-    def finishList(self):
-        try:
-            _datetime=self.finalizeDate.strftime('%d-%m-%Y %H:%M')
-        except:
-            _datetime=''
+        if rc['finalizeDate'] != None:
+            createdDate = rc['finalizeDate'].strftime('%d-%m-%Y %H:%M')
 
-      
-
-        backslash='\n'
-        txt="Title: "+self.title+'\nID: '+self.rcId+f"{(backslash+'Event time: ' + _datetime + ' ' + 'a') if _datetime != '' else ''}{(backslash+'Location:' + self.location) if self.location!=None else ''}{(backslash+'Event Fee: ' + str(self.event_fee)) if self.event_fee != None else backslash*2+'In case of paid event - reach out to organiser for payment contribution'}{(backslash + 'Individual Fee: ' + str((round(int(re.sub(r'[^0-9]', '', self.event_fee))/len(self.inList), 2)) if len(self.inList)>0 else '0')) if self.event_fee!=None else ''}\n\n"+("Additional unknown/penalty fees are not included and needs to be handled separately.\n\n" if self.event_fee!=None else '')+(self.inListText() if self.inListText()!='In:\nNobody\n\n' else 'In:\nNobody\n\n')+(self.outListText() if self.outListText()!='Out:\nNobody\n\n' else 'Out:\nNobody\n\n')+(self.maybeListText() if self.maybeListText()!='Maybe:\nNobody\n\n' else 'Maybe:\nNobody\n\n')+(self.waitListText() if self.waitListText()!='Waiting:\nNobody' else '')+'Max limit: '+('♾' if self.inListLimit==None else str(self.inListLimit))
+        return "Title: "+rc["title"]+f'\nID: {rc["rcId"]}'+f"\nEvent time: {createdDate} {' '+self.chat_config['timezone'] if createdDate !='Yet to decide' else ''}\nLocation: {rc['location'] if rc['location']!=None else 'Yet to decide'}\n\n"+(self.inListText(cid, rc_id) if self.inListText(cid, rc_id)!='In:\nNobody\n\n' else '')+(self.outListText(cid,rc_id) if self.outListText(cid,rc_id)!='Out:\nNobody\n\n' else '')+(self.maybeListText(cid, rc_id) if self.maybeListText(cid, rc_id)!='Maybe:\nNobody\n\n' else '')+(self.waitListText(cid, rc_id) if self.waitListText(cid, rc_id)!='Waiting:\nNobody' else '')+'Max limit: '+('♾' if rc['inListLimit']==None else str(rc['inListLimit']))
         
-        return txt
-
-    #DELETE A USER
-    def delete_user(self, name):
+    #RETURN THE FINISH LIST (ONLY IN ERC COMMAND)
+    def finishList(self, cid, rc_id):
 
         try:
-            for us in self.inList:
-                if us.name==name:
-                    self.inList.remove(us)
-                    for n in self.allNames:
-                        if n.name==name:
-                            self.allNames.remove(n)
-                    return True
+            rc = self.rollCallInfo(rc_id)
 
-            for us in self.outList:
-                if us.name==name:
-                    self.outList.remove(us)
-                    for n in self.allNames:
-                        if n.name==name:
-                            self.allNames.remove(n)
-                    return True
+            createdDate = 'Yet to decide'
 
-            for us in self.maybeList:
-                if us.name==name:
-                    self.maybeList.remove(us)
-                    for n in self.allNames:
-                        if n.name==name:
-                            self.allNames.remove(n)
-                    return True
+            if rc['finalizeDate'] != None:
+                createdDate = rc['finalizeDate'].strftime('%d-%m-%Y %H:%M')
+
+            backslash='\n'
+
+            inList = self.inListText(cid, rc_id)
+            outList = self.outListText(cid, rc_id)
+            maybeList = self.maybeListText(cid, rc_id)
+            waitList = self.waitListText(cid, rc_id)
+
+            txt = f"Title: {rc['title']}\nID: {rc['rcId']}{(backslash+'Event time: '+createdDate) if createdDate != 'Yet to decide' else ''}{(backslash+'Location: '+rc['location']) if rc['location'] != None else ''}{(backslash+'Event fee: '+rc['event_fee']+backslash + 'Individual Fee: ' + str((round(int(re.sub(r'[^0-9]', '', rc['event_fee']))/len(rc['inList']), 2)) if len(rc['inList'])>0 else '0') + backslash*2 + 'Additional unknown/penalty fees are not included and needs to be handled separately.' + backslash*2) if rc['event_fee'] != None else backslash*2+'In case of paid event - reach out to organiser for payment contribution'}\n\n{inList}{outList}{maybeList}{waitList if waitList !='Waiting:'+backslash+'Nobody' else ''}Max limit: {('♾' if rc['inListLimit']==None else str(rc['inListLimit']))}"
+
+            return txt
         except:
             print(traceback.format_exc())
 
     #ADD A NEW USER TO IN LIST
-    def addIn(self, user):
+    def addIn(self, user, cid, rc_id):
+
+        rc = self.rollCallInfo(rc_id)
+        user = user.__dict__
+        exists_on_allNames = False
 
         #ERROR FOR REPEATLY NAME IN SET COMMANDS
-        if type(user.user_id)==str: 
-            for us in self.allNames:
-                if user.name==us.name and user.user_id!=us.user_id:
-                    return 'AA'
+        for us in rc['allNames']:
+
+            if user["user_id"] == us["user_id"]:
+                user['last_state'] = us['last_state']
+                exists_on_allNames = True
+                pos = rc['allNames'].index(us)
+    
+            if user['name']==us['name'] and user['user_id']!=us['user_id']:
+
+                if user['username'] != None:
+                    user['name'] += f' ({user["username"]})'
+                else:
+                    return 'Error 2'
 
         #ERROR FOR DUPLICATE USER IN THE SAME STATE
-        for us in self.inList:
-            if us==user:
-                return 'AB'
+        for us in rc['inList']:
 
-            if us.user_id==user.user_id and us.comment != user.comment:
-                us.comment=user.comment
+            #IF HAS A NEW COMMENT, REPLACE IT
+            if us['user_id']==user['user_id'] and us['comment'] != user['comment']:
+                us['comment']=user['comment']
                 return
+            
+            if us['user_id']==user['user_id']:
+                return 'Error 1'
 
-        if self.inListLimit!=None:
-            for us in self.waitList:
+        #ERROR FOR DUPLICATE USER ON WAIT LIST STATE
+        if rc['inListLimit']!=None:
+            for us in rc['waitList']:
                 if us==user:
-                    return "AB"
+                    return "Error 1"
 
-                if us.user_id==user.user_id and us.comment != user.comment:
-                    us.comment=user.comment
+                #IF HAS A NEW COMMENT, REPLACE IT
+                if us['user_id']==user['user_id'] and us['comment'] != user['comment']:
+                    us['comment']=user['comment']
                     return
 
         #REMOVE THE USER FROM OTHER STATE
-        if user.lastState!=None:
+        if user['last_state'] != None:
 
-            if user.lastState=='out': 
-                for us in self.outList:
-                    if us.user_id == user.user_id:
-                        self.outList.remove(us)
-                        self.allNames.remove(us)
+            lastState = user['last_state']
 
-            if user.lastState=='maybe':
-                for us in self.maybeList:
-                    if us.user_id == user.user_id:
-                        self.maybeList.remove(us)
-                        self.allNames.remove(us)
+            for us in rc[lastState]:
+                if us['user_id'] == user['user_id']:
+                    rc[lastState].remove(us)
 
-            if user.lastState=='maybe':
-                for us in self.waitList:
-                    if us.user_id == user.user_id:
-                        self.waitList.remove(us)
-                        self.allNames.remove(us)
-
-            #WAITLIST FEATURE. ADD USER TO WAITLIST IF IN LIST IS FULL
-            if self.inListLimit!=None:
-                if len(self.inList)==int(self.inListLimit):
-                    self.waitList.append(user)
-                    self.allNames.append(user)
-                    logging.info(f"The user {user.name} has been added to the Wait list")
+            #ADD USER TO WAITLIST IF IN LIST IS FULL
+            if rc['inListLimit']!=None:
+                if len(rc['inList'])==int(rc['inListLimit']):
+                    rc['waitList'].append(user)
+                    logging.info(f"The user {user['name']} has been added to the Wait list")
                     return 'AC'
 
         #ADD THE USER TO THE STATE
-        self.inList.append(user)
-        self.allNames.append(user)
+        user['last_state'] = 'inList'
 
-        logging.info(f"User {user.name} has change his state to in")
+        if not exists_on_allNames:
+            rc['allNames'].append(user)
+        else:
+            rc['allNames'][pos] = user 
+
+        rc['inList'].append(user)
+        self.rc_collection.update_one({"_id":cid, "rollCalls.rcId":rc_id}, {"$set":{"rollCalls.$":rc}})
+
+        logging.info(f"User {user['name']} has change his state to in")
 
     #ADD A NEW USER TO OUT LIST
-    def addOut(self, user):
+    def addOut(self, user, cid, rc_id):
 
-        #ERROR FOR REPEATLY NAME IN SET COMMANDS
-        if type(user.user_id)==str: 
-            for us in self.allNames:
-                if user.name==us.name and user.user_id!=us.user_id:
-                    return 'AA'
+        rc = self.rollCallInfo(rc_id)
+        user = user.__dict__
+        exists_on_allNames = False
 
-        for us in self.allNames:
-            if us.first_name==user.first_name and us.username == user.username and us.user_id!=user.user_id:
-                return "AB"
+        #ERROR FOR REPEATLY NAME
+        for us in rc['allNames']:
 
+            if user["user_id"] == us["user_id"]:
+                user['last_state'] = us['last_state']
+                exists_on_allNames = True
+                pos = rc['allNames'].index(us)
+
+            if user['name']==us['name'] and user['user_id']!=us['user_id']:
+
+                if user['username'] != None:
+                    user['name'] += f' ({user["username"]})'
+                else:
+                    return 'Error 2'
+                    
         #ERROR FOR DUPLICATE USER IN THE SAME STATE
-        for us in self.outList:
-            if us.user_id == user.user_id and us.comment == user.comment:
-                return 'AB'
-            elif us.first_name==user.first_name and us.username == user.username and us.user_id!=user.user_id:
-                return "AB"
-            elif us.user_id==user.user_id and us.comment != user.comment:
-                us.comment=user.comment
+        for us in rc['outList']:
+
+            #IF HAS A NEW COMMENT, REPLACE IT
+            if us['user_id']==user['user_id'] and us['comment'] != user['comment']:
+                us['comment']=user['comment']
                 return
 
-        #REMOVE THE USER FROM OTHER STATE
-        for us in self.inList:
-            if us.user_id == user.user_id:
-                self.inList.remove(us)
-                self.allNames.remove(us)
+            if us['user_id']==user['user_id']:
+                return 'Error 1'
 
-        #REMOVE THE USER FROM OTHER STATE
-        for us in self.maybeList:
-            if us.user_id == user.user_id:
-                self.maybeList.remove(us)
-                self.allNames.remove(us)
+        #REMOVE THE USER FROM LAST STATE
+        if user['last_state'] != None:
 
-        if self.inListLimit!=None:
-            for us in self.waitList:
-                if us.user_id==user.user_id:
-                    self.waitList.remove(us)
-                    self.allNames.remove(us)
+            lastState = user['last_state']
 
-        if self.inListLimit!=None:
-            if len(self.inList)<int(self.inListLimit) and len(self.waitList)>0:
-                result=self.waitList[0]
-                self.inList.append(self.waitList[0])
-                self.waitList.pop(0)
-                self.outList.append(user)  
-                self.allNames.append(user)
-                logging.info(f"User {user.name} has change his state to out")
+            for us in rc[lastState]:
+                if us['user_id'] == user['user_id']:
+                    rc[lastState].remove(us)
+
+        #IF LAST STATE WAS IN LIST AND WAIT LIST FEATURE ITS ACTIVE, THEN MOVE THE FIRST USER ON WAITLIST TO INLIST
+        if rc['inListLimit']!=None and user['last_state'] == 'inList':
+
+            if len(rc['inList'])<int(rc['inListLimit']) and len(rc['waitList'])>0:
+
+                result=rc['waitList'][0]
+                rc['inList'].append(rc['waitList'][0])
+                rc['waitList'].pop(0)
+                rc['outList'].append(user)  
+                logging.info(f"User {user['name']} has change his state to out")
                 return result
 
         #ADD THE USER TO THE STATE
-        self.outList.append(user)  
-        self.allNames.append(user)
+        user['last_state'] = 'outList'
 
-        logging.info(f"User {user.name} has change his state to out")
+        if not exists_on_allNames:
+            rc['allNames'].append(user)
+        else:
+            rc['allNames'][pos] = user 
 
+        rc['outList'].append(user)  
+        self.rc_collection.update_one({"_id":cid, "rollCalls.rcId":rc_id}, {"$set":{"rollCalls.$":rc}})
+
+        logging.info(f"User {user['name']} has change his state to out")
+        
     #ADD A NEW USER TO MAYBE LIST
-    def addMaybe(self, user):
+    def addMaybe(self, user, cid, rc_id):
+
+        rc = self.rollCallInfo(rc_id)
+        user = user.__dict__
+        exists_on_allNames = False
 
         #ERROR FOR REPEATLY NAME IN SET COMMANDS
-        if type(user.user_id)==str: 
-            for us in self.allNames:
-                if user.name==us.name and user.user_id!=us.user_id:
-                    return 'AA'
+        for us in rc['allNames']:
 
-        for us in self.allNames:
-            if us.first_name==user.first_name and us.username == user.username and us.user_id!=user.user_id:
-                return "AB"
+            if user["user_id"] == us["user_id"]:
+                user['last_state'] = us['last_state']
+                exists_on_allNames = True
+                pos = rc['allNames'].index(us)
+
+            if user['name']==us['name'] and user['user_id']!=us['user_id']:
+                if user['username'] != None:
+                    user['name'] += f' ({user["username"]})'
+                else:
+                    return 'Error 2'
 
         #ERROR FOR DUPLICATE USER IN THE SAME STATE
-        for us in self.maybeList:
-            if us.user_id == user.user_id and us.comment == user.comment:
-                return "AB"
-            elif us.user_id==user.user_id and us.comment != user.comment:
-                us.comment=user.comment
+        for us in rc['maybeList']:
+            
+            #IF HAS A NEW COMMENT, REPLACE IT
+            if us['user_id']==user['user_id'] and us['comment'] != user['comment']:
+                us['comment']=user['comment']
                 return
 
-        #REMOVE THE USER FROM OTHER STATE
-        for us in self.outList:
-            if us.user_id == user.user_id:
-                self.outList.remove(us)
-                self.allNames.remove(us)
+            if us['user_id']==user['user_id']:
+                return 'Error 1'
 
         #REMOVE THE USER FROM OTHER STATE
-        for us in self.inList:
-            if us.user_id == user.user_id:
-                self.inList.remove(us)
-                self.allNames.remove(us)
+        if user['last_state']!=None:
 
-        if self.inListLimit!=None:
-            for us in self.waitList:
-                if us.user_id==user.user_id:
-                    self.waitList.remove(us)
-                    self.allNames.remove(us)
+            lastState = user['last_state']
 
-        if self.inListLimit!=None:
-            if len(self.inList)<int(self.inListLimit) and len(self.waitList)>0:
-                result=self.waitList[0]
-                self.inList.append(self.waitList[0])
-                self.waitList.pop(0)
-                self.maybeList.append(user)
-                self.allNames.append(user)
-                logging.info(f"User {user.name} has change his state to maybe")
+            for us in rc[lastState]:
+                print(us['user_id'], user['user_id'])
+                if us['user_id'] == user['user_id']:
+                    rc[lastState].remove(us)
+
+        #IF LAST STATE WAS IN LIST AND WAIT LIST FEATURE ITS ACTIVE, THEN MOVE THE FIRST USER ON WAITLIST TO INLIST
+        if rc['inListLimit']!=None and user['last_state'] == 'inList':
+
+            if len(rc['inList'])<int(rc['inListLimit']) and len(rc['waitList'])>0:
+
+                result=rc['waitList'][0]
+                rc['inList'].append(rc['waitList'][0])
+                rc['waitList'].pop(0)
+                rc['maybeList'].append(user)  
+                logging.info(f"User {user['name']} has change his state to out")
                 return result
 
         #ADD THE USER TO THE STATE
-        self.maybeList.append(user)
-        self.allNames.append(user)
+        user['last_state'] = 'maybeList'
 
-        logging.info(f"User {user.name} has change his state to maybe")
+        if not exists_on_allNames:
+            rc['allNames'].append(user)
+        else:
+            rc['allNames'][pos] = user 
 
+        rc['maybeList'].append(user)
+
+        self.rc_collection.update_one({"_id":cid, "rollCalls.rcId":rc_id}, {"$set":{"rollCalls.$":rc}})
+
+        logging.info(f"User {user['name']} has change his state to maybe")
+
+    #RETURN A LIST WITH A TEXT OF EACH ROLLCALL WITH ALL HIS INFO
+    def allRollCallsInfo(self, cid):
+        txt = []
+
+        for roll_call in self.chat_roll_calls:
+
+            createdDate = 'Yet to decide'
+
+            if roll_call['createdDate'] != None:
+                createdDate = roll_call['createdDate'].strftime('%d-%m-%Y %H:%M')
+
+            txt.append("Title: "+roll_call["title"]+f'\nID: {roll_call["rcId"]}'+f"\nEvent time: {createdDate} {' '+self.chat_config['timezone'] if createdDate !='Yet to decide' else ''}\nLocation: {roll_call['location'] if roll_call['location']!=None else 'Yet to decide'}\n\n"+(self.inListText(cid, roll_call['rcId']) if self.inListText(cid, roll_call['rcId'])!='In:\nNobody\n\n' else '')+(self.outListText(cid, roll_call['rcId']) if self.outListText(cid, roll_call['rcId'])!='Out:\nNobody\n\n' else '')+(self.maybeListText(cid, roll_call['rcId']) if self.maybeListText(cid, roll_call['rcId'])!='Maybe:\nNobody\n\n' else '')+(self.waitListText(cid, roll_call['rcId']) if self.waitListText(cid, roll_call['rcId'])!='Waiting:\nNobody' else '')+'Max limit: '+('♾' if roll_call['inListLimit']==None else str(roll_call['inListLimit'])))
+
+        return txt
+
+    #RETURN INFO OF A SINGLE ROLLCALL
+    def rollCallInfo(self, rc_id):
+        for roll_call in self.chat_roll_calls:
+            if rc_id == roll_call['rcId']:
+                return roll_call
+
+    #FINISH A ROLLCALL
+    def finishRollCall(self, cid, rc_id):
+        self.rc_collection.update_one({"_id":cid}, {"$pull":{"rollCalls":{"rcId":rc_id}}})
+
+    #DELETE A USER FROM A STATE
+    def delete_user(self, name, cid, rc_id):
+
+        rc = self.rollCallInfo(rc_id)
+        user_removed = False
+
+        #FOUND USER
+        for us in rc['allNames']:
+            if us['name'] == name:
+                user_removed = True
+                rc[us['last_state']].remove(us)
+
+        if not user_removed:
+            False
+
+        self.rc_collection.update_one({"_id":cid, "rollCalls.rcId":rc_id}, {"$set":{"rollCalls.$":rc}})
+        return True
+
+#CLASS TO MANAGE USER OBJECTS      
 class User:
 
     #USER OBJECT
-
-    def __init__(self, name, username, user_id, allNames):
-        self.name=name
-        self.first_name=name
-        self.username=username
-        self.user_id=user_id
-        self.comment=''
-        self.lastState=None
-
-        #ADD USERNAMES TO NAMES IN NORMAL COMMANDS (/IN, /OUT, /MAYBE)
-        if type(self.user_id)==int:
-            for user in allNames:
-                if self.name == user.name and self.user_id != user.user_id:
-                    self.name=f"{self.name} ({self.username})"
+    def __init__(self, first_name, username, user_id):
+        self.name = first_name
+        self.first_name = first_name
+        self.username = username
+        self.user_id = user_id
+        self.comment = ''
+        self.last_state = None
 
     def __str__(self):
         backslash="\n"
         return f"{self.name + (' ('+self.comment+')' if self.comment!='' else '')}"
-
-        
-    

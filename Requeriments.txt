@@ -1,2 +1,4 @@
 pyTelegramBotAPI==4.5.1
 pytz==2022.1
+Levenshtein==0.20.8
+pymongo==4.3.2

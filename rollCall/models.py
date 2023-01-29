@@ -1,4 +1,3 @@
-import telebot
 from pymongo import MongoClient
 
 from config import TELEGRAM_TOKEN
@@ -8,6 +7,9 @@ from utils.functions import *
 import re
 import traceback
 import logging
+from telebot import TeleBot
+
+bot = TeleBot(TELEGRAM_TOKEN)
 
 #CLASS TO MANAGE MONGO DATABASE
 class Database:
@@ -20,12 +22,7 @@ class Database:
         #COLLECTIONS
         self.chat_collection = self.db['chats']
         self.rc_collection = self.db['rollCalls']
-
-        #CHAT INFO
-        # if cid:
-        #     self.chat_config = self.chat_collection.find_one({"_id":cid})['config'] 
-        #     self.chat_roll_calls = self.rc_collection.find_one({"_id":cid})['rollCalls'] 
-
+ 
     #RETURN INLIST
     def inListText(self, cid, rcId):
 
@@ -139,7 +136,8 @@ class Database:
                 if user['username'] != None:
                     user['name'] += f' ({user["username"]})'
                 else:
-                    return 'Error 2'
+                    bot.send_message(cid, 'That name already exists!')
+                    return
 
         #ERROR FOR DUPLICATE USER IN THE SAME STATE
         for us in rc['inList']:
@@ -150,13 +148,15 @@ class Database:
                 return
             
             if us['user_id']==user['user_id']:
-                return 'Error 1'
+                bot.send_message(cid, 'No duplicate proxy please :-), Thanks!')
+                return 'Error'
 
         #ERROR FOR DUPLICATE USER ON WAIT LIST STATE
         if rc['inListLimit']!=None:
             for us in rc['waitList']:
                 if us==user:
-                    return "Error 1"
+                    bot.send_message(cid, 'No duplicate proxy please :-), Thanks!')
+                    return 'Error'
 
                 #IF HAS A NEW COMMENT, REPLACE IT
                 if us['user_id']==user['user_id'] and us['comment'] != user['comment']:
@@ -177,7 +177,9 @@ class Database:
                 if len(rc['inList'])==int(rc['inListLimit']):
                     rc['waitList'].append(user)
                     logging.info(f"The user {user['name']} has been added to the Wait list")
-                    return 'AC'
+                    bot.send_message(cid, f"Event max limit is reached, {user['name']} was added in waitlist")
+                    self.rc_collection.update_one({"_id":cid, "rollCalls.rcId":rcId}, {"$set":{"rollCalls.$":rc}})
+                    return
 
         #ADD THE USER TO THE STATE
         user['last_state'] = 'inList'
@@ -189,7 +191,6 @@ class Database:
 
         rc['inList'].append(user)
         self.rc_collection.update_one({"_id":cid, "rollCalls.rcId":rcId}, {"$set":{"rollCalls.$":rc}})
-
         logging.info(f"User {user['name']} has change his state to in")
 
     #ADD A NEW USER TO OUT LIST
@@ -198,6 +199,7 @@ class Database:
         rc = self.getRollCallById(cid, rcId)
         user = user.__dict__
         exists_on_allNames = False
+        result = None
 
         #ERROR FOR REPEATLY NAME
         for us in rc['allNames']:
@@ -212,7 +214,8 @@ class Database:
                 if user['username'] != None:
                     user['name'] += f' ({user["username"]})'
                 else:
-                    return 'Error 2'
+                    bot.send_message(cid, 'That name already exists!')
+                    return 'Error'
                     
         #ERROR FOR DUPLICATE USER IN THE SAME STATE
         for us in rc['outList']:
@@ -223,13 +226,12 @@ class Database:
                 return
 
             if us['user_id']==user['user_id']:
-                return 'Error 1'
+                bot.send_message(cid, 'No duplicate proxy please :-), Thanks!')
+                return 'Error'
 
         #REMOVE THE USER FROM LAST STATE
         if user['last_state'] != None:
-
             lastState = user['last_state']
-
             for us in rc[lastState]:
                 if us['user_id'] == user['user_id']:
                     rc[lastState].remove(us)
@@ -241,10 +243,8 @@ class Database:
 
                 result=rc['waitList'][0]
                 rc['inList'].append(rc['waitList'][0])
-                rc['waitList'].pop(0)
-                rc['outList'].append(user)  
+                rc['waitList'].pop(0)  
                 logging.info(f"User {user['name']} has change his state to out")
-                return result
 
         #ADD THE USER TO THE STATE
         user['last_state'] = 'outList'
@@ -256,8 +256,9 @@ class Database:
 
         rc['outList'].append(user)  
         self.rc_collection.update_one({"_id":cid, "rollCalls.rcId":rcId}, {"$set":{"rollCalls.$":rc}})
-
         logging.info(f"User {user['name']} has change his state to out")
+        if result!=None:
+            return result
         
     #ADD A NEW USER TO MAYBE LIST
     def addMaybe(self, user, cid, rcId):
@@ -265,6 +266,7 @@ class Database:
         rc = self.getRollCallById(cid, rcId)
         user = user.__dict__
         exists_on_allNames = False
+        result = None
 
         #ERROR FOR REPEATLY NAME IN SET COMMANDS
         for us in rc['allNames']:
@@ -278,7 +280,8 @@ class Database:
                 if user['username'] != None:
                     user['name'] += f' ({user["username"]})'
                 else:
-                    return 'Error 2'
+                    bot.send_message(cid, 'That name already exists!')
+                    return 'Error'
 
         #ERROR FOR DUPLICATE USER IN THE SAME STATE
         for us in rc['maybeList']:
@@ -289,7 +292,8 @@ class Database:
                 return
 
             if us['user_id']==user['user_id']:
-                return 'Error 1'
+                bot.send_message(cid, 'No duplicate proxy please :-), Thanks!')
+                return 'Error'
 
         #REMOVE THE USER FROM OTHER STATE
         if user['last_state']!=None:
@@ -297,7 +301,6 @@ class Database:
             lastState = user['last_state']
 
             for us in rc[lastState]:
-                print(us['user_id'], user['user_id'])
                 if us['user_id'] == user['user_id']:
                     rc[lastState].remove(us)
 
@@ -309,9 +312,7 @@ class Database:
                 result=rc['waitList'][0]
                 rc['inList'].append(rc['waitList'][0])
                 rc['waitList'].pop(0)
-                rc['maybeList'].append(user)  
                 logging.info(f"User {user['name']} has change his state to out")
-                return result
 
         #ADD THE USER TO THE STATE
         user['last_state'] = 'maybeList'
@@ -322,10 +323,10 @@ class Database:
             rc['allNames'][pos] = user 
 
         rc['maybeList'].append(user)
-
         self.rc_collection.update_one({"_id":cid, "rollCalls.rcId":rcId}, {"$set":{"rollCalls.$":rc}})
-
         logging.info(f"User {user['name']} has change his state to maybe")
+        if result:
+            return result
 
     #RETURN A LIST WITH A TEXT OF EACH ROLLCALL WITH ALL HIS INFO
     def allRollCallsInfo(self, cid):

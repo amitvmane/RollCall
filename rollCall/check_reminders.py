@@ -13,9 +13,6 @@ db = Database(CONN_DB)
 
 async def check():
     while True:
-
-        print('while')
-
         try:
             for chat in db.chat_collection.find():
                 timezone = chat['config']['timezone']

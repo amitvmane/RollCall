@@ -28,8 +28,7 @@ logging.info("Bot already started")
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/start")
 async def welcome_and_explanation(message): 
     cid = message.chat.id
-    print(datetime.datetime.fromtimestamp(message.date))
-  
+
     #CHECK FOR ADMIN RIGHTS
     if not admin_rights(message) and not message.chat.type == 'private':
         await bot.send_message(cid, "Error - user does not have sufficient permissions for this operation")
@@ -162,7 +161,6 @@ async def rollCalls(message):
 
     except Exception as e:
         print(traceback.format_exc())
-        print(e)
 
 # START A ROLL CALL
 @ bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/start_roll_call")
@@ -442,7 +440,6 @@ async def set_location(message):
         await bot.send_message(cid, f"The rollcall with title - {rc['title']} has a new location!")
 
     except Exception as e:
-        print(e)
         await bot.send_message(cid, e)
 
 # SET A LIMIT FOR IN LIST
@@ -545,7 +542,6 @@ async def shh(message):
         await bot.send_message(message.chat.id, "Ok, i will keep quiet!")
 
     except rollCallNotStarted as e:
-        print(traceback.format_exc())
         await bot.send_message(message.chat.id, "Roll call is not active")
 
 # NON RESUME NOTIFICATIONS
@@ -560,7 +556,6 @@ async def louder(message):
         await bot.send_message(message.chat.id, "Ok, i can hear you!")
 
     except rollCallNotStarted as e:
-        print(traceback.format_exc())
         await bot.send_message(message.chat.id, "Roll call is not active")
 
 # CHANGE STATE TO IN
@@ -598,10 +593,8 @@ async def in_user(message):
         # ADDING THE USER TO THE LIST
         result = db.addIn(user, cid, rcNumber)
 
-        if result == 'Error 1':
-            raise duplicateProxy("No duplicate proxy please :-), Thanks!")
-        elif result == 'AC':
-            await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
+        if result == 'Error':
+            return
 
         # PRINTING THE LIST
         if not chatConfig['shh']:
@@ -647,13 +640,16 @@ async def out_user(message):
         # ADDING THE USER TO THE LIST
         result = db.addOut(user, cid, rcNumber)
 
-        if result == 'Error 1':
-            raise duplicateProxy("No duplicate proxy please :-), Thanks!")
-        elif isinstance(result, User):
-            if type(result.user_id) == int:
-                await bot.send_message(cid, f"{'@'+result.username if result.username!=None else f'[{result.name}](tg://user?id={result.user_id})'} now you are in!", parse_mode="Markdown")
+        if result == 'Error':
+            return
+        elif type(result) == dict:
+            if type(result['user_id']) == int:
+
+                name, username, user_id = result['name'], result['username'], result['user_id']
+                await bot.send_message(cid, f"{'@'+username if username !=None else f'[{name}](tg://user?id={user_id})'} now you are in!", parse_mode="Markdown")
+
             else:
-                await bot.send_message(cid, f"{result.name} now you are in!")
+                await bot.send_message(cid, f"{result['name']} now you are in!")
 
         # PRINTING THE LIST
         if not chatConfig['shh']:
@@ -698,14 +694,16 @@ async def maybe_user(message):
         # ADDING THE USER TO THE LIST
         result = db.addMaybe(user, cid, rcNumber)
 
-        if result == 'Error 1':
-            raise duplicateProxy("No duplicate proxy please :-), Thanks!")
-        elif isinstance(result, User):
-            if type(result.user_id) == int:
-                await bot.send_message(cid, f"{'@'+result.username if result.username!=None else f'[{result.name}](tg://user?id={result.user_id})'} now you are in!", parse_mode="Markdown")
-            else:
-                await bot.send_message(cid, f"{result.name} now you are in!")
+        if result == 'Error':
+            return
+        elif type(result) == dict:
+            if type(result['user_id']) == int:
 
+                name, username, user_id = result['name'], result['username'], result['user_id']
+                await bot.send_message(cid, f"{'@'+username if username !=None else f'[{name}](tg://user?id={user_id})'} now you are in!", parse_mode="Markdown")
+
+            else:
+                await bot.send_message(cid, f"{result['name']} now you are in!")
         # PRINTING THE LIST
         if not chatConfig['shh']:
             await bot.send_message(cid, db.allList(cid, rcNumber))
@@ -750,17 +748,8 @@ async def set_in_for(message):
         # ADDING THE USER TO THE LIST
         result = db.addIn(user, cid, rcNumber)
 
-        # DUPLICATE USER IN SAME STATE ERROR
-        if result == 'Error 1':
-            raise duplicateProxy("No duplicate proxy please :-), Thanks!")
-
-        # INLIST REACHED MAX USERS LIMIT ERROR
-        elif result == 'AC':
-            await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
-
-        # NAME ALREADY EXIST ERROR
-        elif result == 'Error 2':
-            raise repeatlyName("That name already exists!")
+        if result == 'Error':
+            return
 
         # NOTIFY USER THAT WAS MOVED FROM WAITLIST TO INLIST
         elif type(result) == dict:
@@ -818,21 +807,10 @@ async def set_out_for(message):
         # ADDING THE USER TO THE LIST
         result = db.addOut(user, cid, rcNumber)
 
-        # DUPLICATE USER IN SAME STATE ERROR
-        if result == 'Error 1':
-            raise duplicateProxy("No duplicate proxy please :-), Thanks!")
-
-        # INLIST REACHED MAX USERS LIMIT ERROR
-        elif result == 'AC':
-            await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
-
-        # NAME ALREADY EXIST ERROR
-        elif result == 'Error 2':
-            raise repeatlyName("That name already exists!")
-
+        if result == 'Error':
+            return
         # NOTIFY USER THAT WAS MOVED FROM WAITLIST TO INLIST
         elif type(result) == dict:
-
             if type(result['user_id']) == int:
 
                 name, username, user_id = result['name'], result['username'], result['user_id']
@@ -886,17 +864,8 @@ async def set_maybe_for(message):
         # ADDING THE USER TO THE LIST
         result = db.addMaybe(user, cid, rcNumber)
 
-        # DUPLICATE USER IN SAME STATE ERROR
-        if result == 'Error 1':
-            raise duplicateProxy("No duplicate proxy please :-), Thanks!")
-
-        # INLIST REACHED MAX USERS LIMIT ERROR
-        elif result == 'AC':
-            await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
-
-        # NAME ALREADY EXIST ERROR
-        elif result == 'Error 2':
-            raise repeatlyName("That name already exists!")
+        if result == 'Error':
+            return
 
         # NOTIFY USER THAT WAS MOVED FROM WAITLIST TO INLIST
         elif type(result) == dict:

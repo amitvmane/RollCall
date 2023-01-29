@@ -12,7 +12,7 @@ class MyMiddleware(BaseMiddleware):
 
     async def pre_process(self, update, data):
 
-        if update.text.split(" ")[0] in commands:
+        if update.text.split(" ")[0].split("@")[0] in commands:
             
             #SAVE CHAT ON DATABASE IF NO EXISTS
             if not db['chats'].find_one({"_id":update.chat.id}):
@@ -44,7 +44,7 @@ class MyMiddleware(BaseMiddleware):
     async def post_process(self, update, data, exception):
 
         
-        if update.text.split(" ")[0] in commands:
+        if update.text.split(" ")[0].split("@")[0] in commands:
             #SAVE INTERACTION
             if not db['users'].find_one({"_id": update.chat.id, "users._id":update.from_user.id}):
                 print("added")

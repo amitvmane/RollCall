@@ -24,3 +24,6 @@ class incorrectParameter(Exception):
 
 class amountOfRollCallsReached(Exception):
     pass
+
+class rollCallNoExists(Exception):
+    pass

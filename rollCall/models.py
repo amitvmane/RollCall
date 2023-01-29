@@ -3,7 +3,7 @@ from pymongo import MongoClient
 
 from config import TELEGRAM_TOKEN
 from exceptions import *
-from functions import *
+from utils.functions import *
 
 import re
 import traceback
@@ -11,7 +11,7 @@ import logging
 
 #CLASS TO MANAGE MONGO DATABASE
 class Database:
-    def __init__(self, CONN_DB, cid = None):
+    def __init__(self, CONN_DB):
 
         #CONNECTION
         self.client = MongoClient(CONN_DB)
@@ -22,13 +22,14 @@ class Database:
         self.rc_collection = self.db['rollCalls']
 
         #CHAT INFO
-        self.chat_config = self.chat_collection.find_one({"_id":cid})['config']
-        self.chat_roll_calls = self.rc_collection.find_one({"_id":cid})['rollCalls']
+        # if cid:
+        #     self.chat_config = self.chat_collection.find_one({"_id":cid})['config'] 
+        #     self.chat_roll_calls = self.rc_collection.find_one({"_id":cid})['rollCalls'] 
 
     #RETURN INLIST
-    def inListText(self, cid, rc_id):
+    def inListText(self, cid, rcId):
 
-        rc = self.rollCallInfo(rc_id)
+        rc = self.getRollCallById(cid, rcId)
 
         txt=f'In:\n'
         i=0
@@ -40,9 +41,9 @@ class Database:
         return txt+'\n' if len(rc['inList'])>0 else "In:\nNobody\n\n"
 
     #RETURN OUTLIST
-    def outListText(self, cid, rc_id):
+    def outListText(self, cid, rcId):
 
-        rc = self.rollCallInfo(rc_id)
+        rc = self.getRollCallById(cid, rcId)
 
         txt=f'Out:\n'
         i=0
@@ -54,9 +55,9 @@ class Database:
         return txt+'\n' if len(rc['outList'])>0 else "Out:\nNobody\n\n"
     
     #RETURN MAYBELIST
-    def maybeListText(self, cid, rc_id):
+    def maybeListText(self, cid, rcId):
 
-        rc = self.rollCallInfo(rc_id)
+        rc = self.getRollCallById(cid, rcId)
 
         txt=f'Maybe:\n'
         i=0
@@ -68,9 +69,9 @@ class Database:
         return txt+'\n' if len(rc['maybeList'])>0 else "Maybe:\nNobody\n\n"
 
     #RETURN WAITLIST
-    def waitListText(self, cid, rc_id):
+    def waitListText(self, cid, rcId):
 
-        rc = self.rollCallInfo(rc_id)
+        rc = self.getRollCallById(cid, rcId)
 
         txt=f'Waiting:\n'
         i=0
@@ -82,22 +83,23 @@ class Database:
         return (txt+'\n' if len(rc['waitList'])>0 else "Waiting:\nNobody") if rc['inListLimit']!=None else ""
 
     #RETURN ALL THE STATES
-    def allList(self, cid, rc_id):
+    def allList(self, cid, rcId):
 
-        rc = self.rollCallInfo(rc_id)
+        rc = self.getRollCallById(cid, rcId)
+        chat_config = self.getChatConfigById(cid)
 
         createdDate = 'Yet to decide'
 
         if rc['finalizeDate'] != None:
             createdDate = rc['finalizeDate'].strftime('%d-%m-%Y %H:%M')
 
-        return "Title: "+rc["title"]+f'\nID: {rc["rcId"]}'+f"\nEvent time: {createdDate} {' '+self.chat_config['timezone'] if createdDate !='Yet to decide' else ''}\nLocation: {rc['location'] if rc['location']!=None else 'Yet to decide'}\n\n"+(self.inListText(cid, rc_id) if self.inListText(cid, rc_id)!='In:\nNobody\n\n' else '')+(self.outListText(cid,rc_id) if self.outListText(cid,rc_id)!='Out:\nNobody\n\n' else '')+(self.maybeListText(cid, rc_id) if self.maybeListText(cid, rc_id)!='Maybe:\nNobody\n\n' else '')+(self.waitListText(cid, rc_id) if self.waitListText(cid, rc_id)!='Waiting:\nNobody' else '')+'Max limit: '+('♾' if rc['inListLimit']==None else str(rc['inListLimit']))
+        return "Title: "+rc["title"]+f'\nID: {rc["rcId"]}'+f"\nEvent time: {createdDate} {' '+chat_config['timezone'] if createdDate !='Yet to decide' else ''}\nLocation: {rc['location'] if rc['location']!=None else 'Yet to decide'}\n\n"+(self.inListText(cid, rcId) if self.inListText(cid, rcId)!='In:\nNobody\n\n' else '')+(self.outListText(cid,rcId) if self.outListText(cid,rcId)!='Out:\nNobody\n\n' else '')+(self.maybeListText(cid, rcId) if self.maybeListText(cid, rcId)!='Maybe:\nNobody\n\n' else '')+(self.waitListText(cid, rcId) if self.waitListText(cid, rcId)!='Waiting:\nNobody' else '')+'Max limit: '+('♾' if rc['inListLimit']==None else str(rc['inListLimit']))
         
     #RETURN THE FINISH LIST (ONLY IN ERC COMMAND)
-    def finishList(self, cid, rc_id):
+    def finishList(self, cid, rcId):
 
         try:
-            rc = self.rollCallInfo(rc_id)
+            rc = self.getRollCallById(cid, rcId)
 
             createdDate = 'Yet to decide'
 
@@ -106,21 +108,21 @@ class Database:
 
             backslash='\n'
 
-            inList = self.inListText(cid, rc_id)
-            outList = self.outListText(cid, rc_id)
-            maybeList = self.maybeListText(cid, rc_id)
-            waitList = self.waitListText(cid, rc_id)
+            inList = self.inListText(cid, rcId)
+            outList = self.outListText(cid, rcId)
+            maybeList = self.maybeListText(cid, rcId)
+            waitList = self.waitListText(cid, rcId)
 
-            txt = f"Title: {rc['title']}\nID: {rc['rcId']}{(backslash+'Event time: '+createdDate) if createdDate != 'Yet to decide' else ''}{(backslash+'Location: '+rc['location']) if rc['location'] != None else ''}{(backslash+'Event fee: '+rc['event_fee']+backslash + 'Individual Fee: ' + str((round(int(re.sub(r'[^0-9]', '', rc['event_fee']))/len(rc['inList']), 2)) if len(rc['inList'])>0 else '0') + backslash*2 + 'Additional unknown/penalty fees are not included and needs to be handled separately.' + backslash*2) if rc['event_fee'] != None else backslash*2+'In case of paid event - reach out to organiser for payment contribution'}\n\n{inList}{outList}{maybeList}{waitList if waitList !='Waiting:'+backslash+'Nobody' else ''}Max limit: {('♾' if rc['inListLimit']==None else str(rc['inListLimit']))}"
+            txt = f"Title: {rc['title']}\nID: {rc['rcId']}{(backslash+'Event time: '+createdDate) if createdDate != 'Yet to decide' else ''}{(backslash+'Location: '+rc['location']) if rc['location'] != None else ''}{(backslash+'Event fee: '+str(rc['event_fee'])+backslash + 'Individual Fee: ' + str((round(int(re.sub(r'[^0-9]', '', rc['event_fee']))/len(rc['inList']), 2)) if len(rc['inList'])>0 else '0') + backslash*2 + 'Additional unknown/penalty fees are not included and needs to be handled separately.' + backslash*2) if rc['event_fee'] != None else backslash*2+'In case of paid event - reach out to organiser for payment contribution'}\n\n{inList}{outList}{maybeList}{waitList if waitList !='Waiting:'+backslash+'Nobody' else ''}Max limit: {('♾' if rc['inListLimit']==None else str(rc['inListLimit']))}"
 
             return txt
         except:
             print(traceback.format_exc())
 
     #ADD A NEW USER TO IN LIST
-    def addIn(self, user, cid, rc_id):
+    def addIn(self, user, cid, rcId):
 
-        rc = self.rollCallInfo(rc_id)
+        rc = self.getRollCallById(cid, rcId)
         user = user.__dict__
         exists_on_allNames = False
 
@@ -186,14 +188,14 @@ class Database:
             rc['allNames'][pos] = user 
 
         rc['inList'].append(user)
-        self.rc_collection.update_one({"_id":cid, "rollCalls.rcId":rc_id}, {"$set":{"rollCalls.$":rc}})
+        self.rc_collection.update_one({"_id":cid, "rollCalls.rcId":rcId}, {"$set":{"rollCalls.$":rc}})
 
         logging.info(f"User {user['name']} has change his state to in")
 
     #ADD A NEW USER TO OUT LIST
-    def addOut(self, user, cid, rc_id):
+    def addOut(self, user, cid, rcId):
 
-        rc = self.rollCallInfo(rc_id)
+        rc = self.getRollCallById(cid, rcId)
         user = user.__dict__
         exists_on_allNames = False
 
@@ -253,14 +255,14 @@ class Database:
             rc['allNames'][pos] = user 
 
         rc['outList'].append(user)  
-        self.rc_collection.update_one({"_id":cid, "rollCalls.rcId":rc_id}, {"$set":{"rollCalls.$":rc}})
+        self.rc_collection.update_one({"_id":cid, "rollCalls.rcId":rcId}, {"$set":{"rollCalls.$":rc}})
 
         logging.info(f"User {user['name']} has change his state to out")
         
     #ADD A NEW USER TO MAYBE LIST
-    def addMaybe(self, user, cid, rc_id):
+    def addMaybe(self, user, cid, rcId):
 
-        rc = self.rollCallInfo(rc_id)
+        rc = self.getRollCallById(cid, rcId)
         user = user.__dict__
         exists_on_allNames = False
 
@@ -321,39 +323,35 @@ class Database:
 
         rc['maybeList'].append(user)
 
-        self.rc_collection.update_one({"_id":cid, "rollCalls.rcId":rc_id}, {"$set":{"rollCalls.$":rc}})
+        self.rc_collection.update_one({"_id":cid, "rollCalls.rcId":rcId}, {"$set":{"rollCalls.$":rc}})
 
         logging.info(f"User {user['name']} has change his state to maybe")
 
     #RETURN A LIST WITH A TEXT OF EACH ROLLCALL WITH ALL HIS INFO
     def allRollCallsInfo(self, cid):
         txt = []
+        chat_config = self.getChatConfigById(cid)
 
-        for roll_call in self.chat_roll_calls:
+        for rollCall in self.rc_collection.find_one({"_id":cid})['rollCalls']:
 
             createdDate = 'Yet to decide'
+            
 
-            if roll_call['createdDate'] != None:
-                createdDate = roll_call['createdDate'].strftime('%d-%m-%Y %H:%M')
+            if rollCall['createdDate'] != None:
+                createdDate = rollCall['createdDate'].strftime('%d-%m-%Y %H:%M')
 
-            txt.append("Title: "+roll_call["title"]+f'\nID: {roll_call["rcId"]}'+f"\nEvent time: {createdDate} {' '+self.chat_config['timezone'] if createdDate !='Yet to decide' else ''}\nLocation: {roll_call['location'] if roll_call['location']!=None else 'Yet to decide'}\n\n"+(self.inListText(cid, roll_call['rcId']) if self.inListText(cid, roll_call['rcId'])!='In:\nNobody\n\n' else '')+(self.outListText(cid, roll_call['rcId']) if self.outListText(cid, roll_call['rcId'])!='Out:\nNobody\n\n' else '')+(self.maybeListText(cid, roll_call['rcId']) if self.maybeListText(cid, roll_call['rcId'])!='Maybe:\nNobody\n\n' else '')+(self.waitListText(cid, roll_call['rcId']) if self.waitListText(cid, roll_call['rcId'])!='Waiting:\nNobody' else '')+'Max limit: '+('♾' if roll_call['inListLimit']==None else str(roll_call['inListLimit'])))
+            txt.append("Title: "+rollCall["title"]+f'\nID: {rollCall["rcId"]}'+f"\nEvent time: {createdDate} {' '+chat_config['timezone'] if createdDate !='Yet to decide' else ''}\nLocation: {rollCall['location'] if rollCall['location']!=None else 'Yet to decide'}\n\n"+(self.inListText(cid, rollCall['rcId']) if self.inListText(cid, rollCall['rcId'])!='In:\nNobody\n\n' else '')+(self.outListText(cid, rollCall['rcId']) if self.outListText(cid, rollCall['rcId'])!='Out:\nNobody\n\n' else '')+(self.maybeListText(cid, rollCall['rcId']) if self.maybeListText(cid, rollCall['rcId'])!='Maybe:\nNobody\n\n' else '')+(self.waitListText(cid, rollCall['rcId']) if self.waitListText(cid, rollCall['rcId'])!='Waiting:\nNobody' else '')+'Max limit: '+('♾' if rollCall['inListLimit']==None else str(rollCall['inListLimit'])))
 
         return txt
 
-    #RETURN INFO OF A SINGLE ROLLCALL
-    def rollCallInfo(self, rc_id):
-        for roll_call in self.chat_roll_calls:
-            if rc_id == roll_call['rcId']:
-                return roll_call
-
     #FINISH A ROLLCALL
-    def finishRollCall(self, cid, rc_id):
-        self.rc_collection.update_one({"_id":cid}, {"$pull":{"rollCalls":{"rcId":rc_id}}})
+    def finishRollCall(self, cid, rcId):
+        self.rc_collection.update_one({"_id":cid}, {"$pull":{"rollCalls":{"rcId":rcId}}})
 
     #DELETE A USER FROM A STATE
-    def delete_user(self, name, cid, rc_id):
+    def deleteUser(self, name, cid, rcId):
 
-        rc = self.rollCallInfo(rc_id)
+        rc = self.getRollCallById(cid, rcId)
         user_removed = False
 
         #FOUND USER
@@ -365,8 +363,24 @@ class Database:
         if not user_removed:
             False
 
-        self.rc_collection.update_one({"_id":cid, "rollCalls.rcId":rc_id}, {"$set":{"rollCalls.$":rc}})
+        self.rc_collection.update_one({"_id":cid, "rollCalls.rcId":rcId}, {"$set":{"rollCalls.$":rc}})
         return True
+
+    #GET ALL ROLLCALLS
+    def getAllRollCalls(self, cid):
+        return self.rc_collection.find_one({"_id":cid})['rollCalls']
+
+    #GET ROLLCALL BY ID
+    def getRollCallById(self, cid, rcId):
+        for rollCall in self.rc_collection.find_one({"_id":cid})['rollCalls']:
+            if rollCall['rcId'] == rcId:
+                return rollCall
+        
+        return None
+
+    #GET CHAT CONFIG
+    def getChatConfigById(self, cid):
+        return self.chat_collection.find_one({"_id":cid})['config']
 
 #CLASS TO MANAGE USER OBJECTS      
 class User:

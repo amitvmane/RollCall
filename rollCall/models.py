@@ -110,7 +110,7 @@ class Database:
             maybeList = self.maybeListText(cid, rcId)
             waitList = self.waitListText(cid, rcId)
 
-            txt = f"Title: {rc['title']}\nID: {rc['rcId']}{(backslash+'Event time: '+createdDate) if createdDate != 'Yet to decide' else ''}{(backslash+'Location: '+rc['location']) if rc['location'] != None else ''}{(backslash+'Event fee: '+str(rc['event_fee'])+backslash + 'Individual Fee: ' + str((round(int(re.sub(r'[^0-9]', '', rc['event_fee']))/len(rc['inList']), 2)) if len(rc['inList'])>0 else '0') + backslash*2 + 'Additional unknown/penalty fees are not included and needs to be handled separately.' + backslash*2) if rc['event_fee'] != None else backslash*2+'In case of paid event - reach out to organiser for payment contribution'}\n\n{inList}{outList}{maybeList}{waitList if waitList !='Waiting:'+backslash+'Nobody' else ''}Max limit: {('♾' if rc['inListLimit']==None else str(rc['inListLimit']))}"
+            txt = f"Title: {rc['title']}\nID: {rc['rcId']}{(backslash+'Event time: '+createdDate) if createdDate != 'Yet to decide' else ''}{(backslash+'Location: '+rc['location']) if rc['location'] != None else ''}{(backslash+'Event fee: '+str(rc['event_fee'])+backslash + 'Individual Fee: ' + str((round(int(re.sub(r'[^0-9]', '', str(rc['event_fee'])))/len(rc['inList']), 2)) if len(rc['inList'])>0 else '0') + backslash*2 + 'Additional unknown/penalty fees are not included and needs to be handled separately.' + backslash*2) if rc['event_fee'] != None else backslash*2+'In case of paid event - reach out to organiser for payment contribution'}\n\n{inList}{outList}{maybeList}{waitList if waitList !='Waiting:'+backslash+'Nobody' else ''}Max limit: {('♾' if rc['inListLimit']==None else str(rc['inListLimit']))}"
 
             return txt
         except:
@@ -172,14 +172,14 @@ class Database:
                 if us['user_id'] == user['user_id']:
                     rc[lastState].remove(us)
 
-            #ADD USER TO WAITLIST IF IN LIST IS FULL
-            if rc['inListLimit']!=None:
-                if len(rc['inList'])==int(rc['inListLimit']):
-                    rc['waitList'].append(user)
-                    logging.info(f"The user {user['name']} has been added to the Wait list")
-                    bot.send_message(cid, f"Event max limit is reached, {user['name']} was added in waitlist")
-                    self.rc_collection.update_one({"_id":cid, "rollCalls.rcId":rcId}, {"$set":{"rollCalls.$":rc}})
-                    return
+        #ADD USER TO WAITLIST IF IN LIST IS FULL
+        if rc['inListLimit']!=None:
+            if len(rc['inList'])==int(rc['inListLimit']):
+                rc['waitList'].append(user)
+                logging.info(f"The user {user['name']} has been added to the Wait list")
+                bot.send_message(cid, f"Event max limit is reached, {user['name']} was added in waitlist")
+                self.rc_collection.update_one({"_id":cid, "rollCalls.rcId":rcId}, {"$set":{"rollCalls.$":rc}})
+                return
 
         #ADD THE USER TO THE STATE
         user['last_state'] = 'inList'
@@ -338,8 +338,8 @@ class Database:
             createdDate = 'Yet to decide'
             
 
-            if rollCall['createdDate'] != None:
-                createdDate = rollCall['createdDate'].strftime('%d-%m-%Y %H:%M')
+            if rollCall['finalizeDate'] != None:
+                createdDate = rollCall['finalizeDate'].strftime('%d-%m-%Y %H:%M')
 
             txt.append("Title: "+rollCall["title"]+f'\nID: {rollCall["rcId"]}'+f"\nEvent time: {createdDate} {' '+chat_config['timezone'] if createdDate !='Yet to decide' else ''}\nLocation: {rollCall['location'] if rollCall['location']!=None else 'Yet to decide'}\n\n"+(self.inListText(cid, rollCall['rcId']) if self.inListText(cid, rollCall['rcId'])!='In:\nNobody\n\n' else '')+(self.outListText(cid, rollCall['rcId']) if self.outListText(cid, rollCall['rcId'])!='Out:\nNobody\n\n' else '')+(self.maybeListText(cid, rollCall['rcId']) if self.maybeListText(cid, rollCall['rcId'])!='Maybe:\nNobody\n\n' else '')+(self.waitListText(cid, rollCall['rcId']) if self.waitListText(cid, rollCall['rcId'])!='Waiting:\nNobody' else '')+'Max limit: '+('♾' if rollCall['inListLimit']==None else str(rollCall['inListLimit'])))
 

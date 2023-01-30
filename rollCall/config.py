@@ -17,4 +17,4 @@ CONN_DB=os.environ.get("CONN_DB") #URL OF MONGODB DATABASE, EX: mongodb://USERNA
 
 ADMINS=[int(os.environ.get("ADMIN1")), int(os.environ.get("ADMIN2"))]
 
-commands = ['/src', '/in', '/out', '/maybe', '/set_in_for', '/set_out_for','/sif', '/sof', '/smf', '/start', '/help', '/set_admins', '/unset_admins', '/broadcast', '/timezone', '/version', '/rollcalls', '/start_roll_call', '/set_rollcall_time', '/set_rollcall_reminder', '/event_fee', '/individual_fee', '/when', '/location', '/set_limit', '/delete_user', '/shh', '/louder', '/set_maybe_for', '/whos_in', '/whos_out', '/whos_maybe', '/whos_waiting', '/set_title', '/end_roll_call', '/src', '/erc']
+commands = ['/src','/erc','/in','/out','/maybe','/set_in_for','/set_out_for','/set_maybe_for','/sif','/sof','/smf','/start_roll_call','/end_roll_call','/start','/help','/set_admins','/unset_admins','/broadcast','/timezone','/tz','/version','/v','/rollcalls','/r','/set_rollcall_time','/set_rollcall_reminder','/srt','/srr','/event_fee','/ef','/individual_fee','/if','/when','/w','/location','/loc','/sl','/set_limit','/delete_user','/shh','/louder','/whos_in','/whos_out','/whos_maybe','/whos_waiting','/set_title','/st',]

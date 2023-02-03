@@ -175,10 +175,16 @@ class Database:
         #ADD USER TO WAITLIST IF IN LIST IS FULL
         if rc['inListLimit']!=None:
             if len(rc['inList'])==int(rc['inListLimit']):
+                user['last_state'] = 'waitList'
                 rc['waitList'].append(user)
-                logging.info(f"The user {user['name']} has been added to the Wait list")
-                bot.send_message(cid, f"Event max limit is reached, {user['name']} was added in waitlist")
+
+                if not exists_on_allNames:
+                    rc['allNames'].append(user)
+                else:
+                    rc['allNames'][pos] = user
+
                 self.rc_collection.update_one({"_id":cid, "rollCalls.rcId":rcId}, {"$set":{"rollCalls.$":rc}})
+                bot.send_message(cid, f"Event max limit is reached, {user['name']} was added in waitlist")
                 return
 
         #ADD THE USER TO THE STATE
@@ -216,7 +222,7 @@ class Database:
                 else:
                     bot.send_message(cid, 'That name already exists!')
                     return 'Error'
-                    
+
         #ERROR FOR DUPLICATE USER IN THE SAME STATE
         for us in rc['outList']:
 
@@ -232,6 +238,7 @@ class Database:
         #REMOVE THE USER FROM LAST STATE
         if user['last_state'] != None:
             lastState = user['last_state']
+            print(lastState)
             for us in rc[lastState]:
                 if us['user_id'] == user['user_id']:
                     rc[lastState].remove(us)
@@ -347,6 +354,10 @@ class Database:
 
     #FINISH A ROLLCALL
     def finishRollCall(self, cid, rcId):
+        rollCalls = self.rc_collection.find_one({"_id":cid})['rollCalls']
+        for rollCall in rollCalls:
+            if rollCall['rcId'] == rcId:
+                self.db['endedRollCalls'].update_one({"_id":cid}, {"$push":{"endedRollCalls":rollCall}})
         self.rc_collection.update_one({"_id":cid}, {"$pull":{"rollCalls":{"rcId":rcId}}})
 
     #DELETE A USER FROM A STATE

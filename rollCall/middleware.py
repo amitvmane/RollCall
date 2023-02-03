@@ -30,8 +30,18 @@ class MyMiddleware(BaseMiddleware):
                     "_id": update.chat.id,
                     'rollCalls': []
                 }
+                endedRollcalls = {
+                    "_id": update.chat.id,
+                    'endedRollCalls':[]
+                }
+                users = {
+                    "_id":update.chat.id,
+                    "users":[]
+                }
                 db['chats'].insert_one(chat)
                 db['rollCalls'].insert_one(rollCalls)
+                db['endedRollCalls'].insert_one(endedRollcalls)
+                db['users'].insert_one(users)
             
             #GET RC NUMBER IF EXIST
             rcNumber = re.findall(r' ::\d+$', update.text)
@@ -42,12 +52,10 @@ class MyMiddleware(BaseMiddleware):
     
 
     async def post_process(self, update, data, exception):
-
         
         if update.text.split(" ")[0].split("@")[0] in commands:
             #SAVE INTERACTION
             if not db['users'].find_one({"_id": update.chat.id, "users._id":update.from_user.id}):
-                print("added")
                 db['users'].update_one({"_id": update.chat.id}, {"$push":{"users":{'name':update.from_user.first_name, '_id':update.from_user.id,'command':update.text, "last_interaction": datetime.now()}}})
             else:
                 db['users'].update_one({"_id": update.chat.id, 'users._id':update.from_user.id}, {"$set":{'users.$.command':update.text, "users.$.last_interaction": datetime.now()}})

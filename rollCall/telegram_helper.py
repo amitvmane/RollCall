@@ -1038,7 +1038,6 @@ async def end_roll_call(message):
 
         # DEFINING VARIABLES
         cid = message.chat.id
-        msg = message.text
         rcNumber = int(message.data['rcNumber'])
         
         chatRollCalls = db.getAllRollCalls(cid)

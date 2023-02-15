@@ -1,12 +1,10 @@
-from pymongo import MongoClient
-
-from config import TELEGRAM_TOKEN
-from exceptions import *
-from utils.functions import *
-
+import logging
 import re
 import traceback
-import logging
+
+from config.config import CONN_DB, TELEGRAM_TOKEN
+
+from pymongo import MongoClient
 from telebot import TeleBot
 
 bot = TeleBot(TELEGRAM_TOKEN)
@@ -184,6 +182,7 @@ class Database:
                     rc['allNames'][pos] = user
 
                 self.rc_collection.update_one({"_id":cid, "rollCalls.rcId":rcId}, {"$set":{"rollCalls.$":rc}})
+                self.db['users'].update_one({"_id":cid, "users.user_id":user['user_id']}, {"$inc":{"users.$.responses":1}})
                 bot.send_message(cid, f"Event max limit is reached, {user['name']} was added in waitlist")
                 return
 
@@ -196,8 +195,8 @@ class Database:
             rc['allNames'][pos] = user 
 
         rc['inList'].append(user)
+        self.db['users'].update_one({"_id":cid, "users.user_id":user['user_id']}, {"$inc":{"users.$.responses":1}})
         self.rc_collection.update_one({"_id":cid, "rollCalls.rcId":rcId}, {"$set":{"rollCalls.$":rc}})
-        logging.info(f"User {user['name']} has change his state to in")
 
     #ADD A NEW USER TO OUT LIST
     def addOut(self, user, cid, rcId):
@@ -238,7 +237,10 @@ class Database:
         #REMOVE THE USER FROM LAST STATE
         if user['last_state'] != None:
             lastState = user['last_state']
-            print(lastState)
+
+            if lastState == 'inList':
+                self.db['users'].update_one({"_id":cid, "users.user_id":user['user_id']}, {"$inc":{"users.$.in_to_out_count":1}})
+
             for us in rc[lastState]:
                 if us['user_id'] == user['user_id']:
                     rc[lastState].remove(us)
@@ -251,7 +253,6 @@ class Database:
                 result=rc['waitList'][0]
                 rc['inList'].append(rc['waitList'][0])
                 rc['waitList'].pop(0)  
-                logging.info(f"User {user['name']} has change his state to out")
 
         #ADD THE USER TO THE STATE
         user['last_state'] = 'outList'
@@ -263,7 +264,7 @@ class Database:
 
         rc['outList'].append(user)  
         self.rc_collection.update_one({"_id":cid, "rollCalls.rcId":rcId}, {"$set":{"rollCalls.$":rc}})
-        logging.info(f"User {user['name']} has change his state to out")
+        self.db['users'].update_one({"_id":cid, "users.user_id":user['user_id']}, {"$inc":{"users.$.responses":1}})
         if result!=None:
             return result
         
@@ -319,7 +320,6 @@ class Database:
                 result=rc['waitList'][0]
                 rc['inList'].append(rc['waitList'][0])
                 rc['waitList'].pop(0)
-                logging.info(f"User {user['name']} has change his state to out")
 
         #ADD THE USER TO THE STATE
         user['last_state'] = 'maybeList'
@@ -331,7 +331,7 @@ class Database:
 
         rc['maybeList'].append(user)
         self.rc_collection.update_one({"_id":cid, "rollCalls.rcId":rcId}, {"$set":{"rollCalls.$":rc}})
-        logging.info(f"User {user['name']} has change his state to maybe")
+        self.db['users'].update_one({"_id":cid, "users.user_id":user['user_id']}, {"$inc":{"users.$.responses":1}})
         if result:
             return result
 
@@ -394,18 +394,4 @@ class Database:
     def getChatConfigById(self, cid):
         return self.chat_collection.find_one({"_id":cid})['config']
 
-#CLASS TO MANAGE USER OBJECTS      
-class User:
-
-    #USER OBJECT
-    def __init__(self, first_name, username, user_id):
-        self.name = first_name
-        self.first_name = first_name
-        self.username = username
-        self.user_id = user_id
-        self.comment = ''
-        self.last_state = None
-
-    def __str__(self):
-        backslash="\n"
-        return f"{self.name + (' ('+self.comment+')' if self.comment!='' else '')}"
+db = Database(CONN_DB)

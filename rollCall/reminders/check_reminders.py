@@ -1,15 +1,14 @@
 import pytz
 from telebot import TeleBot
 from datetime import datetime, timedelta
+
 import asyncio
 import traceback
 
-from models import Database
-from config import TELEGRAM_TOKEN, CONN_DB
+from models.Database import db
+from config.config import TELEGRAM_TOKEN
 
 bot = TeleBot(token=TELEGRAM_TOKEN)
-db = Database(CONN_DB)
-
 
 async def check():
     while True:

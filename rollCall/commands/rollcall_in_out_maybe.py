@@ -25,6 +25,10 @@ async def in_user(bot, message):
         if not rc:
             raise rollCallNoExists("The roll call id doesn't exist")
 
+        if rc['freeze']:
+            await bot.send_message(cid, f'The rollcall {rc["title"]} is currently freezed')
+            return
+
         user = User(message.from_user.first_name,
                     message.from_user.username if message.from_user.username != "" else "None", message.from_user.id)
 
@@ -178,8 +182,12 @@ async def set_in_for(bot, message):
             raise parameterMissing("Input username is missing")
 
         # ASSIGN ROLLCALL ID
-        if not db.getRollCallById(cid, rcNumber):
+        if not rc:
             raise rollCallNoExists("The roll call id doesn't exist")
+
+        if rc['freeze']:
+            await bot.send_message(cid, f'The rollcall {rc["title"]} is currently freezed')
+            return
 
         # CREATING THE USER OBJECT
         user = User(arr[1], None, arr[1])

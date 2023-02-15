@@ -5,12 +5,14 @@ from utils.functions import admin_rights
 import traceback
 import re
 
+
 async def rollCalls(bot, message):
     try:
 
         # DEFINING VARIABLES
         cid = message.chat.id
-        chat_roll_calls = db.rc_collection.find_one({"_id":message.chat.id})['rollCalls']
+        chat_roll_calls = db.rc_collection.find_one(
+            {"_id": message.chat.id})['rollCalls']
 
         # ERROR IF NOT EXISTS ANY ROLLCALLS
         if len(chat_roll_calls) == 0:
@@ -22,6 +24,51 @@ async def rollCalls(bot, message):
 
     except Exception as e:
         print(traceback.format_exc())
+
+
+async def freeze(bot, message):
+    try:
+        cid = message.chat.id
+
+        rcNumber = int(message.data['rcNumber'])
+        chatRollCalls = db.getAllRollCalls(cid)
+        rc = db.getRollCallById(cid, rcNumber)
+
+        if len(chatRollCalls) == 0:
+            raise rollCallNotStarted("Roll call is not active")
+
+        # ASSIGN ROLLCALL ID
+        if not rc:
+            raise rollCallNoExists("The roll call id doesn't exist")
+
+        db.db['rollCalls'].update_one({"_id": cid, "rollCalls.rcId": rcNumber}, {
+                                    "$set": {"rollCalls.$.freeze": True}})
+        await bot.send_message(cid, 'Freezing')
+    except Exception as e:
+        print(traceback.format_exc())
+
+
+async def unfreeze(bot, message):
+    try:
+        cid = message.chat.id
+
+        rcNumber = int(message.data['rcNumber'])
+        chatRollCalls = db.getAllRollCalls(cid)
+        rc = db.getRollCallById(cid, rcNumber)
+
+        if len(chatRollCalls) == 0:
+            raise rollCallNotStarted("Roll call is not active")
+
+        # ASSIGN ROLLCALL ID
+        if not rc:
+            raise rollCallNoExists("The roll call id doesn't exist")
+
+        db.db['rollCalls'].update_one({"_id": cid, "rollCalls.rcId": rcNumber}, {
+                                    "$set": {"rollCalls.$.freeze": False}})
+        await bot.send_message(cid, 'Unfreezing')
+    except Exception as e:
+        print(traceback.format_exc())
+
 
 async def individual_fee(bot, message):
 
@@ -53,6 +100,7 @@ async def individual_fee(bot, message):
     except Exception as e:
         await bot.send_message(cid, e)
 
+
 async def when(bot, message):
 
     cid = message.chat.id
@@ -60,7 +108,7 @@ async def when(bot, message):
 
     chatRollCalls = db.getAllRollCalls(cid)
     chatConfig = db.getChatConfigById(cid)
-    rc = db.getRollCallById(cid)
+    rc = db.getRollCallById(cid, rcNumber)
 
     try:
         if len(chatRollCalls) == 0:
@@ -78,6 +126,7 @@ async def when(bot, message):
     except Exception as e:
         await bot.send_message(cid, e)
 
+
 async def delete_user(bot, message):
     try:
 
@@ -85,7 +134,7 @@ async def delete_user(bot, message):
         msg = message.text
         cid = message.chat.id
         rcNumber = int(message.data['rcNumber'])
-        
+
         chatRollCalls = db.getAllRollCalls(cid)
         chatConfig = db.getChatConfigById(cid)
         rc = db.getRollCallById(cid, rcNumber)
@@ -126,7 +175,7 @@ async def whos_in(bot, message):
         # DEFINING VARIABLES
         cid = message.chat.id
         rcNumber = int(message.data['rcNumber'])
-     
+
         chatRollCalls = db.getAllRollCalls(cid)
         rc = db.getRollCallById(cid, rcNumber)
 
@@ -151,7 +200,7 @@ async def whos_out(bot, message):
         # DEFINING VARIABLES
         cid = message.chat.id
         rcNumber = int(message.data['rcNumber'])
-        
+
         chatRollCalls = db.getAllRollCalls(cid)
         rc = db.getRollCallById(cid, rcNumber)
 
@@ -176,7 +225,7 @@ async def whos_maybe(bot, message):
         # DEFINING VARIABLES
         cid = message.chat.id
         rcNumber = int(message.data['rcNumber'])
-        
+
         chatRollCalls = db.getAllRollCalls(cid)
         rc = db.getRollCallById(cid, rcNumber)
 
@@ -201,7 +250,7 @@ async def whos_waiting(bot, message):
         # DEFINING VARIABLES
         cid = message.chat.id
         rcNumber = int(message.data['rcNumber'])
-       
+
         chatRollCalls = db.getAllRollCalls(cid)
         rc = db.getRollCallById(cid, rcNumber)
 

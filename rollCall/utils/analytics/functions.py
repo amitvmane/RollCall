@@ -296,12 +296,3 @@ def rollcalls_month(cid):
     buf.seek(0)
 
     return buf
-    
-
-''' % users voting in the bot ? LISTO
-Top 5 available user ( gives IN vote ) by order in last 3/6 months.LISTO
-Top 5 Users which are not using bot NOT POSSIBLE
-Top 5 users who are changing vote from IN to OUT in same roll call LISTO
-Top 5 users who are consistently responding to bot ( no matter if its IN/OUT/MAYBE ) LISTO
-Bot usage frequency per month ( total no of rollcalls per month ) LISTO
-'''

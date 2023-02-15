@@ -147,3 +147,9 @@ bot.register_message_handler(lambda message: chat_analytics.consistent_users(bot
 
 bot.register_message_handler(lambda message: chat_analytics.rollcalls_per_month(bot, message), 
                             func=lambda message: message.text.lower().split("@")[0].split(" ")[0] in ["/rollcalls_per_month", '/rpm'])
+
+bot.register_message_handler(lambda message: rollcall_interact.freeze(bot, message), 
+                            func=lambda message: message.text.lower().split("@")[0].split(" ")[0] in ["/f", '/freeze'])
+
+bot.register_message_handler(lambda message: rollcall_interact.unfreeze(bot, message), 
+                            func=lambda message: message.text.lower().split("@")[0].split(" ")[0] in ["/uf", '/unfreeze'])

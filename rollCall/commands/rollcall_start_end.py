@@ -49,6 +49,7 @@ async def start_roll_call(bot, message):
             "finalizeDate": None,
             "location": None,
             "event_fee": None,
+            "freeze": False,
             "createdDate": datetime.datetime.utcnow()
         }
 

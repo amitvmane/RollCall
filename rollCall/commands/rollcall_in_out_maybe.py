@@ -10,9 +10,9 @@ async def in_user(bot, message):
         # DEFINING VARIABLES
         msg = message.text
         cid = message.chat.id
-        comment = ""
         rcNumber = int(message.data['rcNumber'])
         
+        # GET ROLLCALL/CHAT INFORMATION FROM DB
         chatRollCalls = db.getAllRollCalls(cid)
         chatConfig = db.getChatConfigById(cid)
         rc = db.getRollCallById(cid, rcNumber)
@@ -21,27 +21,24 @@ async def in_user(bot, message):
         if len(chatRollCalls) == 0:
             raise rollCallNotStarted("Roll call is not active")
 
-        # ASSIGN ROLLCALL ID
+        # CHECK IF EXIST THE ROLLCALL
         if not rc:
             raise rollCallNoExists("The roll call id doesn't exist")
 
+        #CHECK IF THE ROLLCALL IS FREEZED
         if rc['freeze']:
             await bot.send_message(cid, f'The rollcall {rc["title"]} is currently freezed')
             return
 
-        user = User(message.from_user.first_name,
-                    message.from_user.username if message.from_user.username != "" else "None", message.from_user.id)
-
-        # DEFINING THE USER COMMENT
-        arr = msg.split(" ")
-        if len(arr) > 1:
-            arr.pop(0)
-            comment = ' '.join(arr)
-            user.comment = comment
+        user = User(
+            message.from_user.first_name,
+            message.from_user.username if message.from_user.username != "" else None, 
+            message.from_user.id,
+            comment = msg.split(" ", 1)[1] if len(msg.split(" ")) > 1 else ""
+            )
 
         # ADDING THE USER TO THE LIST
         result = db.addIn(user, cid, rcNumber)
-
         if result == 'Error':
             return
 
@@ -60,9 +57,9 @@ async def out_user(bot, message):
         # DEFINING VARIABLES
         msg = message.text
         cid = message.chat.id
-        comment = ""
         rcNumber = int(message.data['rcNumber'])
 
+        # GET ROLLCALL/CHAT INFORMATION FROM DB
         chatRollCalls = db.getAllRollCalls(cid)
         chatConfig = db.getChatConfigById(cid)
         rc = db.getRollCallById(cid, rcNumber)
@@ -71,25 +68,21 @@ async def out_user(bot, message):
         if len(chatRollCalls) == 0:
             raise rollCallNotStarted("Roll call is not active")
 
-        # ASSIGN ROLLCALL ID
+        # CHECK IF ROLLCALL EXIST
         if not rc:
             raise rollCallNoExists("The roll call id doesn't exist")
 
-        user = User(message.from_user.first_name,
-                    message.from_user.username, message.from_user.id)
-
-        # DEFINING THE USER COMMENT
-        arr = msg.split(" ")
-        if len(arr) > 1:
-            arr.pop(0)
-            comment = ' '.join(arr)
-            user.comment = comment
+        user = User(
+            message.from_user.first_name,
+            message.from_user.username if message.from_user.username != "" else None, 
+            message.from_user.id,
+            comment = msg.split(" ", 1)[1] if len(msg.split(" ")) > 1 else ""
+        )
 
         # ADDING THE USER TO THE LIST
         result = db.addOut(user, cid, rcNumber)
-
         if result == 'Error':
-            return
+            return   
         elif type(result) == dict:
             if type(result['user_id']) == int:
 
@@ -113,7 +106,6 @@ async def maybe_user(bot, message):
         # DEFINING VARIABLES
         msg = message.text
         cid = message.chat.id
-        comment = ""
         rcNumber = int(message.data['rcNumber'])
         
         chatRollCalls = db.getAllRollCalls(cid)
@@ -124,23 +116,19 @@ async def maybe_user(bot, message):
         if len(chatRollCalls) == 0:
             raise rollCallNotStarted("Roll call is not active")
 
-        # ASSIGN ROLLCALL ID
+        # CHECK IF ROLLCALL EXIST
         if not rc:
             raise rollCallNoExists("The roll call id doesn't exist")
 
-        user = User(message.from_user.first_name,
-                    message.from_user.username, message.from_user.id)
-
-        # DEFINING THE USER COMMENT
-        arr = msg.split(" ")
-        if len(arr) > 1:
-            arr.pop(0)
-            comment = ' '.join(arr)
-            user.comment = comment
+        user = User(
+            message.from_user.first_name,
+            message.from_user.username, 
+            message.from_user.id,
+            comment = msg.split(" ", 1)[1] if len(msg.split(" ")) > 1 else ""
+            )
 
         # ADDING THE USER TO THE LIST
         result = db.addMaybe(user, cid, rcNumber)
-
         if result == 'Error':
             return
         elif type(result) == dict:
@@ -151,6 +139,7 @@ async def maybe_user(bot, message):
 
             else:
                 await bot.send_message(cid, f"{result['name']} now you are in!")
+        
         # PRINTING THE LIST
         if not chatConfig['shh']:
             await bot.send_message(cid, db.allList(cid, rcNumber))
@@ -165,7 +154,6 @@ async def set_in_for(bot, message):
         # DEFINING VARIABLES
         msg = message.text
         cid = message.chat.id
-        comment = ""
         rcNumber = int(message.data['rcNumber'])
         arr = msg.split(" ")
         
@@ -181,25 +169,27 @@ async def set_in_for(bot, message):
         elif len(arr) <= 1:
             raise parameterMissing("Input username is missing")
 
-        # ASSIGN ROLLCALL ID
+        # CHECK IF ROLLCALL EXIST
         if not rc:
             raise rollCallNoExists("The roll call id doesn't exist")
 
+        #CHECK IF ROLLCALL IS FREEZED
         if rc['freeze']:
             await bot.send_message(cid, f'The rollcall {rc["title"]} is currently freezed')
             return
 
         # CREATING THE USER OBJECT
-        user = User(arr[1], None, arr[1])
-        comment = " ".join(arr[2:]) if len(arr) > 2 else ""
-        user.comment = comment
+        user = User(
+            arr[1], 
+            None, 
+            arr[1],
+            comment = " ".join(arr[2:]) if len(arr) > 2 else ""
+            )
 
         # ADDING THE USER TO THE LIST
         result = db.addIn(user, cid, rcNumber)
-
         if result == 'Error':
             return
-
         # NOTIFY USER THAT WAS MOVED FROM WAITLIST TO INLIST
         elif type(result) == dict:
 

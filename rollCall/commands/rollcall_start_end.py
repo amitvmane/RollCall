@@ -10,34 +10,23 @@ async def start_roll_call(bot, message):
         # DEFINING VARIABLES
         cid = message.chat.id
         msg = message.text
-        title = '<Empty>'
+        title = msg.split(" ",1)[1] if len(msg.split(" ")) > 1 else '<Empty>'
         chatRollCalls = db.getAllRollCalls(cid)
         chatConfig = db.getChatConfigById(cid)
-        idsToUse = [1, 2, 3]
+        idsToUse = set([1,2,3]) - set(i['rcId'] for i in chatRollCalls) # AVAILABLE ROLLCALLS ID'S
 
         # MAXIMUM ROLLCALLS ERROR
         if len(chatRollCalls) >= 3:
             raise amountOfRollCallsReached("Allowed Maximum number of active roll calls per group is 3.")
 
         # CHECK FOR ADMIN RIGHTS
-        if chatConfig['adminRights'] == True:
-            if not admin_rights(message):
-                await bot.send_message(message.chat.id, "Error - user does not have sufficient permissions for this operation")
-                return
-
-        # GET AVAILABLE ROLLCALLS ID'S
-        idsUsed = [i['rcId'] for i in chatRollCalls]
-        idsToUse = list(set(idsToUse) - set(idsUsed))
-
-        # SET THE RC TITLE
-        arr = msg.split(" ")
-        if len(arr) > 1:
-            arr.pop(0)
-            title = ' '.join(arr)
+        if chatConfig['adminRights'] and not admin_rights(message):
+            await bot.send_message(message.chat.id, "Error - user does not have sufficient permissions for this operation")
+            return
 
         # CREATING ROLLCALL OBJECT
         rollCall = {
-            "rcId": idsToUse[0],
+            "rcId": idsToUse.pop(),
             "title": title,
             "inList": [],
             "outList": [],
@@ -52,7 +41,7 @@ async def start_roll_call(bot, message):
             "freeze": False,
             "createdDate": datetime.datetime.utcnow()
         }
-
+    
         # UPDATING RC TO DB
         db.rc_collection.update_one({"_id": cid}, {"$push": {"rollCalls": rollCall}})
         await bot.send_message(message.chat.id, f"Roll call with title: {title} started!")
@@ -77,12 +66,11 @@ async def end_roll_call(bot, message):
             raise rollCallNotStarted("Roll call is not active")
 
         # CHECK FOR ADMIN RIGHTS
-        if chatConfig['adminRights'] == True:
-            if not admin_rights(message):
-                await bot.send_message(message.chat.id, "Error - user does not have sufficient permissions for this operation")
-                return
+        if chatConfig['adminRights'] and not admin_rights(message):
+            await bot.send_message(cid, "Error - user does not have sufficient permissions for this operation")
+            return
 
-        # ASSIGN ROLLCALL ID
+        # IF ROLLCALL ID DOESN'T EXIST
         if not rc:
             raise rollCallNoExists("The roll call id doesn't exist")
 

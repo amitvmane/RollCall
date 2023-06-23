@@ -2,12 +2,12 @@
 class User:
 
     #USER OBJECT
-    def __init__(self, first_name, username, user_id):
+    def __init__(self, first_name, username, user_id, comment=''):
         self.name = first_name
         self.first_name = first_name
         self.username = username
         self.user_id = user_id
-        self.comment = ''
+        self.comment = comment
         self.last_state = None
 
     def __str__(self):

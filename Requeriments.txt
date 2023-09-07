@@ -1,2 +1,5 @@
-pyTelegramBotAPI==4.5.1
-pytz==2022.1
+pyTelegramBotAPI==4.9.0
+pytz==2022.6
+Levenshtein==0.20.8
+matplotlib==3.6.3
+urllib3==1.26.12

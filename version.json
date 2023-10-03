@@ -21,6 +21,12 @@
         "Description":"Some bugs and visual fixes",
         "DeployedOnProd":"Y",
         "DeployedDatetime":"29-11-2022 06:00 UTC"
+    },
+     {
+        "Version":3.0,
+        "Description":"Major Release with docker support and base for DB support",
+        "DeployedOnProd":"Y",
+        "DeployedDatetime":"29-11-2022 06:00 UTC"
     }
 
 ]

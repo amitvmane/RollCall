@@ -1,0 +1,25 @@
+[
+    {"Version": 2,
+    "Description": "Reminder feature fixed, /version command, /location command, few visuals changes",
+    "DeployedOnProd": "Y",
+    "DeployedDatetime":"20-08-2022 20:00 UTC"
+    },
+    {
+        "Version":2.1,
+        "Description":"introduction of fee split based on IN list , minor notification error code fixes , server timezone related changes, critical- Roll call was not ending post fee feature",
+        "DeployedOnProd":"Y",
+        "DeployedDatetime":"03-11-2022 00:30 UTC"
+    },
+    {
+        "Version":2.2,
+        "Description":"Introduction of MRC feature (Multiple Roll Call), creating MRC with /src command, also you can interact with each one using ::<rc_number> at the end of all commands, Added new command (/Individual_Fee) to know how much needs to pay each user",
+        "DeployedOnProd":"Y",
+        "DeployedDatetime":"05-11-2022 06:00 UTC"
+     },
+     {
+        "Version":2.3,
+        "Description":"Some bugs and visual fixes",
+        "DeployedOnProd":"Y",
+        "DeployedDatetime":"29-11-2022 06:00 UTC"
+    }
+]

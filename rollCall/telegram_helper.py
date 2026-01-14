@@ -536,7 +536,7 @@ async def set_location(message):
 
         chat[cid]['rollCalls'][rc_number].location=place
 
-        await bot.send_message(cid, f"The rollcall with title - {chat[cid]['rollCalls'][0].title} has a new location!")
+        await bot.send_message(cid, f"The rollcall with title - {chat[cid]['rollCalls'][rc_number].title} has a new location!")
 
     except Exception as e:
         await bot.send_message(cid, e)
@@ -1185,7 +1185,7 @@ async def end_roll_call(message):
         pmts=message.text.split(" ")[1:]
         rc_number=0
 
-        if len(pmts)>1 and "::" in pmts[-1]:
+        if len(pmts)>0 and "::" in pmts[-1]:
             try:
                 rc_number=int(pmts[-1].replace("::",""))-1
                 del pmts[-1]

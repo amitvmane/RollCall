@@ -1,6 +1,6 @@
 pyTelegramBotAPI==4.14.1
 pytz==2023.3
-Levenshtein==0.20.8
+Levenshtein==0.23.0
 matplotlib==3.6.3
 urllib3==1.26.12
 aiohttp==3.8.5

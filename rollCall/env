@@ -1,3 +1,10 @@
 API_KEY="5504049496:AAFKy6QRSvK9tQ3CMOlkw4JLIKgSgSSBbhE"
 ADMIN1=168415137
 ADMIN2=1873806303
+
+# Add this line for database (SQLite is default)
+DATABASE_URL=sqlite:////app/data/rollcall.db
+
+# OR for PostgreSQL:
+# DATABASE_URL=postgresql://username:password@localhost:5432/rollcall_db
+

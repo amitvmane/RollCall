@@ -1,4 +1,41 @@
-version: '3'
+version: '3.8'
+
 services:
-  bot:
-    image: dockerbot:latest
+  rollcall-bot:
+    build:
+      context: .
+      dockerfile: dockerfile
+    container_name: rollcall-bot
+    restart: unless-stopped
+    
+    environment:
+      # Telegram Bot Configuration
+      - API_KEY=${API_KEY}
+      - ADMIN1=${ADMIN1}
+      - ADMIN2=${ADMIN2}
+      
+      # Database Configuration (SQLite with persistent volume)
+      - DATABASE_URL=sqlite:////app/data/rollcall.db
+    
+    volumes:
+      # Persist database across container restarts
+      - ./data:/app/data
+      
+      # Persist logs
+      - ./logs:/app/logs
+      
+      # Optional: Mount version.json and database.json if they're updated externally
+      - ./version.json:/app/version.json:ro
+      - ./database.json:/app/database.json
+    
+    # Read environment variables from .env file
+    env_file:
+      - .env
+    
+    # Health check (optional but recommended)
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sqlite3; conn = sqlite3.connect('/app/data/rollcall.db'); conn.close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

@@ -13,6 +13,8 @@ services:
       - API_KEY=${API_KEY}
       - ADMIN1=${ADMIN1}
       - ADMIN2=${ADMIN2}
+      - TELEGRAM_TOKEN=${API_KEY}
+      - HEALTH_CHECK_PORT=8080
       
       # Database Configuration (SQLite with persistent volume)
       - DATABASE_URL=sqlite:////app/data/rollcall.db
@@ -24,18 +26,24 @@ services:
       # Persist logs
       - ./logs:/app/logs
       
-      # Optional: Mount version.json and database.json if they're updated externally
-      - ./version.json:/app/version.json:ro
-      - ./database.json:/app/database.json
+    ports:
+      - "8080:8080"  # Health check endpoint
     
     # Read environment variables from .env file
     env_file:
       - .env
     
-    # Health check (optional but recommended)
+    # HTTP-based health check using curl
     healthcheck:
-      test: ["CMD", "python", "-c", "import sqlite3; conn = sqlite3.connect('/app/data/rollcall.db'); conn.close()"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

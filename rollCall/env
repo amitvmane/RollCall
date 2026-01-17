@@ -1,6 +1,10 @@
-API_KEY="5504049496:AAFKy6QRSvK9tQ3CMOlkw4JLIKgSgSSBbhE"
+API_KEY="8324883914:AAE4i0zrkF-TEmW9uowy6SYWIa4gQqPK9cI"
 ADMIN1=168415137
 ADMIN2=1873806303
+ADMINS=[${ADMIN1},${ADMIN2}]
+TELEGRAM_TOKEN=${API_KEY}
+
+
 
 # Add this line for database (SQLite is default)
 DATABASE_URL=sqlite:////app/data/rollcall.db
@@ -8,3 +12,6 @@ DATABASE_URL=sqlite:////app/data/rollcall.db
 # OR for PostgreSQL:
 # DATABASE_URL=postgresql://username:password@localhost:5432/rollcall_db
 
+
+# Health Check Configuration
+HEALTH_CHECK_PORT=8080

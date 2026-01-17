@@ -1,0 +1,785 @@
+2026-01-17 17:14:21,519 - root - INFO - Using SQLite database
+2026-01-17 17:14:21,528 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:14:21,549 - root - INFO - Database tables created successfully
+2026-01-17 17:14:21,550 - root - INFO - Database initialized successfully
+2026-01-17 17:14:21,554 - root - INFO - Bot already started
+2026-01-17 17:14:21,555 - __main__ - INFO - ============================================================
+2026-01-17 17:14:21,555 - __main__ - INFO - 🤖 Starting RollCall Telegram Bot
+2026-01-17 17:14:21,556 - __main__ - INFO - ============================================================
+2026-01-17 17:14:21,557 - __main__ - INFO - Validating environment configuration...
+2026-01-17 17:14:21,558 - __main__ - INFO - ✅ TELEGRAM_TOKEN configured
+2026-01-17 17:14:21,559 - __main__ - INFO - ✅ DATABASE_URL configured: sqlite:////app/data/rollcall.db
+2026-01-17 17:14:21,559 - __main__ - INFO - ✅ 2 admin(s) configured
+2026-01-17 17:14:21,560 - __main__ - INFO - ✅ Directory exists: /app/data/
+2026-01-17 17:14:21,561 - __main__ - INFO - ✅ Directory exists: /app/logs/
+2026-01-17 17:14:21,562 - __main__ - INFO - Initializing database...
+2026-01-17 17:14:21,563 - root - INFO - Using SQLite database
+2026-01-17 17:14:21,565 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:14:21,578 - root - INFO - Database tables created successfully
+2026-01-17 17:14:21,579 - root - INFO - Database initialized successfully
+2026-01-17 17:14:21,579 - __main__ - INFO - ✅ Database initialized successfully
+2026-01-17 17:14:22,189 - __main__ - INFO - ============================================================
+2026-01-17 17:14:22,195 - __main__ - INFO - ✅ Bot authenticated successfully!
+2026-01-17 17:14:22,200 - __main__ - INFO -    Bot Name: TestGenericRollcallBot
+2026-01-17 17:14:22,209 - __main__ - INFO -    Username: @TestGenericRollcallBot
+2026-01-17 17:14:22,211 - __main__ - INFO -    Bot ID:   8324883914
+2026-01-17 17:14:22,213 - __main__ - INFO - ============================================================
+2026-01-17 17:14:22,217 - __main__ - INFO - ✅ Health check server running on http://0.0.0.0:8080
+2026-01-17 17:14:22,218 - __main__ - INFO -    - Health: http://localhost:8080/health
+2026-01-17 17:14:22,219 - __main__ - INFO -    - Ping:   http://localhost:8080/ping
+2026-01-17 17:14:22,221 - __main__ - INFO - 🚀 Bot is now running and listening for messages...
+2026-01-17 17:14:22,222 - __main__ - INFO - Press Ctrl+C to stop
+2026-01-17 17:14:22,223 - __main__ - INFO - ============================================================
+2026-01-17 17:14:42,443 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:14:42,471 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:14:45,481 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:14:45,488 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:14:48,505 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:14:48,550 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:14:51,558 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:14:51,561 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:14:51,636 - root - INFO - Using SQLite database
+2026-01-17 17:14:51,640 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:14:51,657 - root - INFO - Database tables created successfully
+2026-01-17 17:14:51,658 - root - INFO - Database initialized successfully
+2026-01-17 17:14:51,661 - aiohttp.access - INFO - 127.0.0.1 [17/Jan/2026:17:14:51 +0000] "GET /health HTTP/1.1" 200 201 "-" "curl/8.14.1"
+2026-01-17 17:14:54,573 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:14:54,590 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:14:57,601 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:14:57,614 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:15:00,625 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:15:00,633 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:15:03,643 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:15:03,653 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:15:06,672 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:15:06,683 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:15:09,691 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:15:09,698 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:15:12,701 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:15:12,710 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:15:15,722 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:15:15,729 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:15:18,743 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:15:18,776 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:15:21,785 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:15:21,790 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:15:22,573 - root - INFO - Using SQLite database
+2026-01-17 17:15:22,593 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:15:22,628 - root - INFO - Database tables created successfully
+2026-01-17 17:15:22,630 - root - INFO - Database initialized successfully
+2026-01-17 17:15:22,633 - aiohttp.access - INFO - 127.0.0.1 [17/Jan/2026:17:15:21 +0000] "GET /health HTTP/1.1" 200 201 "-" "curl/8.14.1"
+2026-01-17 17:15:24,800 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:15:24,809 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:15:27,823 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:15:27,836 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:15:30,851 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:15:30,885 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:15:33,896 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:15:33,904 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:15:36,915 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:15:36,923 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:15:39,937 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:15:39,955 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:15:42,969 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:15:42,975 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:15:45,996 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:15:46,105 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:15:49,122 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:15:49,131 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:15:52,141 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:15:52,145 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:15:53,599 - root - INFO - Using SQLite database
+2026-01-17 17:15:53,611 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:15:53,653 - root - INFO - Database tables created successfully
+2026-01-17 17:15:53,654 - root - INFO - Database initialized successfully
+2026-01-17 17:15:53,657 - aiohttp.access - INFO - 127.0.0.1 [17/Jan/2026:17:15:52 +0000] "GET /health HTTP/1.1" 200 201 "-" "curl/8.14.1"
+2026-01-17 17:15:55,157 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:15:55,168 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:15:58,178 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:15:58,189 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:16:01,204 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:16:01,217 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:16:04,231 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:16:04,242 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:16:07,256 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:16:07,274 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:16:10,289 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:16:10,306 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:16:13,322 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:16:13,330 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:16:16,345 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:16:16,382 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:16:19,395 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:16:19,404 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:16:22,432 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:16:22,476 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:16:24,581 - root - INFO - Using SQLite database
+2026-01-17 17:16:24,602 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:16:24,641 - root - INFO - Database tables created successfully
+2026-01-17 17:16:24,643 - root - INFO - Database initialized successfully
+2026-01-17 17:16:24,646 - aiohttp.access - INFO - 127.0.0.1 [17/Jan/2026:17:16:23 +0000] "GET /health HTTP/1.1" 200 201 "-" "curl/8.14.1"
+2026-01-17 17:16:25,486 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:16:25,492 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:16:28,509 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:16:28,533 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:16:31,543 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:16:31,553 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:16:34,570 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:16:34,587 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:16:37,600 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:16:37,616 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:16:40,626 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:16:40,643 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:16:43,657 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:16:43,673 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:16:46,692 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:16:46,704 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:16:49,712 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:16:49,720 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:16:52,744 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:16:52,771 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:16:55,413 - root - INFO - Using SQLite database
+2026-01-17 17:16:55,437 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:16:55,462 - root - INFO - Database tables created successfully
+2026-01-17 17:16:55,464 - root - INFO - Database initialized successfully
+2026-01-17 17:16:55,471 - aiohttp.access - INFO - 127.0.0.1 [17/Jan/2026:17:16:54 +0000] "GET /health HTTP/1.1" 200 201 "-" "curl/8.14.1"
+2026-01-17 17:16:55,778 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:16:55,784 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:16:58,798 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:16:58,875 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:17:01,897 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:17:01,922 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:17:04,935 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:17:04,944 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:17:07,963 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:17:07,996 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:17:11,033 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:17:11,051 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:17:14,073 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:17:14,080 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:17:17,096 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:17:17,117 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:17:20,133 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:17:20,141 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:17:23,165 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:17:23,172 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:17:26,183 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:17:26,200 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:17:26,359 - root - INFO - Using SQLite database
+2026-01-17 17:17:26,373 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:17:26,417 - root - INFO - Database tables created successfully
+2026-01-17 17:17:26,419 - root - INFO - Database initialized successfully
+2026-01-17 17:17:26,421 - aiohttp.access - INFO - 127.0.0.1 [17/Jan/2026:17:17:25 +0000] "GET /health HTTP/1.1" 200 201 "-" "curl/8.14.1"
+2026-01-17 17:17:29,217 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:17:29,227 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:17:32,250 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:17:32,366 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:17:35,380 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:17:35,389 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:17:38,400 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:17:38,420 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:17:41,442 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:17:41,461 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:17:44,478 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:17:44,490 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:17:47,508 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:17:47,529 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:17:50,543 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:17:50,549 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:17:53,561 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:17:53,568 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:17:56,579 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:17:56,581 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:17:57,289 - root - INFO - Using SQLite database
+2026-01-17 17:17:57,302 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:17:57,344 - root - INFO - Database tables created successfully
+2026-01-17 17:17:57,345 - root - INFO - Database initialized successfully
+2026-01-17 17:17:57,348 - aiohttp.access - INFO - 127.0.0.1 [17/Jan/2026:17:17:56 +0000] "GET /health HTTP/1.1" 200 201 "-" "curl/8.14.1"
+2026-01-17 17:17:59,587 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:17:59,595 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:18:02,614 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:18:02,639 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:18:05,664 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:18:05,677 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:18:08,690 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:18:08,712 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:18:11,724 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:18:11,730 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:18:14,737 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:18:14,748 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:18:17,766 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:18:17,790 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:18:20,805 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:18:20,830 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:18:23,837 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:18:23,845 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:18:26,859 - TeleBot - ERROR - Infinity polling exception: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+2026-01-17 17:18:26,863 - TeleBot - ERROR - Exception traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/telebot/async_telebot.py", line 357, in infinity_polling
+    await self._process_polling(non_stop=True, timeout=timeout, request_timeout=request_timeout,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'long_polling_timeout'
+
+2026-01-17 17:18:28,154 - root - INFO - Using SQLite database
+2026-01-17 17:18:28,170 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:18:28,209 - root - INFO - Database tables created successfully
+2026-01-17 17:18:28,211 - root - INFO - Database initialized successfully
+2026-01-17 17:18:28,213 - aiohttp.access - INFO - 127.0.0.1 [17/Jan/2026:17:18:27 +0000] "GET /health HTTP/1.1" 200 201 "-" "curl/8.14.1"
+2026-01-17 17:20:43,173 - root - INFO - Using SQLite database
+2026-01-17 17:20:43,180 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:20:43,193 - root - INFO - Database tables created successfully
+2026-01-17 17:20:43,194 - root - INFO - Database initialized successfully
+2026-01-17 17:20:43,198 - root - INFO - Bot already started
+2026-01-17 17:20:43,199 - __main__ - INFO - ============================================================
+2026-01-17 17:20:43,200 - __main__ - INFO - 🤖 Starting RollCall Telegram Bot
+2026-01-17 17:20:43,201 - __main__ - INFO - ============================================================
+2026-01-17 17:20:43,202 - __main__ - INFO - Validating environment configuration...
+2026-01-17 17:20:43,202 - __main__ - INFO - ✅ TELEGRAM_TOKEN configured
+2026-01-17 17:20:43,203 - __main__ - INFO - ✅ DATABASE_URL configured: sqlite:////app/data/rollcall.db
+2026-01-17 17:20:43,203 - __main__ - INFO - ✅ 2 admin(s) configured
+2026-01-17 17:20:43,204 - __main__ - INFO - ✅ Directory exists: /app/data/
+2026-01-17 17:20:43,205 - __main__ - INFO - ✅ Directory exists: /app/logs/
+2026-01-17 17:20:43,206 - __main__ - INFO - Initializing database...
+2026-01-17 17:20:43,207 - root - INFO - Using SQLite database
+2026-01-17 17:20:43,209 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:20:43,224 - root - INFO - Database tables created successfully
+2026-01-17 17:20:43,225 - root - INFO - Database initialized successfully
+2026-01-17 17:20:43,226 - __main__ - INFO - ✅ Database initialized successfully
+2026-01-17 17:20:43,811 - __main__ - INFO - ============================================================
+2026-01-17 17:20:43,815 - __main__ - INFO - ✅ Bot authenticated successfully!
+2026-01-17 17:20:43,819 - __main__ - INFO -    Bot Name: TestGenericRollcallBot
+2026-01-17 17:20:43,824 - __main__ - INFO -    Username: @TestGenericRollcallBot
+2026-01-17 17:20:43,827 - __main__ - INFO -    Bot ID:   8324883914
+2026-01-17 17:20:43,829 - __main__ - INFO - ============================================================
+2026-01-17 17:20:43,833 - __main__ - INFO - ✅ Health check server running on http://0.0.0.0:8080
+2026-01-17 17:20:43,835 - __main__ - INFO -    - Health: http://localhost:8080/health
+2026-01-17 17:20:43,839 - __main__ - INFO -    - Ping:   http://localhost:8080/ping
+2026-01-17 17:20:43,842 - __main__ - INFO - 🚀 Bot is now running and listening for messages...
+2026-01-17 17:20:43,844 - __main__ - INFO - Press Ctrl+C to stop
+2026-01-17 17:20:43,845 - __main__ - INFO - ============================================================
+2026-01-17 17:21:15,825 - root - INFO - Using SQLite database
+2026-01-17 17:21:15,847 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:21:15,881 - root - INFO - Database tables created successfully
+2026-01-17 17:21:15,884 - root - INFO - Database initialized successfully
+2026-01-17 17:21:15,891 - aiohttp.access - INFO - 127.0.0.1 [17/Jan/2026:17:21:13 +0000] "GET /health HTTP/1.1" 200 201 "-" "curl/8.14.1"
+2026-01-17 17:21:49,366 - root - INFO - Using SQLite database
+2026-01-17 17:21:49,390 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:21:49,427 - root - INFO - Database tables created successfully
+2026-01-17 17:21:49,429 - root - INFO - Database initialized successfully
+2026-01-17 17:21:49,431 - aiohttp.access - INFO - 127.0.0.1 [17/Jan/2026:17:21:46 +0000] "GET /health HTTP/1.1" 200 201 "-" "curl/8.14.1"
+2026-01-17 17:22:20,195 - root - INFO - Using SQLite database
+2026-01-17 17:22:20,210 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:22:20,247 - root - INFO - Database tables created successfully
+2026-01-17 17:22:20,248 - root - INFO - Database initialized successfully
+2026-01-17 17:22:20,251 - aiohttp.access - INFO - 127.0.0.1 [17/Jan/2026:17:22:19 +0000] "GET /health HTTP/1.1" 200 201 "-" "curl/8.14.1"
+2026-01-17 17:22:40,870 - root - INFO - Using SQLite database
+2026-01-17 17:22:40,888 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:22:40,924 - root - INFO - Database tables created successfully
+2026-01-17 17:22:40,925 - root - INFO - Database initialized successfully
+2026-01-17 17:22:40,928 - aiohttp.access - INFO - 172.25.0.1 [17/Jan/2026:17:22:38 +0000] "GET /health HTTP/1.1" 200 201 "-" "curl/8.7.1"
+2026-01-17 17:22:50,611 - root - INFO - Using SQLite database
+2026-01-17 17:22:50,624 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:22:50,651 - root - INFO - Database tables created successfully
+2026-01-17 17:22:50,652 - root - INFO - Database initialized successfully
+2026-01-17 17:22:50,654 - aiohttp.access - INFO - 127.0.0.1 [17/Jan/2026:17:22:50 +0000] "GET /health HTTP/1.1" 200 201 "-" "curl/8.14.1"
+2026-01-17 17:23:21,424 - root - INFO - Using SQLite database
+2026-01-17 17:23:21,443 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:23:21,480 - root - INFO - Database tables created successfully
+2026-01-17 17:23:21,482 - root - INFO - Database initialized successfully
+2026-01-17 17:23:21,489 - aiohttp.access - INFO - 127.0.0.1 [17/Jan/2026:17:23:20 +0000] "GET /health HTTP/1.1" 200 201 "-" "curl/8.14.1"
+2026-01-17 17:23:41,241 - root - INFO - The roll call test3 has ended
+2026-01-17 17:23:41,326 - root - INFO - Ended rollcall 2
+2026-01-17 17:23:41,327 - root - INFO - Ended rollcall ID 2 for chat 168415137
+2026-01-17 17:23:44,154 - root - INFO - The roll call 2 has ended
+2026-01-17 17:23:44,228 - root - INFO - Ended rollcall 4
+2026-01-17 17:23:44,229 - root - INFO - Ended rollcall ID 4 for chat 168415137
+2026-01-17 17:23:48,967 - root - ERROR - Roll call is not active
+2026-01-17 17:23:51,825 - root - INFO - Using SQLite database
+2026-01-17 17:23:51,847 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:23:51,874 - root - INFO - Database tables created successfully
+2026-01-17 17:23:51,875 - root - INFO - Database initialized successfully
+2026-01-17 17:23:51,878 - aiohttp.access - INFO - 127.0.0.1 [17/Jan/2026:17:23:51 +0000] "GET /health HTTP/1.1" 200 201 "-" "curl/8.14.1"
+2026-01-17 17:24:08,745 - root - INFO - Created rollcall 5 for chat 168415137: 1
+2026-01-17 17:24:08,747 - root - INFO - Created rollcall '1' with ID 5 for chat 168415137
+2026-01-17 17:24:18,358 - root - INFO - Created rollcall 6 for chat 168415137: 2
+2026-01-17 17:24:18,360 - root - INFO - Created rollcall '2' with ID 6 for chat 168415137
+2026-01-17 17:24:22,864 - root - INFO - Using SQLite database
+2026-01-17 17:24:22,900 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:24:22,936 - root - INFO - Database tables created successfully
+2026-01-17 17:24:22,937 - root - INFO - Database initialized successfully
+2026-01-17 17:24:22,939 - aiohttp.access - INFO - 127.0.0.1 [17/Jan/2026:17:24:22 +0000] "GET /health HTTP/1.1" 200 201 "-" "curl/8.14.1"
+2026-01-17 17:24:32,781 - root - INFO - User Amit has change his state to in
+2026-01-17 17:24:32,790 - root - INFO - Updated rollcall 5: {'title': '1', 'finalize_date': None, 'reminder_hours': None, 'timezone': 'Asia/Calcutta', 'location': None, 'event_fee': None, 'in_list_limit': None}
+2026-01-17 17:24:40,387 - root - INFO - User Amit has change his state to in
+2026-01-17 17:24:40,394 - root - INFO - Updated rollcall 6: {'title': '2', 'finalize_date': None, 'reminder_hours': None, 'timezone': 'Asia/Calcutta', 'location': None, 'event_fee': None, 'in_list_limit': None}
+2026-01-17 17:24:46,481 - root - INFO - The roll call 2 has ended
+2026-01-17 17:24:46,552 - root - INFO - Ended rollcall 6
+2026-01-17 17:24:46,554 - root - INFO - Ended rollcall ID 6 for chat 168415137
+2026-01-17 17:24:53,287 - root - INFO - Using SQLite database
+2026-01-17 17:24:53,312 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:24:53,341 - root - INFO - Database tables created successfully
+2026-01-17 17:24:53,342 - root - INFO - Database initialized successfully
+2026-01-17 17:24:53,349 - aiohttp.access - INFO - 127.0.0.1 [17/Jan/2026:17:24:53 +0000] "GET /health HTTP/1.1" 200 201 "-" "curl/8.14.1"
+2026-01-17 17:24:58,967 - root - INFO - The roll call 1 has ended
+2026-01-17 17:24:59,033 - root - INFO - Ended rollcall 5
+2026-01-17 17:24:59,034 - root - INFO - Ended rollcall ID 5 for chat 168415137
+2026-01-17 17:25:24,302 - root - INFO - Using SQLite database
+2026-01-17 17:25:24,333 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:25:24,368 - root - INFO - Database tables created successfully
+2026-01-17 17:25:24,369 - root - INFO - Database initialized successfully
+2026-01-17 17:25:24,375 - aiohttp.access - INFO - 127.0.0.1 [17/Jan/2026:17:25:23 +0000] "GET /health HTTP/1.1" 200 201 "-" "curl/8.14.1"
+2026-01-17 17:25:55,315 - root - INFO - Using SQLite database
+2026-01-17 17:25:55,337 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:25:55,357 - root - INFO - Database tables created successfully
+2026-01-17 17:25:55,358 - root - INFO - Database initialized successfully
+2026-01-17 17:25:55,360 - aiohttp.access - INFO - 127.0.0.1 [17/Jan/2026:17:25:54 +0000] "GET /health HTTP/1.1" 200 201 "-" "curl/8.14.1"
+2026-01-17 17:26:26,114 - root - INFO - Using SQLite database
+2026-01-17 17:26:26,136 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:26:26,170 - root - INFO - Database tables created successfully
+2026-01-17 17:26:26,171 - root - INFO - Database initialized successfully
+2026-01-17 17:26:26,177 - aiohttp.access - INFO - 127.0.0.1 [17/Jan/2026:17:26:25 +0000] "GET /health HTTP/1.1" 200 201 "-" "curl/8.14.1"

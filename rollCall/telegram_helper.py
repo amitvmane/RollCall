@@ -29,7 +29,7 @@ async def welcome_and_explanation(message):
     manager.get_chat(cid)
 
     # CHECK FOR ADMIN RIGHTS
-    if admin_rights(message, manager) == False:
+    if await admin_rights(message, manager) == False:
         await bot.send_message(message.chat.id, "Error - user does not have sufficient permissions for this operation")
         return
 
@@ -180,7 +180,7 @@ async def start_roll_call(message):
             raise amountOfRollCallsReached("Allowed Maximum number of active roll calls per group is 3.")
 
         # CHECK IF ADMIN_RIGHTS ARE ON
-        if admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) == False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
 
         # SET THE RC TITLE
@@ -559,7 +559,7 @@ async def delete_user(message):
             raise rollCallNotStarted("Roll call is not active")
         elif len(message.text.split(" ")) <= 1:
             raise parameterMissing("Input username is missing")
-        if admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) == False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
 
         msg = message.text
@@ -1095,7 +1095,7 @@ async def end_roll_call(message):
         if roll_call_not_started(message, manager) == False:
             raise rollCallNotStarted("Roll call is not active")
 
-        if admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) == False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
 
         cid = message.chat.id

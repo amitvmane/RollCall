@@ -813,3 +813,33 @@ TypeError: AsyncTeleBot._process_polling() got an unexpected keyword argument 'l
 2026-01-17 17:29:34,683 - root - INFO - Database tables created successfully
 2026-01-17 17:29:34,684 - root - INFO - Database initialized successfully
 2026-01-17 17:29:34,687 - aiohttp.access - INFO - 127.0.0.1 [17/Jan/2026:17:29:34 +0000] "GET /health HTTP/1.1" 200 201 "-" "curl/8.14.1"
+2026-01-17 17:30:09,017 - root - INFO - Using SQLite database
+2026-01-17 17:30:09,044 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:30:09,075 - root - INFO - Database tables created successfully
+2026-01-17 17:30:09,076 - root - INFO - Database initialized successfully
+2026-01-17 17:30:09,082 - aiohttp.access - INFO - 127.0.0.1 [17/Jan/2026:17:30:04 +0000] "GET /health HTTP/1.1" 200 201 "-" "curl/8.14.1"
+2026-01-17 17:30:40,085 - root - INFO - Using SQLite database
+2026-01-17 17:30:40,094 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:30:40,122 - root - INFO - Database tables created successfully
+2026-01-17 17:30:40,124 - root - INFO - Database initialized successfully
+2026-01-17 17:30:40,127 - aiohttp.access - INFO - 127.0.0.1 [17/Jan/2026:17:30:39 +0000] "GET /health HTTP/1.1" 200 201 "-" "curl/8.14.1"
+2026-01-17 17:31:10,903 - root - INFO - Using SQLite database
+2026-01-17 17:31:10,932 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:31:10,973 - root - INFO - Database tables created successfully
+2026-01-17 17:31:10,974 - root - INFO - Database initialized successfully
+2026-01-17 17:31:10,977 - aiohttp.access - INFO - 127.0.0.1 [17/Jan/2026:17:31:10 +0000] "GET /health HTTP/1.1" 200 201 "-" "curl/8.14.1"
+2026-01-17 17:31:41,741 - root - INFO - Using SQLite database
+2026-01-17 17:31:41,766 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:31:41,808 - root - INFO - Database tables created successfully
+2026-01-17 17:31:41,810 - root - INFO - Database initialized successfully
+2026-01-17 17:31:41,813 - aiohttp.access - INFO - 127.0.0.1 [17/Jan/2026:17:31:41 +0000] "GET /health HTTP/1.1" 200 201 "-" "curl/8.14.1"
+2026-01-17 17:32:14,592 - root - INFO - Using SQLite database
+2026-01-17 17:32:14,612 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:32:14,633 - root - INFO - Database tables created successfully
+2026-01-17 17:32:14,636 - root - INFO - Database initialized successfully
+2026-01-17 17:32:14,638 - aiohttp.access - INFO - 127.0.0.1 [17/Jan/2026:17:32:11 +0000] "GET /health HTTP/1.1" 200 201 "-" "curl/8.14.1"
+2026-01-17 17:32:45,386 - root - INFO - Using SQLite database
+2026-01-17 17:32:45,413 - root - INFO - SQLite database connected: /app/data/rollcall.db
+2026-01-17 17:32:45,463 - root - INFO - Database tables created successfully
+2026-01-17 17:32:45,465 - root - INFO - Database initialized successfully
+2026-01-17 17:32:45,467 - aiohttp.access - INFO - 127.0.0.1 [17/Jan/2026:17:32:44 +0000] "GET /health HTTP/1.1" 200 201 "-" "curl/8.14.1"

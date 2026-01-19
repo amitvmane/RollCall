@@ -191,11 +191,12 @@ async def start_roll_call(message):
         else:
             title = '<Empty>'
 
+        rc_index = len(rollcalls)  # Index before adding
+
         # Create new rollcall using manager
         rc = manager.add_rollcall(cid, title)
         
-        rc_index = len(rollcalls)  # Index before adding
-        await bot.send_message(message.chat.id, f"Roll call with title: {title} started!\nRollcall id is set to {rc_index + 1}\nTo vote for this RollCall, please use ::RollCallID eg. /in ::2")
+        await bot.send_message(message.chat.id, f"Roll call with title: {title} started!\nRollcall id is set to {rc_index + 1}\nTo vote for this RollCall, please use ::RollCallID eg. /in ::{rc_index + 1}")
 
     except Exception as e:
         await bot.send_message(cid, e)
@@ -1095,7 +1096,7 @@ async def end_roll_call(message):
         if roll_call_not_started(message, manager) == False:
             raise rollCallNotStarted("Roll call is not active")
 
-        if await admin_rights(message, manager) == False:
+        if admin_rights(message, manager) == False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
 
         cid = message.chat.id
@@ -1109,18 +1110,32 @@ async def end_roll_call(message):
             except:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
-            rollcalls = manager.get_rollcalls(cid)
-            if len(rollcalls) < rc_number + 1:
-                raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
-        
+        rollcalls = manager.get_rollcalls(cid)
+        if len(rollcalls) < rc_number + 1:
+            raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+
         rc = manager.get_rollcall(cid, rc_number)
-        
+
+        # End current rollcall
         await bot.send_message(message.chat.id, "Roll ended!")
         await bot.send_message(cid, rc.finishList().replace("__RCID__", str(rc_number + 1)))
-
         logging.info("The roll call " + rc.title + " has ended")
-
         manager.remove_rollcall(cid, rc_number)
+
+    # NEW: warning + optional re-broadcast
+        updated_rollcalls = manager.get_rollcalls(cid)
+        if len(updated_rollcalls) > 0:
+            await bot.send_message(
+                cid,
+                "⚠️ Active rollcall IDs have been updated because one rollcall was ended.\n"
+                "Use /rollcalls to see the current list and IDs."
+            )
+
+            # If you want automatic re-broadcast (can be removed if too noisy)
+            for rollcall in updated_rollcalls:
+                new_id = updated_rollcalls.index(rollcall) + 1
+                text = f"Rollcall number {new_id}\n\n" + rollcall.allList().replace("__RCID__", str(new_id))
+                await bot.send_message(cid, text)
 
     except Exception as e:
         await bot.send_message(message.chat.id, e)

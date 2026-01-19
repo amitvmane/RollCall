@@ -30,16 +30,71 @@ async def welcome_and_explanation(message):
 
     # CHECK FOR ADMIN RIGHTS
     if await admin_rights(message, manager) == False:
-        await bot.send_message(message.chat.id, "Error - user does not have sufficient permissions for this operation")
+        await bot.send_message(message.chat.id, "Error - User does not have sufficient permissions for this operation")
         return
 
     # START MSG
-    await bot.send_message(message.chat.id, 'Hi! im RollCall!\n\nType /help to see all the commands')
+    await bot.send_message(message.chat.id, 'Hi! im RollCall!\n\nUse /help to see all the commands')
 
 # HELP COMMAND WITH ALL THE COMMANDS
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/help")
 async def help_commands(message):
-    await bot.send_message(message.chat.id, '''The commands are:\n-/start  - To start the bot\n-/help - To see the commands\n-/start_roll_call - To start a new roll call (optional title)\n-/in - To let everybody know you will be attending (optional comment)\n-/out - To let everybody know you wont be attending (optional comment)\n-/maybe - To let everybody know you dont know (optional comment)\n-/whos_in - List of those who will go\n-/whos_out - List of those who will not go\n-/whos_maybe - List of those who maybe will go\n-/set_title - To set a title for the current roll call\n-/set_in_for - Allows you to respond for another user\n-/set_out_for - Allows you to respond for another user\n-/set_maybe_for - Allows you to respond for another user\n-/shh - to apply minimum output for each command\n-/louder - to disable minimum output for each command\n-/set_limit - To set a limit to IN state\n-/end_roll_call - To end a roll call\n-/set_rollcall_time - To set a finalize time to the current rc. Accepts 2 parameters date (DD-MM-YYYY) and time (H:M). Write cancel to delete it\n-/set_rollcall_reminder - To set a reminder before the ends of the rc. Accepts 1 parameter, hours as integers. Write 'cancel' to delete the reminder\n-/timezone - To set your timezone, accepts 1 parameter (Continent/Country) or (Continent/State)\n-/when - To check the start time of a roll call\n-/location - To check the location of a roll call''')
+  #  await bot.send_message(message.chat.id, '''The commands are:\n-/start  - To start the bot\n-/help - To see the commands\n-/start_roll_call - To start a new roll call (optional title)\n-/in - To let everybody know you will be attending (optional comment)\n-/out - To let everybody know you won't be attending (optional comment)\n-/maybe - To let everybody know you don't know (optional comment)\n-/whos_in - List of those who will go\n-/whos_out - List of those who will not go\n-/whos_maybe - List of those who maybe will go\n-/set_title - To set a title for the current roll call\n-/set_in_for - Allows you to respond for another user\n-/set_out_for - Allows you to respond for another user\n-/set_maybe_for - Allows you to respond for another user\n-/shh - to apply minimum output for each command\n-/louder - to disable minimum output for each command\n-/set_limit - To set a limit to IN state\n-/end_roll_call - To end a roll call\n-/set_rollcall_time - To set a finalize time to the current rc. Accepts 2 parameters date (DD-MM-YYYY) and time (H:M). Write cancel to delete it\n-/set_rollcall_reminder - To set a reminder before the ends of the rc. Accepts 1 parameter, hours as integers. Write 'cancel' to delete the reminder\n-/timezone - To set your timezone, accepts 1 parameter (Continent/Country) or (Continent/State)\n-/when - To check the start time of a roll call\n-/location - To check the location of a roll call''')
+    await bot.send_message(message.chat.id, '''**RollCall Bot Commands** 
+
+**Basic:**
+/start     - Start the bot  
+/help      - Show this help
+/start_roll_call (/src)  - Start new rollcall (optional title)
+
+**Status Updates:**
+/in        - Mark yourself attending (optional comment ::N)
+/out       - Mark yourself not attending (optional comment ::N) 
+/maybe     - Mark yourself maybe (optional comment ::N)
+
+**Lists:**
+/rollcalls (/r)    - List all active rollcalls with IDs
+/whos_in (/wi)     - Show attending (::N for specific)
+/whos_out (/wo)    - Show not attending (::N)
+/whos_maybe (/wm)  - Show maybe (::N)
+/whos_waiting (/ww)- Show waitlist (::N)
+
+**Admin Commands:**
+/end_roll_call (/erc) ::N      - End rollcall #N
+/set_title (/st) ::N "title"   - Set title for #N
+/set_limit (/sl) ::N limit     - Set max IN limit for #N
+/delete_user ::N username      - Remove user from #N (admin only)
+/set_admins                    - Enable admin mode (group admin only)
+/unset_admins                  - Disable admin mode
+
+**Proxy Voting (for others):**
+/set_in_for (/sif) ::N username     - Mark other user IN
+/set_out_for (/sof) ::N username    - Mark other user OUT
+/set_maybe_for (/smf) ::N username  - Mark other user MAYBE
+
+**Event Management:**
+/set_rollcall_time (/srt) ::N "DD-MM-YYYY H:M"  - Set event time ('cancel' to clear)
+/set_rollcall_reminder (/srr) ::N hours         - Reminder hours before ('cancel' to clear)  
+/event_fee (/ef) ::N amount                    - Set total event fee
+/individual_fee (/if) ::N                      - Calculate per-person fee
+/when (/w) ::N                                 - Show event time
+/location (/loc) ::N "place"                   - Set location
+
+**Chat Settings:**
+/shh                 - Silent mode (no lists after responses)
+/louder              - Resume full output  
+/timezone (/tz) "Asia/Kolkata" - Set timezone
+
+**Super Admin:**
+/broadcast "message"  - Send to all bot chats (super admin only)
+
+**Info:**
+/stats (/s)   - Bot usage statistics
+/version (/v) - Show current version
+
+**Usage:** Use `::N` to target rollcall #N (see /rollcalls)
+''', parse_mode='none')
+
 
 # SET ADMIN RIGHTS TO TRUE
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/set_admins")
@@ -115,7 +170,7 @@ async def config_timezone(message):
             await bot.send_message(message.chat.id, f"Your timezone has been set to {response}")
             manager.set_timezone(cid, response)
         else:
-            await bot.send_message(message.chat.id, f"Your timezone doesnt exists, if you can't found your timezone, check this <a href='https://gist.github.com/heyalexej/8bf688fd67d7199be4a1682b3eec7568'>website</a>", parse_mode='HTML')
+            await bot.send_message(message.chat.id, f"Given timezone is invalid , check this <a href='https://gist.github.com/heyalexej/8bf688fd67d7199be4a1682b3eec7568'>website</a>", parse_mode='HTML')
 
     except Exception as e:
         print(traceback.format_exc())

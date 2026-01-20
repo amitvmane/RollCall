@@ -9,12 +9,14 @@ from telebot.async_telebot import AsyncTeleBot
 import pytz
 
 from config import TELEGRAM_TOKEN, ADMINS
+
 from exceptions import *
 from models import RollCall, User
 from functions import *
 from check_reminders import start
 from rollcall_manager import manager
 import traceback
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 bot = AsyncTeleBot(token=TELEGRAM_TOKEN)
 
@@ -58,6 +60,7 @@ async def help_commands(message):
 /whos_out (/wo)    - Show not attending (::N)
 /whos_maybe (/wm)  - Show maybe (::N)
 /whos_waiting (/ww)- Show waitlist (::N)
+/panel ::N - Show control panel with buttons for rollcall #N
 
 **Admin Commands:**
 /end_roll_call (/erc) ::N      - End rollcall #N
@@ -247,11 +250,11 @@ async def start_roll_call(message):
             title = '<Empty>'
 
         rc_index = len(rollcalls)  # Index before adding
-
         # Create new rollcall using manager
         rc = manager.add_rollcall(cid, title)
-        
-        await bot.send_message(message.chat.id, f"Roll call with title: {title} started!\nRollcall id is set to {rc_index + 1}\nTo vote for this RollCall, please use ::RollCallID eg. /in ::{rc_index + 1}")
+        markup = await get_status_keyboard(rc_index+1)
+        await bot.send_message(message.chat.id, f"Roll call '{title}' started! ID: {rc_index+1}\nUse buttons below:", reply_markup=markup)
+        #await bot.send_message(message.chat.id, f"Roll call with title: {title} started!\nRollcall id is set to {rc_index + 1}\nTo vote for this RollCall, please use ::RollCallID eg. /in ::{rc_index + 1}")
 
     except Exception as e:
         await bot.send_message(cid, e)
@@ -1194,3 +1197,242 @@ async def end_roll_call(message):
 
     except Exception as e:
         await bot.send_message(message.chat.id, e)
+
+
+@bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/panel")
+async def show_panel(message):
+    """
+    Re-post the inline control panel for a rollcall.
+    Usage:
+      /panel           -> panel for rollcall #1
+      /panel ::N       -> panel for rollcall #N
+    """
+    try:
+        cid = message.chat.id
+        pmts = message.text.split(" ")[1:]
+        rc_number = 0
+
+        # Optional ::N
+        if len(pmts) > 0 and "::" in pmts[-1]:
+            try:
+                rc_number = int(pmts[-1].replace("::", "")) - 1
+                del pmts[-1]
+            except:
+                raise incorrectParameter("The rollcall number must be a positive integer")
+
+        rollcalls = manager.get_rollcalls(cid)
+        if len(rollcalls) < rc_number + 1:
+            raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+
+        rc = manager.get_rollcall(cid, rc_number)
+        text = rc.allList().replace("__RCID__", str(rc_number + 1))
+        markup = await get_status_keyboard(rc_number + 1)
+
+        await bot.send_message(
+            cid,
+            text,
+            reply_markup=markup,
+        )
+
+    except Exception as e:
+        await bot.send_message(message.chat.id, e)
+
+
+
+# ===== Inline keyboards for rollcall UI =====
+async def get_status_keyboard(rc_number: int = 0) -> InlineKeyboardMarkup:
+    """Keyboard with IN / OUT / MAYBE + lists + refresh + end."""
+    markup = InlineKeyboardMarkup(row_width=3)
+    markup.add(
+        InlineKeyboardButton("✅ IN", callback_data=f"btn_in_{rc_number}"),
+        InlineKeyboardButton("❌ OUT", callback_data=f"btn_out_{rc_number}"),
+        InlineKeyboardButton("❓ MAYBE", callback_data=f"btn_maybe_{rc_number}"),
+    )
+    markup.add(
+        InlineKeyboardButton("📋 Lists", callback_data=f"btn_lists_{rc_number}"),
+        InlineKeyboardButton("🔄 Refresh", callback_data=f"btn_refresh_{rc_number}"),
+    )
+    markup.add(InlineKeyboardButton("🛑 End RC", callback_data=f"btn_end_{rc_number}"))
+    return markup
+
+
+async def get_lists_keyboard(rc_number: int = 0) -> InlineKeyboardMarkup:
+    """Keyboard to choose which list to view."""
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton("✅ Who's IN", callback_data=f"btn_wi_{rc_number}"),
+        InlineKeyboardButton("❌ Who's OUT", callback_data=f"btn_wo_{rc_number}"),
+    )
+    markup.add(
+        InlineKeyboardButton("❓ Who's Maybe", callback_data=f"btn_wm_{rc_number}"),
+        InlineKeyboardButton("⏳ Waiting", callback_data=f"btn_ww_{rc_number}"),
+    )
+    markup.add(InlineKeyboardButton("🔙 Back", callback_data=f"btn_status_{rc_number}"))
+    return markup
+
+
+@bot.callback_query_handler(func=lambda call: True)
+async def callback_handler(call):
+    """
+    Handle button clicks from inline keyboards.
+    Supported actions:
+      btn_in_N, btn_out_N, btn_maybe_N   - change user status
+      btn_lists_N                        - show lists submenu
+      btn_wi_N / btn_wo_N / btn_wm_N    - show IN / OUT / MAYBE list
+      btn_ww_N                           - show waiting list
+      btn_status_N                       - go back to main status keyboard
+      btn_refresh_N                      - refresh main panel
+      btn_end_N                          - end rollcall (admin rights)
+    """
+    try:
+        data = call.data.split("_")
+        # Expected callback_data pattern: "btn_<action>_<rc_number>"
+        if len(data) != 3 or data[0] != "btn":
+            await bot.answer_callback_query(call.id, "Invalid action")
+            return
+
+        action = data[1]
+        rc_number = int(data[2])  # 1-based index from buttons
+        cid = call.message.chat.id
+
+        rollcalls = manager.get_rollcalls(cid)
+        if rc_number < 1 or rc_number > len(rollcalls):
+            await bot.answer_callback_query(call.id, "Invalid rollcall!")
+            return
+
+        rc = rollcalls[rc_number - 1]
+
+        # --- Status change actions (IN / OUT / MAYBE) ---
+        if action in ("in", "out", "maybe"):
+            user = User(
+                call.from_user.first_name,
+                call.from_user.username,
+                call.from_user.id,
+                rc.allNames,
+            )
+
+            if action == "in":
+                result = rc.addIn(user)
+            elif action == "out":
+                result = rc.addOut(user)
+            else:
+                result = rc.addMaybe(user)
+
+            rc.save()
+
+            if result == "AB":
+                await bot.answer_callback_query(call.id, "No duplicate proxy please 🙂")
+                return
+            elif result == "AC":
+                await bot.answer_callback_query(call.id, "Event max limit reached, added to waitlist")
+            elif result == "AA":
+                await bot.answer_callback_query(call.id, "That name already exists!")
+            else:
+                await bot.answer_callback_query(call.id, "Status updated")
+
+            # Refresh main status keyboard with full list
+            text = rc.allList().replace("__RCID__", str(rc_number))
+            markup = await get_status_keyboard(rc_number)
+            await bot.edit_message_text(
+                text,
+                cid,
+                call.message.message_id,
+                reply_markup=markup,
+            )
+            return
+
+        # --- Show lists submenu ---
+        if action == "lists":
+            markup = await get_lists_keyboard(rc_number)
+            await bot.edit_message_text(
+                "Select list:",
+                cid,
+                call.message.message_id,
+                reply_markup=markup,
+            )
+            await bot.answer_callback_query(call.id)
+            return
+
+        # --- Individual lists (IN / OUT / MAYBE / Waiting) ---
+        if action in ("wi", "wo", "wm", "ww"):
+            if action == "wi":
+                text = rc.inListText()
+            elif action == "wo":
+                text = rc.outListText()
+            elif action == "wm":
+                text = rc.maybeListText()
+            else:
+                text = rc.waitListText()
+
+            await bot.edit_message_text(
+                text if text.strip() else "List is empty.",
+                cid,
+                call.message.message_id,
+                reply_markup=await get_lists_keyboard(rc_number),
+            )
+            await bot.answer_callback_query(call.id)
+            return
+
+        # --- Back to status keyboard ---
+        if action == "status":
+            text = rc.allList().replace("__RCID__", str(rc_number))
+            markup = await get_status_keyboard(rc_number)
+            await bot.edit_message_text(
+                text,
+                cid,
+                call.message.message_id,
+                reply_markup=markup,
+            )
+            await bot.answer_callback_query(call.id)
+            return
+
+        # --- Refresh main panel ---
+        if action == "refresh":
+            text = rc.allList().replace("__RCID__", str(rc_number))
+            markup = await get_status_keyboard(rc_number)
+            await bot.edit_message_text(
+                text,
+                cid,
+                call.message.message_id,
+                reply_markup=markup,
+            )
+            await bot.answer_callback_query(call.id, "Refreshed")
+            return
+ 
+        # --- End rollcall via button ---
+        if action == "end":
+            # same permission logic as /end_roll_call (/erc)
+            if await admin_rights(call.message, manager) is False:
+                await bot.answer_callback_query(call.id, "Insufficient permissions")
+                return
+
+            # Send final list to the chat, like /erc does
+            try:
+                # rc_number is 1-based; use it directly
+                final_text = rc.finishList().replace("__RCID__", str(rc_number))
+                await bot.send_message(cid, final_text)
+            except Exception:
+                # If finishList() fails for any reason, ignore and just end
+                pass
+
+            # Edit the panel message to a simple ended notice
+            await bot.edit_message_text(
+                "Rollcall ended!",
+                cid,
+                call.message.message_id,
+            )
+
+            # Remove from manager AFTER sending final list
+            manager.remove_rollcall(cid, rc_number - 1)
+
+            await bot.answer_callback_query(call.id, "Ended")
+            return
+
+
+
+        # --- Fallback ---
+        await bot.answer_callback_query(call.id, "Unknown action")
+
+    except Exception as e:
+        # Show error in callback but avoid crashing polling
+        await bot.answer_callback_query(call.id, str(e))

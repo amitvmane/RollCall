@@ -266,15 +266,12 @@ async def set_rollcall_time(message):
     try:
         if roll_call_not_started(message, manager) == False:
             raise rollCallNotStarted("Roll call is not active")
-        
         if len(message.text.split(" ")) == 1:
             raise parameterMissing("invalid datetime format, refer help section for details")
-
         cid = message.chat.id
         msg = message.text
         rc_number = 0
         pmts = msg.split(" ")[1:]
-
         # IF RC_NUMBER IS SPECIFIED IN PARAMETERS THEN STORE THE VALUE
         if len(pmts) > 1 and "::" in pmts[-1]:
             try:
@@ -282,13 +279,10 @@ async def set_rollcall_time(message):
                 del pmts[-1]
             except:
                 raise incorrectParameter("The rollcall number must be a positive integer")
-
-            rollcalls = manager.get_rollcalls(cid)
-            if len(rollcalls) < rc_number + 1:
-                raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
-
+        rollcalls = manager.get_rollcalls(cid)
+        if len(rollcalls) < rc_number + 1:
+            raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
         rc = manager.get_rollcall(cid, rc_number)
-
         # CANCEL THE CURRENT REMINDER TIME
         if (pmts[0]).lower() == 'cancel':
             rc.finalizeDate = None
@@ -296,22 +290,17 @@ async def set_rollcall_time(message):
             rc.save()
             await bot.send_message(message.chat.id, "Reminder time is canceled.")
             return
-
         # PARSING INPUT DATETIME
         input_datetime = " ".join(pmts).strip()
-
         tz = pytz.timezone(rc.timezone)
         date = datetime.datetime.strptime(input_datetime, "%d-%m-%Y %H:%M")
         date = tz.localize(date)
-
         now_date_string = datetime.datetime.now(pytz.timezone(rc.timezone)).strftime("%d-%m-%Y %H:%M")
         now_date = datetime.datetime.strptime(now_date_string, "%d-%m-%Y %H:%M")
         now_date = tz.localize(now_date)
-
         # ERROR FOR INVALID DATETIME
         if now_date > date:
             raise timeError("Please provide valid future datetime.")
-
         if rc.finalizeDate == None:
             rc.finalizeDate = date
             changed = False
@@ -335,7 +324,13 @@ async def set_rollcall_time(message):
             rc.save()
             backslash = '\n'
             await bot.send_message(cid, f"Event notification time is set to {date.strftime('%d-%m-%Y %H:%M')} {rc.timezone} {backslash*2+'Reminder has been reset!' if changed else ''}")
-
+        
+        # NEW: Time update notification
+        await bot.send_message(
+            cid,
+            f"Time updated for '{rc.title}' (ID: {rc_number + 1}) → {rc.finalizeDate.strftime('%d-%m-%Y %H:%M')} {rc.timezone}."
+        )
+        
     except Exception as e:
         print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
@@ -524,33 +519,32 @@ async def set_location(message):
     try:
         if roll_call_not_started(message, manager) == False:
             raise rollCallNotStarted("Roll call is not active")
-          
         if len(message.text.split(" ")) < 2:
             raise incorrectParameter("The correct format is /location <place>")
-       
+        
         cid = message.chat.id
         msg = message.text
         pmts = msg.split(" ")[1:]
         rc_number = 0
-
         if len(pmts) > 1 and "::" in pmts[-1]:
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
             except:
                 raise incorrectParameter("The rollcall number must be a positive integer")
-
-            rollcalls = manager.get_rollcalls(cid)
-            if len(rollcalls) < rc_number + 1:
-                raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
-
+        rollcalls = manager.get_rollcalls(cid)
+        if len(rollcalls) < rc_number + 1:
+            raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
         place = " ".join(pmts)
         rc = manager.get_rollcall(cid, rc_number)
         rc.location = place
         rc.save()
-
-        await bot.send_message(cid, f"The rollcall with title - {rc.title} has a new location!")
-
+        
+        # NEW: Location update notification
+        await bot.send_message(
+            cid,
+            f"Location updated for '{rc.title}' (ID: {rc_number + 1}) → {place}."
+        )
     except Exception as e:
         await bot.send_message(cid, e)
 
@@ -561,16 +555,13 @@ async def wait_limit(message):
     try:
         if roll_call_not_started(message, manager) == False:
             raise rollCallNotStarted("Roll call is not active")
-
         if len(message.text.split(" ")) <= 1 or int(message.text.split(" ")[1]) < 0:
             raise parameterMissing("Input limit is missing or it's not a positive number")
-
         msg = message.text
         cid = message.chat.id
         pmts = msg.split(" ")[1:]
         rc_number = 0
         limit = int(pmts[0])
-
         try:
             if "::" in pmts[-1]:
                 try:
@@ -578,31 +569,63 @@ async def wait_limit(message):
                     del pmts[-1]
                 except:
                     raise incorrectParameter("The rollcall number must be a positive integer")
-
-                rollcalls = manager.get_rollcalls(cid)
-                if len(rollcalls) < rc_number + 1:
-                    raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+            rollcalls = manager.get_rollcalls(cid)
+            if len(rollcalls) < rc_number + 1:
+                raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
         except:
             pass
-
+        
         rc = manager.get_rollcall(cid, rc_number)
+        
+        # Capture current state for notifications
+        old_limit = rc.inListLimit
+        was_full = old_limit is not None and len(rc.inList) >= int(old_limit)
+        
         rc.inListLimit = limit
         rc.save()
         
         logging.info(f"Max limit of attendees is set to {limit}")
         await bot.send_message(cid, f'Max limit of attendees is set to {limit}')
-
+        
+        # Now rebalance IN and WAITING
+        moved_from_in_to_wait = []
+        moved_from_wait_to_in = []
+        
         # MOVING USERS IF IN LIST HAS ALREADY REACH THE LIMIT
         if len(rc.inList) > limit:
+            moved_from_in_to_wait = rc.inList[limit:]
             rc.waitList.extend(rc.inList[limit:])
             rc.inList = rc.inList[:limit]
             rc.save()
         elif len(rc.inList) < limit:
-            a = int(limit - len(rc.inList))
-            rc.inList.extend(rc.waitList[:limit - len(rc.inList)])
-            rc.waitList = rc.waitList[a:]
+            available_slots = limit - len(rc.inList)
+            moved_from_wait_to_in = rc.waitList[:available_slots]
+            rc.inList.extend(rc.waitList[:available_slots])
+            rc.waitList = rc.waitList[available_slots:]
             rc.save()
-
+        
+        # NEW: Notifications for limit changes
+        if moved_from_in_to_wait:
+            names = ", ".join(u.name for u in moved_from_in_to_wait)
+            await bot.send_message(
+                cid,
+                f"{names} moved from IN to WAITING because limit was set to {limit} for '{rc.title}' (ID: {rc_number + 1})."
+            )
+        
+        if moved_from_wait_to_in:
+            names = ", ".join(u.name for u in moved_from_wait_to_in)
+            await bot.send_message(
+                cid,
+                f"{names} moved from WAITING to IN after limit was set to {limit} for '{rc.title}' (ID: {rc_number + 1})."
+            )
+        
+        # Notify when limit is first reached
+        if len(rc.inList) == limit and not was_full:
+            await bot.send_message(
+                cid,
+                f"Rollcall '{rc.title}' (ID: {rc_number + 1}) has reached its max limit ({limit}). New IN will go to WAITING."
+            )
+        
     except parameterMissing as e:
         print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
@@ -729,13 +752,11 @@ async def out_user(message):
     try:
         if roll_call_not_started(message, manager) == False:
             raise rollCallNotStarted("Roll call is not active")
-
         msg = message.text
         pmts = msg.split(" ")
         cid = message.chat.id
         comment = ""
         rc_number = 0
-
         if len(pmts) > 1 and "::" in pmts[-1]:
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
@@ -743,20 +764,20 @@ async def out_user(message):
                 msg = " ".join(pmts)
             except:
                 raise incorrectParameter("The rollcall number must be a positive integer")
-
-            rollcalls = manager.get_rollcalls(cid)
-            if len(rollcalls) < rc_number + 1:
-                raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
-
+        rollcalls = manager.get_rollcalls(cid)
+        if len(rollcalls) < rc_number + 1:
+            raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
         rc = manager.get_rollcall(cid, rc_number)
         user = User(message.from_user.first_name, message.from_user.username, message.from_user.id, rc.allNames)
-
         arr = msg.split(" ")
         if len(arr) > 1:
             arr.pop(0)
             comment = ' '.join(arr)
-            user.comment = comment
-
+        user.comment = comment
+        
+        # Capture state BEFORE addOut
+        was_in = any(u.user_id == user.user_id for u in rc.inList)
+        
         result = rc.addOut(user)
         rc.save()
         
@@ -767,12 +788,20 @@ async def out_user(message):
                 await bot.send_message(cid, f"{'@'+result.username if result.username!=None else f'[{result.name}](tg://user?id={result.user_id})'} now you are in!", parse_mode="Markdown")
             else:
                 await bot.send_message(cid, f"{result.name} now you are in!")
-
+        
+        # NEW: IN → OUT notification
+        if was_in and any(u.user_id == user.user_id for u in rc.outList):
+            await bot.send_message(cid, f"{user.name} moved from IN to OUT for '{rc.title}' (ID: {rc_number + 1}).")
+        
+        # NEW: WAITING → IN notification
+        if isinstance(result, User):
+            await bot.send_message(cid, f"{result.name} moved from WAITING to IN for '{rc.title}' (ID: {rc_number + 1}).")
+        
         if send_list(message, manager):
             await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number + 1)))
-
     except Exception as e:
         await bot.send_message(message.chat.id, e)
+
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/maybe")
 async def maybe_user(message):
@@ -888,13 +917,11 @@ async def set_out_for(message):
             raise rollCallNotStarted("Roll call is not active")
         if len(message.text.split(" ")) <= 1:
             raise parameterMissing("Input username is missing")
-
         msg = message.text
         pmts = msg.split(" ")
         cid = message.chat.id
         comment = ""
         rc_number = 0
-
         if len(pmts) > 1 and "::" in pmts[-1]:
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
@@ -902,19 +929,20 @@ async def set_out_for(message):
                 msg = " ".join(pmts)
             except:
                 raise incorrectParameter("The rollcall number must be a positive integer")
-
-            rollcalls = manager.get_rollcalls(cid)
-            if len(rollcalls) < rc_number + 1:
-                raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+        rollcalls = manager.get_rollcalls(cid)
+        if len(rollcalls) < rc_number + 1:
+            raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
         
         rc = manager.get_rollcall(cid, rc_number)
         arr = msg.split(" ")
-
         if len(arr) > 1:
             user = User(arr[1], None, arr[1], rc.allNames)
             comment = " ".join(arr[2:]) if len(arr) > 2 else ""
             user.comment = comment
-
+            
+            # Capture state BEFORE addOut (proxies may match by name OR user_id)
+            was_in = any((u.user_id == user.user_id or u.name == user.name) for u in rc.inList)
+            
             result = rc.addOut(user)
             rc.save()
             
@@ -929,10 +957,17 @@ async def set_out_for(message):
                     await bot.send_message(cid, f"{'@'+result.username if result.username!=None else f'[{result.name}](tg://user?id={result.user_id})'} now you are in!", parse_mode="Markdown")
                 else:
                     await bot.send_message(cid, f"{result.name} now you are in!")
-
+            
+            # NEW: IN → OUT notification (match proxy by name OR user_id)
+            if was_in and any((u.user_id == user.user_id or u.name == user.name) for u in rc.outList):
+                await bot.send_message(cid, f"{user.name} moved from IN to OUT for '{rc.title}' (ID: {rc_number + 1}).")
+            
+            # NEW: WAITING → IN notification
+            if isinstance(result, User):
+                await bot.send_message(cid, f"{result.name} moved from WAITING to IN for '{rc.title}' (ID: {rc_number + 1}).")
+            
             if send_list(message, manager):
                 await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number + 1)))
-
     except Exception as e:
         await bot.send_message(message.chat.id, e)
 
@@ -1252,7 +1287,7 @@ async def get_status_keyboard(rc_number: int = 0) -> InlineKeyboardMarkup:
         InlineKeyboardButton("📋 Lists", callback_data=f"btn_lists_{rc_number}"),
         InlineKeyboardButton("🔄 Refresh", callback_data=f"btn_refresh_{rc_number}"),
     )
-    markup.add(InlineKeyboardButton("🛑 End RC", callback_data=f"btn_end_{rc_number}"))
+    markup.add(InlineKeyboardButton(f"🛑 End RollCall #{rc_number}", callback_data=f"btn_end_{rc_number}"))
     return markup
 
 
@@ -1276,13 +1311,13 @@ async def callback_handler(call):
     """
     Handle button clicks from inline keyboards.
     Supported actions:
-      btn_in_N, btn_out_N, btn_maybe_N   - change user status
-      btn_lists_N                        - show lists submenu
-      btn_wi_N / btn_wo_N / btn_wm_N    - show IN / OUT / MAYBE list
-      btn_ww_N                           - show waiting list
-      btn_status_N                       - go back to main status keyboard
-      btn_refresh_N                      - refresh main panel
-      btn_end_N                          - end rollcall (admin rights)
+        btn_in_N, btn_out_N, btn_maybe_N - change user status
+        btn_lists_N - show lists submenu
+        btn_wi_N / btn_wo_N / btn_wm_N - show IN / OUT / MAYBE list
+        btn_ww_N - show waiting list
+        btn_status_N - go back to main status keyboard
+        btn_refresh_N - refresh main panel
+        btn_end_N - end rollcall (admin rights)
     """
     try:
         data = call.data.split("_")
@@ -1290,18 +1325,15 @@ async def callback_handler(call):
         if len(data) != 3 or data[0] != "btn":
             await bot.answer_callback_query(call.id, "Invalid action")
             return
-
         action = data[1]
         rc_number = int(data[2])  # 1-based index from buttons
         cid = call.message.chat.id
-
         rollcalls = manager.get_rollcalls(cid)
         if rc_number < 1 or rc_number > len(rollcalls):
             await bot.answer_callback_query(call.id, "Invalid rollcall!")
             return
-
         rc = rollcalls[rc_number - 1]
-
+        
         # --- Status change actions (IN / OUT / MAYBE) ---
         if action in ("in", "out", "maybe"):
             user = User(
@@ -1310,16 +1342,18 @@ async def callback_handler(call):
                 call.from_user.id,
                 rc.allNames,
             )
-
+            
+            # Capture state before action (for OUT notifications)
+            was_in = any(u.user_id == user.user_id for u in rc.inList) if action == "out" else False
+            
             if action == "in":
                 result = rc.addIn(user)
             elif action == "out":
                 result = rc.addOut(user)
             else:
                 result = rc.addMaybe(user)
-
             rc.save()
-
+            
             if result == "AB":
                 await bot.answer_callback_query(call.id, "No duplicate proxy please 🙂")
                 return
@@ -1329,7 +1363,17 @@ async def callback_handler(call):
                 await bot.answer_callback_query(call.id, "That name already exists!")
             else:
                 await bot.answer_callback_query(call.id, "Status updated")
-
+            
+            # NEW: Notifications for OUT button
+            if action == "out":
+                # IN → OUT notification
+                if was_in and any(u.user_id == user.user_id for u in rc.outList):
+                    await bot.send_message(cid, f"{user.name} moved from IN to OUT for '{rc.title}' (ID: {rc_number}).")
+                
+                # WAITING → IN notification
+                if isinstance(result, User):
+                    await bot.send_message(cid, f"{result.name} moved from WAITING to IN for '{rc.title}' (ID: {rc_number}).")
+            
             # Refresh main status keyboard with full list
             text = rc.allList().replace("__RCID__", str(rc_number))
             markup = await get_status_keyboard(rc_number)
@@ -1340,7 +1384,7 @@ async def callback_handler(call):
                 reply_markup=markup,
             )
             return
-
+        
         # --- Show lists submenu ---
         if action == "lists":
             markup = await get_lists_keyboard(rc_number)
@@ -1352,7 +1396,7 @@ async def callback_handler(call):
             )
             await bot.answer_callback_query(call.id)
             return
-
+        
         # --- Individual lists (IN / OUT / MAYBE / Waiting) ---
         if action in ("wi", "wo", "wm", "ww"):
             if action == "wi":
@@ -1363,7 +1407,6 @@ async def callback_handler(call):
                 text = rc.maybeListText()
             else:
                 text = rc.waitListText()
-
             await bot.edit_message_text(
                 text if text.strip() else "List is empty.",
                 cid,
@@ -1372,7 +1415,7 @@ async def callback_handler(call):
             )
             await bot.answer_callback_query(call.id)
             return
-
+        
         # --- Back to status keyboard ---
         if action == "status":
             text = rc.allList().replace("__RCID__", str(rc_number))
@@ -1385,7 +1428,7 @@ async def callback_handler(call):
             )
             await bot.answer_callback_query(call.id)
             return
-
+        
         # --- Refresh main panel ---
         if action == "refresh":
             text = rc.allList().replace("__RCID__", str(rc_number))
@@ -1398,41 +1441,56 @@ async def callback_handler(call):
             )
             await bot.answer_callback_query(call.id, "Refreshed")
             return
- 
+        
         # --- End rollcall via button ---
+        # Inside callback_handler, in the "end" action block:
         if action == "end":
-            # same permission logic as /end_roll_call (/erc)
             if await admin_rights(call.message, manager) is False:
                 await bot.answer_callback_query(call.id, "Insufficient permissions")
                 return
-
-            # Send final list to the chat, like /erc does
+            
+            ended_by = call.from_user.first_name or call.from_user.username or "someone"
+            
             try:
-                # rc_number is 1-based; use it directly
                 final_text = rc.finishList().replace("__RCID__", str(rc_number))
+                final_text += f"\n\nEnded by {ended_by}"
                 await bot.send_message(cid, final_text)
             except Exception:
-                # If finishList() fails for any reason, ignore and just end
                 pass
-
-            # Edit the panel message to a simple ended notice
+            
             await bot.edit_message_text(
-                "Rollcall ended!",
+                f"Rollcall ended by {ended_by}!",
                 cid,
                 call.message.message_id,
             )
-
-            # Remove from manager AFTER sending final list
+            
+            # Remove the rollcall FIRST
             manager.remove_rollcall(cid, rc_number - 1)
-
-            await bot.answer_callback_query(call.id, "Ended")
+            
+            # NEW: Send updated panels for remaining rollcalls
+            updated_rollcalls = manager.get_rollcalls(cid)
+            if len(updated_rollcalls) > 0:
+                await bot.send_message(
+                    cid,
+                    "⚠️ Rollcall IDs have been updated. Here are the current rollcalls with fresh panels:"
+                )
+                
+                # Send fresh panel for each remaining rollcall
+                for idx, rollcall in enumerate(updated_rollcalls):
+                    new_id = idx + 1
+                    text = rollcall.allList().replace("__RCID__", str(new_id))
+                    markup = await get_status_keyboard(new_id)
+                    await bot.send_message(
+                        cid,
+                        f"**Rollcall #{new_id}**\n\n{text}",
+                        reply_markup=markup
+                    )
+            
+            await bot.answer_callback_query(call.id, "Ended - Fresh panels sent")
             return
-
-
-
+        
         # --- Fallback ---
         await bot.answer_callback_query(call.id, "Unknown action")
-
     except Exception as e:
         # Show error in callback but avoid crashing polling
         await bot.answer_callback_query(call.id, str(e))

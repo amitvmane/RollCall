@@ -1,4 +1,49 @@
-version: '3'
+version: '3.8'
+
 services:
-  bot:
-    image: dockerbot:latest
+  rollcall-bot:
+    build:
+      context: .
+      dockerfile: dockerfile
+    container_name: rollcall-bot
+    restart: unless-stopped
+    
+    environment:
+      # Telegram Bot Configuration
+      - API_KEY=${API_KEY}
+      - ADMIN1=${ADMIN1}
+      - ADMIN2=${ADMIN2}
+      - TELEGRAM_TOKEN=${API_KEY}
+      - HEALTH_CHECK_PORT=8080
+      
+      # Database Configuration (SQLite with persistent volume)
+      - DATABASE_URL=sqlite:////app/data/rollcall.db
+    
+    volumes:
+      # Persist database across container restarts
+      - ./data:/app/data
+      
+      # Persist logs
+      - ./logs:/app/logs
+      
+    ports:
+      - "8080:8080"  # Health check endpoint
+    
+    # Read environment variables from .env file
+    env_file:
+      - .env
+    
+    # HTTP-based health check using curl
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

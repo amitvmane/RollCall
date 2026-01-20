@@ -1,9 +1,0 @@
-pyTelegramBotAPI==4.9.0
-pytz==2022.6
-Levenshtein==0.20.8
-matplotlib==3.6.3
-urllib3==1.26.12
-aiohttp==3.8.5
-python-dotenv==1.0.0
-
-

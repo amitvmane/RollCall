@@ -22,6 +22,19 @@ bot = AsyncTeleBot(token=TELEGRAM_TOKEN)
 
 logging.info("Bot already started")
 
+def format_mention(user: User) -> str:
+    """
+    Build a Telegram mention string.
+    Real users (int id): use @username or tg://user link.
+    Proxy users (str id): just show their name.
+    """
+    if isinstance(user.user_id, int):
+        if user.username:
+            return f"@{user.username}"
+        return f"[{user.name}](tg://user?id={user.user_id})"
+    return user.name
+
+
 # START COMMAND, SIMPLE TEXT
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/start")
 async def welcome_and_explanation(message):
@@ -557,11 +570,14 @@ async def wait_limit(message):
             raise rollCallNotStarted("Roll call is not active")
         if len(message.text.split(" ")) <= 1 or int(message.text.split(" ")[1]) < 0:
             raise parameterMissing("Input limit is missing or it's not a positive number")
+
         msg = message.text
         cid = message.chat.id
         pmts = msg.split(" ")[1:]
         rc_number = 0
+
         limit = int(pmts[0])
+
         try:
             if "::" in pmts[-1]:
                 try:
@@ -569,29 +585,29 @@ async def wait_limit(message):
                     del pmts[-1]
                 except:
                     raise incorrectParameter("The rollcall number must be a positive integer")
+
             rollcalls = manager.get_rollcalls(cid)
             if len(rollcalls) < rc_number + 1:
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
         except:
             pass
-        
+
         rc = manager.get_rollcall(cid, rc_number)
-        
+
         # Capture current state for notifications
         old_limit = rc.inListLimit
         was_full = old_limit is not None and len(rc.inList) >= int(old_limit)
-        
+
         rc.inListLimit = limit
         rc.save()
-        
         logging.info(f"Max limit of attendees is set to {limit}")
-        await bot.send_message(cid, f'Max limit of attendees is set to {limit}')
-        
+        await bot.send_message(cid, f"Max limit of attendees is set to {limit}")
+
         # Now rebalance IN and WAITING
         moved_from_in_to_wait = []
         moved_from_wait_to_in = []
-        
-        # MOVING USERS IF IN LIST HAS ALREADY REACH THE LIMIT
+
+        # MOVING USERS IF IN LIST HAS ALREADY REACHED THE LIMIT
         if len(rc.inList) > limit:
             moved_from_in_to_wait = rc.inList[limit:]
             rc.waitList.extend(rc.inList[limit:])
@@ -603,29 +619,43 @@ async def wait_limit(message):
             rc.inList.extend(rc.waitList[:available_slots])
             rc.waitList = rc.waitList[available_slots:]
             rc.save()
-        
+
         # NEW: Notifications for limit changes
+
+        # IN -> WAITING
         if moved_from_in_to_wait:
             names = ", ".join(u.name for u in moved_from_in_to_wait)
             await bot.send_message(
                 cid,
                 f"{names} moved from IN to WAITING because limit was set to {limit} for '{rc.title}' (ID: {rc_number + 1})."
             )
-        
+
+        # WAITING -> IN (short + proxy owner tagging)
         if moved_from_wait_to_in:
-            names = ", ".join(u.name for u in moved_from_wait_to_in)
-            await bot.send_message(
-                cid,
-                f"{names} moved from WAITING to IN after limit was set to {limit} for '{rc.title}' (ID: {rc_number + 1})."
-            )
-        
+            for u in moved_from_wait_to_in:
+                # Short IN message
+                if isinstance(u.user_id, int):
+                    await bot.send_message(
+                        cid,
+                        f"{format_mention(u)} → IN (from WAITING) for '{rc.title}' (#{rc_number + 1})",
+                        parse_mode="Markdown",
+                    )
+                else:
+                    await bot.send_message(
+                        cid,
+                        f"{u.name} → IN (from WAITING) for '{rc.title}' (#{rc_number + 1})",
+                    )
+
+                # Notify proxy creator if this is a proxy
+                await notify_proxy_owner_wait_to_in(rc, u, cid, rc.title, rc_number + 1)
+
         # Notify when limit is first reached
         if len(rc.inList) == limit and not was_full:
             await bot.send_message(
                 cid,
                 f"Rollcall '{rc.title}' (ID: {rc_number + 1}) has reached its max limit ({limit}). New IN will go to WAITING."
             )
-        
+
     except parameterMissing as e:
         print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
@@ -752,11 +782,13 @@ async def out_user(message):
     try:
         if roll_call_not_started(message, manager) == False:
             raise rollCallNotStarted("Roll call is not active")
+
         msg = message.text
         pmts = msg.split(" ")
         cid = message.chat.id
         comment = ""
         rc_number = 0
+
         if len(pmts) > 1 and "::" in pmts[-1]:
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
@@ -764,39 +796,50 @@ async def out_user(message):
                 msg = " ".join(pmts)
             except:
                 raise incorrectParameter("The rollcall number must be a positive integer")
+
         rollcalls = manager.get_rollcalls(cid)
         if len(rollcalls) < rc_number + 1:
             raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+
         rc = manager.get_rollcall(cid, rc_number)
+
         user = User(message.from_user.first_name, message.from_user.username, message.from_user.id, rc.allNames)
         arr = msg.split(" ")
         if len(arr) > 1:
             arr.pop(0)
             comment = ' '.join(arr)
         user.comment = comment
-        
+
         # Capture state BEFORE addOut
         was_in = any(u.user_id == user.user_id for u in rc.inList)
-        
+
         result = rc.addOut(user)
         rc.save()
-        
+
         if result == 'AB':
             raise duplicateProxy("No duplicate proxy please :-), Thanks!")
         elif isinstance(result, User):
-            if type(result.user_id) == int:
-                await bot.send_message(cid, f"{'@'+result.username if result.username!=None else f'[{result.name}](tg://user?id={result.user_id})'} now you are in!", parse_mode="Markdown")
+            # Someone moved from WAITING to IN
+            if isinstance(result.user_id, int):
+                await bot.send_message(
+                    cid,
+                    f"{format_mention(result)} → IN",
+                    parse_mode="Markdown",
+                )
             else:
-                await bot.send_message(cid, f"{result.name} now you are in!")
-        
-        # NEW: IN → OUT notification
+                await bot.send_message(cid, f"{result.name} → IN")
+
+            # Notify proxy creator if this is a proxy
+            await notify_proxy_owner_wait_to_in(rc, result, cid, rc.title, rc_number + 1)
+
+        # IN → OUT notification (short + tagged)
         if was_in and any(u.user_id == user.user_id for u in rc.outList):
-            await bot.send_message(cid, f"{user.name} moved from IN to OUT for '{rc.title}' (ID: {rc_number + 1}).")
-        
-        # NEW: WAITING → IN notification
-        if isinstance(result, User):
-            await bot.send_message(cid, f"{result.name} moved from WAITING to IN for '{rc.title}' (ID: {rc_number + 1}).")
-        
+            await bot.send_message(
+                cid,
+                f"{format_mention(user)} → OUT for '{rc.title}' (#{rc_number + 1})",
+                parse_mode="Markdown",
+            )
+
         if send_list(message, manager):
             await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number + 1)))
     except Exception as e:
@@ -876,21 +919,32 @@ async def set_in_for(message):
             except:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
-            rollcalls = manager.get_rollcalls(cid)
-            if len(rollcalls) < rc_number + 1:
-                raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
-    
-        rc = manager.get_rollcall(cid, rc_number)
-        arr = msg.split(" ")
+        rollcalls = manager.get_rollcalls(cid)
+        if len(rollcalls) < rc_number + 1:
+            raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
+        rc = manager.get_rollcall(cid, rc_number)
+
+        arr = msg.split(" ")
         if len(arr) > 1:
+            # Proxy user: name as user_id
             user = User(arr[1], None, arr[1], rc.allNames)
             comment = " ".join(arr[2:]) if len(arr) > 2 else ""
             user.comment = comment
 
             result = rc.addIn(user)
             rc.save()
-            
+
+            # Remember who created this proxy user
+            try:
+                if not hasattr(rc, "proxy_owners") or rc.proxy_owners is None:
+                    rc.proxy_owners = {}
+                user_key = user.user_id  # proxy name string
+                rc.proxy_owners[user_key] = message.from_user.id
+                rc.save()
+            except Exception:
+                logging.exception("Failed to store proxy owner info")
+
             if result == 'AB':
                 raise duplicateProxy("No duplicate proxy please :-), Thanks!")
             elif result == 'AC':
@@ -898,14 +952,17 @@ async def set_in_for(message):
             elif result == 'AA':
                 raise repeatlyName("That name already exists!")
             elif isinstance(result, User):
-                if type(result.user_id) == int:
-                    await bot.send_message(cid, f"{'@'+result.username if result.username!=None else f'[{result.name}](tg://user?id={result.user_id})'} now you are in!", parse_mode="Markdown")
+                if isinstance(result.user_id, int):
+                    await bot.send_message(
+                        cid,
+                        f"{format_mention(result)} now you are in!",
+                        parse_mode="Markdown",
+                    )
                 else:
                     await bot.send_message(cid, f"{result.name} now you are in!")
 
             if send_list(message, manager):
                 await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number + 1)))
-
     except Exception as e:
         await bot.send_message(message.chat.id, e)
 
@@ -917,11 +974,13 @@ async def set_out_for(message):
             raise rollCallNotStarted("Roll call is not active")
         if len(message.text.split(" ")) <= 1:
             raise parameterMissing("Input username is missing")
+
         msg = message.text
         pmts = msg.split(" ")
         cid = message.chat.id
         comment = ""
         rc_number = 0
+
         if len(pmts) > 1 and "::" in pmts[-1]:
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
@@ -929,23 +988,25 @@ async def set_out_for(message):
                 msg = " ".join(pmts)
             except:
                 raise incorrectParameter("The rollcall number must be a positive integer")
+
         rollcalls = manager.get_rollcalls(cid)
         if len(rollcalls) < rc_number + 1:
             raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
-        
+
         rc = manager.get_rollcall(cid, rc_number)
+
         arr = msg.split(" ")
         if len(arr) > 1:
             user = User(arr[1], None, arr[1], rc.allNames)
             comment = " ".join(arr[2:]) if len(arr) > 2 else ""
             user.comment = comment
-            
+
             # Capture state BEFORE addOut (proxies may match by name OR user_id)
             was_in = any((u.user_id == user.user_id or u.name == user.name) for u in rc.inList)
-            
+
             result = rc.addOut(user)
             rc.save()
-            
+
             if result == 'AB':
                 raise duplicateProxy("No duplicate proxy please :-), Thanks!")
             elif result == 'AC':
@@ -953,23 +1014,31 @@ async def set_out_for(message):
             elif result == 'AA':
                 raise repeatlyName("That name already exists!")
             elif isinstance(result, User):
-                if type(result.user_id) == int:
-                    await bot.send_message(cid, f"{'@'+result.username if result.username!=None else f'[{result.name}](tg://user?id={result.user_id})'} now you are in!", parse_mode="Markdown")
+                # Someone moved from WAITING to IN
+                if isinstance(result.user_id, int):
+                    await bot.send_message(
+                        cid,
+                        f"{format_mention(result)} → IN",
+                        parse_mode="Markdown",
+                    )
                 else:
-                    await bot.send_message(cid, f"{result.name} now you are in!")
-            
-            # NEW: IN → OUT notification (match proxy by name OR user_id)
+                    await bot.send_message(cid, f"{result.name} → IN")
+
+                # Notify proxy creator if this is a proxy
+                await notify_proxy_owner_wait_to_in(rc, result, cid, rc.title, rc_number + 1)
+
+            # IN → OUT notification (short, proxies by name)
             if was_in and any((u.user_id == user.user_id or u.name == user.name) for u in rc.outList):
-                await bot.send_message(cid, f"{user.name} moved from IN to OUT for '{rc.title}' (ID: {rc_number + 1}).")
-            
-            # NEW: WAITING → IN notification
-            if isinstance(result, User):
-                await bot.send_message(cid, f"{result.name} moved from WAITING to IN for '{rc.title}' (ID: {rc_number + 1}).")
-            
+                await bot.send_message(
+                    cid,
+                    f"{user.name} → OUT for '{rc.title}' (#{rc_number + 1})",
+                )
+
             if send_list(message, manager):
                 await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number + 1)))
     except Exception as e:
         await bot.send_message(message.chat.id, e)
+
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/set_maybe_for")
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/smf")
@@ -1366,13 +1435,37 @@ async def callback_handler(call):
             
             # NEW: Notifications for OUT button
             if action == "out":
-                # IN → OUT notification
+                # Capture state BEFORE addOut
+                was_in = any(u.user_id == user.user_id for u in rc.inList)
+
+                result = rc.addOut(user)
+                rc.save()
+
+                if result == 'AB':
+                    await bot.answer_callback_query(call.id, "No duplicate proxy please :-), Thanks!")
+                elif isinstance(result, User):
+                    # Someone moved from WAITING to IN
+                    if isinstance(result.user_id, int):
+                        await bot.send_message(
+                            cid,
+                            f"{format_mention(result)} → IN",
+                            parse_mode="Markdown",
+                        )
+                    else:
+                        await bot.send_message(cid, f"{result.name} → IN")
+
+                    # Notify proxy creator if this is a proxy
+                    await notify_proxy_owner_wait_to_in(rc, result, cid, rc.title, rc_number)
+
+                # IN → OUT notification (short + tagged)
                 if was_in and any(u.user_id == user.user_id for u in rc.outList):
-                    await bot.send_message(cid, f"{user.name} moved from IN to OUT for '{rc.title}' (ID: {rc_number}).")
-                
-                # WAITING → IN notification
-                if isinstance(result, User):
-                    await bot.send_message(cid, f"{result.name} moved from WAITING to IN for '{rc.title}' (ID: {rc_number}).")
+                    await bot.send_message(
+                        cid,
+                        f"{format_mention(user)} → OUT for '{rc.title}' (#{rc_number})",
+                        parse_mode="Markdown",
+                    )
+
+                await bot.answer_callback_query(call.id, "Updated!")
             
             # Refresh main status keyboard with full list
             text = rc.allList().replace("__RCID__", str(rc_number))
@@ -1494,3 +1587,34 @@ async def callback_handler(call):
     except Exception as e:
         # Show error in callback but avoid crashing polling
         await bot.answer_callback_query(call.id, str(e))
+
+# ===== Proxy owner notification helper =====
+async def notify_proxy_owner_wait_to_in(rc, moved_user: User, cid, title: str, rc_number: int):
+    """
+    Notify the user who created this proxy (if any) that their proxy moved
+    from WAITING to IN. Message is short and tagged.
+    """
+    try:
+        proxy_owners = getattr(rc, "proxy_owners", None)
+        if not proxy_owners:
+            return
+
+        user_key = moved_user.user_id
+        owner_id = proxy_owners.get(user_key)
+        if not owner_id:
+            return
+
+        # Build owner mention
+        try:
+            member = await bot.get_chat_member(cid, owner_id)
+            if member.user.username:
+                owner_mention = f"@{member.user.username}"
+            else:
+                owner_mention = f"[{member.user.first_name}](tg://user?id={owner_id})"
+        except Exception:
+            owner_mention = "Proxy owner"
+
+        txt = f"{owner_mention}, your proxy {format_mention(moved_user)} → IN for '{title}' (#{rc_number})"
+        await bot.send_message(cid, txt, parse_mode="Markdown")
+    except Exception:
+        logging.exception("Failed to notify proxy owner for WAITING→IN")

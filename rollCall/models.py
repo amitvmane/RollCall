@@ -28,6 +28,8 @@ class RollCall:
             self.outList = []
             self.maybeList = []
             self.waitList = []
+            # NEW: map proxy user key -> owner user_id
+            self.proxy_owners = {}
             self.allNames = []
             self.inListLimit = None
             self.reminder = None
@@ -59,7 +61,8 @@ class RollCall:
         self.event_fee = data['event_fee']
         self.inListLimit = data['in_list_limit']
         self.reminder = data['reminder_hours']
-        
+        self.proxy_owners = getattr(self, "proxy_owners", {})
+
         # Parse datetime from database
         if data['finalize_date']:
             self.finalizeDate = datetime.fromisoformat(data['finalize_date'])
@@ -137,7 +140,8 @@ class RollCall:
                 timezone=self.timezone,
                 location=self.location,
                 event_fee=self.event_fee,
-                in_list_limit=self.inListLimit
+                in_list_limit=self.inListLimit,
+                proxy_owners=self.proxy_owners,  # NEW (once DB supports it)
             )
     
     # RETURN INLIST
@@ -203,12 +207,23 @@ class RollCall:
             if db.delete_user_by_name(self.id, name):
                 # Reload from database to sync
                 self._load_users_from_db()
+
+                # NEW: clean proxy_owners mapping (proxies use name as user_id)
+                try:
+                    if hasattr(self, "proxy_owners") and self.proxy_owners is not None:
+                        if name in self.proxy_owners:
+                            del self.proxy_owners[name]
+                except Exception:
+                    print(traceback.format_exc())
+
                 return True
+
             return False
+
         except:
             print(traceback.format_exc())
             return False
-    
+
     # ADD A NEW USER TO IN LIST
     def addIn(self, user):
         print(self.allNames)
@@ -477,6 +492,24 @@ class RollCall:
                 status,
                 user.comment
             )
+    # --- Proxy owner helpers ---
+
+    def set_proxy_owner(self, proxy_user_id: str, owner_user_id: int):
+        """
+        Remember who created a proxy user for this rollcall.
+        proxy_user_id is the string ID used for proxies (e.g. their name).
+        """
+        if not hasattr(self, "proxy_owners") or self.proxy_owners is None:
+            self.proxy_owners = {}
+        self.proxy_owners[proxy_user_id] = owner_user_id
+
+    def get_proxy_owner(self, proxy_user_id: str):
+        """
+        Get Telegram user_id of the person who created this proxy, if any.
+        """
+        if not hasattr(self, "proxy_owners") or self.proxy_owners is None:
+            return None
+        return self.proxy_owners.get(proxy_user_id)
 
 
 class User:

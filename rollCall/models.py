@@ -491,12 +491,14 @@ class RollCall:
             )
         else:
             # Proxy user
+            owner_id = self.proxy_owners.get(user.name)  # or user.user_id
             db.add_or_update_proxy_user(
-                self.id,
-                user.name,
-                status,
-                user.comment
-            )
+            self.id,
+            user.name,
+            status,
+            user.comment,
+            proxy_owner_id=owner_id
+         )
     # --- Proxy owner helpers ---
 
     def set_proxy_owner(self, proxy_user_id: str, owner_user_id: int):

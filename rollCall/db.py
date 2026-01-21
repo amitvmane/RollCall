@@ -101,7 +101,21 @@ def create_tables():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS proxy_users (
+                    id SERIAL PRIMARY KEY,
+                    rollcall_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    status VARCHAR(20) NOT NULL,
+                    comment TEXT,
+                    proxy_owner_id BIGINT,  -- NEW: Telegram user_id of proxy creator
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (rollcall_id) REFERENCES rollcalls(id) ON DELETE CASCADE,
+                    UNIQUE(rollcall_id, name)
+                )
+            """)
+
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS rollcalls (
                     id SERIAL PRIMARY KEY,
@@ -173,7 +187,22 @@ def create_tables():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS proxy_users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    rollcall_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    comment TEXT,
+                    proxy_owner_id INTEGER,  -- NEW: Telegram user_id of proxy creator
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (rollcall_id) REFERENCES rollcalls(id) ON DELETE CASCADE,
+                    UNIQUE(rollcall_id, name)
+                )
+         """)
+
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS rollcalls (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -546,7 +575,7 @@ def add_or_update_user(rollcall_id: int, user_id: int, first_name: str, username
             cursor.close()
             release_connection(conn)
 
-def add_or_update_proxy_user(rollcall_id: int, name: str, status: str, comment: str = '') -> bool:
+def add_or_update_proxy_user(rollcall_id: int, name: str, status: str, comment: str = '', proxy_owner_id: Optional[int] = None) -> bool:
     """Add or update a proxy user"""
     conn = get_connection()
     try:
@@ -554,19 +583,24 @@ def add_or_update_proxy_user(rollcall_id: int, name: str, status: str, comment: 
         
         if db_type == 'postgresql':
             cursor.execute(
-                """INSERT INTO proxy_users (rollcall_id, name, status, comment, updated_at)
-                   VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
-                   ON CONFLICT (rollcall_id, name)
-                   DO UPDATE SET status = EXCLUDED.status,
-                                 comment = EXCLUDED.comment,
-                                 updated_at = CURRENT_TIMESTAMP""",
-                (rollcall_id, name, status, comment)
+                """
+                INSERT INTO proxy_users (rollcall_id, name, status, comment, proxy_owner_id, updated_at)
+                VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (rollcall_id, name)
+                DO UPDATE SET status = EXCLUDED.status,
+                            comment = EXCLUDED.comment,
+                            proxy_owner_id = EXCLUDED.proxy_owner_id,
+                            updated_at = CURRENT_TIMESTAMP
+                """,
+                (rollcall_id, name, status, comment, proxy_owner_id)
             )
         else:
             cursor.execute(
-                """INSERT OR REPLACE INTO proxy_users (rollcall_id, name, status, comment, updated_at)
-                   VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)""",
-                (rollcall_id, name, status, comment)
+                """
+                INSERT OR REPLACE INTO proxy_users (rollcall_id, name, status, comment, proxy_owner_id, updated_at)
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """,
+                (rollcall_id, name, status, comment, proxy_owner_id)
             )
         
         conn.commit()

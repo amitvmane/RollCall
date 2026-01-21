@@ -17,6 +17,7 @@ from check_reminders import start
 from rollcall_manager import manager
 import traceback
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from db import add_or_update_proxy_user
 
 bot = AsyncTeleBot(token=TELEGRAM_TOKEN)
 
@@ -911,6 +912,7 @@ async def set_in_for(message):
         comment = ""
         rc_number = 0
 
+        # Optional ::N
         if len(pmts) > 1 and "::" in pmts[-1]:
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
@@ -927,23 +929,28 @@ async def set_in_for(message):
 
         arr = msg.split(" ")
         if len(arr) > 1:
-            # Proxy user: name as user_id
-            user = User(arr[1], None, arr[1], rc.allNames)
+            # Proxy user: name as user_id (string)
+            proxy_name = arr[1]
+            user = User(proxy_name, None, proxy_name, rc.allNames)
             comment = " ".join(arr[2:]) if len(arr) > 2 else ""
             user.comment = comment
 
+            # Persist proxy user INCLUDING proxy_owner_id in DB
+            proxy_owner_id = message.from_user.id
+            add_or_update_proxy_user(
+                rc.id,
+                user.user_id,          # proxy key (string)
+                "in",                  # status
+                comment,
+                proxy_owner_id=proxy_owner_id,
+            )
+
+            # Remember in-memory owner mapping on RollCall
+            rc.set_proxy_owner(user.user_id, proxy_owner_id)
+
+            # Add to in/waiting lists using normal logic
             result = rc.addIn(user)
             rc.save()
-
-            # Remember who created this proxy user
-            try:
-                if not hasattr(rc, "proxy_owners") or rc.proxy_owners is None:
-                    rc.proxy_owners = {}
-                user_key = user.user_id  # proxy name string
-                rc.proxy_owners[user_key] = message.from_user.id
-                rc.save()
-            except Exception:
-                logging.exception("Failed to store proxy owner info")
 
             if result == 'AB':
                 raise duplicateProxy("No duplicate proxy please :-), Thanks!")
@@ -952,6 +959,7 @@ async def set_in_for(message):
             elif result == 'AA':
                 raise repeatlyName("That name already exists!")
             elif isinstance(result, User):
+                # Just a simple confirmation; list is printed by send_list
                 if isinstance(result.user_id, int):
                     await bot.send_message(
                         cid,

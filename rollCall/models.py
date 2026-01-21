@@ -108,6 +108,7 @@ class RollCall:
             self.allNames.append(user)
         
         # Load proxy users
+        self.proxy_owners = {}  # reset and rebuild from DB each load
         for status in ['in', 'out', 'maybe', 'waitlist']:
             proxy_users_data = db.get_proxy_users_by_status(self.id, status)
             for proxy_data in proxy_users_data:
@@ -128,6 +129,10 @@ class RollCall:
                     self.waitList.append(user)
                 
                 self.allNames.append(user)
+                # NEW: rebuild proxy owner mapping from DB column
+                owner_id = proxy_data.get('proxy_owner_id')
+                if owner_id is not None:
+                    self.proxy_owners[user.user_id] = owner_id
     
     def save(self):
         """Save current rollcall state to database"""
@@ -141,7 +146,7 @@ class RollCall:
                 location=self.location,
                 event_fee=self.event_fee,
                 in_list_limit=self.inListLimit,
-                proxy_owners=self.proxy_owners,  # NEW (once DB supports it)
+               # proxy_owners=self.proxy_owners,  # NEW (once DB supports it) - not required now
             )
     
     # RETURN INLIST

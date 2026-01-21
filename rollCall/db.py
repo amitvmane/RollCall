@@ -221,21 +221,6 @@ def create_tables():
                     UNIQUE(rollcall_id, user_id)
                 )
             """)
-            
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS proxy_users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    rollcall_id INTEGER NOT NULL,
-                    name TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    comment TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (rollcall_id) REFERENCES rollcalls(id) ON DELETE CASCADE,
-                    UNIQUE(rollcall_id, name)
-                )
-            """)
-            
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_rollcalls_chat_active
                 ON rollcalls(chat_id, is_active)

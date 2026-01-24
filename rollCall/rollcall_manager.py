@@ -5,6 +5,8 @@ This replaces the chat={} dictionary with proper database-backed storage
 
 from typing import List, Dict, Optional
 from models import RollCall, db
+from db import create_rollcall
+
 import logging
 
 class RollCallManager:

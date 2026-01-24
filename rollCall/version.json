@@ -31,6 +31,12 @@
     {
         "Version":4.0,
         "Description":"Major Release with SQLite/Postgress Support and UI/UX improvements in Bot interactions",
+        "DeployedOnProd":"N",
+        "DeployedDatetime":"20-01-2026 01:00 UTC"
+    },
+        {
+        "Version":4.1,
+        "Description":"Enabled stats command for real telegram users only, not for proxy users. Minor fixes wrt displaying correct user order and auto-panel pop-up for proxy user set",
         "DeployedOnProd":"Y",
         "DeployedDatetime":"20-01-2026 01:00 UTC"
     }

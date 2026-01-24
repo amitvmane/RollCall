@@ -35,15 +35,15 @@ def init_db():
         if not HAS_POSTGRES:
             raise ImportError("PostgreSQL URL provided but psycopg2 is not installed. Run: pip install psycopg2-binary")
         db_type = 'postgresql'
-        logging.info("Using PostgreSQL database")
+        logging.debug("Using PostgreSQL database")
         init_postgresql()
     else:
         db_type = 'sqlite'
-        logging.info("Using SQLite database")
+        logging.debug("Using SQLite database")
         init_sqlite()
     
     create_tables()
-    logging.info("Database initialized successfully")
+    logging.debug("Database initialized successfully")
 
 def init_postgresql():
     """Initialize PostgreSQL connection pool"""
@@ -54,7 +54,7 @@ def init_postgresql():
             maxconn=5,
             dsn=DATABASE_URL
         )
-        logging.info("PostgreSQL connection pool created")
+        logging.debug("PostgreSQL connection pool created")
     except Exception as e:
         logging.error(f"Failed to create PostgreSQL connection pool: {e}")
         raise
@@ -67,7 +67,7 @@ def init_sqlite():
     try:
         db_conn = sqlite3.connect(db_path, check_same_thread=False)
         db_conn.row_factory = sqlite3.Row
-        logging.info(f"SQLite database connected: {db_path}")
+        logging.debug(f"SQLite database connected: {db_path}")
     except Exception as e:
         logging.error(f"Failed to connect to SQLite database: {e}")
         raise
@@ -143,12 +143,50 @@ def create_tables():
                     username TEXT,
                     status VARCHAR(20) NOT NULL,
                     comment TEXT,
+                    in_pos INTEGER,
+                    out_pos INTEGER,
+                    wait_pos INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (rollcall_id) REFERENCES rollcalls(id) ON DELETE CASCADE,
                     UNIQUE(rollcall_id, user_id)
                 )
             """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_stats (
+                    id SERIAL PRIMARY KEY,
+                    chat_id BIGINT NOT NULL,
+                    user_id BIGINT NOT NULL,
+                    total_in INTEGER DEFAULT 0,
+                    total_out INTEGER DEFAULT 0,
+                    total_maybe INTEGER DEFAULT 0,
+                    total_waiting_to_in INTEGER DEFAULT 0,
+                    total_rollcalls INTEGER DEFAULT 0,
+                    total_response_seconds BIGINT DEFAULT 0,
+                    best_streak INTEGER DEFAULT 0,
+                    current_streak INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(chat_id, user_id)
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS rollcall_stats (
+                    id SERIAL PRIMARY KEY,
+                    rollcall_id INTEGER NOT NULL,
+                    total_in INTEGER DEFAULT 0,
+                    total_out INTEGER DEFAULT 0,
+                    total_maybe INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (rollcall_id) REFERENCES rollcalls(id) ON DELETE CASCADE,
+                    UNIQUE(rollcall_id)
+                )
+           """)
+
+
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_rollcalls_chat_active
                 ON rollcalls(chat_id, is_active)
@@ -215,12 +253,49 @@ def create_tables():
                     username TEXT,
                     status TEXT NOT NULL,
                     comment TEXT,
+                    in_pos INTEGER,
+                    out_pos INTEGER,
+                    wait_pos INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (rollcall_id) REFERENCES rollcalls(id) ON DELETE CASCADE,
                     UNIQUE(rollcall_id, user_id)
                 )
             """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_stats (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    total_in INTEGER DEFAULT 0,
+                    total_out INTEGER DEFAULT 0,
+                    total_maybe INTEGER DEFAULT 0,
+                    total_waiting_to_in INTEGER DEFAULT 0,
+                    total_rollcalls INTEGER DEFAULT 0,
+                    total_response_seconds INTEGER DEFAULT 0,
+                    best_streak INTEGER DEFAULT 0,
+                    current_streak INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(chat_id, user_id)
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS rollcall_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                rollcall_id INTEGER NOT NULL,
+                total_in INTEGER DEFAULT 0,
+                total_out INTEGER DEFAULT 0,
+                total_maybe INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (rollcall_id) REFERENCES rollcalls(id) ON DELETE CASCADE,
+                UNIQUE(rollcall_id)
+            )
+            """)
+
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_rollcalls_chat_active
                 ON rollcalls(chat_id, is_active)
@@ -235,7 +310,7 @@ def create_tables():
             """)
         
         conn.commit()
-        logging.info("Database tables created successfully")
+        logging.debug("Database tables created successfully")
     except Exception as e:
         conn.rollback()
         logging.error(f"Error creating tables: {e}")
@@ -510,38 +585,92 @@ def end_rollcall(rollcall_id: int) -> bool:
             release_connection(conn)
 
 def add_or_update_user(rollcall_id: int, user_id: int, first_name: str, username: str, status: str, comment: str = '') -> bool:
-    """Add or update a user"""
+    """
+        Insert or update a regular user row and maintain per-state positions.
+    """
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        
-        if db_type == 'postgresql':
+
+        # Determine positions based on new status
+        in_pos = out_pos = wait_pos = None
+        if status == "in":
+            in_pos = get_next_position(rollcall_id, "in")
+        elif status == "out":
+            out_pos = get_next_position(rollcall_id, "out")
+        elif status == "waitlist":
+            wait_pos = get_next_position(rollcall_id, "waitlist")
+
+        if db_type == "postgresql":
             cursor.execute(
-                """INSERT INTO users (rollcall_id, user_id, first_name, username, status, comment, updated_at)
-                   VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                   ON CONFLICT (rollcall_id, user_id)
-                   DO UPDATE SET first_name = EXCLUDED.first_name,
-                                 username = EXCLUDED.username,
-                                 status = EXCLUDED.status,
-                                 comment = EXCLUDED.comment,
-                                 updated_at = CURRENT_TIMESTAMP""",
-                (rollcall_id, user_id, first_name, username, status, comment)
+                """
+                INSERT INTO users (
+                    rollcall_id, user_id, first_name, username, status, comment,
+                    in_pos, out_pos, wait_pos
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (rollcall_id, user_id)
+                DO UPDATE SET
+                    first_name = EXCLUDED.first_name,
+                    username   = EXCLUDED.username,
+                    status     = EXCLUDED.status,
+                    comment    = EXCLUDED.comment,
+                    in_pos     = EXCLUDED.in_pos,
+                    out_pos    = EXCLUDED.out_pos,
+                    wait_pos   = EXCLUDED.wait_pos,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    rollcall_id,
+                    user_id,
+                    first_name,
+                    username,
+                    status,
+                    comment,
+                    in_pos,
+                    out_pos,
+                    wait_pos,
+                ),
             )
         else:
+            # SQLite with UPSERT syntax
             cursor.execute(
-                """INSERT OR REPLACE INTO users (rollcall_id, user_id, first_name, username, status, comment, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
-                (rollcall_id, user_id, first_name, username, status, comment)
+                """
+                INSERT INTO users (
+                    rollcall_id, user_id, first_name, username, status, comment,
+                    in_pos, out_pos, wait_pos
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(rollcall_id, user_id) DO UPDATE SET
+                    first_name = excluded.first_name,
+                    username   = excluded.username,
+                    status     = excluded.status,
+                    comment    = excluded.comment,
+                    in_pos     = excluded.in_pos,
+                    out_pos    = excluded.out_pos,
+                    wait_pos   = excluded.wait_pos,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    rollcall_id,
+                    user_id,
+                    first_name,
+                    username,
+                    status,
+                    comment,
+                    in_pos,
+                    out_pos,
+                    wait_pos,
+                ),
             )
-        
+
         conn.commit()
-        return True
     except Exception as e:
         conn.rollback()
-        logging.error(f"Error adding/updating user: {e}")
-        return False
+        logging.error(f"Error add/update user: {e}")
+        raise
     finally:
-        if db_type == 'postgresql':
+        if db_type == "postgresql":
             cursor.close()
             release_connection(conn)
 
@@ -584,34 +713,97 @@ def add_or_update_proxy_user(rollcall_id: int, name: str, status: str, comment: 
             cursor.close()
             release_connection(conn)
 
-def get_all_users(rollcall_id: int) -> List[Dict]:
-    """Get all regular users for a rollcall"""
+def get_all_users(rollcall_id: int):
+    """
+    Get all regular users for a rollcall.
+
+    Ordering:
+    - Grouped by status (in, out, maybe, waitlist) for convenience.
+    - Within IN/OUT/WAITING, ordered by their per-state position.
+    - For MAYBE (no positions), fall back to created_at.
+    """
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        
-        if db_type == 'postgresql':
+        if db_type == "postgresql":
             cursor.execute(
-                "SELECT * FROM users WHERE rollcall_id = %s ORDER BY created_at ASC",
-                (rollcall_id,)
+                """
+                SELECT
+                    id,
+                    rollcall_id,
+                    user_id,
+                    first_name,
+                    username,
+                    status,
+                    comment,
+                    in_pos,
+                    out_pos,
+                    wait_pos,
+                    created_at,
+                    updated_at
+                FROM users
+                WHERE rollcall_id = %s
+                ORDER BY
+                    CASE status
+                        WHEN 'in' THEN 1
+                        WHEN 'out' THEN 2
+                        WHEN 'maybe' THEN 3
+                        WHEN 'waitlist' THEN 4
+                        ELSE 5
+                    END,
+                    CASE status
+                        WHEN 'in' THEN COALESCE(in_pos, 0)
+                        WHEN 'out' THEN COALESCE(out_pos, 0)
+                        WHEN 'waitlist' THEN COALESCE(wait_pos, 0)
+                        ELSE 0
+                    END,
+                    created_at ASC
+                """,
+                (rollcall_id,),
             )
         else:
             cursor.execute(
-                "SELECT * FROM users WHERE rollcall_id = ? ORDER BY created_at ASC",
-                (rollcall_id,)
+                """
+                SELECT
+                    id,
+                    rollcall_id,
+                    user_id,
+                    first_name,
+                    username,
+                    status,
+                    comment,
+                    in_pos,
+                    out_pos,
+                    wait_pos,
+                    created_at,
+                    updated_at
+                FROM users
+                WHERE rollcall_id = ?
+                ORDER BY
+                    CASE status
+                        WHEN 'in' THEN 1
+                        WHEN 'out' THEN 2
+                        WHEN 'maybe' THEN 3
+                        WHEN 'waitlist' THEN 4
+                        ELSE 5
+                    END,
+                    CASE status
+                        WHEN 'in' THEN COALESCE(in_pos, 0)
+                        WHEN 'out' THEN COALESCE(out_pos, 0)
+                        WHEN 'waitlist' THEN COALESCE(wait_pos, 0)
+                        ELSE 0
+                    END,
+                    created_at ASC
+                """,
+                (rollcall_id,),
             )
-        
         rows = cursor.fetchall()
-        result = []
-        for row in rows:
-            result.append(dict(row))
-        
-        return result
-    except Exception as e:
-        logging.error(f"Error getting users: {e}")
-        return []
+        if db_type == "postgresql":
+            return [dict(r) for r in rows]
+        else:
+            return [dict(r) for r in rows]
     finally:
-        if db_type == 'postgresql':
+        if db_type == "postgresql":
             cursor.close()
             release_connection(conn)
 
@@ -702,6 +894,132 @@ def close_db():
     elif db_type == 'sqlite' and db_conn:
         db_conn.close()
         logging.info("SQLite connection closed")
+
+
+def increment_user_stat(chat_id: int, user_id: int, field: str) -> None:
+    """Increment a single numeric field in user_stats."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+
+        if db_type == 'postgresql':
+            cursor.execute(
+                """
+                INSERT INTO user_stats (chat_id, user_id, {field})
+                VALUES (%s, %s, 1)
+                ON CONFLICT (chat_id, user_id)
+                DO UPDATE SET {field} = user_stats.{field} + 1,
+                              updated_at = CURRENT_TIMESTAMP
+                """.format(field=field),
+                (chat_id, user_id),
+            )
+        else:
+            cursor.execute(
+                f"""
+                INSERT OR IGNORE INTO user_stats (chat_id, user_id, {field})
+                VALUES (?, ?, 0)
+                """,
+                (chat_id, user_id),
+            )
+            cursor.execute(
+                f"""
+                UPDATE user_stats
+                SET {field} = {field} + 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE chat_id = ? AND user_id = ?
+                """,
+                (chat_id, user_id),
+            )
+
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"Error incrementing user stat {field}: {e}")
+    finally:
+        if db_type == 'postgresql':
+            cursor.close()
+            release_connection(conn)
+
+
+def increment_rollcall_stat(rollcall_id: int, field: str) -> None:
+    """Increment a single numeric field in rollcall_stats."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+
+        if db_type == 'postgresql':
+            cursor.execute(
+                """
+                INSERT INTO rollcall_stats (rollcall_id, {field})
+                VALUES (%s, 1)
+                ON CONFLICT (rollcall_id)
+                DO UPDATE SET {field} = rollcall_stats.{field} + 1,
+                              updated_at = CURRENT_TIMESTAMP
+                """.format(field=field),
+                (rollcall_id,),
+            )
+        else:
+            cursor.execute(
+                f"""
+                INSERT OR IGNORE INTO rollcall_stats (rollcall_id, {field})
+                VALUES (?, 0)
+                """,
+                (rollcall_id,),
+            )
+            cursor.execute(
+                f"""
+                UPDATE rollcall_stats
+                SET {field} = {field} + 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE rollcall_id = ?
+                """,
+                (rollcall_id,),
+            )
+
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"Error incrementing rollcall stat {field}: {e}")
+    finally:
+        if db_type == 'postgresql':
+            cursor.close()
+            release_connection(conn)
+
+
+def get_next_position(rollcall_id: int, status: str) -> int:
+    """
+    Return next position index for given status in users table.
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        if status == "in":
+            col = "in_pos"
+        elif status == "out":
+            col = "out_pos"
+        elif status == "waitlist":
+            col = "wait_pos"
+        else:
+            return 0  # maybe or unknown, no ordering
+
+        if db_type == "postgresql":
+            cursor.execute(
+                f"SELECT COALESCE(MAX({col}), 0) FROM users WHERE rollcall_id = %s AND status = %s",
+                (rollcall_id, status),
+            )
+        else:
+            cursor.execute(
+                f"SELECT COALESCE(MAX({col}), 0) FROM users WHERE rollcall_id = ? AND status = ?",
+                (rollcall_id, status),
+            )
+        row = cursor.fetchone()
+        max_pos = row[0] if row else 0
+        return int(max_pos) + 1
+    finally:
+        if db_type == "postgresql":
+            cursor.close()
+            release_connection(conn)
+
 
 # Initialize database on import
 init_db()

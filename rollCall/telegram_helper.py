@@ -18,6 +18,7 @@ from rollcall_manager import manager
 import traceback
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from db import add_or_update_proxy_user
+from db import increment_user_stat, increment_rollcall_stat
 
 bot = AsyncTeleBot(token=TELEGRAM_TOKEN)
 
@@ -34,6 +35,15 @@ def format_mention(user: User) -> str:
             return f"@{user.username}"
         return f"[{user.name}](tg://user?id={user.user_id})"
     return user.name
+
+def get_rollcall_db_id(rc: RollCall) -> int:
+    """
+    Helper to get DB rollcall id from RollCall object.
+    Assumes rc has .db_id or similar; if not, extend RollCall to store it.
+    """
+    # If your RollCall already exposes db_id or rollcall_id, use that.
+    # Fallback: manager can be extended later if needed.
+    return getattr(rc, "db_id", None)
 
 
 # START COMMAND, SIMPLE TEXT
@@ -106,7 +116,7 @@ async def help_commands(message):
 /broadcast "message"  - Send to all bot chats (super admin only)
 
 **Info:**
-/stats (/s)   - Bot usage statistics
+/stats (/s) @username or group or firstname or top - Bot usage statistics for real telegram users , not for proxy users
 /version (/v) - Show current version
 
 **Usage:** Use `::N` to target rollcall #N (see /rollcalls)
@@ -650,6 +660,13 @@ async def wait_limit(message):
                 # Notify proxy creator if this is a proxy
                 await notify_proxy_owner_wait_to_in(rc, u, cid, rc.title, rc_number + 1)
 
+                # --- Stats: WAITING -> IN ---
+                rc_db_id = getattr(rc, "id", None)
+                if rc_db_id is not None and isinstance(u.user_id, int):
+                    increment_user_stat(cid, u.user_id, "total_waiting_to_in")
+                    increment_user_stat(cid, u.user_id, "total_in")
+                    increment_rollcall_stat(rc_db_id, "total_in")
+
         # Notify when limit is first reached
         if len(rc.inList) == limit and not was_full:
             await bot.send_message(
@@ -766,7 +783,12 @@ async def in_user(message):
 
         result = rc.addIn(user)
         rc.save()
-        
+        # --- Stats: record IN ---
+        rc_db_id = getattr(rc, "id", None)
+        if rc_db_id is not None and isinstance(user.user_id, int):
+            increment_user_stat(cid, user.user_id, "total_in")
+            increment_rollcall_stat(rc_db_id, "total_in")
+
         if result == 'AB':
             raise duplicateProxy("No duplicate proxy please :-), Thanks!")
         elif result == 'AC':
@@ -816,6 +838,11 @@ async def out_user(message):
 
         result = rc.addOut(user)
         rc.save()
+        # --- Stats: record OUT ---
+        rc_db_id = getattr(rc, "id", None)
+        if rc_db_id is not None and isinstance(user.user_id, int):
+            increment_user_stat(cid, user.user_id, "total_out")
+            increment_rollcall_stat(rc_db_id, "total_out")
 
         if result == 'AB':
             raise duplicateProxy("No duplicate proxy please :-), Thanks!")
@@ -882,7 +909,12 @@ async def maybe_user(message):
 
         result = rc.addMaybe(user)
         rc.save()
-        
+        # --- Stats: record MAYBE ---
+        rc_db_id = getattr(rc, "id", None)
+        if rc_db_id is not None and isinstance(user.user_id, int):
+            increment_user_stat(cid, user.user_id, "total_maybe")
+            increment_rollcall_stat(rc_db_id, "total_maybe")
+
         if result == 'AB':
             raise duplicateProxy("No duplicate proxy please :-), Thanks!")
         elif isinstance(result, User):
@@ -971,6 +1003,10 @@ async def set_in_for(message):
 
             if send_list(message, manager):
                 await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number + 1)))
+            
+            # Always show updated panel for this rollcall
+            await show_panel_for_rollcall(cid, rc_number + 1)
+    
     except Exception as e:
         await bot.send_message(message.chat.id, e)
 
@@ -1044,6 +1080,10 @@ async def set_out_for(message):
 
             if send_list(message, manager):
                 await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number + 1)))
+
+            # Always show updated panel for this rollcall
+            await show_panel_for_rollcall(cid, rc_number + 1)
+
     except Exception as e:
         await bot.send_message(message.chat.id, e)
 
@@ -1099,7 +1139,9 @@ async def set_maybe_for(message):
                     await bot.send_message(cid, f"{result.name} now you are in!")
 
             if send_list(message, manager):
-                await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number + 1)))
+                await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number + 1)))            
+                # Show updated panel for this rollcall
+                await show_panel_for_rollcall(cid, rc_number + 1)
                 return
 
     except Exception as e:
@@ -1311,6 +1353,411 @@ async def end_roll_call(message):
         await bot.send_message(message.chat.id, e)
 
 
+@bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] in ["/stats", "/s"])
+async def stats_command(message):
+    """
+    /stats or /s              -> my stats in this chat
+    /stats group              -> group totals
+    /stats @username / name   -> that user's stats in this chat
+    /stats top                -> top users by IN count in this chat
+    """
+    cid = message.chat.id
+    text = message.text.strip()
+    parts = text.split()
+
+    # Default scope: me
+    target_user_id = message.from_user.id
+    display_name = message.from_user.first_name or "User"
+    scope = "me"
+
+    # Parse additional argument if present
+    if len(parts) > 1:
+        arg = " ".join(parts[1:]).strip()
+        lower_arg = arg.lower()
+
+        if lower_arg == "group":
+            scope = "group"
+        elif lower_arg == "top":
+            scope = "top"
+        else:
+            # Try to resolve another user in this chat
+            resolved = await resolve_user_for_stats(cid, arg)
+            if resolved is None:
+                await bot.send_message(
+                    cid,
+                    f"Could not find user '{arg}' in recent rollcalls for this chat."
+                )
+                return
+            target_user_id, display_name = resolved
+            scope = "other"
+
+    try:
+        if scope == "group":
+            text = await build_group_stats_text(cid)
+        elif scope == "top":
+            text = await build_leaderboard_text(cid)
+        else:
+            text = await build_user_stats_text(cid, target_user_id, display_name)
+
+        await bot.send_message(cid, text, parse_mode="Markdown")
+    except Exception as e:
+        logging.exception("Error in /stats")
+        await bot.send_message(cid, "Error while fetching stats, please try again later.")
+
+
+async def build_leaderboard_text(chat_id: int, limit: int = 10) -> str:
+    """
+    Build a simple leaderboard of top users by total_in in this chat.
+    Uses user_stats + latest first_name/username from users table.
+    """
+    from db import get_connection, db_type
+
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+
+        # Get top users by total_in for this chat
+        if db_type == "postgresql":
+            cursor.execute(
+                """
+                SELECT user_id, total_in, total_out, total_maybe
+                FROM user_stats
+                WHERE chat_id = %s
+                ORDER BY total_in DESC, total_out ASC
+                LIMIT %s
+                """,
+                (chat_id, limit),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT user_id, total_in, total_out, total_maybe
+                FROM user_stats
+                WHERE chat_id = ?
+                ORDER BY total_in DESC, total_out ASC
+                LIMIT ?
+                """,
+                (chat_id, limit),
+            )   
+        rows = cursor.fetchall()  
+        if not rows:
+            return "*Leaderboard:*\n\nNo data yet. Participate in some rollcalls first!"
+        
+        # Build a map from user_id -> latest (first_name, username)
+        user_ids = [row[0] if not isinstance(row, dict) else row["user_id"] for row in rows]
+        if db_type == "postgresql":
+            cursor.execute(
+                """
+                SELECT DISTINCT ON (u.user_id)
+                    u.user_id,
+                    u.first_name,
+                    u.username
+                FROM users u
+                JOIN rollcalls r ON u.rollcall_id = r.id
+                WHERE r.chat_id = %s AND u.user_id = ANY(%s)
+                ORDER BY u.user_id, u.updated_at DESC
+                """,
+                (chat_id, user_ids),
+            )
+        else:
+            # For SQLite, emulate DISTINCT ON by ordering and taking last per user in Python
+            cursor.execute(
+                """
+                SELECT
+                    u.user_id,
+                    u.first_name,
+                    u.username,
+                    u.updated_at
+                FROM users u
+                JOIN rollcalls r ON u.rollcall_id = r.id
+                WHERE r.chat_id = ? AND u.user_id IN ({placeholders})
+                ORDER BY u.user_id, u.updated_at ASC
+                """.format(placeholders=",".join("?" * len(user_ids))),
+                [chat_id] + user_ids,
+            )
+        user_rows = cursor.fetchall()
+
+        name_map = {}
+        if db_type == "postgresql":
+            for ur in user_rows:
+                if isinstance(ur, dict):
+                    uid = ur["user_id"]
+                    first_name = ur["first_name"]
+                    username = ur["username"]
+                else:
+                    uid = ur[0]
+                    first_name = ur[1]
+                    username = ur[2]
+                name_map[uid] = (first_name, username)
+        else:
+            # SQLite: last row per user_id due to ORDER BY ASC
+            for ur in user_rows:
+                if isinstance(ur, dict):
+                    uid = ur["user_id"]
+                    first_name = ur["first_name"]
+                    username = ur["username"]
+                else:
+                    uid = ur[0]
+                    first_name = ur[1]
+                    username = ur[2]
+                name_map[uid] = (first_name, username)
+
+        # Build text
+        lines = ["*Leaderboard (top {} by IN):*".format(len(rows)), ""]
+        rank = 1
+        for row in rows:
+            if isinstance(row, dict):
+                uid = row["user_id"]
+                total_in = row["total_in"]
+                total_out = row["total_out"]
+                total_maybe = row["total_maybe"]
+            else:
+                uid = row[0]
+                total_in = row[1]
+                total_out = row[2]
+                total_maybe = row[3]
+
+            first_name, username = name_map.get(uid, ("User", None))
+            if username:
+                name_text = f"@{username}"
+            else:
+                name_text = first_name or "User"
+
+            lines.append(
+                f"{rank}. {name_text} – ✅ {total_in}  ❌ {total_out}  🤔 {total_maybe}"
+            )
+            rank += 1
+
+        return "\n".join(lines)
+    finally:
+        if db_type == "postgresql":
+            cursor.close()
+            from db import release_connection
+            release_connection(conn)
+
+
+async def resolve_user_for_stats(chat_id: int, arg: str):
+    """
+    Resolve a stats target from @username or name to (user_id, display_name).
+
+    Strategy:
+    - If arg starts with @, match by username from users table.
+    - Otherwise, match by firstname from users table (last seen).
+    """
+    from db import get_connection, db_type
+
+    raw = arg.strip()
+    username = None
+    name = None
+
+    if raw.startswith("@"):
+        username = raw[1:]
+    else:
+        name = raw
+
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+
+        if username:
+            # Look up by username in users table for this chat
+            if db_type == "postgresql":
+                cursor.execute(
+                    """
+                    SELECT DISTINCT u.user_id, u.first_name
+                    FROM users u
+                    JOIN rollcalls r ON u.rollcall_id = r.id
+                    WHERE r.chat_id = %s AND u.username = %s
+                    ORDER BY u.updated_at DESC
+                    LIMIT 1
+                    """,
+                    (chat_id, username),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT DISTINCT u.user_id, u.first_name
+                    FROM users u
+                    JOIN rollcalls r ON u.rollcall_id = r.id
+                    WHERE r.chat_id = ? AND u.username = ?
+                    ORDER BY u.updated_at DESC
+                    LIMIT 1
+                    """,
+                    (chat_id, username),
+                )
+        else:
+            # Look up by first name in users table for this chat
+            if db_type == "postgresql":
+                cursor.execute(
+                    """
+                    SELECT DISTINCT u.user_id, u.first_name
+                    FROM users u
+                    JOIN rollcalls r ON u.rollcall_id = r.id
+                    WHERE r.chat_id = %s AND u.first_name = %s
+                    ORDER BY u.updated_at DESC
+                    LIMIT 1
+                    """,
+                    (chat_id, name),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT DISTINCT u.user_id, u.first_name
+                    FROM users u
+                    JOIN rollcalls r ON u.rollcall_id = r.id
+                    WHERE r.chat_id = ? AND u.first_name = ?
+                    ORDER BY u.updated_at DESC
+                    LIMIT 1
+                    """,
+                    (chat_id, name),
+                )
+
+        row = cursor.fetchone()
+        if not row:
+            return None
+
+        if isinstance(row, dict):
+            user_id = row["user_id"]
+            first_name = row["first_name"]
+        else:
+            user_id = row[0]
+            first_name = row[1]
+
+        return user_id, first_name or arg
+    finally:
+        if db_type == "postgresql":
+            cursor.close()
+            from db import release_connection
+            release_connection(conn)
+
+async def build_user_stats_text(chat_id: int, user_id: int, first_name: str) -> str:
+    """
+    Read user_stats for this user in this chat and format a compact summary.
+    """
+    from db import get_connection, db_type
+
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        if db_type == "postgresql":
+            cursor.execute(
+                """
+                SELECT total_in, total_out, total_maybe,
+                       total_waiting_to_in
+                FROM user_stats
+                WHERE chat_id = %s AND user_id = %s
+                """,
+                (chat_id, user_id),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT total_in, total_out, total_maybe,
+                       total_waiting_to_in
+                FROM user_stats
+                WHERE chat_id = ? AND user_id = ?
+                """,
+                (chat_id, user_id),
+            )
+
+        row = cursor.fetchone()
+        if not row:
+            return f"*Stats for {first_name}:*\n\nNo data yet. Participate in a few rollcalls first!"
+
+        if isinstance(row, dict):
+            data = row
+        else:
+            cols = [d[0] for d in cursor.description]
+            data = {cols[i]: row[i] for i in range(len(cols))}
+
+        total_in = data.get("total_in", 0)
+        total_out = data.get("total_out", 0)
+        total_maybe = data.get("total_maybe", 0)
+        total_wait = data.get("total_waiting_to_in", 0)
+
+        lines = [
+            f"*Stats for {first_name}:*",
+            "",
+            f"✅ IN: {total_in}",
+            f"❌ OUT: {total_out}",
+            f"🤔 MAYBE: {total_maybe}",
+            f"⏫ From WAITING → IN: {total_wait}",
+        ]
+        return "\n".join(lines)
+    finally:
+        if db_type == "postgresql":
+            cursor.close()
+            from db import release_connection
+            release_connection(conn)
+
+
+async def build_group_stats_text(chat_id: int) -> str:
+    """
+    Basic group-level stats: total IN/OUT/MAYBE across all users.
+    """
+    from db import get_connection, db_type
+
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        if db_type == "postgresql":
+            cursor.execute(
+                """
+                SELECT
+                    SUM(total_in) AS sum_in,
+                    SUM(total_out) AS sum_out,
+                    SUM(total_maybe) AS sum_maybe,
+                    SUM(total_waiting_to_in) AS sum_wait
+                FROM user_stats
+                WHERE chat_id = %s
+                """,
+                (chat_id,),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT
+                    SUM(total_in) AS sum_in,
+                    SUM(total_out) AS sum_out,
+                    SUM(total_maybe) AS sum_maybe,
+                    SUM(total_waiting_to_in) AS sum_wait
+                FROM user_stats
+                WHERE chat_id = ?
+                """,
+                (chat_id,),
+            )
+
+        row = cursor.fetchone()
+        if not row:
+            return "*Group stats:*\n\nNo data yet."
+
+        if isinstance(row, dict):
+            data = row
+        else:
+            cols = [d[0] for d in cursor.description]
+            data = {cols[i]: row[i] for i in range(len(cols))}
+
+        sum_in = data.get("sum_in") or 0
+        sum_out = data.get("sum_out") or 0
+        sum_maybe = data.get("sum_maybe") or 0
+        sum_wait = data.get("sum_wait") or 0
+
+        lines = [
+            "*Group stats:*",
+            "",
+            f"✅ Total IN: {sum_in}",
+            f"❌ Total OUT: {sum_out}",
+            f"🤔 Total MAYBE: {sum_maybe}",
+            f"⏫ Total WAITING → IN: {sum_wait}",
+        ]
+        return "\n".join(lines)
+    finally:
+        if db_type == "postgresql":
+            cursor.close()
+            from db import release_connection
+            release_connection(conn)
+
+
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/panel")
 async def show_panel(message):
     """
@@ -1430,7 +1877,28 @@ async def callback_handler(call):
             else:
                 result = rc.addMaybe(user)
             rc.save()
-            
+
+            # IN → OUT notification (short + tagged) for button flow
+            if action == "out" and was_in and any(u.user_id == user.user_id for u in rc.outList):
+                await bot.send_message(
+                    cid,
+                    f"{format_mention(user)} → OUT for '{rc.title}' (#{rc_number})",
+                    parse_mode="Markdown",
+                )
+
+            # --- Stats: record button-based status change ---
+            rc_db_id = getattr(rc, "id", None)
+            if rc_db_id is not None and isinstance(user.user_id, int):
+                if action == "in":
+                    increment_user_stat(cid, user.user_id, "total_in")
+                    increment_rollcall_stat(rc_db_id, "total_in")
+                elif action == "out":
+                    increment_user_stat(cid, user.user_id, "total_out")
+                    increment_rollcall_stat(rc_db_id, "total_out")
+                else:
+                    increment_user_stat(cid, user.user_id, "total_maybe")
+                    increment_rollcall_stat(rc_db_id, "total_maybe")
+
             if result == "AB":
                 await bot.answer_callback_query(call.id, "No duplicate proxy please 🙂")
                 return
@@ -1595,6 +2063,23 @@ async def callback_handler(call):
     except Exception as e:
         # Show error in callback but avoid crashing polling
         await bot.answer_callback_query(call.id, str(e))
+
+
+async def show_panel_for_rollcall(chat_id: int, rc_number: int):
+    """
+    Send the main status panel for rollcall #rc_number (1-based).
+    Used after commands like /sif, /sof, /smf so user sees updated state.
+    """
+    rollcalls = manager.get_rollcalls(chat_id)
+    index = rc_number - 1
+    if index < 0 or index >= len(rollcalls):
+        return
+
+    rc = rollcalls[index]
+    text = rc.allList().replace("__RCID__", str(rc_number))
+    markup = await get_status_keyboard(rc_number)
+    await bot.send_message(chat_id, text, reply_markup=markup)
+
 
 # ===== Proxy owner notification helper =====
 async def notify_proxy_owner_wait_to_in(rc, moved_user: User, cid, title: str, rc_number: int):

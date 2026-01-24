@@ -14,6 +14,7 @@ bot = telebot.TeleBot(token=TELEGRAM_TOKEN)
 class RollCall:
     """RollCall object with database persistence"""
     
+class RollCall:
     def __init__(self, title, chat_id=None, db_id=None):
         """
         Initialize RollCall either from database (db_id) or create new (chat_id + title)
@@ -28,19 +29,20 @@ class RollCall:
             self.outList = []
             self.maybeList = []
             self.waitList = []
-            # NEW: map proxy user key -> owner user_id
+            # map proxy user key -> owner user_id
             self.proxy_owners = {}
             self.allNames = []
             self.inListLimit = None
             self.reminder = None
             self.finalizeDate = None
-            self.timezone = 'Asia/Calcutta'
+            self.timezone = "Asia/Calcutta"
             self.location = None
             self.event_fee = None
             self.createdDate = datetime.utcnow()
-            
+
             # Save to database and get ID
             if chat_id:
+                # NEW: use db.create_rollcall and store DB id in self.id
                 self.id = db.create_rollcall(chat_id, title, self.timezone)
                 self.chat_id = chat_id
             else:

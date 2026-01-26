@@ -1001,8 +1001,8 @@ async def set_in_for(message):
                 else:
                     await bot.send_message(cid, f"{result.name} now you are in!")
 
-            if send_list(message, manager):
-                await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number + 1)))
+            #if send_list(message, manager):
+            #    await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number + 1)))
             
             # Always show updated panel for this rollcall
             await show_panel_for_rollcall(cid, rc_number + 1)
@@ -1078,8 +1078,8 @@ async def set_out_for(message):
                     f"{user.name} → OUT for '{rc.title}' (#{rc_number + 1})",
                 )
 
-            if send_list(message, manager):
-                await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number + 1)))
+            #if send_list(message, manager):
+            #    await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number + 1)))
 
             # Always show updated panel for this rollcall
             await show_panel_for_rollcall(cid, rc_number + 1)
@@ -1138,8 +1138,8 @@ async def set_maybe_for(message):
                 else:
                     await bot.send_message(cid, f"{result.name} now you are in!")
 
-            if send_list(message, manager):
-                await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number + 1)))            
+            #if send_list(message, manager):
+            #    await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number + 1)))            
                 # Show updated panel for this rollcall
                 await show_panel_for_rollcall(cid, rc_number + 1)
                 return
@@ -1829,6 +1829,18 @@ async def get_lists_keyboard(rc_number: int = 0) -> InlineKeyboardMarkup:
     markup.add(InlineKeyboardButton("🔙 Back", callback_data=f"btn_status_{rc_number}"))
     return markup
 
+async def get_end_confirm_keyboard(rc_number: int) -> InlineKeyboardMarkup:
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton(
+            "✅ Yes", callback_data=f"btn_endconfirm_{rc_number}"
+        ),
+        InlineKeyboardButton(
+            "❌ Cancel", callback_data=f"btn_endcancel_{rc_number}"
+        ),
+    )
+    return markup
+
 
 @bot.callback_query_handler(func=lambda call: True)
 async def callback_handler(call):
@@ -2014,6 +2026,79 @@ async def callback_handler(call):
         # --- End rollcall via button ---
         # Inside callback_handler, in the "end" action block:
         if action == "end":
+            # First click -> just ask for confirmation
+            markup = await get_end_confirm_keyboard(rc_number)
+            await bot.edit_message_text(
+                f"Are you sure you want to end rollcall '{rc.title}' (#{rc_number})?",
+                cid,
+                call.message.message_id,
+                reply_markup=markup,
+            )
+            await bot.answer_callback_query(call.id)
+            return
+
+        if action == "endconfirm":
+            # Now actually end, with same checks as before
+            if await admin_rights(call.message, manager) is False:
+                await bot.answer_callback_query(call.id, "Insufficient permissions")
+                return
+
+            ended_by = (
+                call.from_user.first_name
+                or call.from_user.username
+                or "someone"
+            )
+
+            # Send final list (best-effort)
+            try:
+                final_text = rc.finishList().replace("__RCID__", str(rc_number))
+                final_text = f"{final_text} by {ended_by}"
+                await bot.send_message(cid, final_text)
+            except Exception:
+                pass
+
+            # Update panel message
+            await bot.edit_message_text(
+                f"Rollcall ended by {ended_by}!",
+                cid,
+                call.message.message_id,
+            )
+
+            # Remove from manager and send fresh panels for remaining rollcalls
+            manager.remove_rollcall(cid, rc_number - 1)
+            updated_rollcalls = manager.get_rollcalls(cid)
+            if len(updated_rollcalls) > 0:
+                await bot.send_message(
+                    cid,
+                    "Active rollcall IDs have been updated because one rollcall was ended. "
+                    "Use /rollcalls to see the current list and IDs.",
+                )
+                for idx, rollcall in enumerate(updated_rollcalls):
+                    new_id = idx + 1
+                    text = rollcall.allList().replace("__RCID__", str(new_id))
+                    markup = await get_status_keyboard(new_id)
+                    await bot.send_message(
+                        cid,
+                        text,
+                        reply_markup=markup,
+                    )
+
+            await bot.answer_callback_query(call.id, "Rollcall ended")
+            return
+
+        if action == "endcancel":
+            # Just go back to normal status panel
+            text = rc.allList().replace("__RCID__", str(rc_number))
+            markup = await get_status_keyboard(rc_number)
+            await bot.edit_message_text(
+                text,
+                cid,
+                call.message.message_id,
+                reply_markup=markup,
+            )
+            await bot.answer_callback_query(call.id, "Cancelled")
+            return
+
             if await admin_rights(call.message, manager) is False:
                 await bot.answer_callback_query(call.id, "Insufficient permissions")
                 return

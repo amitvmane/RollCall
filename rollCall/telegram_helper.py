@@ -1,8 +1,8 @@
 import logging
-import datetime
 import re
 import asyncio
 import json
+from datetime import datetime, timedelta
 
 from telebot.async_telebot import AsyncTeleBot
 
@@ -19,6 +19,7 @@ import traceback
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from db import add_or_update_proxy_user
 from db import increment_user_stat, increment_rollcall_stat
+from db import create_or_update_template, get_templates, get_template, delete_template
 
 bot = AsyncTeleBot(token=TELEGRAM_TOKEN)
 
@@ -35,6 +36,44 @@ def format_mention(user: User) -> str:
             return f"@{user.username}"
         return f"[{user.name}](tg://user?id={user.user_id})"
     return user.name
+
+WEEKDAY_MAP = {
+    "monday": 0,
+    "tuesday": 1,
+    "wednesday": 2,
+    "thursday": 3,
+    "friday": 4,
+    "saturday": 5,
+    "sunday": 6,
+}
+
+def get_next_weekday_datetime(tz, target_day: str, target_time: str):
+    """Return next datetime in tz with given weekday name and HH:MM time."""
+    target_idx = WEEKDAY_MAP.get(target_day.lower())
+    if target_idx is None:
+        return None
+
+    from datetime import datetime as _dt
+
+    now = _dt.now(tz)
+    try:
+        hour, minute = map(int, target_time.split(":"))
+    except ValueError:
+        return None
+
+    # Start from today with target time
+    candidate = tz.localize(_dt(now.year, now.month, now.day, hour, minute))
+
+    # Adjust to target weekday
+    days_ahead = (target_idx - candidate.weekday()) % 7
+    candidate = candidate + timedelta(days=days_ahead)
+
+    # If that datetime is in the past, jump one week
+    if candidate <= now:
+        candidate = candidate + timedelta(days=7)
+
+    return candidate
+
 
 def get_rollcall_db_id(rc: RollCall) -> int:
     """
@@ -66,61 +105,107 @@ async def welcome_and_explanation(message):
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/help")
 async def help_commands(message):
   #  await bot.send_message(message.chat.id, '''The commands are:\n-/start  - To start the bot\n-/help - To see the commands\n-/start_roll_call - To start a new roll call (optional title)\n-/in - To let everybody know you will be attending (optional comment)\n-/out - To let everybody know you won't be attending (optional comment)\n-/maybe - To let everybody know you don't know (optional comment)\n-/whos_in - List of those who will go\n-/whos_out - List of those who will not go\n-/whos_maybe - List of those who maybe will go\n-/set_title - To set a title for the current roll call\n-/set_in_for - Allows you to respond for another user\n-/set_out_for - Allows you to respond for another user\n-/set_maybe_for - Allows you to respond for another user\n-/shh - to apply minimum output for each command\n-/louder - to disable minimum output for each command\n-/set_limit - To set a limit to IN state\n-/end_roll_call - To end a roll call\n-/set_rollcall_time - To set a finalize time to the current rc. Accepts 2 parameters date (DD-MM-YYYY) and time (H:M). Write cancel to delete it\n-/set_rollcall_reminder - To set a reminder before the ends of the rc. Accepts 1 parameter, hours as integers. Write 'cancel' to delete the reminder\n-/timezone - To set your timezone, accepts 1 parameter (Continent/Country) or (Continent/State)\n-/when - To check the start time of a roll call\n-/location - To check the location of a roll call''')
-    await bot.send_message(message.chat.id, '''**RollCall Bot Commands** 
 
-**Basic:**
-/start     - Start the bot  
-/help      - Show this help
-/start_roll_call (/src)  - Start new rollcall (optional title)
+    await bot.send_message(message.chat.id, '''**RollCall Bot Commands**
 
-**Status Updates:**
-/in        - Mark yourself attending (optional comment ::N)
-/out       - Mark yourself not attending (optional comment ::N) 
-/maybe     - Mark yourself maybe (optional comment ::N)
+    **Basic:**
 
-**Lists:**
-/rollcalls (/r)    - List all active rollcalls with IDs
-/whos_in (/wi)     - Show attending (::N for specific)
-/whos_out (/wo)    - Show not attending (::N)
-/whos_maybe (/wm)  - Show maybe (::N)
-/whos_waiting (/ww)- Show waitlist (::N)
-/panel ::N - Show control panel with buttons for rollcall #N
+    /start - Start the bot
 
-**Admin Commands:**
-/end_roll_call (/erc) ::N      - End rollcall #N
-/set_title (/st) ::N "title"   - Set title for #N
-/set_limit (/sl) ::N limit     - Set max IN limit for #N
-/delete_user ::N username      - Remove user from #N (admin only)
-/set_admins                    - Enable admin mode (group admin only)
-/unset_admins                  - Disable admin mode
+    /help - Show this help
 
-**Proxy Voting (for others):**
-/set_in_for (/sif) ::N username     - Mark other user IN
-/set_out_for (/sof) ::N username    - Mark other user OUT
-/set_maybe_for (/smf) ::N username  - Mark other user MAYBE
+    /start_roll_call (/src) - Start new rollcall (optional title)
 
-**Event Management:**
-/set_rollcall_time (/srt) ::N "DD-MM-YYYY H:M"  - Set event time ('cancel' to clear)
-/set_rollcall_reminder (/srr) ::N hours         - Reminder hours before ('cancel' to clear)  
-/event_fee (/ef) ::N amount                    - Set total event fee
-/individual_fee (/if) ::N                      - Calculate per-person fee
-/when (/w) ::N                                 - Show event time
-/location (/loc) ::N "place"                   - Set location
+    **Status Updates:**
 
-**Chat Settings:**
-/shh                 - Silent mode (no lists after responses)
-/louder              - Resume full output  
-/timezone (/tz) "Asia/Kolkata" - Set timezone
+    /in - Mark yourself attending (optional comment ::N)
 
-**Super Admin:**
-/broadcast "message"  - Send to all bot chats (super admin only)
+    /out - Mark yourself not attending (optional comment ::N)
 
-**Info:**
-/stats (/s) @username or group or firstname or top - Bot usage statistics for real telegram users , not for proxy users
-/version (/v) - Show current version
+    /maybe - Mark yourself maybe (optional comment ::N)
 
-**Usage:** Use `::N` to target rollcall #N (see /rollcalls)
-''', parse_mode='none')
+    **Lists:**
+
+    /rollcalls (/r) - List all active rollcalls with IDs
+
+    /whos_in (/wi) - Show attending (::N for specific)
+
+    /whos_out (/wo) - Show not attending (::N)
+
+    /whos_maybe (/wm) - Show maybe (::N)
+
+    /whos_waiting (/ww) - Show waitlist (::N)
+
+    /panel ::N - Show control panel with buttons for rollcall #N
+
+    **Admin Commands:**
+
+    /end_roll_call (/erc) ::N - End rollcall #N
+
+    /set_title (/st) ::N "title" - Set title for #N
+
+    /set_limit (/sl) ::N limit - Set max IN limit for #N
+
+    /delete_user ::N username - Remove user from #N (admin only)
+
+    /set_admins - Enable admin mode (group admin only)
+
+    /unset_admins - Disable admin mode
+
+    **Templates (per group, admin only):**
+
+    /set_template name - Create or update a template using name "Title" [limit=N] [location=Place] [fee="Amount"] [offset_days=D] [offset_hours=H] [offset_minutes=M]
+
+    /templates - List templates available in this chat
+
+    /start_template name [extra title] - Start new rollcall from a template
+
+    /delete_template name - Delete a template from this chat
+
+    **Proxy Voting (for others):**
+
+    /set_in_for (/sif) ::N username - Mark other user IN
+
+    /set_out_for (/sof) ::N username - Mark other user OUT
+
+    /set_maybe_for (/smf) ::N username - Mark other user MAYBE
+
+    **Event Management:**
+
+    /set_rollcall_time (/srt) ::N "DD-MM-YYYY H:M" - Set event time ('cancel' to clear)
+
+    /set_rollcall_reminder (/srr) ::N hours - Reminder hours before ('cancel' to clear)
+
+    /event_fee (/ef) ::N amount - Set total event fee
+
+    /individual_fee (/if) ::N - Calculate per-person fee
+
+    /when (/w) ::N - Show event time
+
+    /location (/loc) ::N "place" - Set location
+
+    **Chat Settings:**
+
+    /shh - Silent mode (no lists after responses)
+
+    /louder - Resume full output
+
+    /timezone (/tz) "Asia/Kolkata" - Set timezone
+
+    **Super Admin:**
+
+    /broadcast "message" - Send to all bot chats (super admin only)
+
+    **Info:**
+
+    /stats (/s) @username or group or firstname or top - Bot usage statistics for real telegram users , not for proxy users
+
+    /version (/v) - Show current version
+
+    **Usage:** Use `::N` to target rollcall #N (see /rollcalls)
+
+    ''')
+
 
 
 # SET ADMIN RIGHTS TO TRUE
@@ -232,6 +317,26 @@ async def show_reminders(message):
         id = rollcalls.index(rollcall) + 1
         await bot.send_message(cid, f"Rollcall number {id}\n\n" + rollcall.allList().replace("__RCID__", str(id)))
 
+@bot.message_handler(func=lambda message: message.text.split(" ")[0].split("@")[0].lower() == "/templates")
+async def list_templates(message):
+    """
+    List templates defined for this chat.
+    """
+    cid = message.chat.id
+    templates = get_templates(cid)
+
+    if not templates:
+        await bot.send_message(cid, "No templates defined for this chat.")
+        return
+
+    lines = []
+    for t in templates:
+        t_title = t.get("title") or "(no title)"
+        lines.append(f"- {t['name']}: {t_title}")
+
+    await bot.send_message(cid, "Templates:\n" + "\n".join(lines))
+
+
 # START A ROLL CALL
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/start_roll_call")
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/src")
@@ -282,6 +387,233 @@ async def start_roll_call(message):
 
     except Exception as e:
         await bot.send_message(cid, e)
+
+@bot.message_handler(func=lambda message: message.text.split(" ")[0].split("@")[0].lower() == "/start_template")
+async def start_template(message):
+    """
+    Start a new rollcall from a saved template.
+
+    Usage:
+      /start_template template_name
+      /start_template template_name "Extra title"
+    """
+    cid = message.chat.id
+    parts = message.text.split(" ", 2)
+
+    if len(parts) < 2:
+        await bot.send_message(
+            cid,
+            "Usage:\n"
+            "/start_template template_name [optional extra title]\n"
+            'Example: /start_template sunday "With guests"'
+        )
+        return
+
+    template_name = parts[1]
+    extra = parts[2].strip() if len(parts) > 2 else ""
+
+    tmpl = get_template(cid, template_name)
+    if not tmpl:
+        await bot.send_message(cid, f"Template '{template_name}' not found.")
+        return
+
+    # Build title from template + extra
+    base_title = tmpl.get("title") or ""
+    if extra:
+        title = (base_title + " – " + extra).strip(" –")
+    else:
+        title = base_title or template_name
+
+    # Create new rollcall via manager
+    rc = manager.add_rollcall(cid, title)
+
+    # Apply defaults from template (names match templates table)
+    if tmpl.get("inlistlimit") is not None:
+        rc.inListLimit = tmpl["inlistlimit"]
+    if tmpl.get("location"):
+        rc.location = tmpl["location"]
+    if tmpl.get("eventfee"):
+        rc.eventfee = tmpl["eventfee"]
+
+    # Time offsets and calendar fields from template
+    days = tmpl.get("offsetdays")
+    hours = tmpl.get("offsethours")
+    minutes = tmpl.get("offsetminutes")
+    event_day = tmpl.get("event_day")
+    event_time = tmpl.get("event_time")
+
+    # Always get chat timezone first
+    chat = manager.get_chat(cid)
+    tzname = chat.get("timezone", "Asia/Calcutta")
+    try:
+        tz = pytz.timezone(tzname)
+    except Exception:
+        tz = pytz.timezone("Asia/Calcutta")
+        tzname = "Asia/Calcutta"
+
+    rc.timezone = tzname
+    rc.finalizeDate = None
+
+    # 1) Prefer explicit event_day + event_time
+    if event_day and event_time:
+        dt = get_next_weekday_datetime(tz, event_day, event_time)
+        if dt:
+            rc.finalizeDate = dt
+
+    # 2) Fallback: existing offsets logic (relative to now)
+    if rc.finalizeDate is None and any(v is not None for v in (days, hours, minutes)):
+        now = datetime.datetime.now(tz)
+        delta = timedelta(
+            days=days or 0,
+            hours=hours or 0,
+            minutes=minutes or 0,
+        )
+        rc.finalizeDate = now + delta
+
+    rc.save()
+
+    # Show initial panel using your existing helper
+    rollcalls = manager.get_rollcalls(cid)
+    rc_number = len(rollcalls)  # 1-based
+    await show_panel_for_rollcall(cid, rc_number)
+
+
+# SET / UPDATE A TEMPLATE
+@bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/set_template")
+async def set_template(message):
+    try:
+        cid = message.chat.id
+
+        # Only admins for this chat
+        if await admin_rights(message, manager) is False:
+            await bot.send_message(cid, "Error - User does not have sufficient permissions for this operation")
+            return
+
+        msg = message.text.strip()
+        # Normalize “ ” ‘ ’ to standard quotes
+        msg = msg.replace("“", '"').replace("”", '"').replace("‘", "'").replace("’", "'")
+
+        parts = msg.split(" ", 2)
+        if len(parts) < 2:
+            await bot.send_message(
+                cid,
+                "Format:\n"
+                "/set_template name \"Title\" [limit=N] [location=Place] [fee=\"Amount\"] "
+                "[offset_days=D] [offset_hours=H] [offset_minutes=M] [event_day=weekday] [event_time=HH:MM]"
+            )
+            return
+
+        name = parts[1]
+        title = None
+        tail = ""
+
+        if len(parts) == 2:
+            tail = ""
+        else:
+            tail = parts[2].strip()
+
+        # --- extract quoted multi-word title if present ---
+        if tail.startswith('"'):
+            end_quote = tail.find('"', 1)
+            if end_quote != -1:
+                # "Wed Game" -> title = Wed Game, tail = rest
+                title = tail[1:end_quote]
+                tail = tail[end_quote + 1 :].strip()
+            else:
+                # No closing quote; take everything after first quote as title
+                title = tail[1:]
+                tail = ""
+        else:
+            # Optional: allow a single-word title before options
+            # /set_template MG WedGame limit=...
+            first_space = tail.find(" ")
+            if first_space == -1 and tail:
+                title = tail
+                tail = ""
+            elif first_space > 0:
+                title = tail[:first_space]
+                tail = tail[first_space + 1 :].strip()
+
+        # Default values
+        inlistlimit = None
+        location = None
+        eventfee = None
+        offsetdays = None
+        offsethours = None
+        offsetminutes = None
+        event_day = None
+        event_time = None
+
+        # key=value parsing
+        tokens = tail.split()
+        for tok in tokens:
+            if "=" not in tok:
+                continue
+            key, val = tok.split("=", 1)
+            key = key.strip().lower()
+            val = val.strip().strip('"').strip("'")
+
+            if key == "limit":
+                try:
+                    inlistlimit = int(val)
+                except ValueError:
+                    pass
+            elif key == "location":
+                location = val
+            elif key == "fee":
+                eventfee = val
+            elif key == "offset_days":
+                try:
+                    offsetdays = int(val)
+                except ValueError:
+                    pass
+            elif key == "offset_hours":
+                try:
+                    offsethours = int(val)
+                except ValueError:
+                    pass
+            elif key == "offset_minutes":
+                try:
+                    offsetminutes = int(val)
+                except ValueError:
+                    pass
+            elif key == "event_day":
+                event_day = val.lower()  # e.g. wednesday
+            elif key == "event_time":
+                event_time = val         # e.g. 07:00
+
+        ok = create_or_update_template(
+            chatid=cid,
+            name=name,
+            title=title,
+            inlistlimit=inlistlimit,
+            location=location,
+            eventfee=eventfee,
+            offsetdays=offsetdays,
+            offsethours=offsethours,
+            offsetminutes=offsetminutes,
+            event_day=event_day,
+            event_time=event_time,
+        )
+
+        if ok:
+            await bot.send_message(
+                cid,
+                f"Template '{name}' saved for this chat.\n"
+                f"Title: {title or 'none'}\n"
+                f"Limit: {inlistlimit if inlistlimit is not None else 'none'}\n"
+                f"Location: {location or 'none'}\n"
+                f"Fee: {eventfee or 'none'}\n"
+                f"Offsets: days={offsetdays}, hours={offsethours}, minutes={offsetminutes}\n"
+                f"Event_Day={event_day}, Event_Time={event_time}"
+            )
+        else:
+            await bot.send_message(cid, "Failed to save template. Please try again.")
+
+    except Exception as e:
+        print(traceback.format_exc())
+        await bot.send_message(message.chat.id, e)
+
 
 # SET A ROLLCALL START TIME
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/set_rollcall_time")
@@ -719,6 +1051,34 @@ async def delete_user(message):
 
     except Exception as e:
         await bot.send_message(message.chat.id, e)
+
+@bot.message_handler(func=lambda message: message.text.split(" ")[0].split("@")[0].lower() == "/delete_template")
+async def delete_template_command(message):
+    """
+    Delete a template from this chat.
+    Usage: /delete_template name
+    """
+    cid = message.chat.id
+
+    if await admin_rights(message, manager) is False:
+        await bot.send_message(cid, "You don't have permissions to use this command :(")
+        return
+
+    parts = message.text.split(" ", 1)
+    if len(parts) < 2 or not parts[1].strip():
+        await bot.send_message(
+            cid,
+            "Usage:\n/delete_template name\nExample: /delete_template sunday",
+        )
+        return
+
+    name = parts[1].strip()
+    ok = delete_template(cid, name)
+    if ok:
+        await bot.send_message(cid, f"Template '{name}' deleted.")
+    else:
+        await bot.send_message(cid, f"Template '{name}' not found or could not be deleted.")
+
 
 # RESUME NOTIFICATIONS
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/shh")
@@ -2052,17 +2412,17 @@ async def callback_handler(call):
             # Send final list (best-effort)
             try:
                 final_text = rc.finishList().replace("__RCID__", str(rc_number))
-                final_text = f"{final_text} by {ended_by}"
+                final_text = f"{final_text} ended by {ended_by}"
                 await bot.send_message(cid, final_text)
             except Exception:
                 pass
 
             # Update panel message
-            await bot.edit_message_text(
-                f"Rollcall ended by {ended_by}!",
-                cid,
-                call.message.message_id,
-            )
+            #await bot.edit_message_text(
+            #    f"Rollcall ended by {ended_by}!",
+            #    cid,
+            #    call.message.message_id,
+            #)
 
             # Remove from manager and send fresh panels for remaining rollcalls
             manager.remove_rollcall(cid, rc_number - 1)

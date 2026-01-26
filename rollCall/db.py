@@ -6,7 +6,7 @@ Supports both PostgreSQL and SQLite
 import os
 import json
 import logging
-from datetime import datetime
+#from datetime import datetime
 from typing import Dict, List, Optional, Any
 
 # Try PostgreSQL first, fall back to SQLite
@@ -186,6 +186,24 @@ def create_tables():
                 )
            """)
 
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS templates (
+                id SERIAL PRIMARY KEY,
+                chatid BIGINT NOT NULL,
+                name TEXT NOT NULL,
+                title TEXT,
+                inlistlimit INTEGER,
+                location TEXT,
+                eventfee TEXT,
+                offsetdays INTEGER,
+                offsethours INTEGER,
+                offsetminutes INTEGER,
+                event_day TEXT,
+                event_time TEXT,
+                createdat TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(chatid, name)
+            )
+            """)
 
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_rollcalls_chat_active
@@ -293,6 +311,25 @@ def create_tables():
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (rollcall_id) REFERENCES rollcalls(id) ON DELETE CASCADE,
                 UNIQUE(rollcall_id)
+            )
+            """)
+
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chatid INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                title TEXT,
+                inlistlimit INTEGER,
+                location TEXT,
+                eventfee TEXT,
+                offsetdays INTEGER,
+                offsethours INTEGER,
+                offsetminutes INTEGER,
+                event_day TEXT,
+                event_time TEXT,
+                createdat TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(chatid, name)
             )
             """)
 
@@ -548,6 +585,99 @@ def get_active_rollcalls(chat_id: int) -> List[Dict]:
         if db_type == 'postgresql':
             cursor.close()
             release_connection(conn)
+
+def create_or_update_template(
+    chatid: int,
+    name: str,
+    title: Optional[str] = None,
+    inlistlimit: Optional[int] = None,
+    location: Optional[str] = None,
+    eventfee: Optional[str] = None,
+    offsetdays: Optional[int] = None,
+    offsethours: Optional[int] = None,
+    offsetminutes: Optional[int] = None,
+    event_day: Optional[str] = None,
+    event_time: Optional[str] = None,
+) -> bool:
+    """
+    Create or update a template for a chat.
+    Uniqueness is (chatid, name).
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        if db_type == "postgresql":
+            cursor.execute(
+                """
+                INSERT INTO templates
+                    (chatid, name, title, inlistlimit, location, eventfee,
+                     offsetdays, offsethours, offsetminutes,event_day, event_time)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (chatid, name) DO UPDATE SET
+                    title = EXCLUDED.title,
+                    inlistlimit = EXCLUDED.inlistlimit,
+                    location = EXCLUDED.location,
+                    eventfee = EXCLUDED.eventfee,
+                    offsetdays = EXCLUDED.offsetdays,
+                    offsethours = EXCLUDED.offsethours,
+                    offsetminutes = EXCLUDED.offsetminutes,
+                    event_day = EXCLUDED.event_day,
+                    event_time = EXCLUDED.event_time
+                """,
+                (
+                    chatid,
+                    name,
+                    title,
+                    inlistlimit,
+                    location,
+                    eventfee,
+                    offsetdays,
+                    offsethours,
+                    offsetminutes,
+                ),
+            )
+        else:
+            # SQLite: emulate upsert with INSERT OR REPLACE on id
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO templates
+                    (id, chatid, name, title, inlistlimit, location,
+                     eventfee, offsetdays, offsethours, offsetminutes, event_day, event_time)
+                VALUES (
+                    COALESCE(
+                        (SELECT id FROM templates WHERE chatid = ? AND name = ?),
+                        NULL
+                    ),
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                        )
+                """,
+                (
+                    chatid,
+                    name,          # for SELECT
+                    chatid,
+                    name,
+                    title,
+                    inlistlimit,
+                    location,
+                    eventfee,
+                    offsetdays,
+                    offsethours,
+                    offsetminutes,
+                    event_day,
+                    event_time 
+                ),
+            )
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"Error creating/updating template: {e}")
+        return False
+    finally:
+        if db_type == "postgresql":
+            cursor.close()
+            release_connection(conn)
+
 
 def end_rollcall(rollcall_id: int) -> bool:
     """Mark a rollcall as ended"""
@@ -838,6 +968,34 @@ def get_proxy_users_by_status(rollcall_id: int, status: str) -> List[Dict]:
             cursor.close()
             release_connection(conn)
 
+def delete_template(chatid: int, name: str) -> bool:
+    """
+    Delete a template for a chat by name.
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        if db_type == "postgresql":
+            cursor.execute(
+                "DELETE FROM templates WHERE chatid = %s AND name = %s",
+                (chatid, name),
+            )
+        else:
+            cursor.execute(
+                "DELETE FROM templates WHERE chatid = ? AND name = ?",
+                (chatid, name),
+            )
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"Error deleting template: {e}")
+        return False
+    finally:
+        if db_type == "postgresql":
+            cursor.close()
+            release_connection(conn)
+
 def delete_user_by_name(rollcall_id: int, name: str) -> bool:
     """Delete a user by name (supports both regular and proxy users)"""
     conn = get_connection()
@@ -1015,6 +1173,68 @@ def get_next_position(rollcall_id: int, status: str) -> int:
         row = cursor.fetchone()
         max_pos = row[0] if row else 0
         return int(max_pos) + 1
+    finally:
+        if db_type == "postgresql":
+            cursor.close()
+            release_connection(conn)
+
+def get_templates(chatid: int) -> List[Dict]:
+    """
+    Get all templates for a chat.
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        if db_type == "postgresql":
+            cursor.execute(
+                "SELECT * FROM templates WHERE chatid = %s ORDER BY name ASC",
+                (chatid,),
+            )
+        else:
+            cursor.execute(
+                "SELECT * FROM templates WHERE chatid = ? ORDER BY name ASC",
+                (chatid,),
+            )
+        rows = cursor.fetchall()
+        if db_type == "postgresql":
+            return [dict(r) for r in rows]
+        else:
+            return [dict(r) for r in rows]
+    except Exception as e:
+        logging.error(f"Error getting templates: {e}")
+        return []
+    finally:
+        if db_type == "postgresql":
+            cursor.close()
+            release_connection(conn)
+
+def get_template(chatid: int, name: str) -> Optional[Dict]:
+    """
+    Get a single template for a chat by name.
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        if db_type == "postgresql":
+            cursor.execute(
+                "SELECT * FROM templates WHERE chatid = %s AND name = %s",
+                (chatid, name),
+            )
+        else:
+            cursor.execute(
+                "SELECT * FROM templates WHERE chatid = ? AND name = ?",
+                (chatid, name),
+            )
+        row = cursor.fetchone()
+        if row:
+            if db_type == "postgresql":
+                return dict(row)
+            else:
+                return dict(row)
+        return None
+    except Exception as e:
+        logging.error(f"Error getting template: {e}")
+        return None
     finally:
         if db_type == "postgresql":
             cursor.close()

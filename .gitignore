@@ -5,3 +5,5 @@ __pycache__
 database.json
 databaseMongo.json
 tests
+data/rollcall.db
+logs/bot.log

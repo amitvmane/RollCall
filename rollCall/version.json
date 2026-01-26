@@ -37,7 +37,13 @@
         {
         "Version":4.1,
         "Description":"Enabled stats command for real telegram users only, not for proxy users. Minor fixes wrt displaying correct user order and auto-panel pop-up for proxy user set",
-        "DeployedOnProd":"Y",
+        "DeployedOnProd":"N",
         "DeployedDatetime":"20-01-2026 01:00 UTC"
+    },
+    {
+        "Version":4.2,
+        "Description":"Introduced Templates for quick rollcall creations, Fixed minor bugs, END confirmation message",
+        "DeployedOnProd":"Y",
+        "DeployedDatetime":"27-01-2026 03:40 UTC"
     }
 ]

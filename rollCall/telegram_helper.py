@@ -198,7 +198,7 @@ async def help_commands(message):
 
     **Info:**
 
-    /stats (/s) @username or group or firstname or top - Bot usage statistics for real telegram users , not for proxy users
+    /stats (/s) @username or group or firstname or top  or bot - Bot usage statistics for real telegram users , not for proxy users
 
     /version (/v) - Show current version
 
@@ -1712,33 +1712,42 @@ async def end_roll_call(message):
     except Exception as e:
         await bot.send_message(message.chat.id, e)
 
-
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] in ["/stats", "/s"])
 async def stats_command(message):
     """
-    /stats or /s              -> my stats in this chat
-    /stats group              -> group totals
-    /stats @username / name   -> that user's stats in this chat
-    /stats top                -> top users by IN count in this chat
+    /stats or /s -> my stats in this chat
+    /stats group -> group totals
+    /stats @username / name -> that user's stats in this chat
+    /stats top -> top users by IN count in this chat
+    /stats bot -> bot-wide statistics (OWNER ONLY)
     """
     cid = message.chat.id
     text = message.text.strip()
     parts = text.split()
-
+    
     # Default scope: me
     target_user_id = message.from_user.id
     display_name = message.from_user.first_name or "User"
     scope = "me"
-
+    
     # Parse additional argument if present
     if len(parts) > 1:
         arg = " ".join(parts[1:]).strip()
         lower_arg = arg.lower()
-
+        
         if lower_arg == "group":
             scope = "group"
         elif lower_arg == "top":
             scope = "top"
+        elif lower_arg in ["bot", "global", "all"]:
+            # ✅ BOT-WIDE STATS - OWNER ONLY CHECK
+            if message.from_user.id not in ADMINS:
+                await bot.send_message(
+                    cid, 
+                    "⛔ Bot-wide statistics are restricted to bot administrators only."
+                )
+                return
+            scope = "bot"
         else:
             # Try to resolve another user in this chat
             resolved = await resolve_user_for_stats(cid, arg)
@@ -1750,19 +1759,163 @@ async def stats_command(message):
                 return
             target_user_id, display_name = resolved
             scope = "other"
-
+    
     try:
         if scope == "group":
             text = await build_group_stats_text(cid)
         elif scope == "top":
             text = await build_leaderboard_text(cid)
+        elif scope == "bot":
+            # ✅ NEW: Bot-wide statistics
+            text = await build_bot_stats_text()
         else:
             text = await build_user_stats_text(cid, target_user_id, display_name)
-
+        
         await bot.send_message(cid, text, parse_mode="Markdown")
     except Exception as e:
         logging.exception("Error in /stats")
         await bot.send_message(cid, "Error while fetching stats, please try again later.")
+
+
+async def build_bot_stats_text() -> str:
+    """
+    Build bot-wide statistics (all chats combined).
+    Only accessible to bot owners.
+    """
+    from db import get_connection, db_type
+    
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        
+        # Total unique groups
+        if db_type == "postgresql":
+            cursor.execute("SELECT COUNT(DISTINCT chat_id) FROM chats")
+        else:
+            cursor.execute("SELECT COUNT(DISTINCT chat_id) FROM chats")
+        total_groups = cursor.fetchone()[0]
+        
+        # Active groups (last 7 days)
+        if db_type == "postgresql":
+            cursor.execute("""
+                SELECT COUNT(DISTINCT chat_id) 
+                FROM rollcalls 
+                WHERE created_at >= NOW() - INTERVAL '7 days'
+            """)
+        else:
+            cursor.execute("""
+                SELECT COUNT(DISTINCT r.chat_id) 
+                FROM rollcalls r
+                WHERE r.created_at >= datetime('now', '-7 days')
+            """)
+        active_groups_7d = cursor.fetchone()[0]
+        
+        # Active groups (last 30 days)
+        if db_type == "postgresql":
+            cursor.execute("""
+                SELECT COUNT(DISTINCT chat_id) 
+                FROM rollcalls 
+                WHERE created_at >= NOW() - INTERVAL '30 days'
+            """)
+        else:
+            cursor.execute("""
+                SELECT COUNT(DISTINCT r.chat_id) 
+                FROM rollcalls r
+                WHERE r.created_at >= datetime('now', '-30 days')
+            """)
+        active_groups_30d = cursor.fetchone()[0]
+        
+        # Total rollcalls created
+        if db_type == "postgresql":
+            cursor.execute("SELECT COUNT(*) FROM rollcalls")
+        else:
+            cursor.execute("SELECT COUNT(*) FROM rollcalls")
+        total_rollcalls = cursor.fetchone()[0]
+        
+        # Rollcalls last 30 days
+        if db_type == "postgresql":
+            cursor.execute("""
+                SELECT COUNT(*) FROM rollcalls 
+                WHERE created_at >= NOW() - INTERVAL '30 days'
+            """)
+        else:
+            cursor.execute("""
+                SELECT COUNT(*) FROM rollcalls 
+                WHERE created_at >= datetime('now', '-30 days')
+            """)
+        rollcalls_30d = cursor.fetchone()[0]
+        
+        # Total unique users participated
+        if db_type == "postgresql":
+            cursor.execute("SELECT COUNT(DISTINCT user_id) FROM users")
+        else:
+            cursor.execute("SELECT COUNT(DISTINCT user_id) FROM users")
+        total_users = cursor.fetchone()[0]
+        
+        # Total templates created
+        if db_type == "postgresql":
+            cursor.execute("SELECT COUNT(*) FROM templates")
+        else:
+            cursor.execute("SELECT COUNT(*) FROM templates")
+        total_templates = cursor.fetchone()[0]
+        
+        # Total IN/OUT/MAYBE across all chats
+        if db_type == "postgresql":
+            cursor.execute("""
+                SELECT 
+                    SUM(total_in) as sum_in,
+                    SUM(total_out) as sum_out,
+                    SUM(total_maybe) as sum_maybe
+                FROM user_stats
+            """)
+        else:
+            cursor.execute("""
+                SELECT 
+                    SUM(total_in) as sum_in,
+                    SUM(total_out) as sum_out,
+                    SUM(total_maybe) as sum_maybe
+                FROM user_stats
+            """)
+        
+        row = cursor.fetchone()
+        if isinstance(row, dict):
+            data = row
+        else:
+            cols = [d[0] for d in cursor.description]
+            data = {cols[i]: row[i] for i in range(len(cols))}
+        
+        sum_in = data.get("sum_in") or 0
+        sum_out = data.get("sum_out") or 0
+        sum_maybe = data.get("sum_maybe") or 0
+        
+        lines = [
+            "*🤖 Bot-Wide Statistics*",
+            "",
+            "*Groups:*",
+            f"🏘️ Total: {total_groups}",
+            f"✅ Active (7d): {active_groups_7d}",
+            f"✅ Active (30d): {active_groups_30d}",
+            "",
+            "*Rollcalls:*",
+            f"📋 Total: {total_rollcalls}",
+            f"📈 Last 30d: {rollcalls_30d}",
+            "",
+            "*Users:*",
+            f"👥 Total: {total_users}",
+            f"✅ Total IN: {sum_in}",
+            f"❌ Total OUT: {sum_out}",
+            f"🤔 Total MAYBE: {sum_maybe}",
+            "",
+            f"📝 Templates: {total_templates}",
+        ]
+        
+        return "\n".join(lines)
+        
+    finally:
+        if db_type == "postgresql":
+            cursor.close()
+            from db import release_connection
+            release_connection(conn)
 
 
 async def build_leaderboard_text(chat_id: int, limit: int = 10) -> str:
@@ -2412,7 +2565,7 @@ async def callback_handler(call):
             # Send final list (best-effort)
             try:
                 final_text = rc.finishList().replace("__RCID__", str(rc_number))
-                final_text = f"{final_text} ended by {ended_by}"
+                final_text = f"{final_text} . Rollcall ended by {ended_by}"
                 await bot.send_message(cid, final_text)
             except Exception:
                 pass

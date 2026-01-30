@@ -2374,15 +2374,18 @@ async def callback_handler(call):
         if len(data) != 3 or data[0] != "btn":
             await bot.answer_callback_query(call.id, "Invalid action")
             return
+
         action = data[1]
         rc_number = int(data[2])  # 1-based index from buttons
         cid = call.message.chat.id
         rollcalls = manager.get_rollcalls(cid)
+
         if rc_number < 1 or rc_number > len(rollcalls):
             await bot.answer_callback_query(call.id, "Invalid rollcall!")
             return
+
         rc = rollcalls[rc_number - 1]
-        
+
         # --- Status change actions (IN / OUT / MAYBE) ---
         if action in ("in", "out", "maybe"):
             user = User(
@@ -2391,25 +2394,18 @@ async def callback_handler(call):
                 call.from_user.id,
                 rc.allNames,
             )
-            
+
             # Capture state before action (for OUT notifications)
             was_in = any(u.user_id == user.user_id for u in rc.inList) if action == "out" else False
-            
+
             if action == "in":
                 result = rc.addIn(user)
             elif action == "out":
                 result = rc.addOut(user)
             else:
                 result = rc.addMaybe(user)
-            rc.save()
 
-            # IN → OUT notification (short + tagged) for button flow
-            if action == "out" and was_in and any(u.user_id == user.user_id for u in rc.outList):
-                await bot.send_message(
-                    cid,
-                    f"{format_mention(user)} → OUT for '{rc.title}' (#{rc_number})",
-                    parse_mode="Markdown",
-                )
+            rc.save()
 
             # --- Stats: record button-based status change ---
             rc_db_id = getattr(rc, "id", None)
@@ -2424,6 +2420,7 @@ async def callback_handler(call):
                     increment_user_stat(cid, user.user_id, "total_maybe")
                     increment_rollcall_stat(rc_db_id, "total_maybe")
 
+            # Handle result codes
             if result == "AB":
                 await bot.answer_callback_query(call.id, "No duplicate proxy please 🙂")
                 return
@@ -2433,41 +2430,40 @@ async def callback_handler(call):
                 await bot.answer_callback_query(call.id, "That name already exists!")
             else:
                 await bot.answer_callback_query(call.id, "Status updated")
-            
-            # NEW: Notifications for OUT button
-            if action == "out":
-                # Capture state BEFORE addOut
-                was_in = any(u.user_id == user.user_id for u in rc.inList)
 
-                result = rc.addOut(user)
-                rc.save()
-
-                if result == 'AB':
-                    await bot.answer_callback_query(call.id, "No duplicate proxy please :-), Thanks!")
-                elif isinstance(result, User):
-                    # Someone moved from WAITING to IN
-                    if isinstance(result.user_id, int):
-                        await bot.send_message(
-                            cid,
-                            f"{format_mention(result)} → IN",
-                            parse_mode="Markdown",
-                        )
-                    else:
-                        await bot.send_message(cid, f"{result.name} → IN")
-
-                    # Notify proxy creator if this is a proxy
-                    await notify_proxy_owner_wait_to_in(rc, result, cid, rc.title, rc_number)
-
-                # IN → OUT notification (short + tagged)
-                if was_in and any(u.user_id == user.user_id for u in rc.outList):
+            # WAITING → IN notification (when someone from waiting list moves to IN)
+            if action == "out" and isinstance(result, User):
+                # Real Telegram user
+                if isinstance(result.user_id, int):
                     await bot.send_message(
                         cid,
-                        f"{format_mention(user)} → OUT for '{rc.title}' (#{rc_number})",
+                        f"{format_mention(result)} → IN (from WAITING) for '{rc.title}' (#{rc_number})",
                         parse_mode="Markdown",
                     )
+                # Proxy user
+                else:
+                    await bot.send_message(
+                        cid,
+                        f"{result.name} → IN (from WAITING) for '{rc.title}' (#{rc_number})",
+                    )
+                
+                # Notify proxy creator if this is a proxy
+                await notify_proxy_owner_wait_to_in(rc, result, cid, rc.title, rc_number)
+                
+                # Stats: WAITING → IN
+                if rc_db_id is not None and isinstance(result.user_id, int):
+                    increment_user_stat(cid, result.user_id, "total_waiting_to_in")
+                    increment_user_stat(cid, result.user_id, "total_in")
+                    increment_rollcall_stat(rc_db_id, "total_in")
 
-                await bot.answer_callback_query(call.id, "Updated!")
-            
+            # IN → OUT notification (short + tagged)
+            if action == "out" and was_in and any(u.user_id == user.user_id for u in rc.outList):
+                await bot.send_message(
+                    cid,
+                    f"{format_mention(user)} → OUT for '{rc.title}' (#{rc_number})",
+                    parse_mode="Markdown",
+                )
+
             # Refresh main status keyboard with full list
             text = rc.allList().replace("__RCID__", str(rc_number))
             markup = await get_status_keyboard(rc_number)
@@ -2478,7 +2474,7 @@ async def callback_handler(call):
                 reply_markup=markup,
             )
             return
-        
+
         # --- Show lists submenu ---
         if action == "lists":
             markup = await get_lists_keyboard(rc_number)
@@ -2490,7 +2486,7 @@ async def callback_handler(call):
             )
             await bot.answer_callback_query(call.id)
             return
-        
+
         # --- Individual lists (IN / OUT / MAYBE / Waiting) ---
         if action in ("wi", "wo", "wm", "ww"):
             if action == "wi":
@@ -2501,6 +2497,7 @@ async def callback_handler(call):
                 text = rc.maybeListText()
             else:
                 text = rc.waitListText()
+
             await bot.edit_message_text(
                 text if text.strip() else "List is empty.",
                 cid,
@@ -2509,7 +2506,7 @@ async def callback_handler(call):
             )
             await bot.answer_callback_query(call.id)
             return
-        
+
         # --- Back to status keyboard ---
         if action == "status":
             text = rc.allList().replace("__RCID__", str(rc_number))
@@ -2522,7 +2519,7 @@ async def callback_handler(call):
             )
             await bot.answer_callback_query(call.id)
             return
-        
+
         # --- Refresh main panel ---
         if action == "refresh":
             text = rc.allList().replace("__RCID__", str(rc_number))
@@ -2535,9 +2532,8 @@ async def callback_handler(call):
             )
             await bot.answer_callback_query(call.id, "Refreshed")
             return
-        
-        # --- End rollcall via button ---
-        # Inside callback_handler, in the "end" action block:
+
+        # --- End rollcall via button (confirmation) ---
         if action == "end":
             # First click -> just ask for confirmation
             markup = await get_end_confirm_keyboard(rc_number)
@@ -2557,33 +2553,25 @@ async def callback_handler(call):
                 return
 
             ended_by = (
-                call.from_user.first_name
-                or call.from_user.username
-                or "someone"
+                call.from_user.first_name or call.from_user.username or "someone"
             )
 
             # Send final list (best-effort)
             try:
                 final_text = rc.finishList().replace("__RCID__", str(rc_number))
-                final_text = f"{final_text} . Rollcall ended by {ended_by}"
+                final_text = f"{final_text}\n\nRollcall ended by {ended_by}"
                 await bot.send_message(cid, final_text)
             except Exception:
                 pass
 
-            # Update panel message
-            #await bot.edit_message_text(
-            #    f"Rollcall ended by {ended_by}!",
-            #    cid,
-            #    call.message.message_id,
-            #)
-
             # Remove from manager and send fresh panels for remaining rollcalls
             manager.remove_rollcall(cid, rc_number - 1)
             updated_rollcalls = manager.get_rollcalls(cid)
+
             if len(updated_rollcalls) > 0:
                 await bot.send_message(
                     cid,
-                    "Active rollcall IDs have been updated because one rollcall was ended. "
+                    "⚠️ Active rollcall IDs have been updated because one rollcall was ended. "
                     "Use /rollcalls to see the current list and IDs.",
                 )
                 for idx, rollcall in enumerate(updated_rollcalls):
@@ -2612,54 +2600,12 @@ async def callback_handler(call):
             await bot.answer_callback_query(call.id, "Cancelled")
             return
 
-            if await admin_rights(call.message, manager) is False:
-                await bot.answer_callback_query(call.id, "Insufficient permissions")
-                return
-            
-            ended_by = call.from_user.first_name or call.from_user.username or "someone"
-            
-            try:
-                final_text = rc.finishList().replace("__RCID__", str(rc_number))
-                final_text += f"\n\nEnded by {ended_by}"
-                await bot.send_message(cid, final_text)
-            except Exception:
-                pass
-            
-            await bot.edit_message_text(
-                f"Rollcall ended by {ended_by}!",
-                cid,
-                call.message.message_id,
-            )
-            
-            # Remove the rollcall FIRST
-            manager.remove_rollcall(cid, rc_number - 1)
-            
-            # NEW: Send updated panels for remaining rollcalls
-            updated_rollcalls = manager.get_rollcalls(cid)
-            if len(updated_rollcalls) > 0:
-                await bot.send_message(
-                    cid,
-                    "⚠️ Rollcall IDs have been updated. Here are the current rollcalls with fresh panels:"
-                )
-                
-                # Send fresh panel for each remaining rollcall
-                for idx, rollcall in enumerate(updated_rollcalls):
-                    new_id = idx + 1
-                    text = rollcall.allList().replace("__RCID__", str(new_id))
-                    markup = await get_status_keyboard(new_id)
-                    await bot.send_message(
-                        cid,
-                        f"**Rollcall #{new_id}**\n\n{text}",
-                        reply_markup=markup
-                    )
-            
-            await bot.answer_callback_query(call.id, "Ended - Fresh panels sent")
-            return
-        
         # --- Fallback ---
         await bot.answer_callback_query(call.id, "Unknown action")
+
     except Exception as e:
         # Show error in callback but avoid crashing polling
+        logging.exception("Error in callback_handler")
         await bot.answer_callback_query(call.id, str(e))
 
 

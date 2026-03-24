@@ -232,252 +232,213 @@ class RollCall:
             return False
 
     # ADD A NEW USER TO IN LIST
-    def addIn(self, user):
-        print(self.allNames)
-        
-        # Check if this is a proxy command trying to move a real user
-        if type(user.user_id) == str:
-            # Find if a real user with this name exists
-            real_user_found = None
-            for us in self.allNames:
-                if (us.name == user.name or us.first_name == user.name) and type(us.user_id) == int:
-                    # Real user found! Use their object instead
-                    real_user_found = us
-                    break
-            
-            # If real user exists, use them instead of creating proxy
-            if real_user_found:
-                user = real_user_found
-                # Preserve any new comment from the proxy command
-                # (comment is already set in telegram_helper.py)
-            else:
-                # Only check for duplicate proxy if NO real user exists
-                for us in self.allNames:
-                    if user.name == us.name and user.user_id != us.user_id:
-                        return 'AA'
-                
-                for us in self.allNames:
-                    if us.first_name == user.first_name and us.username == user.username and us.user_id != user.user_id:
-                        return "AB"
-        
-        # ERROR FOR DUPLICATE USER IN THE SAME STATE
-        if self.inListLimit == None:
-            for us in self.inList:
-                if us.user_id == user.user_id and us.comment == user.comment:
-                    return "AB"
-                elif us.first_name == user.first_name and us.username == user.username and us.user_id != user.user_id:
-                    return "AB"
-                elif us.user_id == user.user_id and us.comment != user.comment:
-                    us.comment = user.comment
-                    # Update in database
-                    self._save_user_to_db(user, 'in')
-                    return
+def addIn(self, user):
+    print(self.allNames)
+    if type(user.user_id) == str:
+        # Find if a real user with this name exists
+        real_user_found = None
+        for us in self.allNames:
+            if (us.name == user.name or us.first_name == user.name) and type(us.user_id) == int:
+                real_user_found = us
+                break
+        if real_user_found:
+            user = real_user_found
         else:
-            for us in self.inList:
-                if us.user_id == user.user_id and us.comment == user.comment:
-                    return "AB"
-                elif us.first_name == user.first_name and us.username == user.username and us.user_id != user.user_id:
-                    return "AB"
-                elif us.user_id == user.user_id and us.comment != user.comment:
-                    us.comment = user.comment
-                    self._save_user_to_db(user, 'in')
-                    return
-                    
-            for us in self.waitList:
-                if us.user_id == user.user_id and us.comment == user.comment:
-                    return "AB"
-                elif us.user_id == user.user_id and us.comment != user.comment:
-                    us.comment = user.comment
-                    self._save_user_to_db(user, 'waitlist')
-                    return
-        
-        # REMOVE THE USER FROM OTHER STATES
-        for us in self.outList[:]:
-            if us.user_id == user.user_id:
-                self.outList.remove(us)
-                if us in self.allNames:
-                    self.allNames.remove(us)
-                    
-        for us in self.maybeList[:]:
-            if us.user_id == user.user_id:
-                self.maybeList.remove(us)
-                if us in self.allNames:
-                    self.allNames.remove(us)
-                    
+            # FIX: block duplicate proxy by name alone (regardless of user_id)
+            for us in self.allNames:
+                if user.name == us.name and type(us.user_id) == str:
+                    return 'AA'
+
+    for us in self.allNames:
+        if us.first_name == user.first_name and us.username == user.username and us.user_id != user.user_id:
+            return "AB"
+
+    if self.inListLimit == None:
+        for us in self.inList:
+            if us.user_id == user.user_id and us.comment == user.comment:
+                return "AB"
+            elif us.first_name == user.first_name and us.username == user.username and us.user_id != user.user_id:
+                return "AB"
+            elif us.user_id == user.user_id and us.comment != user.comment:
+                us.comment = user.comment
+                self._save_user_to_db(user, 'in')
+                return
+    else:
+        for us in self.inList:
+            if us.user_id == user.user_id and us.comment == user.comment:
+                return "AB"
+            elif us.first_name == user.first_name and us.username == user.username and us.user_id != user.user_id:
+                return "AB"
+            elif us.user_id == user.user_id and us.comment != user.comment:
+                us.comment = user.comment
+                self._save_user_to_db(user, 'in')
+                return
+        for us in self.waitList:
+            if us.user_id == user.user_id and us.comment == user.comment:
+                return "AB"
+            elif us.user_id == user.user_id and us.comment != user.comment:
+                us.comment = user.comment
+                self._save_user_to_db(user, 'waitlist')
+                return
+
+    for us in self.outList[:]:
+        if us.user_id == user.user_id:
+            self.outList.remove(us)
+            if us in self.allNames:
+                self.allNames.remove(us)
+    for us in self.maybeList[:]:
+        if us.user_id == user.user_id:
+            self.maybeList.remove(us)
+            if us in self.allNames:
+                self.allNames.remove(us)
+    for us in self.waitList[:]:
+        if us.user_id == user.user_id:
+            self.waitList.remove(us)
+            if us in self.allNames:
+                self.allNames.remove(us)
+
+    if self.inListLimit != None:
+        if len(self.inList) >= int(self.inListLimit):
+            self.waitList.append(user)
+            if user not in self.allNames:
+                self.allNames.append(user)
+            self._save_user_to_db(user, 'waitlist')
+            logging.info(f"The user {user.name} has been added to the Wait list")
+            return 'AC'
+
+    self.inList.append(user)
+    if user not in self.allNames:
+        self.allNames.append(user)
+    self._save_user_to_db(user, 'in')
+    logging.info(f"User {user.name} has change his state to in")
+    
+    # ADD A NEW USER TO OUT LIST
+def addOut(self, user):
+    print(self.allNames)
+    if type(user.user_id) == str:
+        real_user_found = None
+        for us in self.allNames:
+            if (us.name == user.name or us.first_name == user.name) and type(us.user_id) == int:
+                real_user_found = us
+                break
+        if real_user_found:
+            user = real_user_found
+        else:
+            # FIX: block duplicate proxy by name alone (regardless of user_id)
+            for us in self.allNames:
+                if user.name == us.name and type(us.user_id) == str:
+                    return 'AA'
+
+    for us in self.allNames:
+        if us.first_name == user.first_name and us.username == user.username and us.user_id != user.user_id:
+            return "AB"
+
+    for us in self.outList:
+        if us.user_id == user.user_id and us.comment == user.comment:
+            return 'AB'
+        elif us.first_name == user.first_name and us.username == user.username and us.user_id != user.user_id:
+            return "AB"
+        elif us.user_id == user.user_id and us.comment != user.comment:
+            us.comment = user.comment
+            self._save_user_to_db(user, 'out')
+            return
+
+    for us in self.inList[:]:
+        if us.user_id == user.user_id:
+            self.inList.remove(us)
+            if us in self.allNames:
+                self.allNames.remove(us)
+    for us in self.maybeList[:]:
+        if us.user_id == user.user_id:
+            self.maybeList.remove(us)
+            if us in self.allNames:
+                self.allNames.remove(us)
+    if self.inListLimit != None:
         for us in self.waitList[:]:
             if us.user_id == user.user_id:
                 self.waitList.remove(us)
                 if us in self.allNames:
                     self.allNames.remove(us)
-        
-        # WAITLIST FEATURE
-        if self.inListLimit != None:
-            if len(self.inList) >= int(self.inListLimit):
-                self.waitList.append(user)
-                if user not in self.allNames:
-                    self.allNames.append(user)
-                self._save_user_to_db(user, 'waitlist')
-                logging.info(f"The user {user.name} has been added to the Wait list")
-                return 'AC'
-        
-        # ADD THE USER TO THE STATE
-        self.inList.append(user)
-        if user not in self.allNames:
-            self.allNames.append(user)
-        self._save_user_to_db(user, 'in')
-        logging.info(f"User {user.name} has change his state to in")
-    
-    # ADD A NEW USER TO OUT LIST
-    def addOut(self, user):
-        print(self.allNames)
-        
-        # Check if this is a proxy command trying to move a real user
-        if type(user.user_id) == str:
-            # Find if a real user with this name exists
-            real_user_found = None
-            for us in self.allNames:
-                if (us.name == user.name or us.first_name == user.name) and type(us.user_id) == int:
-                    # Real user found! Use their object instead
-                    real_user_found = us
-                    break
-            
-            # If real user exists, use them instead of creating proxy
-            if real_user_found:
-                user = real_user_found
-                # Preserve any new comment from the proxy command
-            else:
-                # Only check for duplicate proxy if NO real user exists
-                for us in self.allNames:
-                    if user.name == us.name and user.user_id != us.user_id:
-                        return 'AA'
-                
-                for us in self.allNames:
-                    if us.first_name == user.first_name and us.username == user.username and us.user_id != user.user_id:
-                        return "AB"
-        
-        # ERROR FOR DUPLICATE USER IN THE SAME STATE
-        for us in self.outList:
-            if us.user_id == user.user_id and us.comment == user.comment:
-                return 'AB'
-            elif us.first_name == user.first_name and us.username == user.username and us.user_id != user.user_id:
-                return "AB"
-            elif us.user_id == user.user_id and us.comment != user.comment:
-                us.comment = user.comment
-                self._save_user_to_db(user, 'out')
-                return
-        
-        # REMOVE FROM OTHER STATES
-        for us in self.inList[:]:
-            if us.user_id == user.user_id:
-                self.inList.remove(us)
-                if us in self.allNames:
-                    self.allNames.remove(us)
-                    
-        for us in self.maybeList[:]:
-            if us.user_id == user.user_id:
-                self.maybeList.remove(us)
-                if us in self.allNames:
-                    self.allNames.remove(us)
-        
-        if self.inListLimit != None:
-            for us in self.waitList[:]:
-                if us.user_id == user.user_id:
-                    self.waitList.remove(us)
-                    if us in self.allNames:
-                        self.allNames.remove(us)
-                        
-            if len(self.inList) < int(self.inListLimit) and len(self.waitList) > 0:
-                result = self.waitList[0]
-                self.inList.append(self.waitList[0])
-                self.waitList.pop(0)
-                self.outList.append(user)
-                if user not in self.allNames:
-                    self.allNames.append(user)
-                self._save_user_to_db(result, 'in')
-                self._save_user_to_db(user, 'out')
-                logging.info(f"User {user.name} has change his state to out")
-                return result
-        
-        self.outList.append(user)
-        if user not in self.allNames:
-            self.allNames.append(user)
-        self._save_user_to_db(user, 'out')
-        logging.info(f"User {user.name} has change his state to out")
+        if len(self.inList) < int(self.inListLimit) and len(self.waitList) > 0:
+            result = self.waitList[0]
+            self.inList.append(self.waitList[0])
+            self.waitList.pop(0)
+            self.outList.append(user)
+            if user not in self.allNames:
+                self.allNames.append(user)
+            self._save_user_to_db(result, 'in')
+            self._save_user_to_db(user, 'out')
+            logging.info(f"User {user.name} has change his state to out")
+            return result
+
+    self.outList.append(user)
+    if user not in self.allNames:
+        self.allNames.append(user)
+    self._save_user_to_db(user, 'out')
+    logging.info(f"User {user.name} has change his state to out")
     
     # ADD A NEW USER TO MAYBE LIST
-    def addMaybe(self, user):
-        print(self.allNames)
-        
-        # Check if this is a proxy command trying to move a real user
-        if type(user.user_id) == str:
-            # Find if a real user with this name exists
-            real_user_found = None
+def addMaybe(self, user):
+    print(self.allNames)
+    if type(user.user_id) == str:
+        real_user_found = None
+        for us in self.allNames:
+            if (us.name == user.name or us.first_name == user.name) and type(us.user_id) == int:
+                real_user_found = us
+                break
+        if real_user_found:
+            user = real_user_found
+        else:
+            # FIX: block duplicate proxy by name alone (regardless of user_id)
             for us in self.allNames:
-                if (us.name == user.name or us.first_name == user.name) and type(us.user_id) == int:
-                    # Real user found! Use their object instead
-                    real_user_found = us
-                    break
-            
-            # If real user exists, use them instead of creating proxy
-            if real_user_found:
-                user = real_user_found
-                # Preserve any new comment from the proxy command
-            else:
-                # Only check for duplicate proxy if NO real user exists
-                for us in self.allNames:
-                    if user.name == us.name and user.user_id != us.user_id:
-                        return 'AA'
-                
-                for us in self.allNames:
-                    if us.first_name == user.first_name and us.username == user.username and us.user_id != user.user_id:
-                        return "AB"
-        
-        # ERROR FOR DUPLICATE USER IN THE SAME STATE
-        for us in self.maybeList:
-            if us.user_id == user.user_id and us.comment == user.comment:
-                return "AB"
-            elif us.user_id == user.user_id and us.comment != user.comment:
-                us.comment = user.comment
-                self._save_user_to_db(user, 'maybe')
-                return
-        
-        # REMOVE FROM OTHER STATES
-        for us in self.outList[:]:
+                if user.name == us.name and type(us.user_id) == str:
+                    return 'AA'
+
+    for us in self.allNames:
+        if us.first_name == user.first_name and us.username == user.username and us.user_id != user.user_id:
+            return "AB"
+
+    for us in self.maybeList:
+        if us.user_id == user.user_id and us.comment == user.comment:
+            return "AB"
+        elif us.user_id == user.user_id and us.comment != user.comment:
+            us.comment = user.comment
+            self._save_user_to_db(user, 'maybe')
+            return
+
+    for us in self.outList[:]:
+        if us.user_id == user.user_id:
+            self.outList.remove(us)
+            if us in self.allNames:
+                self.allNames.remove(us)
+    for us in self.inList[:]:
+        if us.user_id == user.user_id:
+            self.inList.remove(us)
+            if us in self.allNames:
+                self.allNames.remove(us)
+    if self.inListLimit != None:
+        for us in self.waitList[:]:
             if us.user_id == user.user_id:
-                self.outList.remove(us)
+                self.waitList.remove(us)
                 if us in self.allNames:
                     self.allNames.remove(us)
-                    
-        for us in self.inList[:]:
-            if us.user_id == user.user_id:
-                self.inList.remove(us)
-                if us in self.allNames:
-                    self.allNames.remove(us)
-        
-        if self.inListLimit != None:
-            for us in self.waitList[:]:
-                if us.user_id == user.user_id:
-                    self.waitList.remove(us)
-                    if us in self.allNames:
-                        self.allNames.remove(us)
-                        
-            if len(self.inList) < int(self.inListLimit) and len(self.waitList) > 0:
-                result = self.waitList[0]
-                self.inList.append(self.waitList[0])
-                self.waitList.pop(0)
-                self.maybeList.append(user)
-                if user not in self.allNames:
-                    self.allNames.append(user)
-                self._save_user_to_db(result, 'in')
-                self._save_user_to_db(user, 'maybe')
-                logging.info(f"User {user.name} has change his state to maybe")
-                return result
-        
-        self.maybeList.append(user)
-        if user not in self.allNames:
-            self.allNames.append(user)
-        self._save_user_to_db(user, 'maybe')
-        logging.info(f"User {user.name} has change his state to maybe")
+        if len(self.inList) < int(self.inListLimit) and len(self.waitList) > 0:
+            result = self.waitList[0]
+            self.inList.append(self.waitList[0])
+            self.waitList.pop(0)
+            self.maybeList.append(user)
+            if user not in self.allNames:
+                self.allNames.append(user)
+            self._save_user_to_db(result, 'in')
+            self._save_user_to_db(user, 'maybe')
+            logging.info(f"User {user.name} has change his state to maybe")
+            return result
+
+    self.maybeList.append(user)
+    if user not in self.allNames:
+        self.allNames.append(user)
+    self._save_user_to_db(user, 'maybe')
+    logging.info(f"User {user.name} has change his state to maybe")
     
     def _save_user_to_db(self, user, status):
         """Save user to database"""

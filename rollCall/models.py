@@ -79,25 +79,58 @@ class RollCall:
         # Load users from database
         self._load_users_from_db()
     
-    def _load_users_from_db(self):
-        """Load all users from database"""
-        self.inList = []
-        self.outList = []
-        self.maybeList = []
-        self.waitList = []
-        self.allNames = []
-        
-        # Load regular users
-        all_users_data = db.get_all_users(self.id)
-        for user_data in all_users_data:
-            user = User.__new__(User)
-            user.user_id = user_data['user_id']
-            user.first_name = user_data['first_name']
+def _load_users_from_db(self):
+    """Load all users from database"""
+    self.inList = []
+    self.outList = []
+    self.maybeList = []
+    self.waitList = []
+    self.allNames = []
+
+    # Pre-fetch all proxy names to detect name conflicts with real users
+    all_proxy_names = set()
+    for status in ['in', 'out', 'maybe', 'waitlist']:
+        for proxy_data in db.get_proxy_users_by_status(self.id, status):
+            all_proxy_names.add(proxy_data['name'])
+
+    # Load regular users
+    all_users_data = db.get_all_users(self.id)
+    for user_data in all_users_data:
+        user = User.__new__(User)
+        user.user_id = user_data['user_id']
+        user.first_name = user_data['first_name']
+        user.username = user_data['username']
+        user.comment = user_data['comment'] or ''
+
+        # FIX: If a proxy with same first_name exists, show @username
+        # in parenthesis to distinguish real user from proxy
+        if user_data['first_name'] in all_proxy_names and user_data['username']:
+            user.name = f"{user_data['first_name']} (@{user_data['username']})"
+        else:
             user.name = user_data['first_name']
-            user.username = user_data['username']
-            user.comment = user_data['comment'] or ''
-            
-            status = user_data['status']
+
+        status = user_data['status']
+        if status == 'in':
+            self.inList.append(user)
+        elif status == 'out':
+            self.outList.append(user)
+        elif status == 'maybe':
+            self.maybeList.append(user)
+        elif status == 'waitlist':
+            self.waitList.append(user)
+        self.allNames.append(user)
+
+    # Load proxy users
+    self.proxy_owners = {}  # reset and rebuild from DB each load
+    for status in ['in', 'out', 'maybe', 'waitlist']:
+        proxy_users_data = db.get_proxy_users_by_status(self.id, status)
+        for proxy_data in proxy_users_data:
+            user = User.__new__(User)
+            user.user_id = proxy_data['name']  # String ID for proxy users
+            user.first_name = proxy_data['name']
+            user.name = proxy_data['name']     # proxy stays as plain name
+            user.username = None
+            user.comment = proxy_data['comment'] or ''
             if status == 'in':
                 self.inList.append(user)
             elif status == 'out':
@@ -106,35 +139,11 @@ class RollCall:
                 self.maybeList.append(user)
             elif status == 'waitlist':
                 self.waitList.append(user)
-            
             self.allNames.append(user)
-        
-        # Load proxy users
-        self.proxy_owners = {}  # reset and rebuild from DB each load
-        for status in ['in', 'out', 'maybe', 'waitlist']:
-            proxy_users_data = db.get_proxy_users_by_status(self.id, status)
-            for proxy_data in proxy_users_data:
-                user = User.__new__(User)
-                user.user_id = proxy_data['name']  # String ID for proxy users
-                user.first_name = proxy_data['name']
-                user.name = proxy_data['name']
-                user.username = None
-                user.comment = proxy_data['comment'] or ''
-                
-                if status == 'in':
-                    self.inList.append(user)
-                elif status == 'out':
-                    self.outList.append(user)
-                elif status == 'maybe':
-                    self.maybeList.append(user)
-                elif status == 'waitlist':
-                    self.waitList.append(user)
-                
-                self.allNames.append(user)
-                # NEW: rebuild proxy owner mapping from DB column
-                owner_id = proxy_data.get('proxy_owner_id')
-                if owner_id is not None:
-                    self.proxy_owners[user.user_id] = owner_id
+            # rebuild proxy owner mapping from DB column
+            owner_id = proxy_data.get('proxy_owner_id')
+            if owner_id is not None:
+                self.proxy_owners[user.user_id] = owner_id
     
     def save(self):
         """Save current rollcall state to database"""

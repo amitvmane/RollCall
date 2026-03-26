@@ -384,7 +384,7 @@ class RollCall:
         self._save_user_to_db(user, 'out')
         logging.info(f"User {user.name} has change his state to out")
         
-        # ADD A NEW USER TO MAYBE LIST
+    # ADD A NEW USER TO MAYBE LIST
     def addMaybe(self, user):
         print(self.allNames)
         if type(user.user_id) == str:
@@ -447,46 +447,46 @@ class RollCall:
         self._save_user_to_db(user, 'maybe')
         logging.info(f"User {user.name} has change his state to maybe")
         
-        def _save_user_to_db(self, user, status):
-            """Save user to database"""
-            if type(user.user_id) == int:
-                # Regular user
-                db.add_or_update_user(
-                    self.id,
-                    user.user_id,
-                    user.first_name,
-                    user.username,
-                    status,
-                    user.comment
-                )
-            else:
-                # Proxy user
-                owner_id = self.proxy_owners.get(user.name)  # or user.user_id
-                db.add_or_update_proxy_user(
+    def _save_user_to_db(self, user, status):
+        """Save user to database"""
+        if type(user.user_id) == int:
+            # Regular user
+            db.add_or_update_user(
                 self.id,
-                user.name,
+                user.user_id,
+                user.first_name,
+                user.username,
                 status,
-                user.comment,
-                proxy_owner_id=owner_id
+                user.comment
             )
-        # --- Proxy owner helpers ---
+        else:
+            # Proxy user
+            owner_id = self.proxy_owners.get(user.name)  # or user.user_id
+            db.add_or_update_proxy_user(
+            self.id,
+            user.name,
+            status,
+            user.comment,
+            proxy_owner_id=owner_id
+            )
+    # --- Proxy owner helpers ---
 
-        def set_proxy_owner(self, proxy_user_id: str, owner_user_id: int):
-            """
-            Remember who created a proxy user for this rollcall.
-            proxy_user_id is the string ID used for proxies (e.g. their name).
-            """
-            if not hasattr(self, "proxy_owners") or self.proxy_owners is None:
-                self.proxy_owners = {}
-            self.proxy_owners[proxy_user_id] = owner_user_id
+    def set_proxy_owner(self, proxy_user_id: str, owner_user_id: int):
+        """
+        Remember who created a proxy user for this rollcall.
+        proxy_user_id is the string ID used for proxies (e.g. their name).
+        """
+        if not hasattr(self, "proxy_owners") or self.proxy_owners is None:
+            self.proxy_owners = {}
+        self.proxy_owners[proxy_user_id] = owner_user_id
 
-        def get_proxy_owner(self, proxy_user_id: str):
-            """
-            Get Telegram user_id of the person who created this proxy, if any.
-            """
-            if not hasattr(self, "proxy_owners") or self.proxy_owners is None:
-                return None
-            return self.proxy_owners.get(proxy_user_id)
+    def get_proxy_owner(self, proxy_user_id: str):
+        """
+        Get Telegram user_id of the person who created this proxy, if any.
+        """
+        if not hasattr(self, "proxy_owners") or self.proxy_owners is None:
+            return None
+        return self.proxy_owners.get(proxy_user_id)
 
 
 class User:

@@ -11,9 +11,7 @@ import traceback
 
 bot = telebot.TeleBot(token=TELEGRAM_TOKEN)
 
-class RollCall:
-    """RollCall object with database persistence"""
-    
+
 class RollCall:
     def __init__(self, title, chat_id=None, db_id=None):
         """

@@ -142,8 +142,7 @@ class RollCall:
                 owner_id = proxy_data.get('proxy_owner_id')
                 if owner_id is not None:
                     self.proxy_owners[user.user_id] = owner_id
-        
-        def save(self):
+    def save(self):
             """Save current rollcall state to database"""
             if self.id:
                 db.update_rollcall(
@@ -158,85 +157,85 @@ class RollCall:
                 # proxy_owners=self.proxy_owners,  # NEW (once DB supports it) - not required now
                 )
         
-        # RETURN INLIST
-        def inListText(self):
-            txt = f'In:\n'
-            i = 0
-            for user in self.inList:
-                i += 1
-                txt += f"{i}. {user}\n"
-            return txt + '\n' if len(self.inList) > 0 else "In:\nNobody\n\n"
-        
-        # RETURN OUTLIST
-        def outListText(self):
-            txt = f'Out:\n'
-            i = 0
-            for user in self.outList:
-                i += 1
-                txt += f"{i}. {user}\n"
-            return txt + '\n' if len(self.outList) > 0 else "Out:\nNobody\n\n"
-        
-        # RETURN MAYBELIST
-        def maybeListText(self):
-            txt = f'Maybe:\n'
-            i = 0
-            for user in self.maybeList:
-                i += 1
-                txt += f"{i}. {user}\n"
-            return txt + '\n' if len(self.maybeList) > 0 else "Maybe:\nNobody\n\n"
-        
-        # RETURN WAITLIST
-        def waitListText(self):
-            txt = f'Waiting:\n'
-            i = 0
-            for user in self.waitList:
-                i += 1
-                txt += f"{i}. {user}\n"
-            return (txt + '\n' if len(self.waitList) > 0 else "Waiting:\nNobody") if self.inListLimit != None else ""
-        
-        # RETURN ALL THE STATES
-        def allList(self):
-            try:
-                _datetime = self.finalizeDate.strftime('%d-%m-%Y %H:%M')
-            except:
-                _datetime = 'Yet to decide'
-            txt = "Title: " + self.title + '\nID: ' + "__RCID__" + f"\nEvent time: {_datetime} {self.timezone if _datetime != 'Yet to decide' else ''}\nLocation: {self.location if self.location != None else 'Yet to decide'}\n\n" + (self.inListText() if self.inListText() != 'In:\nNobody\n\n' else '') + (self.outListText() if self.outListText() != 'Out:\nNobody\n\n' else '') + (self.maybeListText() if self.maybeListText() != 'Maybe:\nNobody\n\n' else '') + (self.waitListText() if self.waitListText() != 'Waiting:\nNobody' else '') + 'Max limit: ' + ('∞' if self.inListLimit == None else str(self.inListLimit))
-            return txt
-        
-        # RETURN THE FINISH LIST (ONLY IN ERC COMMAND)
-        def finishList(self):
-            try:
-                _datetime = self.finalizeDate.strftime('%d-%m-%Y %H:%M')
-            except:
-                _datetime = ''
-            backslash = '\n'
-            txt = "Title: " + self.title + '\nID: ' + '__RCID__' + f"{(backslash + 'Event time: ' + _datetime + ' ' + self.timezone) if _datetime != '' else ''}{(backslash + 'Location:' + self.location) if self.location != None else ''}{(backslash + 'Event Fee: ' + str(self.event_fee)) if self.event_fee != None else backslash * 2 + 'In case of paid event - reach out to organiser for payment contribution'}{(backslash + 'Individual Fee: ' + str((round(int(re.sub(r'[^0-9]', '', self.event_fee)) / len(self.inList), 2)) if len(self.inList) > 0 else '0')) if self.event_fee != None else ''}\n\n" + ("Additional unknown/penalty fees are not included and needs to be handled separately.\n\n" if self.event_fee != None else '') + (self.inListText() if self.inListText() != 'In:\nNobody\n\n' else 'In:\nNobody\n\n') + (self.outListText() if self.outListText() != 'Out:\nNobody\n\n' else 'Out:\nNobody\n\n') + (self.maybeListText() if self.maybeListText() != 'Maybe:\nNobody\n\n' else 'Maybe:\nNobody\n\n') + (self.waitListText() if self.waitListText() != 'Waiting:\nNobody' else '') + 'Max limit: ' + ('∞' if self.inListLimit == None else str(self.inListLimit))
-            return txt
-        
-        # DELETE A USER
-        def delete_user(self, name):
-            """Delete a user by name from database and memory"""
-            try:
-                # Delete from database
-                if db.delete_user_by_name(self.id, name):
-                    # Reload from database to sync
-                    self._load_users_from_db()
+    # RETURN INLIST
+    def inListText(self):
+        txt = f'In:\n'
+        i = 0
+        for user in self.inList:
+            i += 1
+            txt += f"{i}. {user}\n"
+        return txt + '\n' if len(self.inList) > 0 else "In:\nNobody\n\n"
+    
+    # RETURN OUTLIST
+    def outListText(self):
+        txt = f'Out:\n'
+        i = 0
+        for user in self.outList:
+            i += 1
+            txt += f"{i}. {user}\n"
+        return txt + '\n' if len(self.outList) > 0 else "Out:\nNobody\n\n"
+    
+    # RETURN MAYBELIST
+    def maybeListText(self):
+        txt = f'Maybe:\n'
+        i = 0
+        for user in self.maybeList:
+            i += 1
+            txt += f"{i}. {user}\n"
+        return txt + '\n' if len(self.maybeList) > 0 else "Maybe:\nNobody\n\n"
+    
+    # RETURN WAITLIST
+    def waitListText(self):
+        txt = f'Waiting:\n'
+        i = 0
+        for user in self.waitList:
+            i += 1
+            txt += f"{i}. {user}\n"
+        return (txt + '\n' if len(self.waitList) > 0 else "Waiting:\nNobody") if self.inListLimit != None else ""
+    
+    # RETURN ALL THE STATES
+    def allList(self):
+        try:
+            _datetime = self.finalizeDate.strftime('%d-%m-%Y %H:%M')
+        except:
+            _datetime = 'Yet to decide'
+        txt = "Title: " + self.title + '\nID: ' + "__RCID__" + f"\nEvent time: {_datetime} {self.timezone if _datetime != 'Yet to decide' else ''}\nLocation: {self.location if self.location != None else 'Yet to decide'}\n\n" + (self.inListText() if self.inListText() != 'In:\nNobody\n\n' else '') + (self.outListText() if self.outListText() != 'Out:\nNobody\n\n' else '') + (self.maybeListText() if self.maybeListText() != 'Maybe:\nNobody\n\n' else '') + (self.waitListText() if self.waitListText() != 'Waiting:\nNobody' else '') + 'Max limit: ' + ('∞' if self.inListLimit == None else str(self.inListLimit))
+        return txt
+    
+    # RETURN THE FINISH LIST (ONLY IN ERC COMMAND)
+    def finishList(self):
+        try:
+            _datetime = self.finalizeDate.strftime('%d-%m-%Y %H:%M')
+        except:
+            _datetime = ''
+        backslash = '\n'
+        txt = "Title: " + self.title + '\nID: ' + '__RCID__' + f"{(backslash + 'Event time: ' + _datetime + ' ' + self.timezone) if _datetime != '' else ''}{(backslash + 'Location:' + self.location) if self.location != None else ''}{(backslash + 'Event Fee: ' + str(self.event_fee)) if self.event_fee != None else backslash * 2 + 'In case of paid event - reach out to organiser for payment contribution'}{(backslash + 'Individual Fee: ' + str((round(int(re.sub(r'[^0-9]', '', self.event_fee)) / len(self.inList), 2)) if len(self.inList) > 0 else '0')) if self.event_fee != None else ''}\n\n" + ("Additional unknown/penalty fees are not included and needs to be handled separately.\n\n" if self.event_fee != None else '') + (self.inListText() if self.inListText() != 'In:\nNobody\n\n' else 'In:\nNobody\n\n') + (self.outListText() if self.outListText() != 'Out:\nNobody\n\n' else 'Out:\nNobody\n\n') + (self.maybeListText() if self.maybeListText() != 'Maybe:\nNobody\n\n' else 'Maybe:\nNobody\n\n') + (self.waitListText() if self.waitListText() != 'Waiting:\nNobody' else '') + 'Max limit: ' + ('∞' if self.inListLimit == None else str(self.inListLimit))
+        return txt
+    
+    # DELETE A USER
+    def delete_user(self, name):
+        """Delete a user by name from database and memory"""
+        try:
+            # Delete from database
+            if db.delete_user_by_name(self.id, name):
+                # Reload from database to sync
+                self._load_users_from_db()
 
-                    # NEW: clean proxy_owners mapping (proxies use name as user_id)
-                    try:
-                        if hasattr(self, "proxy_owners") and self.proxy_owners is not None:
-                            if name in self.proxy_owners:
-                                del self.proxy_owners[name]
-                    except Exception:
-                        print(traceback.format_exc())
+                # NEW: clean proxy_owners mapping (proxies use name as user_id)
+                try:
+                    if hasattr(self, "proxy_owners") and self.proxy_owners is not None:
+                        if name in self.proxy_owners:
+                            del self.proxy_owners[name]
+                except Exception:
+                    print(traceback.format_exc())
 
-                    return True
+                return True
 
-                return False
+            return False
 
-            except:
-                print(traceback.format_exc())
-                return False
+        except:
+            print(traceback.format_exc())
+            return False
 
         # ADD A NEW USER TO IN LIST
 

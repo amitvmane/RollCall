@@ -1668,7 +1668,7 @@ async def end_roll_call(message):
         if roll_call_not_started(message, manager) == False:
             raise rollCallNotStarted("Roll call is not active")
 
-        if admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) == False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
 
         cid = message.chat.id

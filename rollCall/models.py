@@ -238,33 +238,54 @@ class RollCall:
             return False
 
         # ADD A NEW USER TO IN LIST
-
+    # ADD A NEW USER TO IN LIST
     def addIn(self, user):
         print(self.allNames)
+
         if type(user.user_id) == str:
-            # Find if a real user with this name exists
+            # PROXY USER: Check if a real user with the same first_name exists
+            # Use first_name (not name) because name may be modified to "X (@username)"
             real_user_found = None
             for us in self.allNames:
-                if (us.name == user.name or us.first_name == user.name) and type(us.user_id) == int:
+                if us.first_name == user.first_name and type(us.user_id) == int:
                     real_user_found = us
                     break
+
             if real_user_found:
+                # Resolve proxy to the real user
                 user = real_user_found
             else:
-                # FIX: block duplicate proxy by name alone (regardless of user_id)
+                # No real user — treat as a genuine proxy
+                # Block duplicate proxy names (only among other proxies)
                 for us in self.allNames:
                     if user.name == us.name and type(us.user_id) == str:
                         return 'AA'
 
+        # Block real-vs-real duplicate identity (same first_name + username, different user_id)
+        # Skip if either side is a proxy (str) — avoids stale proxy conflicting with real user
         for us in self.allNames:
-            if us.first_name == user.first_name and us.username == user.username and us.user_id != user.user_id:
+            if (
+                us.first_name == user.first_name
+                and us.username == user.username
+                and us.user_id != user.user_id
+                and type(us.user_id) == int
+                and type(user.user_id) == int
+            ):
                 return "AB"
 
-        if self.inListLimit == None:
+        # If we resolved to a real user, clean up any stale proxy with the same name
+        if type(user.user_id) == int:
+            for us in self.allNames[:]:
+                if us.first_name == user.first_name and type(us.user_id) == str:
+                    self.allNames.remove(us)
+                    for lst in [self.inList, self.outList, self.maybeList, self.waitList]:
+                        if us in lst:
+                            lst.remove(us)
+                    break
+
+        if self.inListLimit is None:
             for us in self.inList:
                 if us.user_id == user.user_id and us.comment == user.comment:
-                    return "AB"
-                elif us.first_name == user.first_name and us.username == user.username and us.user_id != user.user_id:
                     return "AB"
                 elif us.user_id == user.user_id and us.comment != user.comment:
                     us.comment = user.comment
@@ -273,8 +294,6 @@ class RollCall:
         else:
             for us in self.inList:
                 if us.user_id == user.user_id and us.comment == user.comment:
-                    return "AB"
-                elif us.first_name == user.first_name and us.username == user.username and us.user_id != user.user_id:
                     return "AB"
                 elif us.user_id == user.user_id and us.comment != user.comment:
                     us.comment = user.comment
@@ -304,7 +323,7 @@ class RollCall:
                 if us in self.allNames:
                     self.allNames.remove(us)
 
-        if self.inListLimit != None:
+        if self.inListLimit is not None:
             if len(self.inList) >= int(self.inListLimit):
                 self.waitList.append(user)
                 if user not in self.allNames:
@@ -318,37 +337,57 @@ class RollCall:
             self.allNames.append(user)
         self._save_user_to_db(user, 'in')
         logging.info(f"User {user.name} has change his state to in")
-        
-        # ADD A NEW USER TO OUT LIST
+
+    # ADD A NEW USER TO OUT LIST
     def addOut(self, user):
         print(self.allNames)
+
         if type(user.user_id) == str:
+            # PROXY USER: Check if a real user with the same first_name exists
             real_user_found = None
             for us in self.allNames:
-                if (us.name == user.name or us.first_name == user.name) and type(us.user_id) == int:
+                if us.first_name == user.first_name and type(us.user_id) == int:
                     real_user_found = us
                     break
+
             if real_user_found:
+                # Resolve proxy to the real user
                 user = real_user_found
             else:
-                # FIX: block duplicate proxy by name alone (regardless of user_id)
+                # No real user — treat as a genuine proxy
+                # Block duplicate proxy names (only among other proxies)
                 for us in self.allNames:
                     if user.name == us.name and type(us.user_id) == str:
                         return 'AA'
 
+        # Block real-vs-real duplicate identity only
         for us in self.allNames:
-            if us.first_name == user.first_name and us.username == user.username and us.user_id != user.user_id:
+            if (
+                us.first_name == user.first_name
+                and us.username == user.username
+                and us.user_id != user.user_id
+                and type(us.user_id) == int
+                and type(user.user_id) == int
+            ):
                 return "AB"
 
         for us in self.outList:
             if us.user_id == user.user_id and us.comment == user.comment:
                 return 'AB'
-            elif us.first_name == user.first_name and us.username == user.username and us.user_id != user.user_id:
-                return "AB"
             elif us.user_id == user.user_id and us.comment != user.comment:
                 us.comment = user.comment
                 self._save_user_to_db(user, 'out')
                 return
+
+        # If we resolved to a real user, clean up any stale proxy with the same name
+        if type(user.user_id) == int:
+            for us in self.allNames[:]:
+                if us.first_name == user.first_name and type(us.user_id) == str:
+                    self.allNames.remove(us)
+                    for lst in [self.inList, self.outList, self.maybeList, self.waitList]:
+                        if us in lst:
+                            lst.remove(us)
+                    break
 
         for us in self.inList[:]:
             if us.user_id == user.user_id:
@@ -360,7 +399,8 @@ class RollCall:
                 self.maybeList.remove(us)
                 if us in self.allNames:
                     self.allNames.remove(us)
-        if self.inListLimit != None:
+
+        if self.inListLimit is not None:
             for us in self.waitList[:]:
                 if us.user_id == user.user_id:
                     self.waitList.remove(us)
@@ -383,26 +423,39 @@ class RollCall:
             self.allNames.append(user)
         self._save_user_to_db(user, 'out')
         logging.info(f"User {user.name} has change his state to out")
-        
+
+
     # ADD A NEW USER TO MAYBE LIST
     def addMaybe(self, user):
         print(self.allNames)
+
         if type(user.user_id) == str:
+            # PROXY USER: Check if a real user with the same first_name exists
             real_user_found = None
             for us in self.allNames:
-                if (us.name == user.name or us.first_name == user.name) and type(us.user_id) == int:
+                if us.first_name == user.first_name and type(us.user_id) == int:
                     real_user_found = us
                     break
+
             if real_user_found:
+                # Resolve proxy to the real user
                 user = real_user_found
             else:
-                # FIX: block duplicate proxy by name alone (regardless of user_id)
+                # No real user — treat as a genuine proxy
+                # Block duplicate proxy names (only among other proxies)
                 for us in self.allNames:
                     if user.name == us.name and type(us.user_id) == str:
                         return 'AA'
 
+        # Block real-vs-real duplicate identity only
         for us in self.allNames:
-            if us.first_name == user.first_name and us.username == user.username and us.user_id != user.user_id:
+            if (
+                us.first_name == user.first_name
+                and us.username == user.username
+                and us.user_id != user.user_id
+                and type(us.user_id) == int
+                and type(user.user_id) == int
+            ):
                 return "AB"
 
         for us in self.maybeList:
@@ -412,6 +465,16 @@ class RollCall:
                 us.comment = user.comment
                 self._save_user_to_db(user, 'maybe')
                 return
+
+        # If we resolved to a real user, clean up any stale proxy with the same name
+        if type(user.user_id) == int:
+            for us in self.allNames[:]:
+                if us.first_name == user.first_name and type(us.user_id) == str:
+                    self.allNames.remove(us)
+                    for lst in [self.inList, self.outList, self.maybeList, self.waitList]:
+                        if us in lst:
+                            lst.remove(us)
+                    break
 
         for us in self.outList[:]:
             if us.user_id == user.user_id:
@@ -423,7 +486,8 @@ class RollCall:
                 self.inList.remove(us)
                 if us in self.allNames:
                     self.allNames.remove(us)
-        if self.inListLimit != None:
+
+        if self.inListLimit is not None:
             for us in self.waitList[:]:
                 if us.user_id == user.user_id:
                     self.waitList.remove(us)
@@ -446,7 +510,8 @@ class RollCall:
             self.allNames.append(user)
         self._save_user_to_db(user, 'maybe')
         logging.info(f"User {user.name} has change his state to maybe")
-        
+
+
     def _save_user_to_db(self, user, status):
         """Save user to database"""
         if type(user.user_id) == int:

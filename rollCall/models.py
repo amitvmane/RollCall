@@ -142,6 +142,53 @@ class RollCall:
                 owner_id = proxy_data.get('proxy_owner_id')
                 if owner_id is not None:
                     self.proxy_owners[user.user_id] = owner_id
+
+    def _get_user_current_status(self, user):
+        """Return current status string for a user object."""
+        if user in self.inList:
+            return 'in'
+        elif user in self.outList:
+            return 'out'
+        elif user in self.maybeList:
+            return 'maybe'
+        elif user in self.waitList:
+            return 'waitlist'
+        return 'in'  # fallback
+
+    def _resolve_display_name_conflict(self, user):
+        """
+        Ensures real user and proxy with same first_name can coexist.
+        - If real user being added and proxy with same name exists:
+          → set real user display name to 'FirstName (@username)'
+        - If proxy being added and real user with same name exists:
+          → update that real user's display name to 'FirstName (@username)'
+          → persist updated name to DB
+        """
+        if type(user.user_id) == int:
+            # Real user — check if any proxy with same first_name exists
+            proxy_exists = any(
+                us.first_name == user.first_name and type(us.user_id) == str
+                for us in self.allNames
+            )
+            if proxy_exists:
+                if user.username:
+                    user.name = f"{user.first_name} (@{user.username})"
+                else:
+                    user.name = f"{user.first_name} (real)"
+        else:
+            # Proxy being added — check if real user with same first_name already exists
+            # Update that real user's display name to distinguish
+            for us in self.allNames:
+                if us.first_name == user.first_name and type(us.user_id) == int:
+                    if us.username:
+                        us.name = f"{us.first_name} (@{us.username})"
+                    else:
+                        us.name = f"{us.first_name} (real)"
+                    # Persist updated display name to DB
+                    self._save_user_to_db(us, self._get_user_current_status(us))
+                    break
+
+
     def save(self):
             """Save current rollcall state to database"""
             if self.id:
@@ -236,52 +283,30 @@ class RollCall:
         except:
             print(traceback.format_exc())
             return False
-
-        # ADD A NEW USER TO IN LIST
+        
     # ADD A NEW USER TO IN LIST
     def addIn(self, user):
         print(self.allNames)
 
         if type(user.user_id) == str:
-            # PROXY USER: Check if a real user with the same first_name exists
-            # Use first_name (not name) because name may be modified to "X (@username)"
-            real_user_found = None
+            # PROXY USER — block duplicate proxy names only (among other proxies)
             for us in self.allNames:
-                if us.first_name == user.first_name and type(us.user_id) == int:
-                    real_user_found = us
-                    break
-
-            if real_user_found:
-                # Resolve proxy to the real user
-                user = real_user_found
-            else:
-                # No real user — treat as a genuine proxy
-                # Block duplicate proxy names (only among other proxies)
-                for us in self.allNames:
-                    if user.name == us.name and type(us.user_id) == str:
-                        return 'AA'
-
-        # Block real-vs-real duplicate identity (same first_name + username, different user_id)
-        # Skip if either side is a proxy (str) — avoids stale proxy conflicting with real user
-        for us in self.allNames:
-            if (
-                us.first_name == user.first_name
-                and us.username == user.username
-                and us.user_id != user.user_id
-                and type(us.user_id) == int
-                and type(user.user_id) == int
-            ):
-                return "AB"
-
-        # If we resolved to a real user, clean up any stale proxy with the same name
-        if type(user.user_id) == int:
-            for us in self.allNames[:]:
-                if us.first_name == user.first_name and type(us.user_id) == str:
-                    self.allNames.remove(us)
-                    for lst in [self.inList, self.outList, self.maybeList, self.waitList]:
-                        if us in lst:
-                            lst.remove(us)
-                    break
+                if user.name == us.name and type(us.user_id) == str:
+                    return 'AA'
+            # If real user with same first_name exists → update real user display name
+            self._resolve_display_name_conflict(user)
+        else:
+            # REAL USER — block only real-vs-real duplicate identity
+            for us in self.allNames:
+                if (
+                    us.first_name == user.first_name
+                    and us.username == user.username
+                    and us.user_id != user.user_id
+                    and type(us.user_id) == int
+                ):
+                    return "AB"
+            # If proxy with same first_name exists → update this real user's display name
+            self._resolve_display_name_conflict(user)
 
         if self.inListLimit is None:
             for us in self.inList:
@@ -338,38 +363,28 @@ class RollCall:
         self._save_user_to_db(user, 'in')
         logging.info(f"User {user.name} has change his state to in")
 
+
     # ADD A NEW USER TO OUT LIST
     def addOut(self, user):
         print(self.allNames)
 
         if type(user.user_id) == str:
-            # PROXY USER: Check if a real user with the same first_name exists
-            real_user_found = None
+            # PROXY USER — block duplicate proxy names only
             for us in self.allNames:
-                if us.first_name == user.first_name and type(us.user_id) == int:
-                    real_user_found = us
-                    break
-
-            if real_user_found:
-                # Resolve proxy to the real user
-                user = real_user_found
-            else:
-                # No real user — treat as a genuine proxy
-                # Block duplicate proxy names (only among other proxies)
-                for us in self.allNames:
-                    if user.name == us.name and type(us.user_id) == str:
-                        return 'AA'
-
-        # Block real-vs-real duplicate identity only
-        for us in self.allNames:
-            if (
-                us.first_name == user.first_name
-                and us.username == user.username
-                and us.user_id != user.user_id
-                and type(us.user_id) == int
-                and type(user.user_id) == int
-            ):
-                return "AB"
+                if user.name == us.name and type(us.user_id) == str:
+                    return 'AA'
+            self._resolve_display_name_conflict(user)
+        else:
+            # REAL USER — block only real-vs-real duplicate identity
+            for us in self.allNames:
+                if (
+                    us.first_name == user.first_name
+                    and us.username == user.username
+                    and us.user_id != user.user_id
+                    and type(us.user_id) == int
+                ):
+                    return "AB"
+            self._resolve_display_name_conflict(user)
 
         for us in self.outList:
             if us.user_id == user.user_id and us.comment == user.comment:
@@ -378,16 +393,6 @@ class RollCall:
                 us.comment = user.comment
                 self._save_user_to_db(user, 'out')
                 return
-
-        # If we resolved to a real user, clean up any stale proxy with the same name
-        if type(user.user_id) == int:
-            for us in self.allNames[:]:
-                if us.first_name == user.first_name and type(us.user_id) == str:
-                    self.allNames.remove(us)
-                    for lst in [self.inList, self.outList, self.maybeList, self.waitList]:
-                        if us in lst:
-                            lst.remove(us)
-                    break
 
         for us in self.inList[:]:
             if us.user_id == user.user_id:
@@ -424,39 +429,27 @@ class RollCall:
         self._save_user_to_db(user, 'out')
         logging.info(f"User {user.name} has change his state to out")
 
-
     # ADD A NEW USER TO MAYBE LIST
     def addMaybe(self, user):
         print(self.allNames)
 
         if type(user.user_id) == str:
-            # PROXY USER: Check if a real user with the same first_name exists
-            real_user_found = None
+            # PROXY USER — block duplicate proxy names only
             for us in self.allNames:
-                if us.first_name == user.first_name and type(us.user_id) == int:
-                    real_user_found = us
-                    break
-
-            if real_user_found:
-                # Resolve proxy to the real user
-                user = real_user_found
-            else:
-                # No real user — treat as a genuine proxy
-                # Block duplicate proxy names (only among other proxies)
-                for us in self.allNames:
-                    if user.name == us.name and type(us.user_id) == str:
-                        return 'AA'
-
-        # Block real-vs-real duplicate identity only
-        for us in self.allNames:
-            if (
-                us.first_name == user.first_name
-                and us.username == user.username
-                and us.user_id != user.user_id
-                and type(us.user_id) == int
-                and type(user.user_id) == int
-            ):
-                return "AB"
+                if user.name == us.name and type(us.user_id) == str:
+                    return 'AA'
+            self._resolve_display_name_conflict(user)
+        else:
+            # REAL USER — block only real-vs-real duplicate identity
+            for us in self.allNames:
+                if (
+                    us.first_name == user.first_name
+                    and us.username == user.username
+                    and us.user_id != user.user_id
+                    and type(us.user_id) == int
+                ):
+                    return "AB"
+            self._resolve_display_name_conflict(user)
 
         for us in self.maybeList:
             if us.user_id == user.user_id and us.comment == user.comment:
@@ -465,16 +458,6 @@ class RollCall:
                 us.comment = user.comment
                 self._save_user_to_db(user, 'maybe')
                 return
-
-        # If we resolved to a real user, clean up any stale proxy with the same name
-        if type(user.user_id) == int:
-            for us in self.allNames[:]:
-                if us.first_name == user.first_name and type(us.user_id) == str:
-                    self.allNames.remove(us)
-                    for lst in [self.inList, self.outList, self.maybeList, self.waitList]:
-                        if us in lst:
-                            lst.remove(us)
-                    break
 
         for us in self.outList[:]:
             if us.user_id == user.user_id:

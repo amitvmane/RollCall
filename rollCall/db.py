@@ -714,33 +714,48 @@ def end_rollcall(rollcall_id: int) -> bool:
             cursor.close()
             release_connection(conn)
 
+
 def add_or_update_user(rollcall_id: int, user_id: int, first_name: str, username: str, status: str, comment: str = '') -> bool:
-    """
-        Insert or update a regular user row and maintain per-state positions.
-    """
+    """Insert or update a regular user. Position assigned once per bucket, preserved on re-entry."""
     conn = get_connection()
     try:
         cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
 
-        # Determine positions based on new status
-        in_pos = out_pos = wait_pos = None
-        if status == "in":
-            in_pos = get_next_position(rollcall_id, "in")
-        elif status == "out":
-            out_pos = get_next_position(rollcall_id, "out")
-        elif status == "waitlist":
-            wait_pos = get_next_position(rollcall_id, "waitlist")
+        # Fetch existing positions
+        cursor.execute(
+            f"SELECT in_pos, out_pos, wait_pos FROM users WHERE rollcall_id = {ph} AND user_id = {ph}",
+            (rollcall_id, user_id)
+        )
+        existing = cursor.fetchone()
 
-        if db_type == "postgresql":
-            cursor.execute(
-                """
-                INSERT INTO users (
-                    rollcall_id, user_id, first_name, username, status, comment,
-                    in_pos, out_pos, wait_pos
-                )
+        if existing:
+            existing = dict(existing)
+            in_pos   = existing['in_pos']
+            out_pos  = existing['out_pos']
+            wait_pos = existing['wait_pos']
+            # Only assign NEW position if entering this bucket for the FIRST TIME
+            if status == 'in' and in_pos is None:
+                in_pos = get_next_position(rollcall_id, 'in')
+            elif status == 'out' and out_pos is None:
+                out_pos = get_next_position(rollcall_id, 'out')
+            elif status == 'waitlist' and wait_pos is None:
+                wait_pos = get_next_position(rollcall_id, 'waitlist')
+        else:
+            # Brand new user
+            in_pos = out_pos = wait_pos = None
+            if status == 'in':
+                in_pos = get_next_position(rollcall_id, 'in')
+            elif status == 'out':
+                out_pos = get_next_position(rollcall_id, 'out')
+            elif status == 'waitlist':
+                wait_pos = get_next_position(rollcall_id, 'waitlist')
+
+        if db_type == 'postgresql':
+            cursor.execute("""
+                INSERT INTO users (rollcall_id, user_id, first_name, username, status, comment, in_pos, out_pos, wait_pos)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (rollcall_id, user_id)
-                DO UPDATE SET
+                ON CONFLICT (rollcall_id, user_id) DO UPDATE SET
                     first_name = EXCLUDED.first_name,
                     username   = EXCLUDED.username,
                     status     = EXCLUDED.status,
@@ -749,27 +764,10 @@ def add_or_update_user(rollcall_id: int, user_id: int, first_name: str, username
                     out_pos    = EXCLUDED.out_pos,
                     wait_pos   = EXCLUDED.wait_pos,
                     updated_at = CURRENT_TIMESTAMP
-                """,
-                (
-                    rollcall_id,
-                    user_id,
-                    first_name,
-                    username,
-                    status,
-                    comment,
-                    in_pos,
-                    out_pos,
-                    wait_pos,
-                ),
-            )
+            """, (rollcall_id, user_id, first_name, username, status, comment, in_pos, out_pos, wait_pos))
         else:
-            # SQLite with UPSERT syntax
-            cursor.execute(
-                """
-                INSERT INTO users (
-                    rollcall_id, user_id, first_name, username, status, comment,
-                    in_pos, out_pos, wait_pos
-                )
+            cursor.execute("""
+                INSERT INTO users (rollcall_id, user_id, first_name, username, status, comment, in_pos, out_pos, wait_pos)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(rollcall_id, user_id) DO UPDATE SET
                     first_name = excluded.first_name,
@@ -780,19 +778,7 @@ def add_or_update_user(rollcall_id: int, user_id: int, first_name: str, username
                     out_pos    = excluded.out_pos,
                     wait_pos   = excluded.wait_pos,
                     updated_at = CURRENT_TIMESTAMP
-                """,
-                (
-                    rollcall_id,
-                    user_id,
-                    first_name,
-                    username,
-                    status,
-                    comment,
-                    in_pos,
-                    out_pos,
-                    wait_pos,
-                ),
-            )
+            """, (rollcall_id, user_id, first_name, username, status, comment, in_pos, out_pos, wait_pos))
 
         conn.commit()
     except Exception as e:
@@ -800,38 +786,74 @@ def add_or_update_user(rollcall_id: int, user_id: int, first_name: str, username
         logging.error(f"Error add/update user: {e}")
         raise
     finally:
-        if db_type == "postgresql":
+        if db_type == 'postgresql':
             cursor.close()
             release_connection(conn)
 
+
 def add_or_update_proxy_user(rollcall_id: int, name: str, status: str, comment: str = '', proxy_owner_id: Optional[int] = None) -> bool:
-    """Add or update a proxy user"""
+    """Add or update a proxy user with position tracking."""
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        
-        if db_type == 'postgresql':
-            cursor.execute(
-                """
-                INSERT INTO proxy_users (rollcall_id, name, status, comment, proxy_owner_id, updated_at)
-                VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                ON CONFLICT (rollcall_id, name)
-                DO UPDATE SET status = EXCLUDED.status,
-                            comment = EXCLUDED.comment,
-                            proxy_owner_id = EXCLUDED.proxy_owner_id,
-                            updated_at = CURRENT_TIMESTAMP
-                """,
-                (rollcall_id, name, status, comment, proxy_owner_id)
-            )
+        ph = '%s' if db_type == 'postgresql' else '?'
+
+        # Fetch existing positions
+        cursor.execute(
+            f"SELECT in_pos, out_pos, wait_pos FROM proxy_users WHERE rollcall_id = {ph} AND name = {ph}",
+            (rollcall_id, name)
+        )
+        existing = cursor.fetchone()
+
+        if existing:
+            existing = dict(existing)
+            in_pos   = existing['in_pos']
+            out_pos  = existing['out_pos']
+            wait_pos = existing['wait_pos']
+            # Only assign NEW position if entering this bucket for the FIRST TIME
+            if status == 'in' and in_pos is None:
+                in_pos = get_next_position(rollcall_id, 'in')
+            elif status == 'out' and out_pos is None:
+                out_pos = get_next_position(rollcall_id, 'out')
+            elif status == 'waitlist' and wait_pos is None:
+                wait_pos = get_next_position(rollcall_id, 'waitlist')
         else:
-            cursor.execute(
-                """
-                INSERT OR REPLACE INTO proxy_users (rollcall_id, name, status, comment, proxy_owner_id, updated_at)
-                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                """,
-                (rollcall_id, name, status, comment, proxy_owner_id)
-            )
-        
+            # Brand new proxy
+            in_pos = out_pos = wait_pos = None
+            if status == 'in':
+                in_pos = get_next_position(rollcall_id, 'in')
+            elif status == 'out':
+                out_pos = get_next_position(rollcall_id, 'out')
+            elif status == 'waitlist':
+                wait_pos = get_next_position(rollcall_id, 'waitlist')
+
+        if db_type == 'postgresql':
+            cursor.execute("""
+                INSERT INTO proxy_users (rollcall_id, name, status, comment, proxy_owner_id, in_pos, out_pos, wait_pos, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (rollcall_id, name) DO UPDATE SET
+                    status         = EXCLUDED.status,
+                    comment        = EXCLUDED.comment,
+                    proxy_owner_id = EXCLUDED.proxy_owner_id,
+                    in_pos         = EXCLUDED.in_pos,
+                    out_pos        = EXCLUDED.out_pos,
+                    wait_pos       = EXCLUDED.wait_pos,
+                    updated_at     = CURRENT_TIMESTAMP
+            """, (rollcall_id, name, status, comment, proxy_owner_id, in_pos, out_pos, wait_pos))
+        else:
+            cursor.execute("""
+                INSERT INTO proxy_users (rollcall_id, name, status, comment, proxy_owner_id, in_pos, out_pos, wait_pos, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(rollcall_id, name) DO UPDATE SET
+                    status         = excluded.status,
+                    comment        = excluded.comment,
+                    proxy_owner_id = excluded.proxy_owner_id,
+                    in_pos         = excluded.in_pos,
+                    out_pos        = excluded.out_pos,
+                    wait_pos       = excluded.wait_pos,
+                    updated_at     = excluded.updated_at
+            """, (rollcall_id, name, status, comment, proxy_owner_id, in_pos, out_pos, wait_pos))
+
         conn.commit()
         return True
     except Exception as e:
@@ -842,6 +864,7 @@ def add_or_update_proxy_user(rollcall_id: int, name: str, status: str, comment: 
         if db_type == 'postgresql':
             cursor.close()
             release_connection(conn)
+
 
 def get_all_users(rollcall_id: int):
     """
@@ -1143,40 +1166,41 @@ def increment_rollcall_stat(rollcall_id: int, field: str) -> None:
             cursor.close()
             release_connection(conn)
 
-
 def get_next_position(rollcall_id: int, status: str) -> int:
-    """
-    Return next position index for given status in users table.
-    """
+    """Return next position index across both users and proxy_users tables."""
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        if status == "in":
-            col = "in_pos"
-        elif status == "out":
-            col = "out_pos"
-        elif status == "waitlist":
-            col = "wait_pos"
+        if status == 'in':
+            col = 'in_pos'
+        elif status == 'out':
+            col = 'out_pos'
+        elif status == 'waitlist':
+            col = 'wait_pos'
         else:
-            return 0  # maybe or unknown, no ordering
+            return 0
 
-        if db_type == "postgresql":
-            cursor.execute(
-                f"SELECT COALESCE(MAX({col}), 0) FROM users WHERE rollcall_id = %s AND status = %s",
-                (rollcall_id, status),
-            )
-        else:
-            cursor.execute(
-                f"SELECT COALESCE(MAX({col}), 0) FROM users WHERE rollcall_id = ? AND status = ?",
-                (rollcall_id, status),
-            )
-        row = cursor.fetchone()
-        max_pos = row[0] if row else 0
-        return int(max_pos) + 1
+        ph = '%s' if db_type == 'postgresql' else '?'
+
+        cursor.execute(
+            f"SELECT COALESCE(MAX({col}), 0) FROM users WHERE rollcall_id = {ph} AND status = {ph}",
+            (rollcall_id, status)
+        )
+        max_real = int(cursor.fetchone()[0] or 0)
+
+        cursor.execute(
+            f"SELECT COALESCE(MAX({col}), 0) FROM proxy_users WHERE rollcall_id = {ph} AND status = {ph}",
+            (rollcall_id, status)
+        )
+        max_proxy = int(cursor.fetchone()[0] or 0)
+
+        return max(max_real, max_proxy) + 1
     finally:
-        if db_type == "postgresql":
+        if db_type == 'postgresql':
             cursor.close()
             release_connection(conn)
+
+
 
 def get_templates(chatid: int) -> List[Dict]:
     """

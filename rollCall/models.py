@@ -76,38 +76,79 @@ class RollCall:
         
         # Load users from database
         self._load_users_from_db()
-    
-    def _load_users_from_db(self):
-        """Load all users from database"""
-        self.inList = []
-        self.outList = []
-        self.maybeList = []
-        self.waitList = []
-        self.allNames = []
 
-        # Pre-fetch all proxy names to detect name conflicts with real users
+    def _load_users_from_db(self):
+        """Load all users from database preserving true join order across real and proxy users."""
+        self.inList   = []
+        self.outList  = []
+        self.maybeList = []
+        self.waitList  = []
+        self.allNames  = []
+        self.proxy_owners = {}
+
+        # Pre-fetch all proxy names to detect display name conflicts
         all_proxy_names = set()
         for status in ['in', 'out', 'maybe', 'waitlist']:
             for proxy_data in db.get_proxy_users_by_status(self.id, status):
                 all_proxy_names.add(proxy_data['name'])
 
-        # Load regular users
-        all_users_data = db.get_all_users(self.id)
-        for user_data in all_users_data:
-            user = User.__new__(User)
-            user.user_id = user_data['user_id']
-            user.first_name = user_data['first_name']
-            user.username = user_data['username']
-            user.comment = user_data['comment'] or ''
+        STATUS_ORDER = {'in': 1, 'out': 2, 'maybe': 3, 'waitlist': 4}
+        combined = []  # list of (status_order, pos, created_at, user_object)
 
-            # FIX: If a proxy with same first_name exists, show @username
-            # in parenthesis to distinguish real user from proxy
+        # --- Real users ---
+        for user_data in db.get_all_users(self.id):
+            user = User.__new__(User)
+            user.user_id    = user_data['user_id']
+            user.first_name = user_data['first_name']
+            user.username   = user_data['username']
+            user.comment    = user_data['comment'] or ''
             if user_data['first_name'] in all_proxy_names and user_data['username']:
                 user.name = f"{user_data['first_name']} (@{user_data['username']})"
             else:
                 user.name = user_data['first_name']
 
             status = user_data['status']
+            if status == 'in':
+                pos = user_data.get('in_pos') or 0
+            elif status == 'out':
+                pos = user_data.get('out_pos') or 0
+            elif status == 'waitlist':
+                pos = user_data.get('wait_pos') or 0
+            else:
+                pos = 0
+
+            combined.append((STATUS_ORDER.get(status, 5), pos, user_data.get('created_at', ''), user, status))
+
+        # --- Proxy users ---
+        for status in ['in', 'out', 'maybe', 'waitlist']:
+            for proxy_data in db.get_proxy_users_by_status(self.id, status):
+                user = User.__new__(User)
+                user.user_id    = proxy_data['name']
+                user.first_name = proxy_data['name']
+                user.name       = proxy_data['name']
+                user.username   = None
+                user.comment    = proxy_data['comment'] or ''
+
+                if status == 'in':
+                    pos = proxy_data.get('in_pos') or 0
+                elif status == 'out':
+                    pos = proxy_data.get('out_pos') or 0
+                elif status == 'waitlist':
+                    pos = proxy_data.get('wait_pos') or 0
+                else:
+                    pos = 0
+
+                combined.append((STATUS_ORDER.get(status, 5), pos, proxy_data.get('created_at', ''), user, status))
+
+                owner_id = proxy_data.get('proxy_owner_id')
+                if owner_id is not None:
+                    self.proxy_owners[user.user_id] = owner_id
+
+        # Sort by: status bucket → position → created_at (fallback)
+        combined.sort(key=lambda x: (x[0], x[1], x[2] or ''))
+
+        # Distribute into lists
+        for _, _, _, user, status in combined:
             if status == 'in':
                 self.inList.append(user)
             elif status == 'out':
@@ -117,31 +158,6 @@ class RollCall:
             elif status == 'waitlist':
                 self.waitList.append(user)
             self.allNames.append(user)
-
-        # Load proxy users
-        self.proxy_owners = {}  # reset and rebuild from DB each load
-        for status in ['in', 'out', 'maybe', 'waitlist']:
-            proxy_users_data = db.get_proxy_users_by_status(self.id, status)
-            for proxy_data in proxy_users_data:
-                user = User.__new__(User)
-                user.user_id = proxy_data['name']  # String ID for proxy users
-                user.first_name = proxy_data['name']
-                user.name = proxy_data['name']     # proxy stays as plain name
-                user.username = None
-                user.comment = proxy_data['comment'] or ''
-                if status == 'in':
-                    self.inList.append(user)
-                elif status == 'out':
-                    self.outList.append(user)
-                elif status == 'maybe':
-                    self.maybeList.append(user)
-                elif status == 'waitlist':
-                    self.waitList.append(user)
-                self.allNames.append(user)
-                # rebuild proxy owner mapping from DB column
-                owner_id = proxy_data.get('proxy_owner_id')
-                if owner_id is not None:
-                    self.proxy_owners[user.user_id] = owner_id
 
     def _get_user_current_status(self, user):
         """Return current status string for a user object."""
@@ -284,25 +300,24 @@ class RollCall:
             print(traceback.format_exc())
             return False
         
-    # ADD A NEW USER TO IN LIST
     def addIn(self, user):
         print(self.allNames)
-
         if type(user.user_id) == str:
-            # PROXY USER — block duplicate proxy names only (among other proxies)
+            # PROXY USER — only block if a DIFFERENT proxy with same name exists
             for us in self.allNames:
                 if user.name == us.name and type(us.user_id) == str:
-                    return 'AA'
-            # If real user with same first_name exists → update real user display name
-            self._resolve_display_name_conflict(user)
+                    break  # already tracked — this is a status change, allow through
+            else:
+                # New proxy not yet in allNames — resolve display name conflict
+                self._resolve_display_name_conflict(user)
         else:
             # REAL USER — block only real-vs-real duplicate identity
             for us in self.allNames:
                 if (
-                    us.first_name == user.first_name
-                    and us.username == user.username
-                    and us.user_id != user.user_id
-                    and type(us.user_id) == int
+                    us.first_name == user.first_name and
+                    us.username == user.username and
+                    us.user_id != user.user_id and
+                    type(us.user_id) == int
                 ):
                     return "AB"
             # If proxy with same first_name exists → update this real user's display name
@@ -367,21 +382,22 @@ class RollCall:
     # ADD A NEW USER TO OUT LIST
     def addOut(self, user):
         print(self.allNames)
-
         if type(user.user_id) == str:
-            # PROXY USER — block duplicate proxy names only
+            # PROXY USER — only block if a DIFFERENT proxy with same name exists
             for us in self.allNames:
                 if user.name == us.name and type(us.user_id) == str:
-                    return 'AA'
-            self._resolve_display_name_conflict(user)
+                    break  # already tracked — this is a status change, allow through
+            else:
+                # New proxy not yet in allNames — resolve display name conflict
+                self._resolve_display_name_conflict(user)
         else:
             # REAL USER — block only real-vs-real duplicate identity
             for us in self.allNames:
                 if (
-                    us.first_name == user.first_name
-                    and us.username == user.username
-                    and us.user_id != user.user_id
-                    and type(us.user_id) == int
+                    us.first_name == user.first_name and
+                    us.username == user.username and
+                    us.user_id != user.user_id and
+                    type(us.user_id) == int
                 ):
                     return "AB"
             self._resolve_display_name_conflict(user)
@@ -432,21 +448,22 @@ class RollCall:
     # ADD A NEW USER TO MAYBE LIST
     def addMaybe(self, user):
         print(self.allNames)
-
         if type(user.user_id) == str:
-            # PROXY USER — block duplicate proxy names only
+            # PROXY USER — only block if a DIFFERENT proxy with same name exists
             for us in self.allNames:
                 if user.name == us.name and type(us.user_id) == str:
-                    return 'AA'
-            self._resolve_display_name_conflict(user)
+                    break  # already tracked — this is a status change, allow through
+            else:
+                # New proxy not yet in allNames — resolve display name conflict
+                self._resolve_display_name_conflict(user)
         else:
             # REAL USER — block only real-vs-real duplicate identity
             for us in self.allNames:
                 if (
-                    us.first_name == user.first_name
-                    and us.username == user.username
-                    and us.user_id != user.user_id
-                    and type(us.user_id) == int
+                    us.first_name == user.first_name and
+                    us.username == user.username and
+                    us.user_id != user.user_id and
+                    type(us.user_id) == int
                 ):
                     return "AB"
             self._resolve_display_name_conflict(user)

@@ -108,7 +108,10 @@ def create_tables():
                     name TEXT NOT NULL,
                     status VARCHAR(20) NOT NULL,
                     comment TEXT,
-                    proxy_owner_id BIGINT,  -- NEW: Telegram user_id of proxy creator
+                    proxy_owner_id BIGINT,
+                    in_pos INTEGER,
+                    out_pos INTEGER,
+                    wait_pos INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (rollcall_id) REFERENCES rollcalls(id) ON DELETE CASCADE,
@@ -236,13 +239,16 @@ def create_tables():
                     name TEXT NOT NULL,
                     status TEXT NOT NULL,
                     comment TEXT,
-                    proxy_owner_id INTEGER,  -- NEW: Telegram user_id of proxy creator
+                    proxy_owner_id INTEGER,
+                    in_pos INTEGER,
+                    out_pos INTEGER,
+                    wait_pos INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (rollcall_id) REFERENCES rollcalls(id) ON DELETE CASCADE,
                     UNIQUE(rollcall_id, name)
                 )
-         """)
+            """)
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS rollcalls (
@@ -1020,40 +1026,16 @@ def delete_template(chatid: int, name: str) -> bool:
             release_connection(conn)
 
 def delete_user_by_name(rollcall_id: int, name: str) -> bool:
-    """Delete a user by name (supports both regular and proxy users)"""
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        
-        # Try to delete from users table (by first_name)
-        if db_type == 'postgresql':
-            cursor.execute(
-                "DELETE FROM users WHERE rollcall_id = %s AND first_name = %s",
-                (rollcall_id, name)
-            )
-        else:
-            cursor.execute(
-                "DELETE FROM users WHERE rollcall_id = ? AND first_name = ?",
-                (rollcall_id, name)
-            )
-        
+        ph = '%s' if db_type == 'postgresql' else '?'
+        # Try proxy_users FIRST
+        cursor.execute(f"DELETE FROM proxy_users WHERE rollcall_id = {ph} AND name = {ph}", (rollcall_id, name))
         rows_deleted = cursor.rowcount
-        
-        # If no rows deleted, try proxy_users table
         if rows_deleted == 0:
-            if db_type == 'postgresql':
-                cursor.execute(
-                    "DELETE FROM proxy_users WHERE rollcall_id = %s AND name = %s",
-                    (rollcall_id, name)
-                )
-            else:
-                cursor.execute(
-                    "DELETE FROM proxy_users WHERE rollcall_id = ? AND name = ?",
-                    (rollcall_id, name)
-                )
-            
+            cursor.execute(f"DELETE FROM users WHERE rollcall_id = {ph} AND first_name = {ph}", (rollcall_id, name))
             rows_deleted = cursor.rowcount
-        
         conn.commit()
         return rows_deleted > 0
     except Exception as e:

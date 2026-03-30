@@ -1667,34 +1667,27 @@ async def end_roll_call(message):
     try:
         if roll_call_not_started(message, manager) == False:
             raise rollCallNotStarted("Roll call is not active")
-
         if await admin_rights(message, manager) == False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
-
         cid = message.chat.id
         pmts = message.text.split(" ")[1:]
         rc_number = 0
-
         if len(pmts) > 0 and "::" in pmts[-1]:
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
             except:
                 raise incorrectParameter("The rollcall number must be a positive integer")
-
         rollcalls = manager.get_rollcalls(cid)
         if len(rollcalls) < rc_number + 1:
             raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
-
         rc = manager.get_rollcall(cid, rc_number)
-
         # End current rollcall
         await bot.send_message(message.chat.id, "Roll ended!")
         await bot.send_message(cid, rc.finishList().replace("__RCID__", str(rc_number + 1)))
         logging.info("The roll call " + rc.title + " has ended")
         manager.remove_rollcall(cid, rc_number)
-
-    # NEW: warning + optional re-broadcast
+        # warning + optional re-broadcast
         updated_rollcalls = manager.get_rollcalls(cid)
         if len(updated_rollcalls) > 0:
             await bot.send_message(
@@ -1702,15 +1695,13 @@ async def end_roll_call(message):
                 "⚠️ Active rollcall IDs have been updated because one rollcall was ended.\n"
                 "Use /rollcalls to see the current list and IDs."
             )
-
-            # If you want automatic re-broadcast (can be removed if too noisy)
             for rollcall in updated_rollcalls:
                 new_id = updated_rollcalls.index(rollcall) + 1
                 text = f"Rollcall number {new_id}\n\n" + rollcall.allList().replace("__RCID__", str(new_id))
                 await bot.send_message(cid, text)
-
     except Exception as e:
         await bot.send_message(message.chat.id, e)
+
 
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] in ["/stats", "/s"])
 async def stats_command(message):
@@ -2545,7 +2536,7 @@ async def callback_handler(call):
             # This prevents Telegram's 10-second timeout error (400 Bad Request)
             await bot.answer_callback_query(call.id, "Rollcall ended")
 
-            if await admin_rights(call.message, all.from_user.username) is False:
+            if await admin_rights(call.message, call.from_user.username) is False:
                 await bot.send_message(cid, "⛔ Insufficient permissions to end rollcall.")
                 return
 

@@ -46,4 +46,10 @@
         "DeployedOnProd":"Y",
         "DeployedDatetime":"27-01-2026 03:40 UTC"
     }
+    {
+        "Version":4.3,
+        "Description":"Major ordering revamps and Stats collection for future insights and improvements, also fixed few minor bugs",
+        "DeployedOnProd":"Y",
+        "DeployedDatetime":"27-03-2026 03:40 UTC"
+    }
 ]

@@ -1677,7 +1677,7 @@ async def end_roll_call(message):
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
             except:
-                raise incorrectParameter("The rollcall number must be a positive integer")
+                raise incorrectParameter("The RollCallnumber must be a positive integer")
         rollcalls = manager.get_rollcalls(cid)
         if len(rollcalls) < rc_number + 1:
             raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")

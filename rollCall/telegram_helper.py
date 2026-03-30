@@ -462,7 +462,7 @@ async def start_template(message):
 
     # 2) Fallback: existing offsets logic (relative to now)
     if rc.finalizeDate is None and any(v is not None for v in (days, hours, minutes)):
-        now = datetime.datetime.now(tz)
+        now = datetime.now(tz)
         delta = timedelta(
             days=days or 0,
             hours=hours or 0,
@@ -649,10 +649,10 @@ async def set_rollcall_time(message):
         # PARSING INPUT DATETIME
         input_datetime = " ".join(pmts).strip()
         tz = pytz.timezone(rc.timezone)
-        date = datetime.datetime.strptime(input_datetime, "%d-%m-%Y %H:%M")
+        date = datetime.strptime(input_datetime, "%d-%m-%Y %H:%M")
         date = tz.localize(date)
-        now_date_string = datetime.datetime.now(pytz.timezone(rc.timezone)).strftime("%d-%m-%Y %H:%M")
-        now_date = datetime.datetime.strptime(now_date_string, "%d-%m-%Y %H:%M")
+        now_date_string = datetime.now(pytz.timezone(rc.timezone)).strftime("%d-%m-%Y %H:%M")
+        now_date = datetime.strptime(now_date_string, "%d-%m-%Y %H:%M")
         now_date = tz.localize(now_date)
         # ERROR FOR INVALID DATETIME
         if now_date > date:
@@ -744,7 +744,7 @@ async def reminder(message):
 
         hour = pmts[0]
         
-        if rc.finalizeDate - datetime.timedelta(hours=int(hour)) < datetime.datetime.now(pytz.timezone(rc.timezone)):
+        if rc.finalizeDate - timedelta(hours=int(hour)) < datetime.now(pytz.timezone(rc.timezone)):
             raise incorrectParameter("Reminder notification time is less than current time, please set it correctly.")
 
         rc.reminder = int(hour) if hour != 0 else None
@@ -2532,30 +2532,22 @@ async def callback_handler(call):
 
         # --- Confirm end rollcall ---
         if action == "endconfirm":
-            # ✅ Answer callback IMMEDIATELY — before ANY slow operations
-            # This prevents Telegram's 10-second timeout error (400 Bad Request)
             await bot.answer_callback_query(call.id, "Rollcall ended")
-
-            if await admin_rights(call.message, call.from_user.username) is False:
+            # Correct admin check using the button clicker's actual user ID
+            member = await bot.get_chat_member(cid, call.from_user.id)
+            if member.status not in ['administrator', 'creator']:
                 await bot.send_message(cid, "⛔ Insufficient permissions to end rollcall.")
                 return
-
             ended_by = (
                 call.from_user.first_name or call.from_user.username or "someone"
             )
-
-            # Send final list (best-effort)
             try:
                 final_text = rc.finishList().replace("__RCID__", str(rc_number))
                 final_text = f"{final_text}\n\nRollcall ended by {ended_by}"
                 await bot.send_message(cid, final_text)
             except Exception:
                 pass
-
-            # Remove from manager
             manager.remove_rollcall(cid, rc_number - 1)
-
-            # Send updated panels for remaining rollcalls
             updated_rollcalls = manager.get_rollcalls(cid)
             if len(updated_rollcalls) > 0:
                 await bot.send_message(
@@ -2567,11 +2559,7 @@ async def callback_handler(call):
                     new_id = idx + 1
                     text = rollcall.allList().replace("__RCID__", str(new_id))
                     markup = await get_status_keyboard(new_id)
-                    await bot.send_message(
-                        cid,
-                        text,
-                        reply_markup=markup,
-                    )
+                    await bot.send_message(cid, text, reply_markup=markup)
             return
 
         # --- Cancel end rollcall ---

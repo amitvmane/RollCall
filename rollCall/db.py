@@ -242,23 +242,6 @@ def create_tables():
                 )
             """)
 
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS proxy_users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    rollcall_id INTEGER NOT NULL,
-                    name TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    comment TEXT,
-                    proxy_owner_id INTEGER,
-                    in_pos INTEGER,
-                    out_pos INTEGER,
-                    wait_pos INTEGER,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (rollcall_id) REFERENCES rollcalls(id) ON DELETE CASCADE,
-                    UNIQUE(rollcall_id, name)
-                )
-            """)
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS rollcalls (
@@ -275,6 +258,25 @@ def create_tables():
                     is_active INTEGER DEFAULT 1,
                     ended_at TIMESTAMP,
                     FOREIGN KEY (chat_id) REFERENCES chats(chat_id) ON DELETE CASCADE
+                )
+            """)
+
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS proxy_users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    rollcall_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    comment TEXT,
+                    proxy_owner_id INTEGER,
+                    in_pos INTEGER,
+                    out_pos INTEGER,
+                    wait_pos INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (rollcall_id) REFERENCES rollcalls(id) ON DELETE CASCADE,
+                    UNIQUE(rollcall_id, name)
                 )
             """)
             
@@ -947,6 +949,7 @@ def get_all_users(rollcall_id: int):
             cursor.close()
             release_connection(conn)
 
+
 def get_proxy_users_by_status(rollcall_id: int, status: str) -> List[Dict]:
     """Get proxy users by status ordered by position"""
     conn = get_connection()
@@ -958,7 +961,7 @@ def get_proxy_users_by_status(rollcall_id: int, status: str) -> List[Dict]:
                 SELECT * FROM proxy_users
                 WHERE rollcall_id = %s AND status = %s
                 ORDER BY
-                    CASE %s
+                    CASE status
                         WHEN 'in'       THEN COALESCE(in_pos, 0)
                         WHEN 'out'      THEN COALESCE(out_pos, 0)
                         WHEN 'waitlist' THEN COALESCE(wait_pos, 0)
@@ -966,7 +969,7 @@ def get_proxy_users_by_status(rollcall_id: int, status: str) -> List[Dict]:
                     END ASC,
                     created_at ASC
                 """,
-                (rollcall_id, status, status)
+                (rollcall_id, status)
             )
         else:
             cursor.execute(
@@ -974,7 +977,7 @@ def get_proxy_users_by_status(rollcall_id: int, status: str) -> List[Dict]:
                 SELECT * FROM proxy_users
                 WHERE rollcall_id = ? AND status = ?
                 ORDER BY
-                    CASE ?
+                    CASE status
                         WHEN 'in'       THEN COALESCE(in_pos, 0)
                         WHEN 'out'      THEN COALESCE(out_pos, 0)
                         WHEN 'waitlist' THEN COALESCE(wait_pos, 0)
@@ -982,7 +985,7 @@ def get_proxy_users_by_status(rollcall_id: int, status: str) -> List[Dict]:
                     END ASC,
                     created_at ASC
                 """,
-                (rollcall_id, status, status)
+                (rollcall_id, status)
             )
         rows = cursor.fetchall()
         return [dict(row) for row in rows]

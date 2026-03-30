@@ -2545,7 +2545,7 @@ async def callback_handler(call):
             # This prevents Telegram's 10-second timeout error (400 Bad Request)
             await bot.answer_callback_query(call.id, "Rollcall ended")
 
-            if await admin_rights(call.message, manager) is False:
+            if await admin_rights(call.message, all.from_user.username) is False:
                 await bot.send_message(cid, "⛔ Insufficient permissions to end rollcall.")
                 return
 

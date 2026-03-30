@@ -6,7 +6,7 @@ Supports both PostgreSQL and SQLite
 import os
 import json
 import logging
-#from datetime import datetime
+from datetime import datetime
 from typing import Dict, List, Optional, Any
 
 # Try PostgreSQL first, fall back to SQLite
@@ -25,6 +25,13 @@ from config import DATABASE_URL
 db_pool = None
 db_conn = None
 db_type = None
+# Allowlists for safe SQL field interpolation
+VALID_USER_STAT_FIELDS = {
+    'total_in', 'total_out', 'total_maybe', 'total_waiting_to_in',
+    'total_rollcalls', 'total_response_seconds', 'best_streak', 'current_streak'
+}
+VALID_ROLLCALL_STAT_FIELDS = {'total_in', 'total_out', 'total_maybe'}
+
 
 def init_db():
     """Initialize database connection and create tables"""
@@ -101,23 +108,7 @@ def create_tables():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS proxy_users (
-                    id SERIAL PRIMARY KEY,
-                    rollcall_id INTEGER NOT NULL,
-                    name TEXT NOT NULL,
-                    status VARCHAR(20) NOT NULL,
-                    comment TEXT,
-                    proxy_owner_id BIGINT,
-                    in_pos INTEGER,
-                    out_pos INTEGER,
-                    wait_pos INTEGER,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (rollcall_id) REFERENCES rollcalls(id) ON DELETE CASCADE,
-                    UNIQUE(rollcall_id, name)
-                )
-            """)
+
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS rollcalls (
@@ -136,6 +127,25 @@ def create_tables():
                     FOREIGN KEY (chat_id) REFERENCES chats(chat_id) ON DELETE CASCADE
                 )
             """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS proxy_users (
+                    id SERIAL PRIMARY KEY,
+                    rollcall_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    status VARCHAR(20) NOT NULL,
+                    comment TEXT,
+                    proxy_owner_id BIGINT,
+                    in_pos INTEGER,
+                    out_pos INTEGER,
+                    wait_pos INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (rollcall_id) REFERENCES rollcalls(id) ON DELETE CASCADE,
+                    UNIQUE(rollcall_id, name)
+                )
+            """)
+
             
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS users (
@@ -368,7 +378,6 @@ def get_or_create_chat(chat_id: int) -> Dict:
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        
         if db_type == 'postgresql':
             cursor.execute(
                 "SELECT * FROM chats WHERE chat_id = %s",
@@ -379,40 +388,33 @@ def get_or_create_chat(chat_id: int) -> Dict:
                 "SELECT * FROM chats WHERE chat_id = ?",
                 (chat_id,)
             )
-        
         row = cursor.fetchone()
-        
         if row:
-            if db_type == 'postgresql':
-                result = dict(row)
-            else:
-                result = dict(row)
+            return dict(row)
         else:
             # Create new chat
             if db_type == 'postgresql':
                 cursor.execute(
                     """INSERT INTO chats (chat_id, shh_mode, admin_rights, timezone)
-                       VALUES (%s, %s, %s, %s) RETURNING *""",
+                    VALUES (%s, %s, %s, %s) RETURNING *""",
                     (chat_id, False, False, 'Asia/Calcutta')
                 )
                 result = dict(cursor.fetchone())
             else:
                 cursor.execute(
                     """INSERT INTO chats (chat_id, shh_mode, admin_rights, timezone)
-                       VALUES (?, ?, ?, ?)""",
+                    VALUES (?, ?, ?, ?)""",
                     (chat_id, 0, 0, 'Asia/Calcutta')
                 )
-                result = {
-                    'chat_id': chat_id,
-                    'shh_mode': False,
-                    'admin_rights': False,
-                    'timezone': 'Asia/Calcutta'
-                }
-            
+                # Re-query to get actual DB values instead of hardcoding
+                cursor.execute(
+                    "SELECT * FROM chats WHERE chat_id = ?",
+                    (chat_id,)
+                )
+                result = dict(cursor.fetchone())
             conn.commit()
             logging.info(f"Created new chat: {chat_id}")
-        
-        return result
+            return result
     except Exception as e:
         conn.rollback()
         logging.error(f"Error in get_or_create_chat: {e}")
@@ -421,6 +423,7 @@ def get_or_create_chat(chat_id: int) -> Dict:
         if db_type == 'postgresql':
             cursor.close()
             release_connection(conn)
+
 
 def update_chat_settings(chat_id: int, **kwargs) -> bool:
     """Update chat settings"""
@@ -618,7 +621,7 @@ def create_or_update_template(
                 INSERT INTO templates
                     (chatid, name, title, inlistlimit, location, eventfee,
                      offsetdays, offsethours, offsetminutes,event_day, event_time)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (chatid, name) DO UPDATE SET
                     title = EXCLUDED.title,
                     inlistlimit = EXCLUDED.inlistlimit,
@@ -640,6 +643,8 @@ def create_or_update_template(
                     offsetdays,
                     offsethours,
                     offsetminutes,
+                    event_day, 
+                    event_time
                 ),
             )
         else:
@@ -871,14 +876,12 @@ def add_or_update_proxy_user(rollcall_id: int, name: str, status: str, comment: 
             cursor.close()
             release_connection(conn)
 
-
 def get_all_users(rollcall_id: int):
     """
-    Get all regular users for a rollcall.
-
+    Get all users (real + proxy) for a rollcall.
     Ordering:
-    - Grouped by status (in, out, maybe, waitlist) for convenience.
-    - Within IN/OUT/WAITING, ordered by their per-state position.
+    - Grouped by status (in, out, maybe, waitlist).
+    - Within IN/OUT/WAITLIST, ordered by their per-state position.
     - For MAYBE (no positions), fall back to created_at.
     """
     conn = get_connection()
@@ -887,32 +890,21 @@ def get_all_users(rollcall_id: int):
         if db_type == "postgresql":
             cursor.execute(
                 """
-                SELECT
-                    id,
-                    rollcall_id,
-                    user_id,
-                    first_name,
-                    username,
-                    status,
-                    comment,
-                    in_pos,
-                    out_pos,
-                    wait_pos,
-                    created_at,
-                    updated_at
-                FROM users
-                WHERE rollcall_id = %s
+                SELECT id, rollcall_id, user_id, first_name, username,
+                       status, comment, in_pos, out_pos, wait_pos,
+                       created_at, updated_at
+                FROM users WHERE rollcall_id = %s
                 ORDER BY
                     CASE status
-                        WHEN 'in' THEN 1
-                        WHEN 'out' THEN 2
-                        WHEN 'maybe' THEN 3
+                        WHEN 'in'       THEN 1
+                        WHEN 'out'      THEN 2
+                        WHEN 'maybe'    THEN 3
                         WHEN 'waitlist' THEN 4
                         ELSE 5
                     END,
                     CASE status
-                        WHEN 'in' THEN COALESCE(in_pos, 0)
-                        WHEN 'out' THEN COALESCE(out_pos, 0)
+                        WHEN 'in'       THEN COALESCE(in_pos, 0)
+                        WHEN 'out'      THEN COALESCE(out_pos, 0)
                         WHEN 'waitlist' THEN COALESCE(wait_pos, 0)
                         ELSE 0
                     END,
@@ -923,32 +915,21 @@ def get_all_users(rollcall_id: int):
         else:
             cursor.execute(
                 """
-                SELECT
-                    id,
-                    rollcall_id,
-                    user_id,
-                    first_name,
-                    username,
-                    status,
-                    comment,
-                    in_pos,
-                    out_pos,
-                    wait_pos,
-                    created_at,
-                    updated_at
-                FROM users
-                WHERE rollcall_id = ?
+                SELECT id, rollcall_id, user_id, first_name, username,
+                       status, comment, in_pos, out_pos, wait_pos,
+                       created_at, updated_at
+                FROM users WHERE rollcall_id = ?
                 ORDER BY
                     CASE status
-                        WHEN 'in' THEN 1
-                        WHEN 'out' THEN 2
-                        WHEN 'maybe' THEN 3
+                        WHEN 'in'       THEN 1
+                        WHEN 'out'      THEN 2
+                        WHEN 'maybe'    THEN 3
                         WHEN 'waitlist' THEN 4
                         ELSE 5
                     END,
                     CASE status
-                        WHEN 'in' THEN COALESCE(in_pos, 0)
-                        WHEN 'out' THEN COALESCE(out_pos, 0)
+                        WHEN 'in'       THEN COALESCE(in_pos, 0)
+                        WHEN 'out'      THEN COALESCE(out_pos, 0)
                         WHEN 'waitlist' THEN COALESCE(wait_pos, 0)
                         ELSE 0
                     END,
@@ -957,38 +938,54 @@ def get_all_users(rollcall_id: int):
                 (rollcall_id,),
             )
         rows = cursor.fetchall()
-        if db_type == "postgresql":
-            return [dict(r) for r in rows]
-        else:
-            return [dict(r) for r in rows]
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logging.error(f"Error getting all users: {e}")
+        return []
     finally:
         if db_type == "postgresql":
             cursor.close()
             release_connection(conn)
 
 def get_proxy_users_by_status(rollcall_id: int, status: str) -> List[Dict]:
-    """Get proxy users by status"""
+    """Get proxy users by status ordered by position"""
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        
         if db_type == 'postgresql':
             cursor.execute(
-                "SELECT * FROM proxy_users WHERE rollcall_id = %s AND status = %s ORDER BY created_at ASC",
-                (rollcall_id, status)
+                """
+                SELECT * FROM proxy_users
+                WHERE rollcall_id = %s AND status = %s
+                ORDER BY
+                    CASE %s
+                        WHEN 'in'       THEN COALESCE(in_pos, 0)
+                        WHEN 'out'      THEN COALESCE(out_pos, 0)
+                        WHEN 'waitlist' THEN COALESCE(wait_pos, 0)
+                        ELSE 0
+                    END ASC,
+                    created_at ASC
+                """,
+                (rollcall_id, status, status)
             )
         else:
             cursor.execute(
-                "SELECT * FROM proxy_users WHERE rollcall_id = ? AND status = ? ORDER BY created_at ASC",
-                (rollcall_id, status)
+                """
+                SELECT * FROM proxy_users
+                WHERE rollcall_id = ? AND status = ?
+                ORDER BY
+                    CASE ?
+                        WHEN 'in'       THEN COALESCE(in_pos, 0)
+                        WHEN 'out'      THEN COALESCE(out_pos, 0)
+                        WHEN 'waitlist' THEN COALESCE(wait_pos, 0)
+                        ELSE 0
+                    END ASC,
+                    created_at ASC
+                """,
+                (rollcall_id, status, status)
             )
-        
         rows = cursor.fetchall()
-        result = []
-        for row in rows:
-            result.append(dict(row))
-        
-        return result
+        return [dict(row) for row in rows]
     except Exception as e:
         logging.error(f"Error getting proxy users: {e}")
         return []
@@ -996,6 +993,7 @@ def get_proxy_users_by_status(rollcall_id: int, status: str) -> List[Dict]:
         if db_type == 'postgresql':
             cursor.close()
             release_connection(conn)
+
 
 def delete_template(chatid: int, name: str) -> bool:
     """
@@ -1072,26 +1070,27 @@ def close_db():
 
 def increment_user_stat(chat_id: int, user_id: int, field: str) -> None:
     """Increment a single numeric field in user_stats."""
+    if field not in VALID_USER_STAT_FIELDS:
+        raise ValueError(f"Invalid stat field: {field}")
     conn = get_connection()
     try:
         cursor = conn.cursor()
-
         if db_type == 'postgresql':
             cursor.execute(
                 """
                 INSERT INTO user_stats (chat_id, user_id, {field})
                 VALUES (%s, %s, 1)
-                ON CONFLICT (chat_id, user_id)
-                DO UPDATE SET {field} = user_stats.{field} + 1,
-                              updated_at = CURRENT_TIMESTAMP
+                ON CONFLICT (chat_id, user_id) DO UPDATE
+                SET {field} = user_stats.{field} + 1,
+                    updated_at = CURRENT_TIMESTAMP
                 """.format(field=field),
                 (chat_id, user_id),
             )
         else:
             cursor.execute(
                 f"""
-                INSERT OR IGNORE INTO user_stats (chat_id, user_id, {field})
-                VALUES (?, ?, 0)
+                INSERT OR IGNORE INTO user_stats (chat_id, user_id)
+                VALUES (?, ?)
                 """,
                 (chat_id, user_id),
             )
@@ -1104,7 +1103,6 @@ def increment_user_stat(chat_id: int, user_id: int, field: str) -> None:
                 """,
                 (chat_id, user_id),
             )
-
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -1114,29 +1112,29 @@ def increment_user_stat(chat_id: int, user_id: int, field: str) -> None:
             cursor.close()
             release_connection(conn)
 
-
 def increment_rollcall_stat(rollcall_id: int, field: str) -> None:
     """Increment a single numeric field in rollcall_stats."""
+    if field not in VALID_ROLLCALL_STAT_FIELDS:
+        raise ValueError(f"Invalid rollcall stat field: {field}")
     conn = get_connection()
     try:
         cursor = conn.cursor()
-
         if db_type == 'postgresql':
             cursor.execute(
                 """
                 INSERT INTO rollcall_stats (rollcall_id, {field})
                 VALUES (%s, 1)
-                ON CONFLICT (rollcall_id)
-                DO UPDATE SET {field} = rollcall_stats.{field} + 1,
-                              updated_at = CURRENT_TIMESTAMP
+                ON CONFLICT (rollcall_id) DO UPDATE
+                SET {field} = rollcall_stats.{field} + 1,
+                    updated_at = CURRENT_TIMESTAMP
                 """.format(field=field),
                 (rollcall_id,),
             )
         else:
             cursor.execute(
                 f"""
-                INSERT OR IGNORE INTO rollcall_stats (rollcall_id, {field})
-                VALUES (?, 0)
+                INSERT OR IGNORE INTO rollcall_stats (rollcall_id)
+                VALUES (?)
                 """,
                 (rollcall_id,),
             )
@@ -1149,7 +1147,6 @@ def increment_rollcall_stat(rollcall_id: int, field: str) -> None:
                 """,
                 (rollcall_id,),
             )
-
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -1158,6 +1155,7 @@ def increment_rollcall_stat(rollcall_id: int, field: str) -> None:
         if db_type == 'postgresql':
             cursor.close()
             release_connection(conn)
+
 
 def get_next_position(rollcall_id: int, status: str) -> int:
     """Return next position index across both users and proxy_users tables."""

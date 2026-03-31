@@ -43,6 +43,7 @@ class RollCall:
                 # NEW: use db.create_rollcall and store DB id in self.id
                 self.id = db.create_rollcall(chat_id, title, self.timezone)
                 self.chat_id = chat_id
+                db.ensure_rollcall_stats(self.id)
             else:
                 self.id = None
                 self.chat_id = None
@@ -62,6 +63,8 @@ class RollCall:
         self.inListLimit = data['in_list_limit']
         self.reminder = data['reminder_hours']
         self.proxy_owners = getattr(self, "proxy_owners", {})
+        self.proxy_owners = {}
+
 
         # Parse datetime from database
         if data['finalize_date']:
@@ -553,6 +556,14 @@ class RollCall:
             return None
         return self.proxy_owners.get(proxy_user_id)
 
+    @property
+    def db_id(self):
+        """Alias for self.id — provides compatibility with code using rc.db_id"""
+        return self.id
+
+    @db_id.setter
+    def db_id(self, value):
+        self.id = value
 
 class User:
     """USER OBJECT"""

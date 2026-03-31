@@ -499,6 +499,42 @@ def create_rollcall(chat_id: int, title: str, timezone: str = 'Asia/Calcutta') -
             cursor.close()
             release_connection(conn)
 
+def ensure_rollcall_stats(rollcall_id: int) -> None:
+    """
+    Ensure a rollcall_stats row exists for this rollcall.
+    Called once at rollcall creation so increment_rollcall_stat never fails silently.
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        if db_type == 'postgresql':
+            cursor.execute(
+                """
+                INSERT INTO rollcall_stats (rollcall_id, total_in, total_out, total_maybe)
+                VALUES (%s, 0, 0, 0)
+                ON CONFLICT (rollcall_id) DO NOTHING
+                """,
+                (rollcall_id,),
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT OR IGNORE INTO rollcall_stats (rollcall_id, total_in, total_out, total_maybe)
+                VALUES (?, 0, 0, 0)
+                """,
+                (rollcall_id,),
+            )
+        conn.commit()
+        logging.info(f"Ensured rollcall_stats row for rollcall {rollcall_id}")
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"Error ensuring rollcall_stats: {e}")
+    finally:
+        if db_type == 'postgresql':
+            cursor.close()
+            release_connection(conn)
+
+
 def get_rollcall(rollcall_id: int) -> Optional[Dict]:
     """Get rollcall by ID"""
     conn = get_connection()

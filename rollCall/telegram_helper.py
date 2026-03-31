@@ -84,6 +84,20 @@ def get_rollcall_db_id(rc: RollCall) -> int:
     # Fallback: manager can be extended later if needed.
     return getattr(rc, "db_id", None)
 
+# ✅ FIX 1: Replace old get_rollcall_db_id with this safe unified helper
+def get_rc_db_id(rc) -> int | None:
+    """
+    Safely retrieve the DB primary key from a RollCall object.
+    Checks both rc.id and rc.db_id for compatibility.
+    Returns None if neither is set — callers must guard before using stats/proxy DB calls.
+    """
+    val = getattr(rc, "id", None) or getattr(rc, "db_id", None)
+    if val is None:
+        logging.warning(
+            f"RollCall '{getattr(rc, 'title', '?')}' has no DB id — "
+            "stats and proxy DB calls will be skipped for this rollcall."
+        )
+    return val
 
 # START COMMAND, SIMPLE TEXT
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/start")
@@ -997,7 +1011,7 @@ async def wait_limit(message):
                 await notify_proxy_owner_wait_to_in(rc, u, cid, rc.title, rc_number + 1)
 
                 # Stats: WAITING → IN
-                rc_db_id = getattr(rc, "id", None)
+                rc_db_id = get_rc_db_id(rc)
                 if rc_db_id is not None and isinstance(u.user_id, int):
                     increment_user_stat(cid, u.user_id, "total_waiting_to_in")
                     increment_user_stat(cid, u.user_id, "total_in")
@@ -1149,7 +1163,7 @@ async def in_user(message):
         rc.save()
 
         # --- Stats: record IN only if user actually joined inList (not duplicate or waitlisted) ---
-        rc_db_id = getattr(rc, "id", None)
+        rc_db_id = get_rc_db_id(rc)
         if result not in ('AB', 'AC') and rc_db_id is not None and isinstance(user.user_id, int):
             increment_user_stat(cid, user.user_id, "total_in")
             increment_rollcall_stat(rc_db_id, "total_in")
@@ -1205,7 +1219,7 @@ async def out_user(message):
         rc.save()
 
         # --- Stats: record OUT only if state actually changed (not duplicate) ---
-        rc_db_id = getattr(rc, "id", None)
+        rc_db_id = get_rc_db_id(rc)
         if result != 'AB' and rc_db_id is not None and isinstance(user.user_id, int):
             increment_user_stat(cid, user.user_id, "total_out")
             increment_rollcall_stat(rc_db_id, "total_out")
@@ -1277,7 +1291,7 @@ async def maybe_user(message):
         rc.save()
 
         # --- Stats: record MAYBE only if state actually changed (not duplicate) ---
-        rc_db_id = getattr(rc, "id", None)
+        rc_db_id = get_rc_db_id(rc)
         if result != 'AB' and rc_db_id is not None and isinstance(user.user_id, int):
             increment_user_stat(cid, user.user_id, "total_maybe")
             increment_rollcall_stat(rc_db_id, "total_maybe")
@@ -2410,7 +2424,7 @@ async def callback_handler(call):
             rc.save()
 
             # --- Stats: record button-based status change ---
-            rc_db_id = getattr(rc, "id", None)
+            rc_db_id = get_rc_db_id(rc)
             if rc_db_id is not None and isinstance(user.user_id, int):
                 if action == "in":
                     increment_user_stat(cid, user.user_id, "total_in")

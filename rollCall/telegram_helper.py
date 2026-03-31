@@ -918,7 +918,6 @@ async def wait_limit(message):
         cid = message.chat.id
         pmts = msg.split(" ")[1:]
         rc_number = 0
-
         limit = int(pmts[0])
 
         try:
@@ -946,26 +945,32 @@ async def wait_limit(message):
         logging.info(f"Max limit of attendees is set to {limit}")
         await bot.send_message(cid, f"Max limit of attendees is set to {limit}")
 
-        # Now rebalance IN and WAITING
+        # Rebalance IN and WAITING lists
         moved_from_in_to_wait = []
         moved_from_wait_to_in = []
 
-        # MOVING USERS IF IN LIST HAS ALREADY REACHED THE LIMIT
+        # IN list exceeds new limit → move excess to WAITLIST
         if len(rc.inList) > limit:
             moved_from_in_to_wait = rc.inList[limit:]
             rc.waitList.extend(rc.inList[limit:])
             rc.inList = rc.inList[:limit]
+            # Persist updated status to DB for each moved user
+            for u in moved_from_in_to_wait:
+                rc._save_user_to_db(u, 'waitlist')
             rc.save()
+
+        # IN list has free slots → promote from WAITLIST
         elif len(rc.inList) < limit:
             available_slots = limit - len(rc.inList)
             moved_from_wait_to_in = rc.waitList[:available_slots]
             rc.inList.extend(rc.waitList[:available_slots])
             rc.waitList = rc.waitList[available_slots:]
+            # Persist updated status to DB for each moved user
+            for u in moved_from_wait_to_in:
+                rc._save_user_to_db(u, 'in')
             rc.save()
 
-        # NEW: Notifications for limit changes
-
-        # IN -> WAITING
+        # Notifications for IN → WAITING
         if moved_from_in_to_wait:
             names = ", ".join(u.name for u in moved_from_in_to_wait)
             await bot.send_message(
@@ -973,10 +978,9 @@ async def wait_limit(message):
                 f"{names} moved from IN to WAITING because limit was set to {limit} for '{rc.title}' (ID: {rc_number + 1})."
             )
 
-        # WAITING -> IN (short + proxy owner tagging)
+        # Notifications for WAITING → IN
         if moved_from_wait_to_in:
             for u in moved_from_wait_to_in:
-                # Short IN message
                 if isinstance(u.user_id, int):
                     await bot.send_message(
                         cid,
@@ -992,7 +996,7 @@ async def wait_limit(message):
                 # Notify proxy creator if this is a proxy
                 await notify_proxy_owner_wait_to_in(rc, u, cid, rc.title, rc_number + 1)
 
-                # --- Stats: WAITING -> IN ---
+                # Stats: WAITING → IN
                 rc_db_id = getattr(rc, "id", None)
                 if rc_db_id is not None and isinstance(u.user_id, int):
                     increment_user_stat(cid, u.user_id, "total_waiting_to_in")
@@ -1012,6 +1016,7 @@ async def wait_limit(message):
     except rollCallNotStarted as e:
         print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
+
 
 # DELETE AN USER OF A ROLLCALL
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/delete_user")
@@ -1113,59 +1118,6 @@ async def in_user(message):
     try:
         if roll_call_not_started(message, manager) == False:
             raise rollCallNotStarted("Roll call is not active")
-
-        msg = message.text
-        pmts = msg.split(" ")
-        cid = message.chat.id
-        comment = ""
-        rc_number = 0
-
-        if len(pmts) > 1 and "::" in pmts[-1]:
-            try:
-                rc_number = int(pmts[-1].replace("::", "")) - 1
-                del pmts[-1]
-                msg = " ".join(pmts)
-            except:
-                raise incorrectParameter("The rollcall number must be a positive integer")
-
-            rollcalls = manager.get_rollcalls(cid)
-            if len(rollcalls) < rc_number + 1:
-                raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
-
-        rc = manager.get_rollcall(cid, rc_number)
-        user = User(message.from_user.first_name, message.from_user.username if message.from_user.username != "" else "None", message.from_user.id, rc.allNames)
-        
-        arr = msg.split(" ")
-        if len(arr) > 1:
-            arr.pop(0)
-            comment = ' '.join(arr)
-            user.comment = comment
-
-        result = rc.addIn(user)
-        rc.save()
-        # --- Stats: record IN ---
-        rc_db_id = getattr(rc, "id", None)
-        if rc_db_id is not None and isinstance(user.user_id, int):
-            increment_user_stat(cid, user.user_id, "total_in")
-            increment_rollcall_stat(rc_db_id, "total_in")
-
-        if result == 'AB':
-            raise duplicateProxy("No duplicate proxy please :-), Thanks!")
-        elif result == 'AC':
-            await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
-
-        if send_list(message, manager):
-            await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number + 1)))
-
-    except Exception as e:
-        await bot.send_message(message.chat.id, e)
-
-@bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/out")
-async def out_user(message):
-    try:
-        if roll_call_not_started(message, manager) == False:
-            raise rollCallNotStarted("Roll call is not active")
-
         msg = message.text
         pmts = msg.split(" ")
         cid = message.chat.id
@@ -1185,8 +1137,61 @@ async def out_user(message):
             raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         rc = manager.get_rollcall(cid, rc_number)
+        user = User(message.from_user.first_name, message.from_user.username if message.from_user.username != "" else "None", message.from_user.id, rc.allNames)
 
+        arr = msg.split(" ")
+        if len(arr) > 1:
+            arr.pop(0)
+            comment = ' '.join(arr)
+        user.comment = comment
+
+        result = rc.addIn(user)
+        rc.save()
+
+        # --- Stats: record IN only if user actually joined inList (not duplicate or waitlisted) ---
+        rc_db_id = getattr(rc, "id", None)
+        if result not in ('AB', 'AC') and rc_db_id is not None and isinstance(user.user_id, int):
+            increment_user_stat(cid, user.user_id, "total_in")
+            increment_rollcall_stat(rc_db_id, "total_in")
+
+        if result == 'AB':
+            raise duplicateProxy("No duplicate proxy please :-), Thanks!")
+        elif result == 'AC':
+            await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
+
+        if send_list(message, manager):
+            await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number + 1)))
+
+    except Exception as e:
+        await bot.send_message(message.chat.id, e)
+
+
+@bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/out")
+async def out_user(message):
+    try:
+        if roll_call_not_started(message, manager) == False:
+            raise rollCallNotStarted("Roll call is not active")
+        msg = message.text
+        pmts = msg.split(" ")
+        cid = message.chat.id
+        comment = ""
+        rc_number = 0
+
+        if len(pmts) > 1 and "::" in pmts[-1]:
+            try:
+                rc_number = int(pmts[-1].replace("::", "")) - 1
+                del pmts[-1]
+                msg = " ".join(pmts)
+            except:
+                raise incorrectParameter("The rollcall number must be a positive integer")
+
+        rollcalls = manager.get_rollcalls(cid)
+        if len(rollcalls) < rc_number + 1:
+            raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+
+        rc = manager.get_rollcall(cid, rc_number)
         user = User(message.from_user.first_name, message.from_user.username, message.from_user.id, rc.allNames)
+
         arr = msg.split(" ")
         if len(arr) > 1:
             arr.pop(0)
@@ -1198,9 +1203,10 @@ async def out_user(message):
 
         result = rc.addOut(user)
         rc.save()
-        # --- Stats: record OUT ---
+
+        # --- Stats: record OUT only if state actually changed (not duplicate) ---
         rc_db_id = getattr(rc, "id", None)
-        if rc_db_id is not None and isinstance(user.user_id, int):
+        if result != 'AB' and rc_db_id is not None and isinstance(user.user_id, int):
             increment_user_stat(cid, user.user_id, "total_out")
             increment_rollcall_stat(rc_db_id, "total_out")
 
@@ -1220,7 +1226,7 @@ async def out_user(message):
             # Notify proxy creator if this is a proxy
             await notify_proxy_owner_wait_to_in(rc, result, cid, rc.title, rc_number + 1)
 
-        # IN → OUT notification (short + tagged)
+        # IN → OUT notification
         if was_in and any(u.user_id == user.user_id for u in rc.outList):
             await bot.send_message(
                 cid,
@@ -1230,6 +1236,7 @@ async def out_user(message):
 
         if send_list(message, manager):
             await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number + 1)))
+
     except Exception as e:
         await bot.send_message(message.chat.id, e)
 
@@ -1239,7 +1246,6 @@ async def maybe_user(message):
     try:
         if roll_call_not_started(message, manager) == False:
             raise rollCallNotStarted("Roll call is not active")
-
         msg = message.text
         pmts = msg.split(" ")
         cid = message.chat.id
@@ -1254,10 +1260,10 @@ async def maybe_user(message):
             except:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
-            rollcalls = manager.get_rollcalls(cid)
-            if len(rollcalls) < rc_number + 1:
-                raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
-    
+        rollcalls = manager.get_rollcalls(cid)
+        if len(rollcalls) < rc_number + 1:
+            raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+
         rc = manager.get_rollcall(cid, rc_number)
         user = User(message.from_user.first_name, message.from_user.username, message.from_user.id, rc.allNames)
 
@@ -1265,21 +1271,27 @@ async def maybe_user(message):
         if len(arr) > 1:
             arr.pop(0)
             comment = ' '.join(arr)
-            user.comment = comment
+        user.comment = comment
 
         result = rc.addMaybe(user)
         rc.save()
-        # --- Stats: record MAYBE ---
+
+        # --- Stats: record MAYBE only if state actually changed (not duplicate) ---
         rc_db_id = getattr(rc, "id", None)
-        if rc_db_id is not None and isinstance(user.user_id, int):
+        if result != 'AB' and rc_db_id is not None and isinstance(user.user_id, int):
             increment_user_stat(cid, user.user_id, "total_maybe")
             increment_rollcall_stat(rc_db_id, "total_maybe")
 
         if result == 'AB':
             raise duplicateProxy("No duplicate proxy please :-), Thanks!")
         elif isinstance(result, User):
+            # Someone moved from WAITING to IN (when user moved from IN to MAYBE, freeing a slot)
             if type(result.user_id) == int:
-                await bot.send_message(cid, f"{'@'+result.username if result.username!=None else f'[{result.name}](tg://user?id={result.user_id})'} now you are in!", parse_mode="Markdown")
+                await bot.send_message(
+                    cid,
+                    f"{'@'+result.username if result.username != None else f'[{result.name}](tg://user?id={result.user_id})'} now you are in!",
+                    parse_mode="Markdown"
+                )
             else:
                 await bot.send_message(cid, f"{result.name} now you are in!")
 

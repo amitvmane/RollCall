@@ -1026,8 +1026,11 @@ def delete_template(chatid: int, name: str) -> bool:
             cursor.close()
             release_connection(conn)
 
+
 def delete_user_by_name(rollcall_id: int, name: str) -> bool:
-    """Delete a user by name — checks proxy_users first, then real users."""
+    """Delete a user by name — checks proxy_users first, then real users.
+    Supports matching by first_name OR username (with or without @).
+    """
     conn = get_connection()
     try:
         cursor = conn.cursor()
@@ -1042,14 +1045,17 @@ def delete_user_by_name(rollcall_id: int, name: str) -> bool:
 
         # Only try real users if no proxy was deleted
         if rows_deleted == 0:
+            # Strip @ if admin passed @username format
+            clean_name = name.lstrip('@')
             cursor.execute(
-                f"DELETE FROM users WHERE rollcall_id = {ph} AND first_name = {ph}",
-                (rollcall_id, name)
+                f"DELETE FROM users WHERE rollcall_id = {ph} AND (first_name = {ph} OR username = {ph})",
+                (rollcall_id, clean_name, clean_name)
             )
             rows_deleted = cursor.rowcount
 
         conn.commit()
         return rows_deleted > 0
+
     except Exception as e:
         conn.rollback()
         logging.error(f"Error deleting user: {e}")

@@ -13,14 +13,34 @@ bot = telebot.TeleBot(token=TELEGRAM_TOKEN)
 def _parse_db_datetime(value):
     if value is None:
         return None
+
     if isinstance(value, datetime):
         return value
+
     if isinstance(value, str):
         value = value.strip()
         if not value:
             return None
-        return datetime.fromisoformat(value)
+
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            pass
+
+        for fmt in (
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M:%S.%f",
+            "%d-%m-%Y %H:%M",
+        ):
+            try:
+                return datetime.strptime(value, fmt)
+            except ValueError:
+                continue
+
+        raise ValueError(f"Unsupported datetime string format: {value}")
+
     raise TypeError(f"Unsupported datetime value type: {type(value)}")
+
 
 class RollCall:
     def __init__(self, title, chat_id=None, db_id=None):

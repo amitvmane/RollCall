@@ -52,8 +52,9 @@ async def check(rollcalls, timezone, chat_id):
                             f"{rollcall.finishList().replace('__RCID__', str(rollcalls.index(rollcall) + 1))}"
                         )
 
-                        if getattr(rollcall, "id", None) is not None:
-                            end_rollcall(rollcall.id)
+                        rc_db_id = getattr(rollcall, "db_id", None) or getattr(rollcall, "id", None)
+                        if rc_db_id is not None:
+                            end_rollcall(rc_db_id)
 
                         if rollcall in rollcalls:
                             rollcalls.remove(rollcall)

@@ -690,32 +690,25 @@ def create_or_update_template(
             cursor.execute(
                 """
                 INSERT OR REPLACE INTO templates
-                    (id, chatid, name, title, inlistlimit, location,
-                     eventfee, offsetdays, offsethours, offsetminutes, event_day, event_time)
+                (
+                    id, chatid, name, title, inlistlimit, location, eventfee,
+                    offsetdays, offsethours, offsetminutes, event_day, event_time
+                )
                 VALUES (
                     COALESCE(
                         (SELECT id FROM templates WHERE chatid = ? AND name = ?),
                         NULL
                     ),
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-                        )
+                )
                 """,
                 (
-                    chatid,
-                    name,          # for SELECT
-                    chatid,
-                    name,
-                    title,
-                    inlistlimit,
-                    location,
-                    eventfee,
-                    offsetdays,
-                    offsethours,
-                    offsetminutes,
-                    event_day,
-                    event_time 
+                    chatid, name,
+                    chatid, name, title, inlistlimit, location, eventfee,
+                    offsetdays, offsethours, offsetminutes, event_day, event_time
                 ),
             )
+        
         conn.commit()
         return True
     except Exception as e:

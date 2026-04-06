@@ -54,17 +54,21 @@ class RollCallManager:
         return rc
     
     def remove_rollcall(self, chat_id: int, rc_number: int):
-        """Remove a rollcall by index"""
-        chat = self.get_chat(chat_id)
-        if 0 <= rc_number < len(chat['rollCalls']):
-            rc = chat['rollCalls'][rc_number]
-            # Mark as inactive in database
-            db.end_rollcall(rc.id)
-            # Remove from memory cache
-            chat['rollCalls'].pop(rc_number)
-            logging.info(f"Ended rollcall ID {rc.id} for chat {chat_id}")
-        else:
-            raise IndexError(f"RollCall index {rc_number} out of range")
+         """Remove a rollcall by index"""
+    chat = self.get_chat(chat_id)
+
+    if 0 <= rc_number < len(chat['rollCalls']):
+        rc = chat['rollCalls'][rc_number]
+
+        if getattr(rc, "db_id", None) is None:
+            raise ValueError("Rollcall database id is missing")
+
+        db.end_rollcall(rc.db_id)
+
+        chat['rollCalls'].pop(rc_number)
+        logging.info(f"Ended rollcall DB ID {rc.db_id} for chat {chat_id}")
+    else:
+        raise IndexError(f"RollCall index {rc_number} out of range")
     
     def get_rollcall(self, chat_id: int, rc_number: int) -> Optional[RollCall]:
         """Get a specific rollcall by index"""

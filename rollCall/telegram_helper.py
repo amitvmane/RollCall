@@ -935,32 +935,33 @@ async def wait_limit(message):
     try:
         if roll_call_not_started(message, manager) == False:
             raise rollCallNotStarted("Roll call is not active")
-        if len(message.text.split(" ")) <= 1 or int(message.text.split(" ")[1]) < 0:
-            raise parameterMissing("Input limit is missing or it's not a positive number")
 
         msg = message.text
         cid = message.chat.id
         pmts = msg.split(" ")[1:]
         rc_number = 0
+
+        if len(pmts) == 0:
+            raise parameterMissing("Input limit is missing or it's not a positive number")
+
+        if "::" in pmts[-1]:
+            try:
+                rc_number = int(pmts[-1].replace("::", "")) - 1
+                del pmts[-1]
+            except:
+                raise incorrectParameter("The rollcall number must be a positive integer")
+
+        if len(pmts) == 0 or not str(pmts[0]).isdigit() or int(pmts[0]) < 0:
+            raise parameterMissing("Input limit is missing or it's not a positive number")
+
         limit = int(pmts[0])
 
-        try:
-            if "::" in pmts[-1]:
-                try:
-                    rc_number = int(pmts[-1].replace("::", "")) - 1
-                    del pmts[-1]
-                except:
-                    raise incorrectParameter("The rollcall number must be a positive integer")
-
-            rollcalls = manager.get_rollcalls(cid)
-            if len(rollcalls) < rc_number + 1:
-                raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
-        except:
-            pass
+        rollcalls = manager.get_rollcalls(cid)
+        if len(rollcalls) < rc_number + 1:
+            raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         rc = manager.get_rollcall(cid, rc_number)
 
-        # Capture current state for notifications
         old_limit = rc.inListLimit
         was_full = old_limit is not None and len(rc.inList) >= int(old_limit)
 
@@ -969,32 +970,26 @@ async def wait_limit(message):
         logging.info(f"Max limit of attendees is set to {limit}")
         await bot.send_message(cid, f"Max limit of attendees is set to {limit}")
 
-        # Rebalance IN and WAITING lists
         moved_from_in_to_wait = []
         moved_from_wait_to_in = []
 
-        # IN list exceeds new limit → move excess to WAITLIST
         if len(rc.inList) > limit:
             moved_from_in_to_wait = rc.inList[limit:]
             rc.waitList.extend(rc.inList[limit:])
             rc.inList = rc.inList[:limit]
-            # Persist updated status to DB for each moved user
             for u in moved_from_in_to_wait:
                 rc._save_user_to_db(u, 'waitlist')
             rc.save()
 
-        # IN list has free slots → promote from WAITLIST
         elif len(rc.inList) < limit:
             available_slots = limit - len(rc.inList)
             moved_from_wait_to_in = rc.waitList[:available_slots]
             rc.inList.extend(rc.waitList[:available_slots])
             rc.waitList = rc.waitList[available_slots:]
-            # Persist updated status to DB for each moved user
             for u in moved_from_wait_to_in:
                 rc._save_user_to_db(u, 'in')
             rc.save()
 
-        # Notifications for IN → WAITING
         if moved_from_in_to_wait:
             names = ", ".join(u.name for u in moved_from_in_to_wait)
             await bot.send_message(
@@ -1002,7 +997,6 @@ async def wait_limit(message):
                 f"{names} moved from IN to WAITING because limit was set to {limit} for '{rc.title}' (ID: {rc_number + 1})."
             )
 
-        # Notifications for WAITING → IN
         if moved_from_wait_to_in:
             for u in moved_from_wait_to_in:
                 if isinstance(u.user_id, int):
@@ -1017,17 +1011,14 @@ async def wait_limit(message):
                         f"{u.name} → IN (from WAITING) for '{rc.title}' (#{rc_number + 1})",
                     )
 
-                # Notify proxy creator if this is a proxy
                 await notify_proxy_owner_wait_to_in(rc, u, cid, rc.title, rc_number + 1)
 
-                # Stats: WAITING → IN
                 rc_db_id = get_rc_db_id(rc)
                 if rc_db_id is not None and isinstance(u.user_id, int):
                     increment_user_stat(cid, u.user_id, "total_waiting_to_in")
                     increment_user_stat(cid, u.user_id, "total_in")
                     increment_rollcall_stat(rc_db_id, "total_in")
 
-        # Notify when limit is first reached
         if len(rc.inList) == limit and not was_full:
             await bot.send_message(
                 cid,
@@ -1040,7 +1031,6 @@ async def wait_limit(message):
     except rollCallNotStarted as e:
         print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)
-
 
 # DELETE AN USER OF A ROLLCALL
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/delete_user")

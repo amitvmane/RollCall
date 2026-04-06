@@ -30,7 +30,6 @@ try:
     from config import TELEGRAM_TOKEN, DATABASE_URL, ADMINS
     from telegram_helper import bot
     from rollcall_manager import manager
-    from db import init_db
 except ImportError as e:
     logger.error(f"Failed to import required modules: {e}")
     sys.exit(1)
@@ -122,14 +121,16 @@ async def main():
     validate_environment()
     
     # Initialize database
+    # Verify database connectivity
     try:
-        logger.info("Initializing database...")
-        init_db()
-        logger.info("✅ Database initialized successfully")
+        logger.info("Verifying database connectivity...")
+        if not db_ping():
+            raise Exception("Database ping failed")
+        logger.info("✅ Database connectivity verified")
     except Exception as e:
-        logger.error(f"❌ Database initialization failed: {e}")
+        logger.error(f"❌ Database verification failed: {e}")
         sys.exit(1)
-    
+
     # Get bot information
     try:
         me = await bot.get_me()

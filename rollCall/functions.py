@@ -41,22 +41,21 @@ async def admin_rights(message, manager):
     """Check if user has admin rights (if required)"""
     try:
         chat_id = message.chat.id
-        
-        # If admin rights are not required, allow all users
+
         if not manager.get_admin_rights(chat_id):
             return True
-        
-        # Check if user is admin or creator
+
         member = await bot.get_chat_member(chat_id, message.from_user.id)
         if member.status not in ['administrator', 'creator']:
             logging.error("Error - user does not have sufficient permissions for this operation")
             return False
-        
+
         return True
+
     except Exception as e:
         logging.error(f"Error checking admin rights: {e}")
-        return True  # Default to allowing if check fails
-
+        return False
+    
 # FUNCTION TO CHECK IF SHH/LOUDER IS ACTIVE
 def send_list(message, manager):
     """Check if bot should send detailed lists (not in shh mode)"""

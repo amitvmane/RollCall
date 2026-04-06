@@ -7,6 +7,7 @@ import asyncio
 import logging
 import os
 import sys
+from db import init_db, db_ping
 from aiohttp import web
 
 # Configure logging before imports
@@ -68,19 +69,14 @@ def validate_environment():
             logger.warning(f"⚠️  Directory missing: {directory}/ (will be created)")
             os.makedirs(directory, exist_ok=True)
 
-
 async def health_check(request):
-    """Health check endpoint for Docker and monitoring"""
     try:
-        # Check if bot is responsive
         me = await bot.get_me()
-        
-        # Check database connection
-        init_db()
-        
-        # Get rollcall manager status
         cache_size = len(manager._cache)
-        
+
+        if not db_ping():
+            raise Exception("Database ping failed")
+
         return web.Response(
             text=f"OK - Bot: @{me.username}, Cache: {cache_size} chats",
             status=200
@@ -91,7 +87,6 @@ async def health_check(request):
             text=f"ERROR: {str(e)}",
             status=503
         )
-
 
 async def ping(request):
     """Simple ping endpoint"""

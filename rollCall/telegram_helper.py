@@ -1,3 +1,4 @@
+import os
 import logging
 import re
 import asyncio
@@ -22,6 +23,10 @@ from db import increment_user_stat, increment_rollcall_stat
 from db import create_or_update_template, get_templates, get_template, delete_template
 
 bot = AsyncTeleBot(token=TELEGRAM_TOKEN)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def data_file_path(filename: str) -> str:
+    return os.path.join(BASE_DIR, filename)
 
 logging.info("Bot already started")
 
@@ -260,7 +265,7 @@ async def broadcast(message):
     msg = message.text.split(" ")[1:]
 
     try:
-        with open('./database.json', 'r') as read_file:
+        with open(data_file_path('database.json'), 'r') as read_file:
             data = json.load(read_file)
     except Exception as e:
         print(traceback.format_exc())
@@ -306,16 +311,21 @@ async def config_timezone(message):
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/version")
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/v")
 async def version_command(message):
-    file = open('./version.json')
-    data = json.load(file)
+    with open(data_file_path('version.json'), 'r') as file:
+        data = json.load(file)
+
     for i in range(0, len(data)):
-        version = data[-1-i]
+        version = data[-1 - i]
         if version["DeployedOnProd"] == 'Y':
-            txt = ''
-            txt += f'Version: {version["Version"]}\nDescription: {version["Description"]}\nDeployed: {version["DeployedOnProd"]}\nDeployed datetime: {version["DeployedDatetime"]}'
+            txt = (
+                f"Version: {version['Version']}\n"
+                f"Description: {version['Description']}\n"
+                f"Deployed: {version['DeployedOnProd']}\n"
+                f"Deployed datetime: {version['DeployedDatetime']}"
+            )
             await bot.send_message(message.chat.id, txt)
             break
-
+        
 # GET ALL ROLLCALLS OF THE CURRENT CHAT
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/rollcalls")
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/r")
@@ -360,7 +370,7 @@ async def start_roll_call(message):
     title = ''
 
     # Save chat to database.json for broadcast
-    with open('./database.json', 'r') as read_file:
+    with open(data_file_path('database.json'), 'r') as read_file:
         database = json.load(read_file)
         read_file.close()
     
@@ -371,7 +381,7 @@ async def start_roll_call(message):
 
     if cond == True:
         database.append({'chat_id': cid})
-        with open('./database.json', 'w') as write_file:
+        with open(data_file_path('database.json'), 'w') as write_file:
             json.dump(database, write_file)
 
     try:
@@ -447,7 +457,7 @@ async def start_template(message):
     if tmpl.get("location"):
         rc.location = tmpl["location"]
     if tmpl.get("eventfee"):
-        rc.eventfee = tmpl["eventfee"]
+        rc.event_fee = tmpl["eventfee"]
 
     # Time offsets and calendar fields from template
     days = tmpl.get("offsetdays")

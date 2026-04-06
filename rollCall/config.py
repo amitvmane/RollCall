@@ -1,13 +1,24 @@
 import os
-import logging
 from dotenv import load_dotenv
 
 load_dotenv()
 
-TELEGRAM_TOKEN = os.environ.get("API_KEY")
 
-ADMINS = [int(os.environ.get("ADMIN1")), int(os.environ.get("ADMIN2"))]
+def _parse_admins():
+    admins = []
+    for key in ("ADMIN1", "ADMIN2"):
+        value = os.environ.get(key)
+        if value is None or str(value).strip() == "":
+            continue
+        try:
+            admins.append(int(value))
+        except ValueError:
+            raise ValueError(f"{key} must be a valid integer Telegram user id")
+    return admins
 
-# Database configuration
+
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN") or os.environ.get("API_KEY")
+ADMINS = _parse_admins()
+
 # Default to SQLite if DATABASE_URL is not set
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///rollcall.db")

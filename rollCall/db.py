@@ -1268,6 +1268,29 @@ def get_templates(chatid: int) -> List[Dict]:
             cursor.close()
             release_connection(conn)
 
+def db_ping():
+    """Lightweight database connectivity check."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+
+        if db_type == 'postgresql':
+            cursor.execute("SELECT 1")
+        else:
+            cursor.execute("SELECT 1")
+
+        cursor.fetchone()
+        return True
+    except Exception as e:
+        logging.error(f"Database ping failed: {e}")
+        return False
+    finally:
+        if cursor:
+            cursor.close()
+        if db_type == 'postgresql' and conn:
+            release_connection(conn)
+
 def get_template(chatid: int, name: str) -> Optional[Dict]:
     """
     Get a single template for a chat by name.

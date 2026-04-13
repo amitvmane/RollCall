@@ -1,3 +1,4 @@
+from email.mime import message
 import os
 import logging
 import re
@@ -41,6 +42,31 @@ def format_mention(user: User) -> str:
             return f"@{user.username}"
         return f"[{user.name}](tg://user?id={user.user_id})"
     return user.name
+
+def format_mention_with_name(user: User) -> str:
+    """
+    No username set  → [FirstName](tg://user?id=...)
+    Username set     → @username (FirstName)
+    """
+    if isinstance(user.user_id, int):
+        if user.username:
+            return f"@{user.username} ({user.name})"
+        else:
+            return f"[{user.name}](tg://user?id={user.user_id})"
+    return user.name
+
+
+async def warn_no_username(cid: int, first_name: str):
+    """Warn in group that this user has no Telegram username set."""
+    try:
+        await bot.send_message(
+            cid,
+            f"⚠️ {first_name}, you don't have a Telegram username set.\n"
+            "Please set one: Settings → Edit Profile → Username\n"
+            "The bot uses it for logging and identification.",
+        )
+    except Exception:
+        pass
 
 WEEKDAY_MAP = {
     "monday": 0,
@@ -1002,7 +1028,7 @@ async def wait_limit(message):
                 if isinstance(u.user_id, int):
                     await bot.send_message(
                         cid,
-                        f"{format_mention(u)} → IN (from WAITING) for '{rc.title}' (#{rc_number + 1})",
+                        f"{format_mention_with_name(u)} → IN (from WAITING) for '{rc.title}' (#{rc_number + 1})",
                         parse_mode="Markdown",
                     )
                 else:
@@ -1151,7 +1177,10 @@ async def in_user(message):
             raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         rc = manager.get_rollcall(cid, rc_number)
-        user = User(message.from_user.first_name, message.from_user.username if message.from_user.username != "" else "None", message.from_user.id, rc.allNames)
+        _username = message.from_user.username or None
+        if not _username:
+            asyncio.create_task(warn_no_username(cid, message.from_user.first_name))
+        user = User(message.from_user.first_name, _username, message.from_user.id, rc.allNames)
 
         arr = msg.split(" ")
         if len(arr) > 1:
@@ -1204,7 +1233,10 @@ async def out_user(message):
             raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         rc = manager.get_rollcall(cid, rc_number)
-        user = User(message.from_user.first_name, message.from_user.username, message.from_user.id, rc.allNames)
+        _username = message.from_user.username or None
+        if not _username:
+            asyncio.create_task(warn_no_username(cid, message.from_user.first_name))
+        user = User(message.from_user.first_name, _username, message.from_user.id, rc.allNames)
 
         arr = msg.split(" ")
         if len(arr) > 1:
@@ -1231,7 +1263,7 @@ async def out_user(message):
             if isinstance(result.user_id, int):
                 await bot.send_message(
                     cid,
-                    f"{format_mention(result)} → IN",
+                    f"{format_mention_with_name(result)} → IN",
                     parse_mode="Markdown",
                 )
             else:
@@ -1244,7 +1276,7 @@ async def out_user(message):
         if was_in and any(u.user_id == user.user_id for u in rc.outList):
             await bot.send_message(
                 cid,
-                f"{format_mention(user)} → OUT for '{rc.title}' (#{rc_number + 1})",
+                f"{format_mention_with_name(user)} → OUT for '{rc.title}' (#{rc_number + 1})",
                 parse_mode="Markdown",
             )
 
@@ -1279,7 +1311,10 @@ async def maybe_user(message):
             raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         rc = manager.get_rollcall(cid, rc_number)
-        user = User(message.from_user.first_name, message.from_user.username, message.from_user.id, rc.allNames)
+        _username = message.from_user.username or None
+        if not _username:
+            asyncio.create_task(warn_no_username(cid, message.from_user.first_name))
+        user = User(message.from_user.first_name, _username, message.from_user.id, rc.allNames)
 
         arr = msg.split(" ")
         if len(arr) > 1:
@@ -1381,7 +1416,7 @@ async def set_in_for(message):
                 if isinstance(result.user_id, int):
                     await bot.send_message(
                         cid,
-                        f"{format_mention(result)} now you are in!",
+                        f"{format_mention_with_name(result)} now you are in!",
                         parse_mode="Markdown",
                     )
                 else:
@@ -1448,7 +1483,7 @@ async def set_out_for(message):
                 if isinstance(result.user_id, int):
                     await bot.send_message(
                         cid,
-                        f"{format_mention(result)} → IN",
+                        f"{format_mention_with_name(result)} → IN",
                         parse_mode="Markdown",
                     )
                 else:
@@ -2421,13 +2456,15 @@ async def callback_handler(call):
         # Status actions: IN / OUT / MAYBE
         # --------------------------------------------------------------
         if action in ("in", "out", "maybe"):
+            _username = call.from_user.username or None
+            if not _username:
+                asyncio.create_task(warn_no_username(cid, call.from_user.first_name))
             user = User(
                 call.from_user.first_name,
-                call.from_user.username if call.from_user.username else "None",
+                _username,
                 call.from_user.id,
                 rc.allNames,
             )
-
             if action == "in":
                 result = rc.addIn(user)
             elif action == "out":
@@ -2467,7 +2504,7 @@ async def callback_handler(call):
                 if isinstance(user.user_id, int):
                     await bot.send_message(
                         cid,
-                        f"{format_mention(user)} → WAITING for '{rc.title}' (#{rc_number})",
+                        f"{format_mention_with_name(user)} → WAITING for '{rc.title}' (#{rc_number})",
                         parse_mode="Markdown",
                     )
                 else:
@@ -2483,7 +2520,7 @@ async def callback_handler(call):
                     if isinstance(user.user_id, int):
                         await bot.send_message(
                             cid,
-                            f"{format_mention(user)} → IN for '{rc.title}' (#{rc_number})",
+                            f"{format_mention_with_name(user)} → IN for '{rc.title}' (#{rc_number})",
                             parse_mode="Markdown",
                         )
                     else:
@@ -2496,7 +2533,7 @@ async def callback_handler(call):
                     if isinstance(user.user_id, int):
                         await bot.send_message(
                             cid,
-                            f"{format_mention(user)} → OUT for '{rc.title}' (#{rc_number})",
+                            f"{format_mention_with_name(user)} → OUT for '{rc.title}' (#{rc_number})",
                             parse_mode="Markdown",
                         )
                     else:
@@ -2509,7 +2546,7 @@ async def callback_handler(call):
                     if isinstance(user.user_id, int):
                         await bot.send_message(
                             cid,
-                            f"{format_mention(user)} → MAYBE for '{rc.title}' (#{rc_number})",
+                            f"{format_mention_with_name(user)} → MAYBE for '{rc.title}' (#{rc_number})",
                             parse_mode="Markdown",
                         )
                     else:
@@ -2523,7 +2560,7 @@ async def callback_handler(call):
                 if isinstance(result.user_id, int):
                     await bot.send_message(
                         cid,
-                        f"{format_mention(result)} → IN (from WAITING) for '{rc.title}' (#{rc_number})",
+                        f"{format_mention_with_name(result)} → IN (from WAITING) for '{rc.title}' (#{rc_number})",
                         parse_mode="Markdown",
                     )
                 else:
@@ -2620,6 +2657,14 @@ async def callback_handler(call):
         # Show end confirmation
         # --------------------------------------------------------------
         if action == "end":
+            # ✅ Check permissions before even showing the confirmation
+            member = await bot.get_chat_member(cid, call.from_user.id)
+            admin_mode = manager.get_admin_rights(cid)
+            
+            if admin_mode and member.status not in ["administrator", "creator"]:
+                await bot.answer_callback_query(call.id, "⛔ Only admins can end rollcalls", show_alert=True)
+                return
+            
             await bot.answer_callback_query(call.id)
             markup = await get_end_confirm_keyboard(rc_number)
             await bot.edit_message_text(
@@ -2634,13 +2679,13 @@ async def callback_handler(call):
         # Confirm end rollcall
         # --------------------------------------------------------------
         if action == "endconfirm":
-            await bot.answer_callback_query(call.id, "Rollcall ended")
 
             member = await bot.get_chat_member(cid, call.from_user.id)
             if member.status not in ["administrator", "creator"]:
                 await bot.send_message(cid, "⛔ Insufficient permissions to end rollcall.")
                 return
-
+            
+            await bot.answer_callback_query(call.id, "Rollcall ended")
             ended_by = call.from_user.first_name or call.from_user.username or "someone"
 
             try:
@@ -2733,7 +2778,7 @@ async def notify_proxy_owner_wait_to_in(rc, moved_user: User, cid, title: str, r
         except Exception:
             owner_mention = "Proxy owner"
 
-        txt = f"{owner_mention}, your proxy {format_mention(moved_user)} → IN for '{title}' (#{rc_number})"
+        txt = f"{owner_mention}, your proxy {format_mention_with_name(moved_user)} → IN for '{title}' (#{rc_number})"
         await bot.send_message(cid, txt, parse_mode="Markdown")
     except Exception:
         logging.exception("Failed to notify proxy owner for WAITING→IN")

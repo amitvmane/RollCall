@@ -317,14 +317,14 @@ class RollCall:
                         if name in self.proxy_owners:
                             del self.proxy_owners[name]
                 except Exception:
-                    print(traceback.format_exc())
+                logging.error(traceback.format_exc())
 
                 return True
 
             return False
 
         except:
-            print(traceback.format_exc())
+            logging.error(traceback.format_exc())
             return False
         
     def addIn(self, user):
@@ -537,7 +537,8 @@ class RollCall:
         if user not in self.allNames:
             self.allNames.append(user)
         self._save_user_to_db(user, 'maybe')
-        logging.info(f"User {user.name} has change his state to maybe")
+        logging.info(f"[RC #{self.id} '{self.title}'] {repr(user)} → MAYBE")
+
 
 
     def _save_user_to_db(self, user, status):

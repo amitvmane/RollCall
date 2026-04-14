@@ -20,7 +20,8 @@ logging.basicConfig(
     handlers=[
         logging.FileHandler(f'{log_dir}/bot.log'),
         logging.StreamHandler()
-    ]
+    ],
+    force=True  # ← overrides any early init by imported modules
 )
 logging.getLogger("TeleBot").setLevel(logging.WARNING)
 logging.getLogger("aiohttp").setLevel(logging.WARNING)

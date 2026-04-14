@@ -29,7 +29,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 def data_file_path(filename: str) -> str:
     return os.path.join(BASE_DIR, filename)
 
-logging.info("Bot already started")
+#logging.info("Bot already started")
 
 def format_mention(user: User) -> str:
     """

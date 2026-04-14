@@ -72,6 +72,7 @@ class RollCall:
             if chat_id:
                 # NEW: use db.create_rollcall and store DB id in self.id
                 self.id = db.create_rollcall(chat_id, title, self.timezone)
+                logging.info(f"[RC #{self.id}] Created rollcall '{title}' for chat {chat_id}")
                 self.chat_id = chat_id
                 db.ensure_rollcall_stats(self.id)
             else:
@@ -306,6 +307,7 @@ class RollCall:
         try:
             # Delete from database
             if db.delete_user_by_name(self.id, name):
+                logging.info(f"[RC #{self.id} '{self.title}'] User '{name}' deleted")
                 # Reload from database to sync
                 self._load_users_from_db()
 
@@ -326,7 +328,7 @@ class RollCall:
             return False
         
     def addIn(self, user):
-        print(self.allNames)
+        logging.debug(f"allNames: {[repr(u) for u in self.allNames]}")
         if type(user.user_id) == str:
             # PROXY USER — only block if a DIFFERENT proxy with same name exists
             for us in self.allNames:
@@ -394,19 +396,20 @@ class RollCall:
                 if user not in self.allNames:
                     self.allNames.append(user)
                 self._save_user_to_db(user, 'waitlist')
-                logging.info(f"The user {user.name} has been added to the Wait list")
+                logging.info(f"[RC #{self.id} '{self.title}'] {repr(user)} → WAITING (limit={self.inListLimit})")
                 return 'AC'
 
         self.inList.append(user)
         if user not in self.allNames:
             self.allNames.append(user)
         self._save_user_to_db(user, 'in')
-        logging.info(f"User {user.name} has change his state to in")
+        logging.info(f"[RC #{self.id} '{self.title}'] {repr(user)} → IN")
+
 
 
     # ADD A NEW USER TO OUT LIST
     def addOut(self, user):
-        print(self.allNames)
+        logging.debug(f"allNames: {[repr(u) for u in self.allNames]}")
         if type(user.user_id) == str:
             # PROXY USER — only block if a DIFFERENT proxy with same name exists
             for us in self.allNames:
@@ -461,18 +464,18 @@ class RollCall:
                     self.allNames.append(user)
                 self._save_user_to_db(result, 'in')
                 self._save_user_to_db(user, 'out')
-                logging.info(f"User {user.name} has change his state to out")
+                logging.info(f"[RC #{self.id} '{self.title}'] {repr(user)} → OUT")
                 return result
 
         self.outList.append(user)
         if user not in self.allNames:
             self.allNames.append(user)
         self._save_user_to_db(user, 'out')
-        logging.info(f"User {user.name} has change his state to out")
+        logging.info(f"[RC #{self.id} '{self.title}'] {repr(user)} → OUT")
 
     # ADD A NEW USER TO MAYBE LIST
     def addMaybe(self, user):
-        print(self.allNames)
+        logging.debug(f"allNames: {[repr(u) for u in self.allNames]}")
         if type(user.user_id) == str:
             # PROXY USER — only block if a DIFFERENT proxy with same name exists
             for us in self.allNames:
@@ -527,7 +530,7 @@ class RollCall:
                     self.allNames.append(user)
                 self._save_user_to_db(result, 'in')
                 self._save_user_to_db(user, 'maybe')
-                logging.info(f"User {user.name} has change his state to maybe")
+                logging.info(f"[RC #{self.id} '{self.title}'] {repr(user)} → MAYBE")
                 return result
 
         self.maybeList.append(user)
@@ -605,3 +608,7 @@ class User:
     def __str__(self):
         backslash = "\n"
         return f"{self.name + (' (' + self.comment + ')' if self.comment != '' else '')}"
+    
+    def __repr__(self):
+        return f"User(name={self.name!r}, @{self.username}, id={self.user_id})"
+    

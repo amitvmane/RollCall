@@ -431,6 +431,7 @@ async def start_roll_call(message):
         rc_index = len(rollcalls)  # Index before adding
         # Create new rollcall using manager
         rc = manager.add_rollcall(cid, title)
+        logging.info(f"[CHAT {cid}] Rollcall started: '{title}' (RC #{rc_index+1}) by {message.from_user.first_name} (@{message.from_user.username})")
         markup = await get_status_keyboard(rc_index+1)
         await bot.send_message(message.chat.id, f"Roll call '{title}' started! ID: {rc_index+1}\nUse buttons below:", reply_markup=markup)
         #await bot.send_message(message.chat.id, f"Roll call with title: {title} started!\nRollcall id is set to {rc_index + 1}\nTo vote for this RollCall, please use ::RollCallID eg. /in ::{rc_index + 1}")
@@ -1748,6 +1749,7 @@ async def end_roll_call(message):
         await bot.send_message(cid, rc.finishList().replace("__RCID__", str(rc_number + 1)))
         logging.info("The roll call " + rc.title + " has ended")
         manager.remove_rollcall(cid, rc_number)
+        logging.info(f"[CHAT {cid}] Rollcall ended: '{rc.title}' by {message.from_user.first_name} (@{message.from_user.username})")
         # warning + optional re-broadcast
         updated_rollcalls = manager.get_rollcalls(cid)
         if len(updated_rollcalls) > 0:
@@ -2578,12 +2580,16 @@ async def callback_handler(call):
 
             text = rc.allList().replace("__RCID__", str(rc_number))
             markup = await get_status_keyboard(rc_number)
-            await bot.edit_message_text(
-                text,
-                cid,
-                call.message.message_id,
-                reply_markup=markup,
-            )
+            try:
+                await bot.edit_message_text(
+                    text,
+                    cid,
+                    call.message.message_id,
+                    reply_markup=markup,
+                )
+            except Exception as e:
+                if "message is not modified" not in str(e):
+                    raise
             return
 
         # --------------------------------------------------------------
@@ -2592,12 +2598,16 @@ async def callback_handler(call):
         if action == "lists":
             await bot.answer_callback_query(call.id)
             markup = await get_lists_keyboard(rc_number)
-            await bot.edit_message_text(
-                "Select list:",
-                cid,
-                call.message.message_id,
-                reply_markup=markup,
-            )
+            try:
+                await bot.edit_message_text(
+                    "Select list:",
+                    cid,
+                    call.message.message_id,
+                    reply_markup=markup,
+                )
+            except Exception as e:
+                if "message is not modified" not in str(e):
+                    raise    
             return
 
         # --------------------------------------------------------------
@@ -2615,12 +2625,16 @@ async def callback_handler(call):
             else:
                 text = rc.waitListText()
 
-            await bot.edit_message_text(
-                text if text.strip() else "List is empty.",
-                cid,
-                call.message.message_id,
-                reply_markup=await get_lists_keyboard(rc_number),
-            )
+            try:
+                await bot.edit_message_text(
+                    text if text.strip() else "List is empty.",
+                    cid,
+                    call.message.message_id,
+                    reply_markup=await get_lists_keyboard(rc_number),
+                )
+            except Exception as e:
+                if "message is not modified" not in str(e):
+                    raise 
             return
 
         # --------------------------------------------------------------
@@ -2630,12 +2644,17 @@ async def callback_handler(call):
             await bot.answer_callback_query(call.id)
             text = rc.allList().replace("__RCID__", str(rc_number))
             markup = await get_status_keyboard(rc_number)
-            await bot.edit_message_text(
-                text,
-                cid,
-                call.message.message_id,
-                reply_markup=markup,
-            )
+            try: 
+                await bot.edit_message_text(
+                    text,
+                    cid,
+                    call.message.message_id,
+                    reply_markup=markup,
+                )
+            except Exception as e:
+                if "message is not modified" not in str(e):
+                    raise 
+                
             return
 
         # --------------------------------------------------------------
@@ -2645,12 +2664,17 @@ async def callback_handler(call):
             await bot.answer_callback_query(call.id, "Refreshed")
             text = rc.allList().replace("__RCID__", str(rc_number))
             markup = await get_status_keyboard(rc_number)
-            await bot.edit_message_text(
-                text,
-                cid,
-                call.message.message_id,
-                reply_markup=markup,
-            )
+            try:
+                await bot.edit_message_text(
+                    text,
+                    cid,
+                    call.message.message_id,
+                    reply_markup=markup,
+                )
+            except Exception as e:
+                if "message is not modified" not in str(e):
+                    raise 
+                
             return
 
         # --------------------------------------------------------------
@@ -2667,12 +2691,17 @@ async def callback_handler(call):
             
             await bot.answer_callback_query(call.id)
             markup = await get_end_confirm_keyboard(rc_number)
-            await bot.edit_message_text(
-                f"Are you sure you want to end rollcall '{rc.title}' (#{rc_number})?",
-                cid,
-                call.message.message_id,
-                reply_markup=markup,
-            )
+            try: 
+                await bot.edit_message_text(
+                    f"Are you sure you want to end rollcall '{rc.title}' (#{rc_number})?",
+                    cid,
+                    call.message.message_id,
+                    reply_markup=markup,
+                )
+            except Exception as e:
+                if "message is not modified" not in str(e):
+                    raise 
+                
             return
 
         # --------------------------------------------------------------
@@ -2718,12 +2747,18 @@ async def callback_handler(call):
             await bot.answer_callback_query(call.id, "Cancelled")
             text = rc.allList().replace("__RCID__", str(rc_number))
             markup = await get_status_keyboard(rc_number)
-            await bot.edit_message_text(
-                text,
-                cid,
-                call.message.message_id,
-                reply_markup=markup,
-            )
+
+            try:
+                await bot.edit_message_text(
+                    text,
+                    cid,
+                    call.message.message_id,
+                    reply_markup=markup,
+                )
+            except Exception as e:
+                if "message is not modified" not in str(e):
+                    raise 
+            
             return
 
         await bot.answer_callback_query(call.id, "Unknown action")

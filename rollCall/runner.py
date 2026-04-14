@@ -22,6 +22,8 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
+logging.getLogger("TeleBot").setLevel(logging.WARNING)
+logging.getLogger("aiohttp").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 

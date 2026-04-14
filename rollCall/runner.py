@@ -164,9 +164,9 @@ async def main():
     try:
         # Run bot with automatic reconnection
         await bot.infinity_polling(
-            timeout=30,
+            timeout=20,
             request_timeout=30,
-            long_polling_timeout=20,
+            #long_polling_timeout=20,
             skip_pending=True  # Skip messages sent while bot was offline
         )
     except KeyboardInterrupt:

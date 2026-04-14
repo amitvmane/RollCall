@@ -43,20 +43,25 @@
     {
         "Version":4.2,
         "Description":"Introduced Templates for quick rollcall creations, Fixed minor bugs, END confirmation message",
-        "DeployedOnProd":"Y",
+        "DeployedOnProd":"N",
         "DeployedDatetime":"27-01-2026 03:40 UTC"
     },
     {
         "Version":4.3,
         "Description":"Major ordering revamps and Stats collection for future insights and improvements, also fixed few minor bugs",
-        "DeployedOnProd":"Y",
+        "DeployedOnProd":"N",
         "DeployedDatetime":"27-03-2026 03:40 UTC"
     },
     {
         "Version":4.4,
         "Description":"Dupcheck removed, deleteuser supports username , OpenClaw+Claude prompt support added ",
-        "DeployedOnProd":"Y",
+        "DeployedOnProd":"N",
         "DeployedDatetime":"27-03-2026 03:40 UTC"
-    }
-
+    },
+    {
+        "Version":4.5,
+        "Description":"Dupcheck removed, deleteuser supports username , OpenClaw+Claude prompt support added, Logging enhanced, fixed @none tags, few UI/UX improvements",
+        "DeployedOnProd":"Y",
+        "DeployedDatetime":"14-04-2026 15:40 IST"
+    }   
 ]

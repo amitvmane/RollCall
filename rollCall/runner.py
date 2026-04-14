@@ -24,6 +24,7 @@ logging.basicConfig(
 )
 logging.getLogger("TeleBot").setLevel(logging.WARNING)
 logging.getLogger("aiohttp").setLevel(logging.WARNING)
+logging.getLogger("asyncio").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
@@ -72,23 +73,24 @@ def validate_environment():
 
 async def health_check(request):
     try:
-        me = await bot.get_me()
+        me = await asyncio.wait_for(bot.get_me(), timeout=10)
         cache_size = len(manager._cache)
-
         if not db_ping():
             raise Exception("Database ping failed")
-
         return web.Response(
             text=f"OK - Bot: @{me.username}, Cache: {cache_size} chats",
             status=200
         )
+    except asyncio.TimeoutError:
+        logger.warning("Health check: Telegram API timeout (bot may be slow, not dead)")
+        return web.Response(text="WARN: Telegram API timeout", status=200)
     except Exception as e:
         logger.error(f"Health check failed: {e}")
         return web.Response(
             text=f"ERROR: {str(e)}",
             status=503
         )
-
+    
 async def ping(request):
     """Simple ping endpoint"""
     return web.Response(text="pong", status=200)
@@ -162,8 +164,9 @@ async def main():
     try:
         # Run bot with automatic reconnection
         await bot.infinity_polling(
-            timeout=60,
-            request_timeout=60,
+            timeout=30,
+            request_timeout=30,
+            long_polling_timeout=20,
             skip_pending=True  # Skip messages sent while bot was offline
         )
     except KeyboardInterrupt:

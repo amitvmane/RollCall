@@ -317,7 +317,7 @@ class RollCall:
                         if name in self.proxy_owners:
                             del self.proxy_owners[name]
                 except Exception:
-                logging.error(traceback.format_exc())
+                    logging.error(traceback.format_exc())
 
                 return True
 

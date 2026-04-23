@@ -1,0 +1,60 @@
+name: PR Checks
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  validate-pr:
+    name: Validate PR Title & Description
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR title follows convention
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = context.payload.pull_request.title;
+            const validPrefixes = ['feat:', 'fix:', 'docs:', 'refactor:', 'test:', 'chore:', 'ci:'];
+            const isValid = validPrefixes.some(prefix => title.toLowerCase().startsWith(prefix));
+            if (!isValid) {
+              core.setFailed(
+                `PR title "${title}" must start with one of: ${validPrefixes.join(', ')}\n` +
+                'Example: "fix: resolve duplicate message in /set_rollcall_time"'
+              );
+            }
+
+  auto-label:
+    name: Auto-label PR by branch name
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Label by branch prefix
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branch = context.payload.pull_request.head.ref;
+            const labelMap = {
+              'fix/':      'bug',
+              'feature/':  'enhancement',
+              'docs/':     'documentation',
+              'refactor/': 'refactor',
+              'test/':     'testing',
+              'ci/':       'ci/cd',
+            };
+
+            for (const [prefix, label] of Object.entries(labelMap)) {
+              if (branch.startsWith(prefix)) {
+                try {
+                  await github.rest.issues.addLabels({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: context.payload.pull_request.number,
+                    labels: [label],
+                  });
+                } catch (e) {
+                  console.log(`Could not add label "${label}": ${e.message}`);
+                }
+                break;
+              }
+            }

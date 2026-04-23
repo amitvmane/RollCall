@@ -1,7 +1,6 @@
 prueba.py
 .env
 test_rollCall.log
-__pycache__
 database.json
 databaseMongo.json
 tests

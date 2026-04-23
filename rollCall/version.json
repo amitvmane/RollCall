@@ -76,5 +76,11 @@
         "Description": "Resolve set_location UnboundLocalError and add handler tests",
         "DeployedOnProd": "N",
         "DeployedDatetime": "23-04-2026 16:30 UTC"
+    },
+    {
+        "Version": 4.8,
+        "Description": "Use GH_PAT for version bump push to bypass branch protection",
+        "DeployedOnProd": "N",
+        "DeployedDatetime": "23-04-2026 17:21 UTC"
     }
 ]

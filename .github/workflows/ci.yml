@@ -92,9 +92,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          # Use a token so the pushed commit triggers downstream workflows
-          # (but version.json is in paths-ignore, so it won't re-trigger CI)
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # GH_PAT is a repo-scoped Personal Access Token stored as a secret.
+          # It carries owner rights and can bypass branch protection rules,
+          # which GITHUB_TOKEN cannot do on personal repos.
+          token: ${{ secrets.GH_PAT }}
 
       - name: Set up Python
         uses: actions/setup-python@v5

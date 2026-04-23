@@ -1,67 +1,14 @@
 [
-    {"Version": 2,
-    "Description": "Reminder feature fixed, /version command, /location command, few visuals changes",
-    "DeployedOnProd": "N",
-    "DeployedDatetime":"20-08-2022 20:00 UTC"
-    },
-    {
-        "Version":2.1,
-        "Description":"introduction of fee split based on IN list , minor notification error code fixes , server timezone related changes, critical- Roll call was not ending post fee feature",
-        "DeployedOnProd":"N",
-        "DeployedDatetime":"03-11-2022 00:30 UTC"
-    },
-    {
-        "Version":2.2,
-        "Description":"Introduction of MRC feature (Multiple Roll Call), creating MRC with /src command, also you can interact with each one using ::<rc_number> at the end of all commands, Added new command (/Individual_Fee) to know how much needs to pay each user",
-        "DeployedOnProd":"N",
-        "DeployedDatetime":"05-11-2022 06:00 UTC"
-     },
-     {
-        "Version":2.3,
-        "Description":"Some bugs and visual fixes",
-        "DeployedOnProd":"N",
-        "DeployedDatetime":"29-11-2022 06:00 UTC"
-    },
-     {
-        "Version":3.0,
-        "Description":"Major Release with docker support and base for DB support",
-        "DeployedOnProd":"N",
-        "DeployedDatetime":"29-11-2022 06:00 UTC"
-    },
-    {
-        "Version":4.0,
-        "Description":"Major Release with SQLite/Postgress Support and UI/UX improvements in Bot interactions",
-        "DeployedOnProd":"N",
-        "DeployedDatetime":"20-01-2026 01:00 UTC"
-    },
-        {
-        "Version":4.1,
-        "Description":"Enabled stats command for real telegram users only, not for proxy users. Minor fixes wrt displaying correct user order and auto-panel pop-up for proxy user set",
-        "DeployedOnProd":"N",
-        "DeployedDatetime":"20-01-2026 01:00 UTC"
-    },
-    {
-        "Version":4.2,
-        "Description":"Introduced Templates for quick rollcall creations, Fixed minor bugs, END confirmation message",
-        "DeployedOnProd":"N",
-        "DeployedDatetime":"27-01-2026 03:40 UTC"
-    },
-    {
-        "Version":4.3,
-        "Description":"Major ordering revamps and Stats collection for future insights and improvements, also fixed few minor bugs",
-        "DeployedOnProd":"N",
-        "DeployedDatetime":"27-03-2026 03:40 UTC"
-    },
-    {
-        "Version":4.4,
-        "Description":"Dupcheck removed, deleteuser supports username , OpenClaw+Claude prompt support added ",
-        "DeployedOnProd":"N",
-        "DeployedDatetime":"27-03-2026 03:40 UTC"
-    },
-    {
-        "Version":4.5,
-        "Description":"Dupcheck removed, deleteuser supports username , OpenClaw+Claude prompt support added, Logging enhanced, fixed @none tags, few UI/UX improvements",
-        "DeployedOnProd":"Y",
-        "DeployedDatetime":"14-04-2026 15:40 IST"
-    }   
+    {"Version": 2,    "Description": "Reminder feature fixed, /version command, /location command, few visual changes", "DeployedOnProd": "N", "DeployedDatetime": "20-08-2022 20:00 UTC"},
+    {"Version": 2.1,  "Description": "Fee split based on IN list, minor notification error fixes, server timezone fixes, critical roll call end fix", "DeployedOnProd": "N", "DeployedDatetime": "03-11-2022 00:30 UTC"},
+    {"Version": 2.2,  "Description": "Multiple Roll Call (MRC) support, /individual_fee command", "DeployedOnProd": "N", "DeployedDatetime": "05-11-2022 06:00 UTC"},
+    {"Version": 2.3,  "Description": "Bug and visual fixes", "DeployedOnProd": "N", "DeployedDatetime": "29-11-2022 06:00 UTC"},
+    {"Version": 3.0,  "Description": "Major release with Docker support and DB foundation", "DeployedOnProd": "N", "DeployedDatetime": "29-11-2022 06:00 UTC"},
+    {"Version": 4.0,  "Description": "Major release with SQLite/PostgreSQL support and UI/UX overhaul", "DeployedOnProd": "N", "DeployedDatetime": "20-01-2026 01:00 UTC"},
+    {"Version": 4.1,  "Description": "Stats enabled for real users only, user order and proxy panel fixes", "DeployedOnProd": "N", "DeployedDatetime": "20-01-2026 01:00 UTC"},
+    {"Version": 4.2,  "Description": "Templates for quick roll call creation, end confirmation message", "DeployedOnProd": "N", "DeployedDatetime": "27-01-2026 03:40 UTC"},
+    {"Version": 4.3,  "Description": "Major ordering revamp, stats collection for future insights, minor bug fixes", "DeployedOnProd": "N", "DeployedDatetime": "27-03-2026 03:40 UTC"},
+    {"Version": 4.4,  "Description": "Dupcheck removed, deleteuser supports username, OpenClaw+Claude prompt support", "DeployedOnProd": "N", "DeployedDatetime": "27-03-2026 03:40 UTC"},
+    {"Version": 4.5,  "Description": "Logging enhanced, @none tag fix, UI/UX improvements", "DeployedOnProd": "N", "DeployedDatetime": "14-04-2026 15:40 IST"},
+    {"Version": 4.6,  "Description": "Bug fixes & security hardening: improved error handling for /version and broadcast commands, fixed proxy owner data loss, safer username and limit handling, errors now properly logged", "DeployedOnProd": "Y", "DeployedDatetime": "23-04-2026 00:00 IST"}
 ]

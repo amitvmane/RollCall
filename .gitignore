@@ -3,6 +3,5 @@ prueba.py
 test_rollCall.log
 database.json
 databaseMongo.json
-tests
 data/rollcall.db
 logs/bot.log

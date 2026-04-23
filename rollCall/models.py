@@ -91,9 +91,13 @@ class RollCall:
         self.timezone = data['timezone']
         self.location = data['location']
         self.event_fee = data['event_fee']
-        self.inListLimit = data['in_list_limit']
+        raw_limit = data['in_list_limit']
+        try:
+            self.inListLimit = int(raw_limit) if raw_limit is not None else None
+        except (ValueError, TypeError):
+            logging.warning(f"[RC] Invalid in_list_limit from DB: {raw_limit!r}, defaulting to None")
+            self.inListLimit = None
         self.reminder = data['reminder_hours']
-        self.proxy_owners = getattr(self, "proxy_owners", {})
         self.proxy_owners = {}
 
 
@@ -195,7 +199,8 @@ class RollCall:
             return 'maybe'
         elif user in self.waitList:
             return 'waitlist'
-        return 'in'  # fallback
+        logging.warning(f"[RC #{self.id}] _get_user_current_status: user {repr(user)} not found in any list")
+        return None
 
     def _resolve_display_name_conflict(self, user):
         """
@@ -227,7 +232,9 @@ class RollCall:
                     else:
                         us.name = f"{us.first_name} (real)"
                     # Persist updated display name to DB
-                    self._save_user_to_db(us, self._get_user_current_status(us))
+                    status = self._get_user_current_status(us)
+                    if status is not None:
+                        self._save_user_to_db(us, status)
                     break
 
 
@@ -604,7 +611,8 @@ class User:
         if type(self.user_id) == int:
             for user in allNames:
                 if self.name == user.name and self.user_id != user.user_id:
-                    self.name = f"{self.name} ({self.username})"
+                    suffix = f"@{self.username}" if self.username else str(self.user_id)
+                    self.name = f"{self.name} ({suffix})"
     
     def __str__(self):
         backslash = "\n"

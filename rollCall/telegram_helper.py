@@ -4,6 +4,7 @@ import re
 import asyncio
 import json
 from datetime import datetime, timedelta
+from typing import Optional
 
 from telebot.async_telebot import AsyncTeleBot
 
@@ -21,12 +22,18 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from db import add_or_update_proxy_user
 from db import increment_user_stat, increment_rollcall_stat
 from db import create_or_update_template, get_templates, get_template, delete_template
+from db import get_all_chat_ids
 
 bot = AsyncTeleBot(token=TELEGRAM_TOKEN)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def data_file_path(filename: str) -> str:
     return os.path.join(BASE_DIR, filename)
+
+
+def _get_display_name(tg_user) -> str:
+    """Return a safe, non-None display name for a Telegram user object."""
+    return tg_user.first_name or tg_user.last_name or str(tg_user.id)
 
 #logging.info("Bot already started")
 
@@ -115,7 +122,7 @@ def get_rollcall_db_id(rc: RollCall) -> int:
     return getattr(rc, "db_id", None)
 
 # ✅ FIX 1: Replace old get_rollcall_db_id with this safe unified helper
-def get_rc_db_id(rc) -> int | None:
+def get_rc_db_id(rc) -> Optional[int]:
     """
     Safely retrieve the DB primary key from a RollCall object.
     Checks both rc.id and rc.db_id for compatibility.
@@ -287,21 +294,23 @@ async def broadcast(message):
         await bot.send_message(message.chat.id, "Message is missing")
         return
 
-    msg = message.text.split(" ")[1:]
+    broadcast_text = " ".join(message.text.split(" ")[1:])
 
-    try:
-        with open(data_file_path('database.json'), 'r') as read_file:
-            data = json.load(read_file)
-    except Exception as e:
-        print(traceback.format_exc())
-        print(e)
+    chat_ids = get_all_chat_ids()
+    if not chat_ids:
+        await bot.send_message(message.chat.id, "No chats found to broadcast to.")
         return
 
-    for k in data:
+    success, failed = 0, 0
+    for chat_id in chat_ids:
         try:
-            await bot.send_message(int(k["chat_id"]), " ".join(msg))
-        except:
-            pass
+            await bot.send_message(chat_id, broadcast_text)
+            success += 1
+        except Exception as e:
+            logging.warning(f"[broadcast] Failed to send to chat {chat_id}: {e}")
+            failed += 1
+
+    await bot.send_message(message.chat.id, f"Broadcast complete. Sent: {success}, Failed: {failed}")
 
 # ADJUST TIMEZONE
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/timezone")
@@ -336,12 +345,21 @@ async def config_timezone(message):
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/version")
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/v")
 async def version_command(message):
-    with open(data_file_path('version.json'), 'r') as file:
-        data = json.load(file)
+    try:
+        with open(data_file_path('version.json'), 'r') as file:
+            data = json.load(file)
+    except FileNotFoundError:
+        logging.error("[version_command] version.json not found")
+        await bot.send_message(message.chat.id, "Version information is currently unavailable.")
+        return
+    except json.JSONDecodeError as e:
+        logging.error(f"[version_command] Failed to parse version.json: {e}")
+        await bot.send_message(message.chat.id, "Version information is currently unavailable.")
+        return
 
-    for i in range(0, len(data)):
+    for i in range(len(data)):
         version = data[-1 - i]
-        if version["DeployedOnProd"] == 'Y':
+        if version.get("DeployedOnProd") == 'Y':
             txt = (
                 f"Version: {version['Version']}\n"
                 f"Description: {version['Description']}\n"
@@ -349,7 +367,10 @@ async def version_command(message):
                 f"Deployed datetime: {version['DeployedDatetime']}"
             )
             await bot.send_message(message.chat.id, txt)
-            break
+            return
+
+    logging.warning("[version_command] No deployed version found in version.json")
+    await bot.send_message(message.chat.id, "No released version information found.")
         
 # GET ALL ROLLCALLS OF THE CURRENT CHAT
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/rollcalls")
@@ -1172,9 +1193,10 @@ async def in_user(message):
 
         rc = manager.get_rollcall(cid, rc_number)
         _username = message.from_user.username or None
+        _display_name = _get_display_name(message.from_user)
         if not _username:
-            asyncio.create_task(warn_no_username(cid, message.from_user.first_name))
-        user = User(message.from_user.first_name, _username, message.from_user.id, rc.allNames)
+            asyncio.create_task(warn_no_username(cid, _display_name))
+        user = User(_display_name, _username, message.from_user.id, rc.allNames)
 
         arr = msg.split(" ")
         if len(arr) > 1:
@@ -1228,9 +1250,10 @@ async def out_user(message):
 
         rc = manager.get_rollcall(cid, rc_number)
         _username = message.from_user.username or None
+        _display_name = _get_display_name(message.from_user)
         if not _username:
-            asyncio.create_task(warn_no_username(cid, message.from_user.first_name))
-        user = User(message.from_user.first_name, _username, message.from_user.id, rc.allNames)
+            asyncio.create_task(warn_no_username(cid, _display_name))
+        user = User(_display_name, _username, message.from_user.id, rc.allNames)
 
         arr = msg.split(" ")
         if len(arr) > 1:
@@ -1306,9 +1329,10 @@ async def maybe_user(message):
 
         rc = manager.get_rollcall(cid, rc_number)
         _username = message.from_user.username or None
+        _display_name = _get_display_name(message.from_user)
         if not _username:
-            asyncio.create_task(warn_no_username(cid, message.from_user.first_name))
-        user = User(message.from_user.first_name, _username, message.from_user.id, rc.allNames)
+            asyncio.create_task(warn_no_username(cid, _display_name))
+        user = User(_display_name, _username, message.from_user.id, rc.allNames)
 
         arr = msg.split(" ")
         if len(arr) > 1:

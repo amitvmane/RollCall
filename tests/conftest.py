@@ -13,10 +13,24 @@ from unittest.mock import MagicMock
 # ---------------------------------------------------------------------------
 telebot_mock = MagicMock()
 async_telebot_mock = MagicMock()
+telebot_types_mock = MagicMock()
 telebot_mock.async_telebot = async_telebot_mock
 telebot_mock.TeleBot = MagicMock()
+telebot_mock.types = telebot_types_mock
 sys.modules["telebot"] = telebot_mock
 sys.modules["telebot.async_telebot"] = async_telebot_mock
+sys.modules["telebot.types"] = telebot_types_mock
+
+# Make @bot.message_handler(...) an identity decorator so the actual
+# async handler functions remain accessible on the telegram_helper module.
+def _message_handler_identity(*args, **kwargs):
+    def decorator(func):
+        return func
+    return decorator
+
+mock_bot_instance = MagicMock()
+mock_bot_instance.message_handler.side_effect = _message_handler_identity
+async_telebot_mock.AsyncTeleBot.return_value = mock_bot_instance
 
 # ---------------------------------------------------------------------------
 # db
@@ -39,6 +53,7 @@ db_mock.get_active_rollcalls.return_value = []
 db_mock.end_rollcall.return_value = None
 db_mock.update_chat_settings.return_value = None
 db_mock.get_rollcall.return_value = None
+db_mock.get_all_chat_ids.return_value = []
 db_mock.db_type = "sqlite"
 sys.modules["db"] = db_mock
 

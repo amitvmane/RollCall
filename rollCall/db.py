@@ -757,9 +757,30 @@ def end_rollcall(rollcall_id: int) -> bool:
             release_connection(conn)
 
 
+def get_all_chat_ids() -> List[int]:
+    """Return all known chat IDs from the chats table."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        if db_type == 'postgresql':
+            cursor.execute("SELECT chat_id FROM chats")
+        else:
+            cursor.execute("SELECT chat_id FROM chats")
+        return [row['chat_id'] for row in cursor.fetchall()]
+    except Exception as e:
+        logging.error(f"Error fetching all chat IDs: {e}")
+        return []
+    finally:
+        if cursor is not None and db_type == 'postgresql':
+            cursor.close()
+            release_connection(conn)
+
+
 def add_or_update_user(rollcall_id: int, user_id: int, first_name: str, username: str, status: str, comment: str = '') -> bool:
     """Insert or update a regular user. Position assigned once per bucket, preserved on re-entry."""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
@@ -828,7 +849,7 @@ def add_or_update_user(rollcall_id: int, user_id: int, first_name: str, username
         logging.error(f"Error add/update user: {e}")
         raise
     finally:
-        if db_type == 'postgresql':
+        if cursor is not None and db_type == 'postgresql':
             cursor.close()
             release_connection(conn)
 
@@ -836,6 +857,7 @@ def add_or_update_user(rollcall_id: int, user_id: int, first_name: str, username
 def add_or_update_proxy_user(rollcall_id: int, name: str, status: str, comment: str = '', proxy_owner_id: Optional[int] = None) -> bool:
     """Add or update a proxy user with position tracking."""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
@@ -903,7 +925,7 @@ def add_or_update_proxy_user(rollcall_id: int, name: str, status: str, comment: 
         logging.error(f"Error adding/updating proxy user: {e}")
         return False
     finally:
-        if db_type == 'postgresql':
+        if cursor is not None and db_type == 'postgresql':
             cursor.close()
             release_connection(conn)
 

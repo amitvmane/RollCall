@@ -1,4 +1,6 @@
 import asyncio
+import logging
+import traceback
 from datetime import datetime, timedelta
 
 import pytz
@@ -63,7 +65,7 @@ async def check(rollcalls, timezone, chat_id):
                         continue
 
             except Exception as e:
-                print(e)
+                logging.error(f"[check_reminders] Error processing rollcall reminder: {traceback.format_exc()}")
 
         if len(rollcalls) == 0 or no_reminder_rollcalls == len(rollcalls):
             break
@@ -80,4 +82,4 @@ async def start(rollcalls, timezone, chat_id):
         await asyncio.sleep(delay)
         await check(rollcalls, timezone, chat_id)
     except Exception as e:
-        print(e)
+        logging.error(f"[check_reminders] Unexpected error in reminder loop: {traceback.format_exc()}")

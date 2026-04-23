@@ -937,13 +937,12 @@ async def when(message):
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/location")
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/loc")
 async def set_location(message):
+    cid = message.chat.id
     try:
         if roll_call_not_started(message, manager) == False:
             raise rollCallNotStarted("Roll call is not active")
         if len(message.text.split(" ")) < 2:
             raise incorrectParameter("The correct format is /location <place>")
-        
-        cid = message.chat.id
         msg = message.text
         pmts = msg.split(" ")[1:]
         rc_number = 0

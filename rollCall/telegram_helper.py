@@ -1,4 +1,3 @@
-from email.mime import message
 import os
 import logging
 import re
@@ -680,7 +679,7 @@ async def set_rollcall_time(message):
         rc_number = 0
         pmts = msg.split(" ")[1:]
         # IF RC_NUMBER IS SPECIFIED IN PARAMETERS THEN STORE THE VALUE
-        if len(pmts) > 1 and "::" in pmts[-1]:
+        if len(pmts) > 0 and "::" in pmts[-1]:
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
@@ -717,7 +716,7 @@ async def set_rollcall_time(message):
             
             rc.save()
             backslash = '\n'
-            await bot.send_message(cid, f"Event notification time is set to {rc.finalizeDate.strftime('%d-%m-%Y %H:%M')} {rc.timezone} {backslash*2+'Reminder has been reset!' if changed else ''}")
+            await bot.send_message(cid, f"Event notification time is set to {rc.finalizeDate.strftime('%d-%m-%Y %H:%M')} {rc.timezone} for '{rc.title}' (ID: {rc_number + 1}).{backslash*2+'Reminder has been reset!' if changed else ''}")
             
             rollcalls = manager.get_rollcalls(cid)
             asyncio.create_task(start(rollcalls, rc.timezone, cid))
@@ -730,13 +729,7 @@ async def set_rollcall_time(message):
             
             rc.save()
             backslash = '\n'
-            await bot.send_message(cid, f"Event notification time is set to {date.strftime('%d-%m-%Y %H:%M')} {rc.timezone} {backslash*2+'Reminder has been reset!' if changed else ''}")
-        
-        # NEW: Time update notification
-        await bot.send_message(
-            cid,
-            f"Time updated for '{rc.title}' (ID: {rc_number + 1}) → {rc.finalizeDate.strftime('%d-%m-%Y %H:%M')} {rc.timezone}."
-        )
+            await bot.send_message(cid, f"Event notification time is set to {date.strftime('%d-%m-%Y %H:%M')} {rc.timezone} for '{rc.title}' (ID: {rc_number + 1}).{backslash*2+'Reminder has been reset!' if changed else ''}")
         
     except Exception as e:
         print(traceback.format_exc())
@@ -761,7 +754,7 @@ async def reminder(message):
                 pmts[0] = pmts[0][1]
 
         # IF RC_NUMBER IS SPECIFIED IN PARAMETERS THEN STORE THE VALUE
-        if len(pmts) > 1 and "::" in pmts[-1]:
+        if len(pmts) > 0 and "::" in pmts[-1]:
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
@@ -821,7 +814,7 @@ async def event_fee(message):
             raise rollCallNotStarted("Roll call is not active")
         
         # IF RC_NUMBER IS SPECIFIED, STORE IT
-        if len(pmts) > 1 and "::" in pmts[-1]:
+        if len(pmts) > 0 and "::" in pmts[-1]:
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
@@ -860,7 +853,7 @@ async def individual_fee(message):
             raise rollCallNotStarted("Roll call is not active")
         
         # IF RC_NUMBER IS SPECIFIED, STORE IT
-        if len(pmts) > 1 and "::" in pmts[-1]:
+        if len(pmts) > 0 and "::" in pmts[-1]:
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
@@ -898,7 +891,7 @@ async def when(message):
             raise rollCallNotStarted("Roll call is not active")
 
         # IF RC_NUMBER IS SPECIFIED, STORE IT
-        if len(pmts) > 1 and "::" in pmts[-1]:
+        if len(pmts) > 0 and "::" in pmts[-1]:
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
@@ -933,7 +926,7 @@ async def set_location(message):
         msg = message.text
         pmts = msg.split(" ")[1:]
         rc_number = 0
-        if len(pmts) > 1 and "::" in pmts[-1]:
+        if len(pmts) > 0 and "::" in pmts[-1]:
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
@@ -1165,7 +1158,7 @@ async def in_user(message):
         comment = ""
         rc_number = 0
 
-        if len(pmts) > 1 and "::" in pmts[-1]:
+        if len(pmts) > 0 and "::" in pmts[-1]:
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
@@ -1221,7 +1214,7 @@ async def out_user(message):
         comment = ""
         rc_number = 0
 
-        if len(pmts) > 1 and "::" in pmts[-1]:
+        if len(pmts) > 0 and "::" in pmts[-1]:
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
@@ -1299,7 +1292,7 @@ async def maybe_user(message):
         comment = ""
         rc_number = 0
 
-        if len(pmts) > 1 and "::" in pmts[-1]:
+        if len(pmts) > 0 and "::" in pmts[-1]:
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
@@ -1367,7 +1360,7 @@ async def set_in_for(message):
         rc_number = 0
 
         # Optional ::N
-        if len(pmts) > 1 and "::" in pmts[-1]:
+        if len(pmts) > 0 and "::" in pmts[-1]:
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
@@ -1447,7 +1440,7 @@ async def set_out_for(message):
         comment = ""
         rc_number = 0
 
-        if len(pmts) > 1 and "::" in pmts[-1]:
+        if len(pmts) > 0 and "::" in pmts[-1]:
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
@@ -1525,7 +1518,7 @@ async def set_maybe_for(message):
         comment = ""
         rc_number = 0
 
-        if len(pmts) > 1 and "::" in pmts[-1]:
+        if len(pmts) > 0 and "::" in pmts[-1]:
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
@@ -1560,11 +1553,8 @@ async def set_maybe_for(message):
                 else:
                     await bot.send_message(cid, f"{result.name} now you are in!")
 
-            #if send_list(message, manager):
-            #    await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number + 1)))            
-                # Show updated panel for this rollcall
-                await show_panel_for_rollcall(cid, rc_number + 1)
-                return
+            # Always show updated panel for this rollcall
+            await show_panel_for_rollcall(cid, rc_number + 1)
 
     except Exception as e:
         await bot.send_message(message.chat.id, e)
@@ -1579,7 +1569,7 @@ async def whos_in(message):
         rc_number = 0
         pmts = message.text.split(" ")[1:]
 
-        if len(pmts) > 1 and "::" in pmts[-1]:
+        if len(pmts) > 0 and "::" in pmts[-1]:
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
@@ -1607,7 +1597,7 @@ async def whos_out(message):
         rc_number = 0
         pmts = message.text.split(" ")[1:]
 
-        if len(pmts) > 1 and "::" in pmts[-1]:
+        if len(pmts) > 0 and "::" in pmts[-1]:
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
@@ -1635,7 +1625,7 @@ async def whos_maybe(message):
         rc_number = 0
         pmts = message.text.split(" ")[1:]
 
-        if len(pmts) > 1 and "::" in pmts[-1]:
+        if len(pmts) > 0 and "::" in pmts[-1]:
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
@@ -1663,7 +1653,7 @@ async def whos_waiting(message):
         rc_number = 0
         pmts = message.text.split(" ")[1:]
 
-        if len(pmts) > 1 and "::" in pmts[-1]:
+        if len(pmts) > 0 and "::" in pmts[-1]:
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
@@ -1696,7 +1686,7 @@ async def set_title(message):
         pmts = msg.split(" ")[1:]
         rc_number = 0
 
-        if len(pmts) > 1 and "::" in pmts[-1]:
+        if len(pmts) > 0 and "::" in pmts[-1]:
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]

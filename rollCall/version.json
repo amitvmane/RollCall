@@ -82,5 +82,11 @@
         "Description": "Use GH_PAT for version bump push to bypass branch protection",
         "DeployedOnProd": "N",
         "DeployedDatetime": "23-04-2026 17:21 UTC"
+    },
+    {
+        "Version": 4.9,
+        "Description": "Verify GH_PAT end-to-end version bump",
+        "DeployedOnProd": "N",
+        "DeployedDatetime": "23-04-2026 17:30 UTC"
     }
 ]

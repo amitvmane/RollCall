@@ -100,5 +100,11 @@
         "Description": "Ghost Tracking \u2014 session no-show tracking with reconfirmation (v5.0)",
         "DeployedOnProd": "N",
         "DeployedDatetime": "24-04-2026 09:51 UTC"
+    },
+    {
+        "Version": 5.2,
+        "Description": "Ghost Tracking \u2014 session no-show tracking (v5.0)",
+        "DeployedOnProd": "N",
+        "DeployedDatetime": "24-04-2026 10:22 UTC"
     }
 ]

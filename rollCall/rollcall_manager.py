@@ -37,7 +37,9 @@ class RollCallManager:
                 'rollCalls': rollcalls,
                 'shh': chat_settings.get('shh_mode', False),
                 'adminRights': chat_settings.get('admin_rights', False),
-                'timezone': chat_settings.get('timezone', 'Asia/Calcutta')
+                'timezone': chat_settings.get('timezone', 'Asia/Calcutta'),
+                'absentLimit': chat_settings.get('absent_limit', 1),
+                'ghostTrackingEnabled': bool(chat_settings.get('ghost_tracking_enabled', True))
             }
 
         return self._cache[chat_id]
@@ -119,6 +121,28 @@ class RollCallManager:
             rc.save()
 
         db.update_chat_settings(chat_id, timezone=timezone)
+
+    def get_absent_limit(self, chat_id: int) -> int:
+        """Get ghost threshold for a chat"""
+        chat = self.get_chat(chat_id)
+        return chat.get('absentLimit', 1)
+
+    def set_absent_limit(self, chat_id: int, limit: int):
+        """Set ghost threshold for a chat"""
+        chat = self.get_chat(chat_id)
+        chat['absentLimit'] = limit
+        db.update_chat_settings(chat_id, absent_limit=limit)
+
+    def get_ghost_tracking_enabled(self, chat_id: int) -> bool:
+        """Get ghost tracking enabled flag for a chat"""
+        chat = self.get_chat(chat_id)
+        return chat.get('ghostTrackingEnabled', True)
+
+    def set_ghost_tracking_enabled(self, chat_id: int, enabled: bool):
+        """Set ghost tracking enabled flag for a chat"""
+        chat = self.get_chat(chat_id)
+        chat['ghostTrackingEnabled'] = enabled
+        db.update_chat_settings(chat_id, ghost_tracking_enabled=enabled)
 
     def reload_chat(self, chat_id: int):
         """Reload chat data from database"""

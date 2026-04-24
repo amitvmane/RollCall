@@ -30,6 +30,7 @@ def _message_handler_identity(*args, **kwargs):
 
 mock_bot_instance = MagicMock()
 mock_bot_instance.message_handler.side_effect = _message_handler_identity
+mock_bot_instance.callback_query_handler.side_effect = _message_handler_identity
 async_telebot_mock.AsyncTeleBot.return_value = mock_bot_instance
 
 # ---------------------------------------------------------------------------
@@ -48,7 +49,18 @@ db_mock.get_or_create_chat.return_value = {
     "shh_mode": False,
     "admin_rights": False,
     "timezone": "Asia/Calcutta",
+    "absent_limit": 1,
+    "ghost_tracking_enabled": True,
 }
+db_mock.get_ghost_count.return_value = 0
+db_mock.increment_ghost_count.return_value = True
+db_mock.reset_ghost_count.return_value = True
+db_mock.get_ghost_leaderboard.return_value = []
+db_mock.get_user_ghost_count_by_name.return_value = None
+db_mock.mark_rollcall_absent_done.return_value = True
+db_mock.get_unprocessed_rollcalls.return_value = []
+db_mock.add_ghost_event.return_value = True
+db_mock.get_rollcall_in_users.return_value = []
 db_mock.get_active_rollcalls.return_value = []
 db_mock.end_rollcall.return_value = None
 db_mock.update_chat_settings.return_value = None
@@ -64,6 +76,7 @@ config_mock = MagicMock()
 config_mock.TELEGRAM_TOKEN = "test_token"
 config_mock.ADMINS = []
 config_mock.DATABASE_URL = "sqlite:///:memory:"
+config_mock.DEFAULT_ABSENT_LIMIT = 1
 sys.modules["config"] = config_mock
 
 # ---------------------------------------------------------------------------

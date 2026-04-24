@@ -105,6 +105,8 @@ def create_tables():
                     shh_mode BOOLEAN DEFAULT FALSE,
                     admin_rights BOOLEAN DEFAULT FALSE,
                     timezone VARCHAR(100) DEFAULT 'Asia/Calcutta',
+                    absent_limit INTEGER DEFAULT 1,
+                    ghost_tracking_enabled BOOLEAN DEFAULT TRUE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -124,6 +126,7 @@ def create_tables():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     is_active BOOLEAN DEFAULT TRUE,
                     ended_at TIMESTAMP,
+                    absent_marked BOOLEAN DEFAULT FALSE,
                     FOREIGN KEY (chat_id) REFERENCES chats(chat_id) ON DELETE CASCADE
                 )
             """)
@@ -238,6 +241,8 @@ def create_tables():
                     shh_mode INTEGER DEFAULT 0,
                     admin_rights INTEGER DEFAULT 0,
                     timezone TEXT DEFAULT 'Asia/Calcutta',
+                    absent_limit INTEGER DEFAULT 1,
+                    ghost_tracking_enabled INTEGER DEFAULT 1,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -257,6 +262,7 @@ def create_tables():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     is_active INTEGER DEFAULT 1,
                     ended_at TIMESTAMP,
+                    absent_marked INTEGER DEFAULT 0,
                     FOREIGN KEY (chat_id) REFERENCES chats(chat_id) ON DELETE CASCADE
                 )
             """)
@@ -364,8 +370,60 @@ def create_tables():
                 ON proxy_users(rollcall_id, status)
             """)
         
+        # Ghost tracking tables
+        if db_type == 'postgresql':
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ghost_records (
+                    id SERIAL PRIMARY KEY,
+                    chat_id BIGINT NOT NULL,
+                    user_id BIGINT NOT NULL,
+                    user_name TEXT,
+                    ghost_count INTEGER DEFAULT 0,
+                    last_ghosted_at TIMESTAMP,
+                    UNIQUE(chat_id, user_id)
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ghost_events (
+                    id SERIAL PRIMARY KEY,
+                    rollcall_id INTEGER NOT NULL,
+                    chat_id BIGINT NOT NULL,
+                    user_id BIGINT,
+                    user_name TEXT,
+                    ghosted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (rollcall_id) REFERENCES rollcalls(id) ON DELETE CASCADE
+                )
+            """)
+        else:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ghost_records (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    user_name TEXT,
+                    ghost_count INTEGER DEFAULT 0,
+                    last_ghosted_at TIMESTAMP,
+                    UNIQUE(chat_id, user_id)
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ghost_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    rollcall_id INTEGER NOT NULL,
+                    chat_id INTEGER NOT NULL,
+                    user_id INTEGER,
+                    user_name TEXT,
+                    ghosted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (rollcall_id) REFERENCES rollcalls(id) ON DELETE CASCADE
+                )
+            """)
+
         conn.commit()
         logging.debug("Database tables created successfully")
+
+        # Migrate existing databases to add new columns if needed
+        _migrate_schema(conn)
+
     except Exception as e:
         conn.rollback()
         logging.error(f"Error creating tables: {e}")
@@ -374,6 +432,35 @@ def create_tables():
         if db_type == 'postgresql':
             cursor.close()
             release_connection(conn)
+
+
+def _migrate_schema(conn):
+    """Add new columns to existing tables for databases created before ghost tracking."""
+    migrations = []
+    if db_type == 'postgresql':
+        migrations = [
+            "ALTER TABLE chats ADD COLUMN IF NOT EXISTS absent_limit INTEGER DEFAULT 1",
+            "ALTER TABLE chats ADD COLUMN IF NOT EXISTS ghost_tracking_enabled BOOLEAN DEFAULT TRUE",
+            "ALTER TABLE rollcalls ADD COLUMN IF NOT EXISTS absent_marked BOOLEAN DEFAULT FALSE",
+        ]
+    else:
+        migrations = [
+            ("ALTER TABLE chats ADD COLUMN absent_limit INTEGER DEFAULT 1"),
+            ("ALTER TABLE chats ADD COLUMN ghost_tracking_enabled INTEGER DEFAULT 1"),
+            ("ALTER TABLE rollcalls ADD COLUMN absent_marked INTEGER DEFAULT 0"),
+        ]
+
+    cursor = conn.cursor()
+    for sql in migrations:
+        try:
+            cursor.execute(sql)
+            conn.commit()
+        except Exception:
+            # Column already exists — safe to ignore
+            conn.rollback()
+    if db_type == 'postgresql':
+        cursor.close()
+
 
 def get_or_create_chat(chat_id: int) -> Dict:
     """Get or create chat settings"""
@@ -397,16 +484,16 @@ def get_or_create_chat(chat_id: int) -> Dict:
             # Create new chat
             if db_type == 'postgresql':
                 cursor.execute(
-                    """INSERT INTO chats (chat_id, shh_mode, admin_rights, timezone)
-                    VALUES (%s, %s, %s, %s) RETURNING *""",
-                    (chat_id, False, False, 'Asia/Calcutta')
+                    """INSERT INTO chats (chat_id, shh_mode, admin_rights, timezone, absent_limit, ghost_tracking_enabled)
+                    VALUES (%s, %s, %s, %s, %s, %s) RETURNING *""",
+                    (chat_id, False, False, 'Asia/Calcutta', 1, True)
                 )
                 result = dict(cursor.fetchone())
             else:
                 cursor.execute(
-                    """INSERT INTO chats (chat_id, shh_mode, admin_rights, timezone)
-                    VALUES (?, ?, ?, ?)""",
-                    (chat_id, 0, 0, 'Asia/Calcutta')
+                    """INSERT INTO chats (chat_id, shh_mode, admin_rights, timezone, absent_limit, ghost_tracking_enabled)
+                    VALUES (?, ?, ?, ?, ?, ?)""",
+                    (chat_id, 0, 0, 'Asia/Calcutta', 1, 1)
                 )
                 # Re-query to get actual DB values instead of hardcoding
                 cursor.execute(
@@ -1335,6 +1422,257 @@ def get_template(chatid: int, name: str) -> Optional[Dict]:
         return None
     finally:
         if db_type == "postgresql":
+            cursor.close()
+            release_connection(conn)
+
+
+# ---------------------------------------------------------------------------
+# Ghost tracking functions
+# ---------------------------------------------------------------------------
+
+def get_ghost_count(chat_id: int, user_id: int) -> int:
+    """Return the ghost count for a user in a chat (0 if no record)."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(
+            f"SELECT ghost_count FROM ghost_records WHERE chat_id = {ph} AND user_id = {ph}",
+            (chat_id, user_id)
+        )
+        row = cursor.fetchone()
+        return row[0] if row else 0
+    except Exception as e:
+        logging.error(f"Error getting ghost count: {e}")
+        return 0
+    finally:
+        if db_type == 'postgresql':
+            cursor.close()
+            release_connection(conn)
+
+
+def increment_ghost_count(chat_id: int, user_id: int, user_name: str) -> bool:
+    """Increment ghost count for a user, inserting a record if one does not exist."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        if db_type == 'postgresql':
+            cursor.execute(
+                """INSERT INTO ghost_records (chat_id, user_id, user_name, ghost_count, last_ghosted_at)
+                   VALUES (%s, %s, %s, 1, CURRENT_TIMESTAMP)
+                   ON CONFLICT (chat_id, user_id) DO UPDATE
+                   SET ghost_count = ghost_records.ghost_count + 1,
+                       user_name = EXCLUDED.user_name,
+                       last_ghosted_at = CURRENT_TIMESTAMP""",
+                (chat_id, user_id, user_name)
+            )
+        else:
+            cursor.execute(
+                """INSERT INTO ghost_records (chat_id, user_id, user_name, ghost_count, last_ghosted_at)
+                   VALUES (?, ?, ?, 1, CURRENT_TIMESTAMP)
+                   ON CONFLICT (chat_id, user_id) DO UPDATE
+                   SET ghost_count = ghost_count + 1,
+                       user_name = excluded.user_name,
+                       last_ghosted_at = CURRENT_TIMESTAMP""",
+                (chat_id, user_id, user_name)
+            )
+        conn.commit()
+        logging.info(f"Incremented ghost count for user {user_id} in chat {chat_id}")
+        return True
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"Error incrementing ghost count: {e}")
+        return False
+    finally:
+        if db_type == 'postgresql':
+            cursor.close()
+            release_connection(conn)
+
+
+def reset_ghost_count(chat_id: int, user_id: int) -> bool:
+    """Reset ghost count to 0 for a user (admin clear)."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(
+            f"UPDATE ghost_records SET ghost_count = 0, last_ghosted_at = NULL WHERE chat_id = {ph} AND user_id = {ph}",
+            (chat_id, user_id)
+        )
+        conn.commit()
+        logging.info(f"Reset ghost count for user {user_id} in chat {chat_id}")
+        return True
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"Error resetting ghost count: {e}")
+        return False
+    finally:
+        if db_type == 'postgresql':
+            cursor.close()
+            release_connection(conn)
+
+
+def get_ghost_leaderboard(chat_id: int) -> List[Dict]:
+    """Return all users with ghost_count > 0 for a chat, sorted descending."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(
+            f"""SELECT user_id, user_name, ghost_count, last_ghosted_at
+                FROM ghost_records
+                WHERE chat_id = {ph} AND ghost_count > 0
+                ORDER BY ghost_count DESC, last_ghosted_at DESC""",
+            (chat_id,)
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    except Exception as e:
+        logging.error(f"Error getting ghost leaderboard: {e}")
+        return []
+    finally:
+        if db_type == 'postgresql':
+            cursor.close()
+            release_connection(conn)
+
+
+def get_user_ghost_count_by_name(chat_id: int, user_name: str) -> Optional[Dict]:
+    """Find a ghost record by user_name for a chat (for admin /clear_absent by name)."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(
+            f"SELECT user_id, user_name, ghost_count FROM ghost_records WHERE chat_id = {ph} AND user_name = {ph}",
+            (chat_id, user_name)
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except Exception as e:
+        logging.error(f"Error looking up ghost record by name: {e}")
+        return None
+    finally:
+        if db_type == 'postgresql':
+            cursor.close()
+            release_connection(conn)
+
+
+def mark_rollcall_absent_done(rollcall_id: int) -> bool:
+    """Mark a rollcall's absent selection as completed."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        val = True if db_type == 'postgresql' else 1
+        cursor.execute(
+            f"UPDATE rollcalls SET absent_marked = {ph} WHERE id = {ph}",
+            (val, rollcall_id)
+        )
+        conn.commit()
+        logging.info(f"Marked rollcall {rollcall_id} absent_marked=True")
+        return True
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"Error marking rollcall absent done: {e}")
+        return False
+    finally:
+        if db_type == 'postgresql':
+            cursor.close()
+            release_connection(conn)
+
+
+def get_unprocessed_rollcalls(chat_id: int, days: int = 30) -> List[Dict]:
+    """
+    Return ended roll calls that still need absent marking:
+      - is_active = FALSE (ended)
+      - absent_marked = FALSE (not yet processed)
+      - ended_at within the last `days` days
+      - had at least one user with status='in'
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        if db_type == 'postgresql':
+            cursor.execute(
+                """SELECT r.id, r.title, r.ended_at
+                   FROM rollcalls r
+                   WHERE r.chat_id = %s
+                     AND r.is_active = FALSE
+                     AND r.absent_marked = FALSE
+                     AND r.ended_at >= NOW() - INTERVAL '%s days'
+                     AND EXISTS (
+                         SELECT 1 FROM users u
+                         WHERE u.rollcall_id = r.id AND u.status = 'in'
+                     )
+                   ORDER BY r.ended_at DESC""",
+                (chat_id, days)
+            )
+        else:
+            cursor.execute(
+                """SELECT r.id, r.title, r.ended_at
+                   FROM rollcalls r
+                   WHERE r.chat_id = ?
+                     AND r.is_active = 0
+                     AND r.absent_marked = 0
+                     AND r.ended_at >= datetime('now', ? || ' days')
+                     AND EXISTS (
+                         SELECT 1 FROM users u
+                         WHERE u.rollcall_id = r.id AND u.status = 'in'
+                     )
+                   ORDER BY r.ended_at DESC""",
+                (chat_id, f'-{days}')
+            )
+        return [dict(row) for row in cursor.fetchall()]
+    except Exception as e:
+        logging.error(f"Error getting unprocessed rollcalls: {e}")
+        return []
+    finally:
+        if db_type == 'postgresql':
+            cursor.close()
+            release_connection(conn)
+
+
+def add_ghost_event(rollcall_id: int, chat_id: int, user_id: int, user_name: str) -> bool:
+    """Record an individual ghost event for audit trail."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(
+            f"""INSERT INTO ghost_events (rollcall_id, chat_id, user_id, user_name)
+                VALUES ({ph}, {ph}, {ph}, {ph})""",
+            (rollcall_id, chat_id, user_id, user_name)
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"Error adding ghost event: {e}")
+        return False
+    finally:
+        if db_type == 'postgresql':
+            cursor.close()
+            release_connection(conn)
+
+
+def get_rollcall_in_users(rollcall_id: int) -> List[Dict]:
+    """Return all real users (non-proxy) with status='in' for a given rollcall."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(
+            f"""SELECT user_id, first_name, username
+                FROM users
+                WHERE rollcall_id = {ph} AND status = 'in'
+                ORDER BY in_pos ASC""",
+            (rollcall_id,)
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    except Exception as e:
+        logging.error(f"Error getting rollcall IN users: {e}")
+        return []
+    finally:
+        if db_type == 'postgresql':
             cursor.close()
             release_connection(conn)
 

@@ -89,6 +89,8 @@ class HandlerTestBase(unittest.IsolatedAsyncioTestCase):
         m.get_rollcall.return_value = rollcalls[0] if rollcalls else None
         m.get_shh_mode.return_value = False
         m.get_admin_rights.return_value = False
+        m.get_ghost_tracking_enabled.return_value = True
+        m.get_absent_limit.return_value = 1
         return m
 
     # ---- helpers ----------------------------------------------------------

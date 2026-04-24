@@ -453,15 +453,15 @@ class TestSetAbsentLimit(GhostTestBase):
 
 
 # ===========================================================================
-# 9. /absent_stats command (public)
+# 9. /stats ghost (replaces standalone /absent_stats)
 # ===========================================================================
 
-class TestAbsentStats(GhostTestBase):
+class TestStatsGhost(GhostTestBase):
 
     async def test_no_ghosts_sends_clean_message(self):
         with patch('telegram_helper.get_ghost_leaderboard', return_value=[]), \
              patch('telegram_helper.manager', self.manager):
-            await self.th.absent_stats(self._make_message("/absent_stats"))
+            await self.th.stats_command(self._make_message("/stats ghost"))
 
         self.assertIn("🏆", self._sent_text(0))
 
@@ -472,7 +472,7 @@ class TestAbsentStats(GhostTestBase):
         ]
         with patch('telegram_helper.get_ghost_leaderboard', return_value=board), \
              patch('telegram_helper.manager', self.manager):
-            await self.th.absent_stats(self._make_message("/absent_stats"))
+            await self.th.stats_command(self._make_message("/stats ghost"))
 
         text = self._sent_text(0)
         self.assertIn("Bob", text)
@@ -484,9 +484,23 @@ class TestAbsentStats(GhostTestBase):
         self.manager.get_absent_limit.return_value = 2
         with patch('telegram_helper.get_ghost_leaderboard', return_value=board), \
              patch('telegram_helper.manager', self.manager):
-            await self.th.absent_stats(self._make_message("/absent_stats"))
+            await self.th.stats_command(self._make_message("/stats ghost"))
 
         self.assertIn("⚠️", self._sent_text(0))
+
+    async def test_ghosts_alias_works(self):
+        with patch('telegram_helper.get_ghost_leaderboard', return_value=[]), \
+             patch('telegram_helper.manager', self.manager):
+            await self.th.stats_command(self._make_message("/stats ghosts"))
+
+        self.assertIn("🏆", self._sent_text(0))
+
+    async def test_absent_alias_works(self):
+        with patch('telegram_helper.get_ghost_leaderboard', return_value=[]), \
+             patch('telegram_helper.manager', self.manager):
+            await self.th.stats_command(self._make_message("/stats absent"))
+
+        self.assertIn("🏆", self._sent_text(0))
 
 
 # ===========================================================================

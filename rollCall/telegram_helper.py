@@ -1861,6 +1861,7 @@ async def stats_command(message):
     /stats group -> group totals
     /stats @username / name -> that user's stats in this chat
     /stats top -> top users by IN count in this chat
+    /stats ghost -> ghost leaderboard for this chat
     /stats bot -> bot-wide statistics (OWNER ONLY)
     """
     cid = message.chat.id
@@ -1881,6 +1882,8 @@ async def stats_command(message):
             scope = "group"
         elif lower_arg == "top":
             scope = "top"
+        elif lower_arg in ["ghost", "ghosts", "absent"]:
+            scope = "ghost"
         elif lower_arg in ["bot", "global", "all"]:
             # ✅ BOT-WIDE STATS - OWNER ONLY CHECK
             if message.from_user.id not in ADMINS:
@@ -1907,16 +1910,41 @@ async def stats_command(message):
             text = await build_group_stats_text(cid)
         elif scope == "top":
             text = await build_leaderboard_text(cid)
+        elif scope == "ghost":
+            text = await build_ghost_stats_text(cid, manager)
         elif scope == "bot":
-            # ✅ NEW: Bot-wide statistics
             text = await build_bot_stats_text()
         else:
             text = await build_user_stats_text(cid, target_user_id, display_name)
-        
+
         await bot.send_message(cid, text, parse_mode="Markdown")
     except Exception as e:
         logging.exception("Error in /stats")
         await bot.send_message(cid, "Error while fetching stats, please try again later.")
+
+
+async def build_ghost_stats_text(cid: int, mgr) -> str:
+    """Build the ghost leaderboard text for /stats ghost."""
+    leaderboard = get_ghost_leaderboard(cid)
+    limit = mgr.get_absent_limit(cid)
+    tracking_on = mgr.get_ghost_tracking_enabled(cid)
+
+    if not leaderboard:
+        return "🏆 No ghosts yet — everyone's been showing up!"
+
+    lines = ["👻 *Ghost Leaderboard*", "─────────────────"]
+    for i, entry in enumerate(leaderboard, 1):
+        name = entry.get('user_name') or f"User {entry['user_id']}"
+        count = entry['ghost_count']
+        warning = " ⚠️" if count >= limit else ""
+        lines.append(f"{i}. {name} — {count} session(s) ghosted{warning}")
+
+    lines.append("")
+    lines.append(f"Current ghost limit: {limit} session(s)")
+    if not tracking_on:
+        lines.append("_(Ghost tracking is currently disabled for this group)_")
+
+    return "\n".join(lines)
 
 
 async def build_bot_stats_text() -> str:
@@ -3196,36 +3224,6 @@ async def set_absent_limit(message):
             f"✅ Ghost limit set to {limit}.\n"
             f"Users who ghost {limit}+ session(s) will be asked to reconfirm their IN vote. 👻"
         )
-    except Exception as e:
-        await bot.send_message(message.chat.id, e)
-
-
-@bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/absent_stats")
-async def absent_stats(message):
-    """Public: show ghost leaderboard for this chat."""
-    try:
-        cid = message.chat.id
-        leaderboard = get_ghost_leaderboard(cid)
-        limit = manager.get_absent_limit(cid)
-        tracking_on = manager.get_ghost_tracking_enabled(cid)
-
-        if not leaderboard:
-            await bot.send_message(cid, "🏆 No ghosts yet — everyone's been showing up!")
-            return
-
-        lines = ["👻 *Ghost Leaderboard*", "─────────────────"]
-        for i, entry in enumerate(leaderboard, 1):
-            name = entry.get('user_name') or f"User {entry['user_id']}"
-            count = entry['ghost_count']
-            warning = " ⚠️" if count >= limit else ""
-            lines.append(f"{i}. {name} — {count} session(s) ghosted{warning}")
-
-        lines.append("")
-        lines.append(f"Current ghost limit: {limit} session(s)")
-        if not tracking_on:
-            lines.append("_(Ghost tracking is currently disabled for this group)_")
-
-        await bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
     except Exception as e:
         await bot.send_message(message.chat.id, e)
 

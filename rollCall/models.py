@@ -78,7 +78,8 @@ class RollCall:
             else:
                 self.id = None
                 self.chat_id = None
-    
+            self.absent_marked = False
+
     def _load_from_db(self, db_id):
         """Load rollcall data from database"""
         data = db.get_rollcall(db_id)
@@ -91,6 +92,7 @@ class RollCall:
         self.timezone = data['timezone']
         self.location = data['location']
         self.event_fee = data['event_fee']
+        self.absent_marked = bool(data.get('absent_marked', False))
         raw_limit = data['in_list_limit']
         try:
             self.inListLimit = int(raw_limit) if raw_limit is not None else None

@@ -22,3 +22,6 @@ ADMINS = _parse_admins()
 
 # Default to SQLite if DATABASE_URL is not set
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///rollcall.db")
+
+# Ghost tracking defaults
+DEFAULT_ABSENT_LIMIT = 1

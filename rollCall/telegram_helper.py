@@ -23,9 +23,52 @@ from db import add_or_update_proxy_user
 from db import increment_user_stat, increment_rollcall_stat
 from db import create_or_update_template, get_templates, get_template, delete_template
 from db import get_all_chat_ids
+from db import (
+    get_ghost_count, increment_ghost_count, reset_ghost_count,
+    get_ghost_leaderboard, get_user_ghost_count_by_name,
+    mark_rollcall_absent_done, get_unprocessed_rollcalls,
+    add_ghost_event, get_rollcall_in_users
+)
 
 bot = AsyncTeleBot(token=TELEGRAM_TOKEN)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Ghost tracking in-memory state
+# (chat_id, rollcall_db_id) -> set of user_ids selected as ghosts
+_ghost_selections: dict = {}
+# (chat_id, user_id) -> {'rc_number': int, 'comment': str} for pending reconfirmation
+_pending_reconf: dict = {}
+
+
+def _fmt_ended_at(ended_at) -> str:
+    """Format a rollcall ended_at timestamp to a human-readable date string."""
+    if not ended_at:
+        return "Unknown date"
+    if isinstance(ended_at, str):
+        try:
+            ended_at = datetime.fromisoformat(ended_at.replace("Z", "+00:00"))
+        except Exception:
+            return str(ended_at)
+    try:
+        return ended_at.strftime("%d %b %Y")
+    except Exception:
+        return str(ended_at)
+
+
+def _build_ghost_select_keyboard(rc_db_id: int, in_users: list, selected_ids: set) -> InlineKeyboardMarkup:
+    """Build the ghost selection keyboard from a list of IN users."""
+    markup = InlineKeyboardMarkup(row_width=2)
+    for u in in_users:
+        uid = u['user_id']
+        name = u.get('first_name') or u.get('username') or str(uid)
+        tick = "👻 " if uid in selected_ids else ""
+        markup.add(InlineKeyboardButton(
+            f"{tick}{name}",
+            callback_data=f"ghost_tog_{rc_db_id}_{uid}"
+        ))
+    markup.add(InlineKeyboardButton("✅ Done", callback_data=f"ghost_done_{rc_db_id}"))
+    return markup
+
 
 def data_file_path(filename: str) -> str:
     return os.path.join(BASE_DIR, filename)
@@ -1203,6 +1246,26 @@ async def in_user(message):
             comment = ' '.join(arr)
         user.comment = comment
 
+        # Ghost reconfirmation check
+        if isinstance(user.user_id, int) and manager.get_ghost_tracking_enabled(cid):
+            ghost_count = get_ghost_count(cid, user.user_id)
+            absent_limit = manager.get_absent_limit(cid)
+            if ghost_count >= absent_limit:
+                _pending_reconf[(cid, user.user_id)] = {'rc_number': rc_number, 'comment': comment}
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(
+                    InlineKeyboardButton("💪 Yes, I'll be there!", callback_data=f"reconf_in_{rc_number}_{user.user_id}"),
+                    InlineKeyboardButton("🤔 Mark me Maybe", callback_data=f"reconf_maybe_{rc_number}_{user.user_id}"),
+                    InlineKeyboardButton("❌ I'm out", callback_data=f"reconf_out_{rc_number}_{user.user_id}"),
+                )
+                await bot.send_message(
+                    cid,
+                    f"👻 Hey {user.name}, you've ghosted {ghost_count} session(s) before.\n"
+                    f"Still committing to IN?",
+                    reply_markup=markup
+                )
+                return
+
         result = rc.addIn(user)
         rc.save()
 
@@ -1757,12 +1820,24 @@ async def end_roll_call(message):
         if len(rollcalls) < rc_number + 1:
             raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
         rc = manager.get_rollcall(cid, rc_number)
+        # Capture ghost tracking info before removing from manager
+        rc_db_id = rc.id
+        ghost_tracking_on = manager.get_ghost_tracking_enabled(cid)
+        had_in_users = len([u for u in rc.inList if isinstance(u.user_id, int)]) > 0
         # End current rollcall
-        await bot.send_message(message.chat.id, "Roll ended!")
+        await bot.send_message(message.chat.id, "🎉 Roll ended!")
         await bot.send_message(cid, rc.finishList().replace("__RCID__", str(rc_number + 1)))
         logging.info("The roll call " + rc.title + " has ended")
         manager.remove_rollcall(cid, rc_number)
         logging.info(f"[CHAT {cid}] Rollcall ended: '{rc.title}' by {message.from_user.first_name} (@{message.from_user.username})")
+        # Ghost tracking prompt
+        if ghost_tracking_on and had_in_users and rc_db_id:
+            markup = InlineKeyboardMarkup(row_width=2)
+            markup.add(
+                InlineKeyboardButton("👻 Yes, select ghosts", callback_data=f"ghost_yes_{rc_db_id}"),
+                InlineKeyboardButton("✅ No, all showed up", callback_data=f"ghost_no_{rc_db_id}")
+            )
+            await bot.send_message(cid, "👻 Did anyone ghost today's session?", reply_markup=markup)
         # warning + optional re-broadcast
         updated_rollcalls = manager.get_rollcalls(cid)
         if len(updated_rollcalls) > 0:
@@ -2423,6 +2498,241 @@ async def get_end_confirm_keyboard(rc_number: int) -> InlineKeyboardMarkup:
     return markup
 
 
+@bot.callback_query_handler(func=lambda call: call.data and (
+    call.data.startswith("ghost_") or call.data.startswith("reconf_") or call.data.startswith("mabs_")
+))
+async def ghost_callback_handler(call):
+    """
+    Handle ghost tracking and reconfirmation inline keyboard callbacks.
+
+    Patterns:
+      ghost_yes_<rc_db_id>           - organiser says yes, someone ghosted — show IN list
+      ghost_no_<rc_db_id>            - organiser says no — mark session processed
+      ghost_tog_<rc_db_id>_<user_id> - toggle a user's ghost selection
+      ghost_done_<rc_db_id>          - confirm ghost selections and save
+      reconf_in_<rc_num>_<user_id>   - user confirms IN after ghost warning
+      reconf_maybe_<rc_num>_<user_id>- user downgrades to MAYBE after warning
+      reconf_out_<rc_num>_<user_id>  - user opts out after warning
+      mabs_sel_<rc_db_id>            - admin selects a rollcall in /mark_absent
+    """
+    try:
+        cid = call.message.chat.id
+        data = call.data
+
+        # ----------------------------------------------------------------
+        # ghost_no — all showed up, mark session as processed
+        # ----------------------------------------------------------------
+        if data.startswith("ghost_no_"):
+            rc_db_id = int(data.split("_", 2)[2])
+            mark_rollcall_absent_done(rc_db_id)
+            _ghost_selections.pop((cid, rc_db_id), None)
+            await bot.answer_callback_query(call.id, "✅ Got it!")
+            await bot.edit_message_text(
+                "✅ No ghosts — everyone showed up! Great session! 🎉",
+                cid, call.message.message_id
+            )
+            return
+
+        # ----------------------------------------------------------------
+        # ghost_yes — show IN list for selection
+        # ----------------------------------------------------------------
+        if data.startswith("ghost_yes_"):
+            rc_db_id = int(data.split("_", 2)[2])
+            in_users = get_rollcall_in_users(rc_db_id)
+            if not in_users:
+                await bot.answer_callback_query(call.id, "No IN users found for this session.")
+                return
+            _ghost_selections[(cid, rc_db_id)] = set()
+            markup = _build_ghost_select_keyboard(rc_db_id, in_users, set())
+            await bot.answer_callback_query(call.id)
+            await bot.edit_message_text(
+                "👻 Who ghosted? Tap to select, then tap Done.",
+                cid, call.message.message_id, reply_markup=markup
+            )
+            return
+
+        # ----------------------------------------------------------------
+        # ghost_tog — toggle a user's ghost selection
+        # ----------------------------------------------------------------
+        if data.startswith("ghost_tog_"):
+            parts = data.split("_")
+            rc_db_id = int(parts[2])
+            user_id = int(parts[3])
+            key = (cid, rc_db_id)
+            if key not in _ghost_selections:
+                _ghost_selections[key] = set()
+            if user_id in _ghost_selections[key]:
+                _ghost_selections[key].discard(user_id)
+            else:
+                _ghost_selections[key].add(user_id)
+            in_users = get_rollcall_in_users(rc_db_id)
+            markup = _build_ghost_select_keyboard(rc_db_id, in_users, _ghost_selections[key])
+            await bot.answer_callback_query(call.id)
+            try:
+                await bot.edit_message_reply_markup(cid, call.message.message_id, reply_markup=markup)
+            except Exception as e:
+                if "message is not modified" not in str(e):
+                    raise
+            return
+
+        # ----------------------------------------------------------------
+        # ghost_done — save ghost records and confirm
+        # ----------------------------------------------------------------
+        if data.startswith("ghost_done_"):
+            rc_db_id = int(data.split("_", 2)[2])
+            key = (cid, rc_db_id)
+            selected = _ghost_selections.pop(key, set())
+            mark_rollcall_absent_done(rc_db_id)
+
+            if not selected:
+                await bot.answer_callback_query(call.id, "No ghosts selected — marking all as attended.")
+                await bot.edit_message_text("✅ No ghosts selected — all marked as attended.", cid, call.message.message_id)
+                return
+
+            in_users = get_rollcall_in_users(rc_db_id)
+            user_map = {u['user_id']: u for u in in_users}
+            lines = []
+            for uid in selected:
+                u = user_map.get(uid)
+                if not u:
+                    continue
+                name = u.get('first_name') or u.get('username') or str(uid)
+                increment_ghost_count(cid, uid, name)
+                add_ghost_event(rc_db_id, cid, uid, name)
+                new_count = get_ghost_count(cid, uid)
+                lines.append(f"👻 {name} — ghosted {new_count} session(s) total")
+
+            summary = "\n".join(lines)
+            await bot.answer_callback_query(call.id, f"{len(selected)} ghost(s) recorded.")
+            await bot.edit_message_text(
+                f"👻 Ghost session recorded!\n\n{summary}",
+                cid, call.message.message_id
+            )
+            return
+
+        # ----------------------------------------------------------------
+        # reconf_in — user confirms they will show up
+        # ----------------------------------------------------------------
+        if data.startswith("reconf_in_"):
+            parts = data.split("_")
+            rc_number = int(parts[2])
+            uid = int(parts[3])
+            if call.from_user.id != uid:
+                await bot.answer_callback_query(call.id, "This confirmation is not for you.")
+                return
+            state = _pending_reconf.pop((cid, uid), {})
+            rollcalls = manager.get_rollcalls(cid)
+            if rc_number >= len(rollcalls):
+                await bot.answer_callback_query(call.id, "Roll call no longer active.")
+                return
+            rc = rollcalls[rc_number]
+            _username = call.from_user.username or None
+            user = User(_get_display_name(call.from_user), _username, uid, rc.allNames)
+            user.comment = state.get('comment', '')
+            result = rc.addIn(user)
+            rc.save()
+            rc_db_id = get_rc_db_id(rc)
+            if result not in ('AB', 'AC') and rc_db_id and isinstance(uid, int):
+                increment_user_stat(cid, uid, "total_in")
+                increment_rollcall_stat(rc_db_id, "total_in")
+            await bot.answer_callback_query(call.id, "💪 You're IN!")
+            await bot.edit_message_text(
+                f"💪 {user.name} committed to IN!\n\n{rc.allList().replace('__RCID__', str(rc_number + 1))}",
+                cid, call.message.message_id
+            )
+            return
+
+        # ----------------------------------------------------------------
+        # reconf_maybe — user downgrades to MAYBE
+        # ----------------------------------------------------------------
+        if data.startswith("reconf_maybe_"):
+            parts = data.split("_")
+            rc_number = int(parts[2])
+            uid = int(parts[3])
+            if call.from_user.id != uid:
+                await bot.answer_callback_query(call.id, "This confirmation is not for you.")
+                return
+            _pending_reconf.pop((cid, uid), None)
+            rollcalls = manager.get_rollcalls(cid)
+            if rc_number >= len(rollcalls):
+                await bot.answer_callback_query(call.id, "Roll call no longer active.")
+                return
+            rc = rollcalls[rc_number]
+            _username = call.from_user.username or None
+            user = User(_get_display_name(call.from_user), _username, uid, rc.allNames)
+            rc.addMaybe(user)
+            rc.save()
+            rc_db_id = get_rc_db_id(rc)
+            if rc_db_id and isinstance(uid, int):
+                increment_user_stat(cid, uid, "total_maybe")
+                increment_rollcall_stat(rc_db_id, "total_maybe")
+            await bot.answer_callback_query(call.id, "🤔 Marked as Maybe")
+            await bot.edit_message_text(
+                f"🤔 {user.name} marked as Maybe.\n\n{rc.allList().replace('__RCID__', str(rc_number + 1))}",
+                cid, call.message.message_id
+            )
+            return
+
+        # ----------------------------------------------------------------
+        # reconf_out — user opts out
+        # ----------------------------------------------------------------
+        if data.startswith("reconf_out_"):
+            parts = data.split("_")
+            rc_number = int(parts[2])
+            uid = int(parts[3])
+            if call.from_user.id != uid:
+                await bot.answer_callback_query(call.id, "This confirmation is not for you.")
+                return
+            _pending_reconf.pop((cid, uid), None)
+            rollcalls = manager.get_rollcalls(cid)
+            if rc_number >= len(rollcalls):
+                await bot.answer_callback_query(call.id, "Roll call no longer active.")
+                return
+            rc = rollcalls[rc_number]
+            _username = call.from_user.username or None
+            user = User(_get_display_name(call.from_user), _username, uid, rc.allNames)
+            rc.addOut(user)
+            rc.save()
+            rc_db_id = get_rc_db_id(rc)
+            if rc_db_id and isinstance(uid, int):
+                increment_user_stat(cid, uid, "total_out")
+                increment_rollcall_stat(rc_db_id, "total_out")
+            await bot.answer_callback_query(call.id, "❌ Marked as Out")
+            await bot.edit_message_text(
+                f"❌ {user.name} is out.\n\n{rc.allList().replace('__RCID__', str(rc_number + 1))}",
+                cid, call.message.message_id
+            )
+            return
+
+        # ----------------------------------------------------------------
+        # mabs_sel — admin selected a rollcall from /mark_absent list
+        # ----------------------------------------------------------------
+        if data.startswith("mabs_sel_"):
+            rc_db_id = int(data.split("_", 2)[2])
+            in_users = get_rollcall_in_users(rc_db_id)
+            if not in_users:
+                await bot.answer_callback_query(call.id, "No IN users found for this session.")
+                await bot.edit_message_text("⚠️ No IN users were found for this session.", cid, call.message.message_id)
+                return
+            _ghost_selections[(cid, rc_db_id)] = set()
+            markup = _build_ghost_select_keyboard(rc_db_id, in_users, set())
+            await bot.answer_callback_query(call.id)
+            await bot.edit_message_text(
+                "👻 Who ghosted? Tap to select, then tap Done.",
+                cid, call.message.message_id, reply_markup=markup
+            )
+            return
+
+        await bot.answer_callback_query(call.id, "Unknown ghost action")
+
+    except Exception as e:
+        logging.exception("Error in ghost_callback_handler")
+        try:
+            await bot.answer_callback_query(call.id, str(e)[:200])
+        except Exception:
+            pass
+
+
 @bot.callback_query_handler(func=lambda call: True)
 async def callback_handler(call):
     """
@@ -2830,3 +3140,167 @@ async def notify_proxy_owner_wait_to_in(rc, moved_user: User, cid, title: str, r
         await bot.send_message(cid, txt, parse_mode="Markdown")
     except Exception:
         logging.exception("Failed to notify proxy owner for WAITING→IN")
+
+
+# ===========================================================================
+# Ghost tracking commands
+# ===========================================================================
+
+@bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/toggle_ghost_tracking")
+async def toggle_ghost_tracking(message):
+    """Admin only: enable or disable ghost tracking for this chat."""
+    try:
+        if await admin_rights(message, manager) == False:
+            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
+        cid = message.chat.id
+        current = manager.get_ghost_tracking_enabled(cid)
+        new_state = not current
+        manager.set_ghost_tracking_enabled(cid, new_state)
+        if new_state:
+            await bot.send_message(
+                cid,
+                "👻 Ghost tracking enabled for this group.\n"
+                "Users will be asked after /erc if anyone ghosted."
+            )
+        else:
+            await bot.send_message(
+                cid,
+                "🔕 Ghost tracking disabled for this group.\n"
+                "/erc will end sessions without ghost prompts."
+            )
+    except Exception as e:
+        await bot.send_message(message.chat.id, e)
+
+
+@bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/set_absent_limit")
+async def set_absent_limit(message):
+    """Admin only: set the ghost threshold for this chat."""
+    try:
+        if await admin_rights(message, manager) == False:
+            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
+        cid = message.chat.id
+        parts = message.text.strip().split()
+        if len(parts) < 2:
+            await bot.send_message(cid, "Usage: /set_absent_limit <number>\nExample: /set_absent_limit 3")
+            return
+        try:
+            limit = int(parts[1])
+            if limit < 1:
+                raise ValueError()
+        except ValueError:
+            await bot.send_message(cid, "⚠️ Please provide a positive integer. Example: /set_absent_limit 3")
+            return
+        manager.set_absent_limit(cid, limit)
+        await bot.send_message(
+            cid,
+            f"✅ Ghost limit set to {limit}.\n"
+            f"Users who ghost {limit}+ session(s) will be asked to reconfirm their IN vote. 👻"
+        )
+    except Exception as e:
+        await bot.send_message(message.chat.id, e)
+
+
+@bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/absent_stats")
+async def absent_stats(message):
+    """Public: show ghost leaderboard for this chat."""
+    try:
+        cid = message.chat.id
+        leaderboard = get_ghost_leaderboard(cid)
+        limit = manager.get_absent_limit(cid)
+        tracking_on = manager.get_ghost_tracking_enabled(cid)
+
+        if not leaderboard:
+            await bot.send_message(cid, "🏆 No ghosts yet — everyone's been showing up!")
+            return
+
+        lines = ["👻 *Ghost Leaderboard*", "─────────────────"]
+        for i, entry in enumerate(leaderboard, 1):
+            name = entry.get('user_name') or f"User {entry['user_id']}"
+            count = entry['ghost_count']
+            warning = " ⚠️" if count >= limit else ""
+            lines.append(f"{i}. {name} — {count} session(s) ghosted{warning}")
+
+        lines.append("")
+        lines.append(f"Current ghost limit: {limit} session(s)")
+        if not tracking_on:
+            lines.append("_(Ghost tracking is currently disabled for this group)_")
+
+        await bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
+    except Exception as e:
+        await bot.send_message(message.chat.id, e)
+
+
+@bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/clear_absent")
+async def clear_absent(message):
+    """Admin only: reset a user's ghost count by name."""
+    try:
+        if await admin_rights(message, manager) == False:
+            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
+        cid = message.chat.id
+        parts = message.text.strip().split(None, 1)
+        if len(parts) < 2:
+            await bot.send_message(cid, "Usage: /clear_absent <name>\nExample: /clear_absent John")
+            return
+        target_name = parts[1].strip()
+
+        # Try exact match first, then fuzzy via leaderboard
+        record = get_user_ghost_count_by_name(cid, target_name)
+        if not record:
+            # Fuzzy: find closest name in leaderboard
+            leaderboard = get_ghost_leaderboard(cid)
+            best = None
+            best_score = None
+            try:
+                from Levenshtein import distance as lev_distance
+                for entry in leaderboard:
+                    name = entry.get('user_name') or ""
+                    score = lev_distance(target_name.lower(), name.lower())
+                    if best_score is None or score < best_score:
+                        best_score = score
+                        best = entry
+            except ImportError:
+                pass
+            if best and best_score is not None and best_score <= 3:
+                record = best
+            else:
+                await bot.send_message(cid, f"⚠️ No ghost record found for '{target_name}'.")
+                return
+
+        reset_ghost_count(cid, record['user_id'])
+        name = record.get('user_name') or target_name
+        await bot.send_message(cid, f"✅ {name}'s ghost record has been cleared. Fresh start! 👻➡️✅")
+    except Exception as e:
+        await bot.send_message(message.chat.id, e)
+
+
+@bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/mark_absent")
+async def mark_absent(message):
+    """Admin only: select ghosts for a previously ended roll call."""
+    try:
+        if await admin_rights(message, manager) == False:
+            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
+        cid = message.chat.id
+
+        if not manager.get_ghost_tracking_enabled(cid):
+            await bot.send_message(
+                cid,
+                "⚠️ Ghost tracking is not enabled for this group.\n"
+                "Admin can enable it with /toggle_ghost_tracking"
+            )
+            return
+
+        sessions = get_unprocessed_rollcalls(cid, days=30)
+        if not sessions:
+            await bot.send_message(cid, "✅ No sessions need absent marking — you're all caught up!")
+            return
+
+        markup = InlineKeyboardMarkup(row_width=1)
+        for s in sessions:
+            date_str = _fmt_ended_at(s.get('ended_at'))
+            title = s.get('title') or "Untitled"
+            label = f"📋 {title} — {date_str}"
+            markup.add(InlineKeyboardButton(label, callback_data=f"mabs_sel_{s['id']}"))
+
+        await bot.send_message(cid, "Which session do you want to review?", reply_markup=markup)
+    except Exception as e:
+        await bot.send_message(message.chat.id, e)

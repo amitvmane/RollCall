@@ -91,8 +91,14 @@
     },
     {
         "Version": 5.0,
-        "Description": "Major release: Ghost Tracking feature. Bot now tracks session no-shows per user. After /erc, organiser is asked if anyone ghosted — tap to select from the IN list. Repeat ghosts get a reconfirmation prompt when voting IN again. New commands: /absent_stats (public leaderboard), /set_absent_limit, /mark_absent, /clear_absent, /toggle_ghost_tracking. Ghost tracking is enabled by default with a limit of 1 missed session.",
+        "Description": "Major release: Ghost Tracking feature. Bot now tracks session no-shows per user. After /erc, organiser is asked if anyone ghosted \u2014 tap to select from the IN list. Repeat ghosts get a reconfirmation prompt when voting IN again. New commands: /absent_stats (public leaderboard), /set_absent_limit, /mark_absent, /clear_absent, /toggle_ghost_tracking. Ghost tracking is enabled by default with a limit of 1 missed session.",
         "DeployedOnProd": "N",
         "DeployedDatetime": "24-04-2026 00:00 UTC"
+    },
+    {
+        "Version": 5.1,
+        "Description": "Ghost Tracking \u2014 session no-show tracking with reconfirmation (v5.0)",
+        "DeployedOnProd": "N",
+        "DeployedDatetime": "24-04-2026 09:51 UTC"
     }
 ]

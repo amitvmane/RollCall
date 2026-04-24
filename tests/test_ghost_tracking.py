@@ -215,6 +215,24 @@ class TestErcGhostPrompt(GhostTestBase):
                  for i in range(self._sent_count())]
         self.assertFalse(any("👻" in t for t in texts))
 
+    async def test_no_ghost_prompt_for_pre_deployment_rollcall(self):
+        """Rollcalls that existed before deployment have absent_marked=True
+        and must never trigger the ghost prompt, even with IN users."""
+        from unittest.mock import MagicMock as MM
+        in_user = MM()
+        in_user.user_id = 5
+        self.rc.inList = [in_user]
+        self.rc.absent_marked = True  # simulates a pre-deployment rollcall
+
+        with self._rc_started(), \
+             patch('telegram_helper.admin_rights', new=AsyncMock(return_value=True)), \
+             patch('telegram_helper.manager', self.manager):
+            await self.th.end_roll_call(self._make_message("/erc"))
+
+        texts = [self.th.bot.send_message.call_args_list[i][0][1]
+                 for i in range(self._sent_count())]
+        self.assertFalse(any("👻" in t for t in texts))
+
 
 # ===========================================================================
 # 3. /in — reconfirmation triggered when ghost_count >= absent_limit

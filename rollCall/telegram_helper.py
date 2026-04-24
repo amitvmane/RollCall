@@ -1831,7 +1831,7 @@ async def end_roll_call(message):
         manager.remove_rollcall(cid, rc_number)
         logging.info(f"[CHAT {cid}] Rollcall ended: '{rc.title}' by {message.from_user.first_name} (@{message.from_user.username})")
         # Ghost tracking prompt
-        if ghost_tracking_on and had_in_users and rc_db_id:
+        if ghost_tracking_on and had_in_users and rc_db_id and not rc.absent_marked:
             markup = InlineKeyboardMarkup(row_width=2)
             markup.add(
                 InlineKeyboardButton("👻 Yes, select ghosts", callback_data=f"ghost_yes_{rc_db_id}"),

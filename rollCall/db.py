@@ -458,6 +458,20 @@ def _migrate_schema(conn):
         except Exception:
             # Column already exists — safe to ignore
             conn.rollback()
+
+    # Stamp all pre-existing rollcalls as already processed so the ghost
+    # tracking prompt never fires for roll calls that started before this
+    # deployment.  New rollcalls get absent_marked = FALSE (the DB default)
+    # and are therefore fully eligible for ghost tracking.
+    try:
+        if db_type == 'postgresql':
+            cursor.execute("UPDATE rollcalls SET absent_marked = TRUE WHERE absent_marked = FALSE")
+        else:
+            cursor.execute("UPDATE rollcalls SET absent_marked = 1 WHERE absent_marked = 0")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+
     if db_type == 'postgresql':
         cursor.close()
 

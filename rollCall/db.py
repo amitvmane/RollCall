@@ -376,11 +376,12 @@ def create_tables():
                 CREATE TABLE IF NOT EXISTS ghost_records (
                     id SERIAL PRIMARY KEY,
                     chat_id BIGINT NOT NULL,
-                    user_id BIGINT NOT NULL,
+                    user_id BIGINT NOT NULL DEFAULT -1,
+                    proxy_name TEXT,
                     user_name TEXT,
                     ghost_count INTEGER DEFAULT 0,
                     last_ghosted_at TIMESTAMP,
-                    UNIQUE(chat_id, user_id)
+                    UNIQUE(chat_id, COALESCE(proxy_name, user_id::text))
                 )
             """)
             cursor.execute("""
@@ -389,6 +390,7 @@ def create_tables():
                     rollcall_id INTEGER NOT NULL,
                     chat_id BIGINT NOT NULL,
                     user_id BIGINT,
+                    proxy_name TEXT,
                     user_name TEXT,
                     ghosted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (rollcall_id) REFERENCES rollcalls(id) ON DELETE CASCADE
@@ -399,11 +401,11 @@ def create_tables():
                 CREATE TABLE IF NOT EXISTS ghost_records (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     chat_id INTEGER NOT NULL,
-                    user_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL DEFAULT -1,
+                    proxy_name TEXT,
                     user_name TEXT,
                     ghost_count INTEGER DEFAULT 0,
-                    last_ghosted_at TIMESTAMP,
-                    UNIQUE(chat_id, user_id)
+                    last_ghosted_at TIMESTAMP
                 )
             """)
             cursor.execute("""
@@ -412,6 +414,7 @@ def create_tables():
                     rollcall_id INTEGER NOT NULL,
                     chat_id INTEGER NOT NULL,
                     user_id INTEGER,
+                    proxy_name TEXT,
                     user_name TEXT,
                     ghosted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (rollcall_id) REFERENCES rollcalls(id) ON DELETE CASCADE
@@ -442,12 +445,14 @@ def _migrate_schema(conn):
             "ALTER TABLE chats ADD COLUMN IF NOT EXISTS absent_limit INTEGER DEFAULT 1",
             "ALTER TABLE chats ADD COLUMN IF NOT EXISTS ghost_tracking_enabled BOOLEAN DEFAULT TRUE",
             "ALTER TABLE rollcalls ADD COLUMN IF NOT EXISTS absent_marked BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE ghost_records ADD COLUMN IF NOT EXISTS proxy_name TEXT",
         ]
     else:
         migrations = [
             ("ALTER TABLE chats ADD COLUMN absent_limit INTEGER DEFAULT 1"),
             ("ALTER TABLE chats ADD COLUMN ghost_tracking_enabled INTEGER DEFAULT 1"),
             ("ALTER TABLE rollcalls ADD COLUMN absent_marked INTEGER DEFAULT 0"),
+            ("ALTER TABLE ghost_records ADD COLUMN proxy_name TEXT"),
         ]
 
     cursor = conn.cursor()
@@ -456,7 +461,6 @@ def _migrate_schema(conn):
             cursor.execute(sql)
             conn.commit()
         except Exception:
-            # Column already exists — safe to ignore
             conn.rollback()
 
     # Stamp all pre-existing rollcalls as already processed so the ghost
@@ -1465,33 +1469,55 @@ def get_ghost_count(chat_id: int, user_id: int) -> int:
             release_connection(conn)
 
 
-def increment_ghost_count(chat_id: int, user_id: int, user_name: str) -> bool:
-    """Increment ghost count for a user, inserting a record if one does not exist."""
+def get_ghost_count_by_proxy_name(chat_id: int, proxy_name: str) -> int:
+    """Return the ghost count for a proxy user in a chat (0 if no record)."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(
+            f"SELECT ghost_count FROM ghost_records WHERE chat_id = {ph} AND proxy_name = {ph}",
+            (chat_id, proxy_name)
+        )
+        row = cursor.fetchone()
+        return row[0] if row else 0
+    except Exception as e:
+        logging.error(f"Error getting ghost count by proxy name: {e}")
+        return 0
+    finally:
+        if db_type == 'postgresql':
+            cursor.close()
+        release_connection(conn)
+
+
+def increment_ghost_count(chat_id: int, user_id: int, user_name: str, proxy_name: str = None) -> bool:
+    """Increment ghost count for a user or proxy user, inserting a record if one does not exist.
+    
+    For proxy users (added via /sif), pass user_id=-1 and the proxy_name.
+    """
     conn = get_connection()
     try:
         cursor = conn.cursor()
         if db_type == 'postgresql':
             cursor.execute(
-                """INSERT INTO ghost_records (chat_id, user_id, user_name, ghost_count, last_ghosted_at)
-                   VALUES (%s, %s, %s, 1, CURRENT_TIMESTAMP)
-                   ON CONFLICT (chat_id, user_id) DO UPDATE
+                """INSERT INTO ghost_records (chat_id, user_id, proxy_name, user_name, ghost_count, last_ghosted_at)
+                   VALUES (%s, %s, %s, %s, 1, CURRENT_TIMESTAMP)
+                   ON CONFLICT (chat_id, COALESCE(proxy_name, user_id::text)) DO UPDATE
                    SET ghost_count = ghost_records.ghost_count + 1,
                        user_name = EXCLUDED.user_name,
                        last_ghosted_at = CURRENT_TIMESTAMP""",
-                (chat_id, user_id, user_name)
+                (chat_id, user_id, proxy_name, user_name)
             )
         else:
             cursor.execute(
-                """INSERT INTO ghost_records (chat_id, user_id, user_name, ghost_count, last_ghosted_at)
-                   VALUES (?, ?, ?, 1, CURRENT_TIMESTAMP)
-                   ON CONFLICT (chat_id, user_id) DO UPDATE
-                   SET ghost_count = ghost_count + 1,
-                       user_name = excluded.user_name,
-                       last_ghosted_at = CURRENT_TIMESTAMP""",
-                (chat_id, user_id, user_name)
+                """INSERT OR REPLACE INTO ghost_records (chat_id, user_id, proxy_name, user_name, ghost_count, last_ghosted_at)
+                   VALUES (?, ?, ?, ?,
+                       COALESCE((SELECT ghost_count FROM ghost_records WHERE chat_id = ? AND COALESCE(proxy_name, '') = COALESCE(?, '')), 0) + 1,
+                       CURRENT_TIMESTAMP)""",
+                (chat_id, user_id, proxy_name, user_name, chat_id, proxy_name)
             )
         conn.commit()
-        logging.info(f"Incremented ghost count for user {user_id} in chat {chat_id}")
+        logging.info(f"Incremented ghost count for user {user_id}/{proxy_name} in chat {chat_id}")
         return True
     except Exception as e:
         conn.rollback()
@@ -1500,21 +1526,30 @@ def increment_ghost_count(chat_id: int, user_id: int, user_name: str) -> bool:
     finally:
         if db_type == 'postgresql':
             cursor.close()
-            release_connection(conn)
+        release_connection(conn)
 
 
-def reset_ghost_count(chat_id: int, user_id: int) -> bool:
-    """Reset ghost count to 0 for a user (admin clear)."""
+def reset_ghost_count(chat_id: int, user_id: int, proxy_name: str = None) -> bool:
+    """Reset ghost count to 0 for a user or proxy user (admin clear).
+    
+    For proxy users, pass user_id=-1 and the proxy_name.
+    """
     conn = get_connection()
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
-        cursor.execute(
-            f"UPDATE ghost_records SET ghost_count = 0, last_ghosted_at = NULL WHERE chat_id = {ph} AND user_id = {ph}",
-            (chat_id, user_id)
-        )
+        if proxy_name:
+            cursor.execute(
+                f"UPDATE ghost_records SET ghost_count = 0, last_ghosted_at = NULL WHERE chat_id = {ph} AND proxy_name = {ph}",
+                (chat_id, proxy_name)
+            )
+        else:
+            cursor.execute(
+                f"UPDATE ghost_records SET ghost_count = 0, last_ghosted_at = NULL WHERE chat_id = {ph} AND user_id = {ph}",
+                (chat_id, user_id)
+            )
         conn.commit()
-        logging.info(f"Reset ghost count for user {user_id} in chat {chat_id}")
+        logging.info(f"Reset ghost count for user {user_id}/{proxy_name} in chat {chat_id}")
         return True
     except Exception as e:
         conn.rollback()
@@ -1523,7 +1558,7 @@ def reset_ghost_count(chat_id: int, user_id: int) -> bool:
     finally:
         if db_type == 'postgresql':
             cursor.close()
-            release_connection(conn)
+        release_connection(conn)
 
 
 def get_ghost_leaderboard(chat_id: int) -> List[Dict]:
@@ -1533,7 +1568,7 @@ def get_ghost_leaderboard(chat_id: int) -> List[Dict]:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
         cursor.execute(
-            f"""SELECT user_id, user_name, ghost_count, last_ghosted_at
+            f"""SELECT user_id, proxy_name, user_name, ghost_count, last_ghosted_at
                 FROM ghost_records
                 WHERE chat_id = {ph} AND ghost_count > 0
                 ORDER BY ghost_count DESC, last_ghosted_at DESC""",
@@ -1550,14 +1585,14 @@ def get_ghost_leaderboard(chat_id: int) -> List[Dict]:
 
 
 def get_user_ghost_count_by_name(chat_id: int, user_name: str) -> Optional[Dict]:
-    """Find a ghost record by user_name for a chat (for admin /clear_absent by name)."""
+    """Find a ghost record by user_name or proxy_name for a chat (for admin /clear_absent by name)."""
     conn = get_connection()
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
         cursor.execute(
-            f"SELECT user_id, user_name, ghost_count FROM ghost_records WHERE chat_id = {ph} AND user_name = {ph}",
-            (chat_id, user_name)
+            f"SELECT user_id, proxy_name, user_name, ghost_count FROM ghost_records WHERE chat_id = {ph} AND (user_name = {ph} OR proxy_name = {ph})",
+            (chat_id, user_name, user_name)
         )
         row = cursor.fetchone()
         return dict(row) if row else None
@@ -1567,7 +1602,7 @@ def get_user_ghost_count_by_name(chat_id: int, user_name: str) -> Optional[Dict]
     finally:
         if db_type == 'postgresql':
             cursor.close()
-            release_connection(conn)
+        release_connection(conn)
 
 
 def mark_rollcall_absent_done(rollcall_id: int) -> bool:
@@ -1645,16 +1680,16 @@ def get_unprocessed_rollcalls(chat_id: int, days: int = 30) -> List[Dict]:
             release_connection(conn)
 
 
-def add_ghost_event(rollcall_id: int, chat_id: int, user_id: int, user_name: str) -> bool:
+def add_ghost_event(rollcall_id: int, chat_id: int, user_id: int = None, user_name: str = None, proxy_name: str = None) -> bool:
     """Record an individual ghost event for audit trail."""
     conn = get_connection()
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
         cursor.execute(
-            f"""INSERT INTO ghost_events (rollcall_id, chat_id, user_id, user_name)
-                VALUES ({ph}, {ph}, {ph}, {ph})""",
-            (rollcall_id, chat_id, user_id, user_name)
+            f"""INSERT INTO ghost_events (rollcall_id, chat_id, user_id, proxy_name, user_name)
+                VALUES ({ph}, {ph}, {ph}, {ph}, {ph})""",
+            (rollcall_id, chat_id, user_id, proxy_name, user_name)
         )
         conn.commit()
         return True
@@ -1665,7 +1700,7 @@ def add_ghost_event(rollcall_id: int, chat_id: int, user_id: int, user_name: str
     finally:
         if db_type == 'postgresql':
             cursor.close()
-            release_connection(conn)
+        release_connection(conn)
 
 
 def get_rollcall_in_users(rollcall_id: int) -> List[Dict]:

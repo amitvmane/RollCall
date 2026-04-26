@@ -535,7 +535,7 @@ class TestClearAbsent(GhostTestBase):
              patch('telegram_helper.manager', self.manager):
             await self.th.clear_absent(self._make_message("/clear_absent Bob"))
 
-        mock_reset.assert_called_once_with(100, 5)
+        mock_reset.assert_called_once_with(100, 5, proxy_name=None)
         self.assertIn("Bob", self._sent_text(0))
 
     async def test_missing_name_sends_usage(self):

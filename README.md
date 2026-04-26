@@ -19,6 +19,7 @@ A feature-rich Telegram bot for tracking event attendance in group chats. Member
 - **Templates** — save and reuse roll call configurations
 - **Reminders** — scheduled notifications for upcoming events
 - **Statistics** — per-user attendance stats for insights
+- **Ghost tracking** — track no-shows and display ghost leaderboard
 - **Admin controls** — restrict commands to designated admins
 - **Dual database support** — SQLite (default) or PostgreSQL
 - **Docker-ready** — ships with a Dockerfile and Docker Compose configuration
@@ -148,6 +149,11 @@ Append `::{number}` to any command to target a specific roll call when multiple 
 |---|---|
 | `/delete_user {name}` | Remove a user from the roll call |
 | `/stats` | View attendance statistics |
+| `/stats ghost` | View ghost (no-show) leaderboard |
+| `/toggle_ghost_tracking` | Enable or disable ghost tracking |
+| `/set_absent_limit {n}` | Set threshold for reconfirmation prompts |
+| `/mark_absent` | Manually mark a user as absent |
+| `/clear_absent {name}` | Clear ghost count for a user |
 
 ---
 
@@ -241,7 +247,7 @@ See [version.json](rollCall/version.json) for the full version history.
 
 | Version | Highlights |
 |---|---|
-| **4.5** | Enhanced logging, `@none` tag fix, UI/UX improvements *(current)* |
+| **4.5** | Ghost tracking (no-show detection), reconfirmation prompts, ghost leaderboard *(current)* |
 | **4.4** | Removed duplicate check, `deleteuser` supports username, Claude/OpenAI prompt support |
 | **4.3** | Major attendance ordering revamp, stats collection |
 | **4.2** | Templates for quick roll call creation, end confirmation message |

@@ -1507,15 +1507,25 @@ def increment_ghost_count(chat_id: int, user_id: int, user_name: str, proxy_name
                        user_name = EXCLUDED.user_name,
                        last_ghosted_at = CURRENT_TIMESTAMP""",
                 (chat_id, user_id, proxy_name, user_name)
-            )
+)
         else:
             cursor.execute(
-                """INSERT OR REPLACE INTO ghost_records (chat_id, user_id, proxy_name, user_name, ghost_count, last_ghosted_at)
-                   VALUES (?, ?, ?, ?,
-                       COALESCE((SELECT ghost_count FROM ghost_records WHERE chat_id = ? AND COALESCE(proxy_name, '') = COALESCE(?, '')), 0) + 1,
-                       CURRENT_TIMESTAMP)""",
-                (chat_id, user_id, proxy_name, user_name, chat_id, proxy_name)
+                "SELECT ghost_count FROM ghost_records WHERE chat_id = ? AND COALESCE(proxy_name, '') = COALESCE(?, '')",
+                (chat_id, proxy_name)
             )
+            existing = cursor.fetchone()
+            if existing:
+                cursor.execute(
+                    """UPDATE ghost_records SET ghost_count = ghost_count + 1, user_name = ?, last_ghosted_at = CURRENT_TIMESTAMP
+                       WHERE chat_id = ? AND COALESCE(proxy_name, '') = COALESCE(?, '')""",
+                    (user_name, chat_id, proxy_name)
+                )
+            else:
+                cursor.execute(
+                    """INSERT INTO ghost_records (chat_id, user_id, proxy_name, user_name, ghost_count, last_ghosted_at)
+                       VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP)""",
+                    (chat_id, user_id, proxy_name, user_name)
+                )
         conn.commit()
         logging.info(f"Incremented ghost count for user {user_id}/{proxy_name} in chat {chat_id}")
         return True

@@ -3,10 +3,6 @@ name: CI
 on:
   push:
     branches: [ main ]
-    paths-ignore:
-      # Prevent infinite loop: version bumps committed by this workflow
-      # only touch version.json, so skip CI for those commits.
-      - 'rollCall/version.json'
   pull_request:
     branches: [ main ]
   workflow_dispatch:   # Allow manual trigger from GitHub Actions UI
@@ -78,41 +74,3 @@ jobs:
 
       - name: Build Docker image
         run: docker build -t rollcall-bot:ci .
-
-  version-bump:
-    name: Auto-bump version.json
-    # Only run on direct pushes to main, not on PRs
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [ test ]          # Only bump if ALL test matrix jobs passed
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write        # Needed to push the version commit back
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          # GH_PAT is a repo-scoped Personal Access Token stored as a secret.
-          # It carries owner rights and can bypass branch protection rules,
-          # which GITHUB_TOKEN cannot do on personal repos.
-          token: ${{ secrets.GH_PAT }}
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Bump version
-        env:
-          COMMIT_MSG: ${{ github.event.head_commit.message }}
-        run: python scripts/bump_version.py
-
-      - name: Commit and push version bump
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add rollCall/version.json
-          # Exit 0 gracefully if nothing to commit (idempotent)
-          git diff --cached --quiet && echo "Nothing to commit" && exit 0
-          git commit -m "chore: auto-bump version [skip ci]"
-          git push

@@ -56,16 +56,30 @@ def _fmt_ended_at(ended_at) -> str:
 
 
 def _build_ghost_select_keyboard(rc_db_id: int, in_users: list, selected_ids: set) -> InlineKeyboardMarkup:
-    """Build the ghost selection keyboard from a list of IN users."""
+    """Build the ghost selection keyboard from a list of IN users.
+
+    ``in_users`` may contain real users (integer user_id) and proxy users
+    (user_id=None, proxy_name=str).  Proxy users use a separate callback prefix
+    so their string name isn't confused with an integer Telegram ID.
+    """
     markup = InlineKeyboardMarkup(row_width=2)
     for u in in_users:
-        uid = u['user_id']
-        name = u.get('first_name') or u.get('username') or str(uid)
-        tick = "👻 " if uid in selected_ids else ""
-        markup.add(InlineKeyboardButton(
-            f"{tick}{name}",
-            callback_data=f"ghost_tog_{rc_db_id}_{uid}"
-        ))
+        proxy_name = u.get('proxy_name')
+        if proxy_name is not None:
+            # /sif proxy user — keyed by name string
+            tick = "👻 " if proxy_name in selected_ids else ""
+            markup.add(InlineKeyboardButton(
+                f"{tick}{proxy_name}",
+                callback_data=f"ghost_togp_{rc_db_id}_{proxy_name}"
+            ))
+        else:
+            uid = u['user_id']
+            name = u.get('first_name') or u.get('username') or str(uid)
+            tick = "👻 " if uid in selected_ids else ""
+            markup.add(InlineKeyboardButton(
+                f"{tick}{name}",
+                callback_data=f"ghost_tog_{rc_db_id}_{uid}"
+            ))
     markup.add(InlineKeyboardButton("✅ Done", callback_data=f"ghost_done_{rc_db_id}"))
     return markup
 
@@ -2580,7 +2594,32 @@ async def ghost_callback_handler(call):
             return
 
         # ----------------------------------------------------------------
-        # ghost_tog — toggle a user's ghost selection
+        # ghost_togp — toggle a PROXY user's ghost selection (added via /sif)
+        # Must be checked before ghost_tog_ to avoid prefix-match collision.
+        # ----------------------------------------------------------------
+        if data.startswith("ghost_togp_"):
+            parts = data.split("_", 3)   # ["ghost", "togp", rc_db_id, name]
+            rc_db_id = int(parts[2])
+            proxy_name = parts[3]
+            key = (cid, rc_db_id)
+            if key not in _ghost_selections:
+                _ghost_selections[key] = set()
+            if proxy_name in _ghost_selections[key]:
+                _ghost_selections[key].discard(proxy_name)
+            else:
+                _ghost_selections[key].add(proxy_name)
+            in_users = get_rollcall_in_users(rc_db_id)
+            markup = _build_ghost_select_keyboard(rc_db_id, in_users, _ghost_selections[key])
+            await bot.answer_callback_query(call.id)
+            try:
+                await bot.edit_message_reply_markup(cid, call.message.message_id, reply_markup=markup)
+            except Exception as e:
+                if "message is not modified" not in str(e):
+                    raise
+            return
+
+        # ----------------------------------------------------------------
+        # ghost_tog — toggle a real user's ghost selection
         # ----------------------------------------------------------------
         if data.startswith("ghost_tog_"):
             parts = data.split("_")
@@ -2618,17 +2657,27 @@ async def ghost_callback_handler(call):
                 return
 
             in_users = get_rollcall_in_users(rc_db_id)
-            user_map = {u['user_id']: u for u in in_users}
+            # Build separate maps for real users (int id) and proxy users (str name)
+            user_map = {u['user_id']: u for u in in_users if u['user_id'] is not None}
+            proxy_map = {u['proxy_name']: u for u in in_users if u.get('proxy_name') is not None}
             lines = []
-            for uid in selected:
-                u = user_map.get(uid)
-                if not u:
-                    continue
-                name = u.get('first_name') or u.get('username') or str(uid)
-                increment_ghost_count(cid, uid, name)
-                add_ghost_event(rc_db_id, cid, uid, name)
-                new_count = get_ghost_count(cid, uid)
-                lines.append(f"👻 {name} — ghosted {new_count} session(s) total")
+            for item in selected:
+                if isinstance(item, int):
+                    # Real Telegram user — track ghost count in DB
+                    u = user_map.get(item)
+                    if not u:
+                        continue
+                    name = u.get('first_name') or u.get('username') or str(item)
+                    increment_ghost_count(cid, item, name)
+                    add_ghost_event(rc_db_id, cid, item, name)
+                    new_count = get_ghost_count(cid, item)
+                    lines.append(f"👻 {name} — ghosted {new_count} session(s) total")
+                else:
+                    # Proxy user added via /sif — no Telegram ID, just note in summary
+                    name = str(item)
+                    if name not in proxy_map:
+                        continue
+                    lines.append(f"👻 {name} (via /sif) — ghosted this session")
 
             summary = "\n".join(lines)
             await bot.answer_callback_query(call.id, f"{len(selected)} ghost(s) recorded.")

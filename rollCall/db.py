@@ -1669,11 +1669,17 @@ def add_ghost_event(rollcall_id: int, chat_id: int, user_id: int, user_name: str
 
 
 def get_rollcall_in_users(rollcall_id: int) -> List[Dict]:
-    """Return all real users (non-proxy) with status='in' for a given rollcall."""
+    """Return all users (real + proxy) with status='in' for a given rollcall.
+
+    Real users (signed in via /in or the panel) have an integer ``user_id``.
+    Proxy users (added via /sif) have ``user_id=None`` and a ``proxy_name`` key.
+    """
     conn = get_connection()
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
+
+        # Real Telegram users
         cursor.execute(
             f"""SELECT user_id, first_name, username
                 FROM users
@@ -1681,7 +1687,22 @@ def get_rollcall_in_users(rollcall_id: int) -> List[Dict]:
                 ORDER BY in_pos ASC""",
             (rollcall_id,)
         )
-        return [dict(row) for row in cursor.fetchall()]
+        real_rows = [dict(row) for row in cursor.fetchall()]
+
+        # Proxy users added via /sif (no Telegram user_id)
+        cursor.execute(
+            f"""SELECT name
+                FROM proxy_users
+                WHERE rollcall_id = {ph} AND status = 'in'
+                ORDER BY in_pos ASC""",
+            (rollcall_id,)
+        )
+        proxy_rows = [
+            {'user_id': None, 'first_name': row['name'], 'username': None, 'proxy_name': row['name']}
+            for row in cursor.fetchall()
+        ]
+
+        return real_rows + proxy_rows
     except Exception as e:
         logging.error(f"Error getting rollcall IN users: {e}")
         return []

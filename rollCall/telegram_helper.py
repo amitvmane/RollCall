@@ -25,7 +25,7 @@ from db import create_or_update_template, get_templates, get_template, delete_te
 from db import get_all_chat_ids
 from db import (
     get_ghost_count, increment_ghost_count, reset_ghost_count,
-    get_ghost_leaderboard, get_user_ghost_count_by_name,
+    get_ghost_leaderboard, get_user_ghost_count_by_name, get_ghost_count_by_proxy_name,
     mark_rollcall_absent_done, get_unprocessed_rollcalls,
     add_ghost_event, get_rollcall_in_users
 )
@@ -1948,7 +1948,11 @@ async def build_ghost_stats_text(cid: int, mgr) -> str:
 
     lines = ["👻 *Ghost Leaderboard*", "─────────────────"]
     for i, entry in enumerate(leaderboard, 1):
-        name = entry.get('user_name') or f"User {entry['user_id']}"
+        # Handle both real users and proxy users
+        if entry.get('proxy_name'):
+            name = f"{entry['proxy_name']} (via /sif)"
+        else:
+            name = entry.get('user_name') or f"User {entry['user_id']}"
         count = entry['ghost_count']
         warning = " ⚠️" if count >= limit else ""
         lines.append(f"{i}. {name} — {count} session(s) ghosted{warning}")
@@ -2673,11 +2677,14 @@ async def ghost_callback_handler(call):
                     new_count = get_ghost_count(cid, item)
                     lines.append(f"👻 {name} — ghosted {new_count} session(s) total")
                 else:
-                    # Proxy user added via /sif — no Telegram ID, just note in summary
-                    name = str(item)
-                    if name not in proxy_map:
+                    # Proxy user added via /sif — track ghost count for proxy user
+                    proxy_name = str(item)
+                    if proxy_name not in proxy_map:
                         continue
-                    lines.append(f"👻 {name} (via /sif) — ghosted this session")
+                    increment_ghost_count(cid, -1, proxy_name, proxy_name=proxy_name)
+                    add_ghost_event(rc_db_id, cid, None, proxy_name=proxy_name)
+                    new_count = get_ghost_count_by_proxy_name(cid, proxy_name)
+                    lines.append(f"👻 {proxy_name} (via /sif) — ghosted {new_count} session(s) total")
 
             summary = "\n".join(lines)
             await bot.answer_callback_query(call.id, f"{len(selected)} ghost(s) recorded.")
@@ -3300,7 +3307,7 @@ async def clear_absent(message):
             try:
                 from Levenshtein import distance as lev_distance
                 for entry in leaderboard:
-                    name = entry.get('user_name') or ""
+                    name = entry.get('user_name') or entry.get('proxy_name') or ""
                     score = lev_distance(target_name.lower(), name.lower())
                     if best_score is None or score < best_score:
                         best_score = score
@@ -3313,8 +3320,11 @@ async def clear_absent(message):
                 await bot.send_message(cid, f"⚠️ No ghost record found for '{target_name}'.")
                 return
 
-        reset_ghost_count(cid, record['user_id'])
-        name = record.get('user_name') or target_name
+        # Handle both real users and proxy users
+        proxy_name = record.get('proxy_name')
+        user_id = record.get('user_id', -1)
+        reset_ghost_count(cid, user_id, proxy_name=proxy_name)
+        name = record.get('user_name') or proxy_name or target_name
         await bot.send_message(cid, f"✅ {name}'s ghost record has been cleared. Fresh start! 👻➡️✅")
     except Exception as e:
         await bot.send_message(message.chat.id, e)

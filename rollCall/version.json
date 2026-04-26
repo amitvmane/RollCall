@@ -101,10 +101,10 @@
         "DeployedOnProd": "N",
         "DeployedDatetime": "24-04-2026 09:51 UTC"
     },
-    {
-        "Version": 5.2,
-        "Description": "Ghost Tracking \u2014 session no-show tracking (v5.0)",
+{
+        "Version": 5.3,
+        "Description": "Ghost Tracking — fix proxy user (/sif) ghost count tracking and support /stats ghost, /clear_absent commands for proxy users",
         "DeployedOnProd": "N",
-        "DeployedDatetime": "24-04-2026 10:22 UTC"
+        "DeployedDatetime": "26-04-2026 12:00 UTC"
     }
 ]

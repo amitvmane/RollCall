@@ -2956,6 +2956,28 @@ async def callback_handler(call):
                 call.from_user.id,
                 rc.allNames,
             )
+            
+            # Ghost reconfirmation check for panel IN button
+            if action == "in" and isinstance(user.user_id, int) and manager.get_ghost_tracking_enabled(cid):
+                ghost_count = get_ghost_count(cid, user.user_id)
+                absent_limit = manager.get_absent_limit(cid)
+                if ghost_count >= absent_limit:
+                    _pending_reconf[(cid, user.user_id)] = {'rc_number': rc_number - 1, 'comment': ''}
+                    markup = InlineKeyboardMarkup(row_width=2)
+                    markup.add(
+                        InlineKeyboardButton("✅ Yes, I'll be there!", callback_data=f"reconf_in_{rc_number - 1}_{user.user_id}"),
+                        InlineKeyboardButton("❌ I'm out", callback_data=f"reconf_out_{rc_number - 1}_{user.user_id}"),
+                    )
+                    await bot.send_message(
+                        cid,
+                        f"👻 *Warning:* You've ghosted *{ghost_count}* session(s) before.\n"
+                        f"Absent limit: *{absent_limit}*\n\n"
+                        f"Are you committing to be at *{rc.title}*?",
+                        parse_mode="Markdown",
+                        reply_markup=markup
+                    )
+                    return
+            
             if action == "in":
                 result = rc.addIn(user)
             elif action == "out":

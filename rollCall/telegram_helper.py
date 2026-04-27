@@ -2612,6 +2612,7 @@ async def ghost_callback_handler(call):
                 _ghost_selections[key].discard(proxy_name)
             else:
                 _ghost_selections[key].add(proxy_name)
+            logging.info(f"ghost_togp: {proxy_name}, key={key}, selected now={_ghost_selections[key]}")
             in_users = get_rollcall_in_users(rc_db_id)
             markup = _build_ghost_select_keyboard(rc_db_id, in_users, _ghost_selections[key])
             await bot.answer_callback_query(call.id)
@@ -2654,6 +2655,8 @@ async def ghost_callback_handler(call):
             key = (cid, rc_db_id)
             selected = _ghost_selections.pop(key, set())
             mark_rollcall_absent_done(rc_db_id)
+            
+            logging.info(f"ghost_done: key={key}, selected from map={selected}")
 
             if not selected:
                 await bot.answer_callback_query(call.id, "No ghosts selected — marking all as attended.")
@@ -2665,13 +2668,18 @@ async def ghost_callback_handler(call):
             user_map = {u['user_id']: u for u in in_users if u['user_id'] is not None}
             proxy_map = {u['proxy_name']: u for u in in_users if u.get('proxy_name') is not None}
             lines = []
+            
+            logging.info(f"Ghost callback: in_users={[u.get('first_name') or u.get('proxy_name') for u in in_users]}, selected={selected}")
+
             for item in selected:
                 if isinstance(item, int):
                     # Real Telegram user — track ghost count in DB
                     u = user_map.get(item)
                     if not u:
+                        logging.warning(f"Ghost: real user {item} not found in user_map")
                         continue
                     name = u.get('first_name') or u.get('username') or str(item)
+                    logging.info(f"Ghosting real user: {name}")
                     increment_ghost_count(cid, item, name)
                     add_ghost_event(rc_db_id, cid, item, name)
                     new_count = get_ghost_count(cid, item)
@@ -2680,7 +2688,9 @@ async def ghost_callback_handler(call):
                     # Proxy user added via /sif — track ghost count for proxy user
                     proxy_name = str(item)
                     if proxy_name not in proxy_map:
+                        logging.warning(f"Ghost: proxy {proxy_name} not found in proxy_map: {list(proxy_map.keys())}")
                         continue
+                    logging.info(f"Ghosting proxy user: {proxy_name}")
                     increment_ghost_count(cid, -1, proxy_name, proxy_name=proxy_name)
                     add_ghost_event(rc_db_id, cid, None, proxy_name=proxy_name)
                     new_count = get_ghost_count_by_proxy_name(cid, proxy_name)

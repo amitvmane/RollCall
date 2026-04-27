@@ -1482,15 +1482,25 @@ async def set_in_for(message):
             comment = " ".join(arr[2:]) if len(arr) > 2 else ""
             user.comment = comment
             
-            # Check ghost count and warn if at/above limit
+            # Check ghost count and ask confirmation if at/above limit
             ghost_count = get_ghost_count_by_proxy_name(cid, proxy_name)
             if ghost_count > 0:
                 chat_settings = manager.get_chat(cid)
                 limit = chat_settings.get('absent_limit', 1)
                 if ghost_count >= limit:
-                    warning = f"⚠️ {proxy_name} has ghosted {ghost_count} time(s) (limit: {limit})"
-                    await bot.send_message(cid, warning)
-
+                    # Ask confirmation with buttons
+                    markup = InlineKeyboardMarkup(row_width=2)
+                    markup.add(
+                        InlineKeyboardButton("✅ Yes, add anyway", callback_data=f"proxy_add_{rc_number}_{proxy_name}"),
+                        InlineKeyboardButton("❌ Cancel", callback_data=f"proxy_cancel_{rc_number}_{proxy_name}"),
+                    )
+                    await bot.send_message(
+                        cid,
+                        f"⚠️ {proxy_name} has ghosted {ghost_count} time(s) (limit: {limit})\n\nStill add as IN?",
+                        reply_markup=markup
+                    )
+                    return
+            
             # Persist proxy user INCLUDING proxy_owner_id in DB
             proxy_owner_id = message.from_user.id
             add_or_update_proxy_user(
@@ -2554,7 +2564,7 @@ async def get_end_confirm_keyboard(rc_number: int) -> InlineKeyboardMarkup:
 
 
 @bot.callback_query_handler(func=lambda call: call.data and (
-    call.data.startswith("ghost_") or call.data.startswith("reconf_") or call.data.startswith("mabs_")
+    call.data.startswith("ghost_") or call.data.startswith("reconf_") or call.data.startswith("mabs_") or call.data.startswith("proxy_add_") or call.data.startswith("proxy_cancel_")
 ))
 async def ghost_callback_handler(call):
     """
@@ -2812,6 +2822,50 @@ async def ghost_callback_handler(call):
             )
             return
 
+        # ----------------------------------------------------------------
+        # proxy_add_ — confirmed adding ghosted proxy user
+        # ----------------------------------------------------------------
+        if data.startswith("proxy_add_"):
+            parts = data.split("_", 3)  # ["proxy", "add", rc_number, proxy_name]
+            rc_number = int(parts[2])
+            proxy_name = parts[3]
+            
+            rc = manager.get_rollcall(cid, rc_number)
+            if not rc:
+                await bot.answer_callback_query(call.id, "Rollcall not found")
+                return
+            
+            user = User(proxy_name, None, proxy_name, rc.allNames)
+            proxy_owner_id = call.from_user.id
+            rc.set_proxy_owner(proxy_name, proxy_owner_id)
+            
+            add_or_update_proxy_user(
+                rc.id,
+                proxy_name,
+                "in",
+                "",
+                proxy_owner_id=proxy_owner_id,
+            )
+            
+            result = rc.addIn(user)
+            rc.save()
+            
+            await bot.answer_callback_query(call.id, f"✅ Added {proxy_name}")
+            await bot.edit_message_text(f"✅ {proxy_name} added to IN list", cid, call.message.message_id)
+            
+            # Send updated list
+            if send_list_message(call, manager):
+                await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number + 1)))
+            return
+        
+        # ----------------------------------------------------------------
+        # proxy_cancel_ — cancelled adding ghosted proxy user
+        # ----------------------------------------------------------------
+        if data.startswith("proxy_cancel_"):
+            await bot.answer_callback_query(call.id, "❌ Cancelled")
+            await bot.edit_message_text("❌ Cancelled — user not added", cid, call.message.message_id)
+            return
+        
         # ----------------------------------------------------------------
         # mabs_sel — admin selected a rollcall from /mark_absent list
         # ----------------------------------------------------------------

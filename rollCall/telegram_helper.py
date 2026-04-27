@@ -1274,7 +1274,7 @@ async def in_user(message):
                 await bot.send_message(
                     cid,
                     f"👻 *Warning:* You've ghosted *{ghost_count}* session(s) before.\n"
-                    f"Absent limit: *{absent_limit}*\n\n"
+                    f"⚠️ Absent Limit: *{absent_limit}*\n\n"
                     f"Are you committing to be at *{rc.title}*?",
                     parse_mode="Markdown",
                     reply_markup=markup
@@ -1498,7 +1498,7 @@ async def set_in_for(message):
                     await bot.send_message(
                         cid,
                         f"👻 *Warning:* *{proxy_name}* has ghosted *{ghost_count}* session(s) before.\n"
-                        f"Absent limit: *{limit}*\n\n"
+                        f"⚠️ Absent Limit: *{limit}*\n\n"
                         f"Still add to *{rc.title}*?",
                         parse_mode="Markdown",
                         reply_markup=markup

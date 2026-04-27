@@ -131,7 +131,7 @@ class RollCallManager:
     def set_absent_limit(self, chat_id: int, limit: int):
         """Set ghost threshold for a chat"""
         chat = self.get_chat(chat_id)
-        chat['absentLimit'] = limit
+        chat['absent_limit'] = limit  # Use same key as DB
         db.update_chat_settings(chat_id, absent_limit=limit)
 
     def get_ghost_tracking_enabled(self, chat_id: int) -> bool:

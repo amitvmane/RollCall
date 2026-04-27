@@ -50,6 +50,7 @@ def init_db():
         init_sqlite()
     
     create_tables()
+    create_ghost_selections_table()  # For ghost selection crash recovery
     logging.debug("Database initialized successfully")
 
 def init_postgresql():
@@ -1790,6 +1791,89 @@ def get_rollcall_in_users(rollcall_id: int) -> List[Dict]:
     except Exception as e:
         logging.error(f"Error getting rollcall IN users: {e}")
         return []
+    finally:
+        if db_type == 'postgresql':
+            cursor.close()
+            release_connection(conn)
+
+
+# Ghost selection persistence: save/load selections to DB
+def save_ghost_selections(chat_id: int, rc_db_id: int, selected_ids: set) -> bool:
+    """Save ghost selections to database for crash recovery"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        ph = "%s" if db_type == 'postgresql' else "?"
+        
+        # Upsert selections
+        cursor.execute(
+            f"""INSERT INTO ghost_selections (chat_id, rc_db_id, selected_ids, updated_at)
+               VALUES ({ph}, {ph}, {ph}, NOW())
+               ON CONFLICT (chat_id, rc_db_id) 
+               DO UPDATE SET selected_ids = {ph}, updated_at = NOW()""",
+            (chat_id, rc_db_id, json.dumps(list(selected_ids)), json.dumps(list(selected_ids)))
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        logging.error(f"Error saving ghost selections: {e}")
+        conn.rollback()
+        return False
+    finally:
+        if db_type == 'postgresql':
+            cursor.close()
+            release_connection(conn)
+
+
+def load_ghost_selections(chat_id: int, rc_db_id: int) -> Optional[set]:
+    """Load ghost selections from database for crash recovery"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        ph = "%s" if db_type == 'postgresql' else "?"
+        
+        cursor.execute(
+            f"""SELECT selected_ids FROM ghost_selections 
+               WHERE chat_id = {ph} AND rc_db_id = {ph}""",
+            (chat_id, rc_db_id)
+        )
+        row = cursor.fetchone()
+        if row and row['selected_ids']:
+            return set(json.loads(row['selected_ids']))
+        return None
+    except Exception as e:
+        logging.error(f"Error loading ghost selections: {e}")
+        return None
+    finally:
+        if db_type == 'postgresql':
+            cursor.close()
+            release_connection(conn)
+
+
+def create_ghost_selections_table() -> None:
+    """Create ghost_selections table if not exists"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        if db_type == 'postgresql':
+            cursor.execute("""CREATE TABLE IF NOT EXISTS ghost_selections (
+                chat_id BIGINT NOT NULL,
+                rc_db_id INTEGER NOT NULL,
+                selected_ids JSONB DEFAULT '[]',
+                updated_at TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (chat_id, rc_db_id)
+            )""")
+        else:
+            cursor.execute("""CREATE TABLE IF NOT EXISTS ghost_selections (
+                chat_id INTEGER NOT NULL,
+                rc_db_id INTEGER NOT NULL,
+                selected_ids TEXT DEFAULT '[]',
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (chat_id, rc_db_id)
+            )""")
+        conn.commit()
+    except Exception as e:
+        logging.error(f"Error creating ghost_selections table: {e}")
     finally:
         if db_type == 'postgresql':
             cursor.close()

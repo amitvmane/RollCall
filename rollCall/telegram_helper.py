@@ -27,7 +27,7 @@ from db import (
     get_ghost_count, increment_ghost_count, reset_ghost_count,
     get_ghost_leaderboard, get_user_ghost_count_by_name, get_ghost_count_by_proxy_name,
     mark_rollcall_absent_done, get_unprocessed_rollcalls,
-    add_ghost_event, get_rollcall_in_users
+    add_ghost_event, get_rollcall_in_users, save_ghost_selections
 )
 
 bot = AsyncTeleBot(token=TELEGRAM_TOKEN)
@@ -2588,8 +2588,11 @@ async def ghost_callback_handler(call):
             if not in_users:
                 await bot.answer_callback_query(call.id, "No IN users found for this session.")
                 return
-            _ghost_selections[(cid, rc_db_id)] = set()
-            markup = _build_ghost_select_keyboard(rc_db_id, in_users, set())
+            # Load persisted selections from DB or start fresh
+            from db import load_ghost_selections
+            saved = load_ghost_selections(cid, rc_db_id)
+            _ghost_selections[(cid, rc_db_id)] = saved if saved else set()
+            markup = _build_ghost_select_keyboard(rc_db_id, in_users, _ghost_selections[(cid, rc_db_id)])
             await bot.answer_callback_query(call.id)
             await bot.edit_message_text(
                 "👻 Who ghosted? Tap to select, then tap Done.",
@@ -2613,6 +2616,7 @@ async def ghost_callback_handler(call):
             else:
                 _ghost_selections[key].add(proxy_name)
             logging.info(f"ghost_togp: {proxy_name}, key={key}, selected now={_ghost_selections[key]}")
+            save_ghost_selections(cid, rc_db_id, _ghost_selections[key])
             in_users = get_rollcall_in_users(rc_db_id)
             markup = _build_ghost_select_keyboard(rc_db_id, in_users, _ghost_selections[key])
             await bot.answer_callback_query(call.id)
@@ -2637,6 +2641,7 @@ async def ghost_callback_handler(call):
                 _ghost_selections[key].discard(user_id)
             else:
                 _ghost_selections[key].add(user_id)
+            save_ghost_selections(cid, rc_db_id, _ghost_selections[key])
             in_users = get_rollcall_in_users(rc_db_id)
             markup = _build_ghost_select_keyboard(rc_db_id, in_users, _ghost_selections[key])
             await bot.answer_callback_query(call.id)

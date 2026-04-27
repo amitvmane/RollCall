@@ -197,7 +197,23 @@ async def main():
         logger.info("=" * 60)
 
 
+def setup_global_exception_handler():
+    """Install global exception handler to catch unhandled exceptions"""
+    def exception_handler(exc_type, exc_value, exc_tb):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_tb)
+            return
+        logger.critical(
+            "💥 UNHANDLED EXCEPTION",
+            exc_info=(exc_type, exc_value, exc_tb)
+        )
+    
+    sys.excepthook = exception_handler
+
+
 if __name__ == "__main__":
+    setup_global_exception_handler()
+    
     try:
         asyncio.run(main())
     except Exception as e:

@@ -5,3 +5,5 @@ database.json
 databaseMongo.json
 data/rollcall.db
 logs/bot.log
+rollcall.db
+*.db

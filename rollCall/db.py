@@ -408,6 +408,8 @@ def create_tables():
                     last_ghosted_at TIMESTAMP
                 )
             """)
+            # SQLite: use INSERT OR REPLACE to handle duplicates, but first check
+            # For proxy users, check by proxy_name; for real users, check by user_id
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS ghost_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -439,34 +441,49 @@ def create_tables():
 
 def _migrate_schema(conn):
     """Add new columns to existing tables for databases created before ghost tracking."""
-    migrations = []
-    if db_type == 'postgresql':
-        migrations = [
-            "ALTER TABLE chats ADD COLUMN IF NOT EXISTS absent_limit INTEGER DEFAULT 1",
-            "ALTER TABLE chats ADD COLUMN IF NOT EXISTS ghost_tracking_enabled BOOLEAN DEFAULT TRUE",
-            "ALTER TABLE rollcalls ADD COLUMN IF NOT EXISTS absent_marked BOOLEAN DEFAULT FALSE",
-            "ALTER TABLE ghost_records ADD COLUMN IF NOT EXISTS proxy_name TEXT",
-        ]
-    else:
-        migrations = [
-            ("ALTER TABLE chats ADD COLUMN absent_limit INTEGER DEFAULT 1"),
-            ("ALTER TABLE chats ADD COLUMN ghost_tracking_enabled INTEGER DEFAULT 1"),
-            ("ALTER TABLE rollcalls ADD COLUMN absent_marked INTEGER DEFAULT 0"),
-            ("ALTER TABLE ghost_records ADD COLUMN proxy_name TEXT"),
-        ]
-
     cursor = conn.cursor()
-    for sql in migrations:
+    
+    # Add missing columns
+    if db_type == 'postgresql':
         try:
-            cursor.execute(sql)
+            cursor.execute("ALTER TABLE ghost_events ADD COLUMN IF NOT EXISTS proxy_name TEXT")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    else:
+        try:
+            cursor.execute("ALTER TABLE ghost_events ADD COLUMN proxy_name TEXT")
             conn.commit()
         except Exception:
             conn.rollback()
 
-    # Stamp all pre-existing rollcalls as already processed so the ghost
-    # tracking prompt never fires for roll calls that started before this
-    # deployment.  New rollcalls get absent_marked = FALSE (the DB default)
-    # and are therefore fully eligible for ghost tracking.
+    # For SQLite, drop the unique constraint on ghost_records that causes issues with proxy users
+    if db_type == 'sqlite':
+        try:
+            # Recreate ghost_records without unique constraint on user_id (proxy users use -1)
+            cursor.execute("""CREATE TABLE IF NOT EXISTS ghost_records_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL DEFAULT -1,
+                proxy_name TEXT,
+                user_name TEXT,
+                ghost_count INTEGER DEFAULT 0,
+                last_ghosted_at TIMESTAMP
+            )""")
+            cursor.execute("""INSERT INTO ghost_records_new (chat_id, user_id, proxy_name, user_name, ghost_count, last_ghosted_at)
+                SELECT chat_id, COALESCE(user_id, -1), proxy_name, user_name, ghost_count, last_ghosted_at
+                FROM ghost_records""")
+            cursor.execute("DROP TABLE ghost_records")
+            cursor.execute("ALTER TABLE ghost_records_new RENAME TO ghost_records")
+            conn.commit()
+        except Exception as e:
+            logging.error(f"Error migrating ghost_records: {e}")
+            conn.rollback()
+
+    if db_type == 'postgresql':
+        cursor.close()
+
+    # Stamp all pre-existing rollcalls as already processed
     try:
         if db_type == 'postgresql':
             cursor.execute("UPDATE rollcalls SET absent_marked = TRUE WHERE absent_marked = FALSE")
@@ -475,9 +492,6 @@ def _migrate_schema(conn):
         conn.commit()
     except Exception:
         conn.rollback()
-
-    if db_type == 'postgresql':
-        cursor.close()
 
 
 def get_or_create_chat(chat_id: int) -> Dict:
@@ -1520,17 +1534,31 @@ def increment_ghost_count(chat_id: int, user_id: int, user_name: str, proxy_name
                     (chat_id, user_id, user_name)
                 )
         else:
-            cursor.execute(
-                "SELECT ghost_count FROM ghost_records WHERE chat_id = ? AND proxy_name = ?",
-                (chat_id, proxy_name)
-            )
+            # SQLite: For proxy users, look up by proxy_name; for real users, look up by user_id
+            if proxy_name:
+                cursor.execute(
+                    "SELECT id, ghost_count FROM ghost_records WHERE chat_id = ? AND proxy_name = ?",
+                    (chat_id, proxy_name)
+                )
+            else:
+                cursor.execute(
+                    "SELECT id, ghost_count FROM ghost_records WHERE chat_id = ? AND user_id = ?",
+                    (chat_id, user_id)
+                )
             existing = cursor.fetchone()
             if existing:
-                cursor.execute(
-                    """UPDATE ghost_records SET ghost_count = ghost_count + 1, user_name = ?, last_ghosted_at = CURRENT_TIMESTAMP
-                       WHERE chat_id = ? AND proxy_name = ?""",
-                    (user_name, chat_id, proxy_name)
-                )
+                if proxy_name:
+                    cursor.execute(
+                        """UPDATE ghost_records SET ghost_count = ghost_count + 1, user_name = ?, last_ghosted_at = CURRENT_TIMESTAMP
+                           WHERE chat_id = ? AND proxy_name = ?""",
+                        (user_name, chat_id, proxy_name)
+                    )
+                else:
+                    cursor.execute(
+                        """UPDATE ghost_records SET ghost_count = ghost_count + 1, user_name = ?, last_ghosted_at = CURRENT_TIMESTAMP
+                           WHERE chat_id = ? AND user_id = ?""",
+                        (user_name, chat_id, user_id)
+                    )
             else:
                 cursor.execute(
                     """INSERT INTO ghost_records (chat_id, user_id, proxy_name, user_name, ghost_count, last_ghosted_at)

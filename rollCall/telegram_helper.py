@@ -1266,16 +1266,17 @@ async def in_user(message):
             absent_limit = manager.get_absent_limit(cid)
             if ghost_count >= absent_limit:
                 _pending_reconf[(cid, user.user_id)] = {'rc_number': rc_number, 'comment': comment}
-                markup = InlineKeyboardMarkup(row_width=1)
+                markup = InlineKeyboardMarkup(row_width=2)
                 markup.add(
-                    InlineKeyboardButton("💪 Yes, I'll be there!", callback_data=f"reconf_in_{rc_number}_{user.user_id}"),
-                    InlineKeyboardButton("🤔 Mark me Maybe", callback_data=f"reconf_maybe_{rc_number}_{user.user_id}"),
+                    InlineKeyboardButton("✅ Yes, I'll be there!", callback_data=f"reconf_in_{rc_number}_{user.user_id}"),
                     InlineKeyboardButton("❌ I'm out", callback_data=f"reconf_out_{rc_number}_{user.user_id}"),
                 )
                 await bot.send_message(
                     cid,
-                    f"👻 Hey {user.name}, you've ghosted {ghost_count} session(s) before.\n"
-                    f"Still committing to IN?",
+                    f"👻 *Warning:* You've ghosted *{ghost_count}* session(s) before.\n"
+                    f"Absent limit: *{absent_limit}*\n\n"
+                    f"Are you committing to be at *{rc.title}*?",
+                    parse_mode="Markdown",
                     reply_markup=markup
                 )
                 return
@@ -1488,7 +1489,7 @@ async def set_in_for(message):
                 chat_settings = manager.get_chat(cid)
                 limit = chat_settings.get('absent_limit', 1)
                 if ghost_count >= limit:
-                    # Ask confirmation with buttons
+                    # Ask confirmation with buttons (consistent UI with /in)
                     markup = InlineKeyboardMarkup(row_width=2)
                     markup.add(
                         InlineKeyboardButton("✅ Yes, add anyway", callback_data=f"proxy_add_{rc_number}_{proxy_name}"),
@@ -1496,7 +1497,10 @@ async def set_in_for(message):
                     )
                     await bot.send_message(
                         cid,
-                        f"⚠️ {proxy_name} has ghosted {ghost_count} time(s) (limit: {limit})\n\nStill add as IN?",
+                        f"👻 *Warning:* *{proxy_name}* has ghosted *{ghost_count}* session(s) before.\n"
+                        f"Absent limit: *{limit}*\n\n"
+                        f"Still add to *{rc.title}*?",
+                        parse_mode="Markdown",
                         reply_markup=markup
                     )
                     return

@@ -1869,7 +1869,7 @@ def create_ghost_selections_table() -> None:
                 chat_id INTEGER NOT NULL,
                 rc_db_id INTEGER NOT NULL,
                 selected_ids TEXT DEFAULT '[]',
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP,
                 PRIMARY KEY (chat_id, rc_db_id)
             )""")
         conn.commit()

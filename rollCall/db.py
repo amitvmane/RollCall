@@ -1496,18 +1496,29 @@ def increment_ghost_count(chat_id: int, user_id: int, user_name: str, proxy_name
     For proxy users (added via /sif), pass user_id=-1 and the proxy_name.
     """
     conn = get_connection()
-    try:
+try:
         cursor = conn.cursor()
         if db_type == 'postgresql':
-            cursor.execute(
-                """INSERT INTO ghost_records (chat_id, user_id, proxy_name, user_name, ghost_count, last_ghosted_at)
-                   VALUES (%s, %s, %s, %s, 1, CURRENT_TIMESTAMP)
-                   ON CONFLICT (chat_id, COALESCE(proxy_name, user_id::text)) DO UPDATE
-                   SET ghost_count = ghost_records.ghost_count + 1,
-                       user_name = EXCLUDED.user_name,
-                       last_ghosted_at = CURRENT_TIMESTAMP""",
-                (chat_id, user_id, proxy_name, user_name)
-)
+            if proxy_name:
+                cursor.execute(
+                    """INSERT INTO ghost_records (chat_id, user_id, proxy_name, user_name, ghost_count, last_ghosted_at)
+                       VALUES (%s, %s, %s, %s, 1, CURRENT_TIMESTAMP)
+                       ON CONFLICT (chat_id, proxy_name) DO UPDATE
+                       SET ghost_count = ghost_records.ghost_count + 1,
+                           user_name = EXCLUDED.user_name,
+                           last_ghosted_at = CURRENT_TIMESTAMP""",
+                    (chat_id, user_id, proxy_name, user_name)
+                )
+            else:
+                cursor.execute(
+                    """INSERT INTO ghost_records (chat_id, user_id, user_name, ghost_count, last_ghosted_at)
+                       VALUES (%s, %s, %s, 1, CURRENT_TIMESTAMP)
+                       ON CONFLICT (chat_id, user_id) DO UPDATE
+                       SET ghost_count = ghost_records.ghost_count + 1,
+                           user_name = EXCLUDED.user_name,
+                           last_ghosted_at = CURRENT_TIMESTAMP""",
+                    (chat_id, user_id, user_name)
+                )
         else:
             cursor.execute(
                 "SELECT ghost_count FROM ghost_records WHERE chat_id = ? AND COALESCE(proxy_name, '') = COALESCE(?, '')",

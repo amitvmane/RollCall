@@ -2862,8 +2862,7 @@ async def ghost_callback_handler(call):
             await bot.edit_message_text(f"✅ {proxy_name} added to IN list", cid, call.message.message_id)
             
             # Send updated list
-            if send_list_message(call, manager):
-                await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number + 1)))
+            await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number + 1)))
             return
         
         # ----------------------------------------------------------------

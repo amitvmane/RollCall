@@ -1804,13 +1804,14 @@ def save_ghost_selections(chat_id: int, rc_db_id: int, selected_ids: set) -> boo
     cursor = conn.cursor()
     try:
         ph = "%s" if db_type == 'postgresql' else "?"
+        ts = "NOW()" if db_type == 'postgresql' else "CURRENT_TIMESTAMP"
         
         # Upsert selections
         cursor.execute(
             f"""INSERT INTO ghost_selections (chat_id, rc_db_id, selected_ids, updated_at)
-               VALUES ({ph}, {ph}, {ph}, NOW())
+               VALUES ({ph}, {ph}, {ph}, {ts})
                ON CONFLICT (chat_id, rc_db_id) 
-               DO UPDATE SET selected_ids = {ph}, updated_at = NOW()""",
+               DO UPDATE SET selected_ids = {ph}, updated_at = {ts}""",
             (chat_id, rc_db_id, json.dumps(list(selected_ids)), json.dumps(list(selected_ids)))
         )
         conn.commit()

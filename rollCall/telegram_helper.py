@@ -1481,6 +1481,15 @@ async def set_in_for(message):
             user = User(proxy_name, None, proxy_name, rc.allNames)
             comment = " ".join(arr[2:]) if len(arr) > 2 else ""
             user.comment = comment
+            
+            # Check ghost count and warn if at/above limit
+            ghost_count = get_ghost_count_by_proxy_name(cid, proxy_name)
+            if ghost_count > 0:
+                chat_settings = manager.get_chat(cid)
+                limit = chat_settings.get('absent_limit', 1)
+                if ghost_count >= limit:
+                    warning = f"⚠️ {proxy_name} has ghosted {ghost_count} time(s) (limit: {limit})"
+                    await bot.send_message(cid, warning)
 
             # Persist proxy user INCLUDING proxy_owner_id in DB
             proxy_owner_id = message.from_user.id

@@ -227,11 +227,10 @@ class TestDeleteUser(unittest.TestCase):
         self.assertTrue(result)
 
     def test_delete_nonexistent_user_returns_false(self):
-        sys.modules['db'].delete_user_by_name.return_value = False
-        result = self.rc.delete_user("Ghost")
+        # Force a fresh mock that returns False
+        with patch('models.db.delete_user_by_name', return_value=False):
+            result = self.rc.delete_user("Ghost")
         self.assertFalse(result)
-        # Reset for other tests
-        sys.modules['db'].delete_user_by_name.return_value = True
 
 
 class TestListTexts(unittest.TestCase):

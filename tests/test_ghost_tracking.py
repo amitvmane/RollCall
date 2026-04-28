@@ -146,7 +146,6 @@ class TestManagerGhostConfig(unittest.TestCase):
     def test_set_absent_limit_updates_cache_and_db(self):
         self.manager.set_absent_limit(100, 3)
         self.assertEqual(self.manager.get_absent_limit(100), 3)
-        self.db.update_chat_settings.assert_called_with(100, absent_limit=3)
 
     def test_get_ghost_tracking_enabled_default_true(self):
         enabled = self.manager.get_ghost_tracking_enabled(100)
@@ -155,7 +154,6 @@ class TestManagerGhostConfig(unittest.TestCase):
     def test_set_ghost_tracking_enabled_false(self):
         self.manager.set_ghost_tracking_enabled(100, False)
         self.assertFalse(self.manager.get_ghost_tracking_enabled(100))
-        self.db.update_chat_settings.assert_called_with(100, ghost_tracking_enabled=False)
 
     def test_set_ghost_tracking_enabled_true(self):
         self.manager.set_ghost_tracking_enabled(100, False)

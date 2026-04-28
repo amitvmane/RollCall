@@ -43,6 +43,8 @@ db_mock.update_rollcall.return_value = None
 db_mock.add_or_update_user.return_value = None
 db_mock.add_or_update_proxy_user.return_value = None
 db_mock.delete_user_by_name.return_value = True
+db_mock.delete_user_by_name.reset_mock = MagicMock()
+
 db_mock.get_all_users.return_value = []
 db_mock.get_proxy_users_by_status.return_value = []
 db_mock.get_or_create_chat.return_value = {

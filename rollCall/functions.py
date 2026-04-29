@@ -1,13 +1,21 @@
 from exceptions import *
 import logging
 import Levenshtein
-import datetime
+from datetime import datetime
 import pytz
 import asyncio
 from telebot.async_telebot import AsyncTeleBot
 from config import TELEGRAM_TOKEN
 
 bot = AsyncTeleBot(TELEGRAM_TOKEN)
+
+logging.basicConfig(
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
+def _ts():
+    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 # FUNCTION TO RAISE RC ALREADY STARTED ERROR
 # USELESS IN NEW FEATURE
@@ -16,7 +24,7 @@ def roll_call_already_started(message, manager):
     try:
         rollcalls = manager.get_rollcalls(message.chat.id)
         if len(rollcalls) == 1:
-            logging.error(f"Roll call with title {rollcalls[0].title} is still in progress")
+            logging.error(f"[{_ts()}] Roll call with title {rollcalls[0].title} is still in progress")
             return False
         else:
             return True
@@ -29,7 +37,7 @@ def roll_call_not_started(message, manager):
     try:
         rollcalls = manager.get_rollcalls(message.chat.id)
         if len(rollcalls) == 0:
-            logging.error("Roll call is not active")
+            logging.error(f"[{_ts()}] Roll call is not active")
             return False
         else:
             return True
@@ -47,13 +55,13 @@ async def admin_rights(message, manager):
 
         member = await bot.get_chat_member(chat_id, message.from_user.id)
         if member.status not in ['administrator', 'creator']:
-            logging.error("Error - user does not have sufficient permissions for this operation")
+            logging.error(f"[{_ts()}] Error - user does not have sufficient permissions for this operation")
             return False
 
         return True
 
     except Exception as e:
-        logging.error(f"Error checking admin rights: {e}")
+        logging.error(f"[{_ts()}] Error checking admin rights: {e}")
         return False
     
 # FUNCTION TO CHECK IF SHH/LOUDER IS ACTIVE
@@ -113,5 +121,5 @@ def auto_complete_timezone(timezone):
         
         return best_match
     except Exception as e:
-        logging.error(f"Error in auto_complete_timezone: {e}")
+        logging.error(f"[{_ts()}] Error in auto_complete_timezone: {e}")
         return None

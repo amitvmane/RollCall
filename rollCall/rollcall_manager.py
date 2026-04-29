@@ -7,6 +7,15 @@ from typing import List, Dict, Optional
 from models import RollCall, db
 from db import create_rollcall
 import logging
+from datetime import datetime
+
+logging.basicConfig(
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
+def _ts():
+    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 
 class RollCallManager:
@@ -59,7 +68,7 @@ class RollCallManager:
         # Add to memory cache
         chat['rollCalls'].append(rc)
 
-        logging.info(f"Created rollcall '{title}' with ID {rc.id} for chat {chat_id}")
+        logging.info(f"[{_ts()}] Created rollcall '{title}' with ID {rc.id} for chat {chat_id}")
         return rc
 
     def remove_rollcall(self, chat_id: int, rc_number: int):
@@ -75,7 +84,7 @@ class RollCallManager:
             db.end_rollcall(rc.db_id)
             chat['rollCalls'].pop(rc_number)
 
-            logging.info(f"Ended rollcall DB ID {rc.db_id} for chat {chat_id}")
+            logging.info(f"[{_ts()}] Ended rollcall DB ID {rc.db_id} for chat {chat_id}")
         else:
             raise IndexError(f"RollCall index {rc_number} out of range")
 
@@ -154,7 +163,7 @@ class RollCallManager:
     def clear_cache(self):
         """Clear all cached data"""
         self._cache.clear()
-        logging.info("RollCall cache cleared")
+        logging.info(f"[{_ts()}] RollCall cache cleared")
 
 
 # Global manager instance

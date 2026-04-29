@@ -10,6 +10,14 @@ from telebot.async_telebot import AsyncTeleBot
 
 import pytz
 
+logging.basicConfig(
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
+def _ts():
+    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
 from config import TELEGRAM_TOKEN, ADMINS
 
 from exceptions import *
@@ -508,7 +516,7 @@ async def start_roll_call(message):
         rc_index = len(rollcalls)  # Index before adding
         # Create new rollcall using manager
         rc = manager.add_rollcall(cid, title)
-        logging.info(f"[CHAT {cid}] Rollcall started: '{title}' (RC #{rc_index+1}) by {message.from_user.first_name} (@{message.from_user.username})")
+        logging.info(f"[{_ts()}] [CHAT {cid}] Rollcall started: '{title}' (RC #{rc_index+1}) by {message.from_user.first_name} (@{message.from_user.username})")
         markup = await get_status_keyboard(rc_index+1)
         await bot.send_message(message.chat.id, f"Roll call '{title}' started! ID: {rc_index+1}\nUse buttons below:", reply_markup=markup)
         #await bot.send_message(message.chat.id, f"Roll call with title: {title} started!\nRollcall id is set to {rc_index + 1}\nTo vote for this RollCall, please use ::RollCallID eg. /in ::{rc_index + 1}")
@@ -1064,7 +1072,7 @@ async def wait_limit(message):
 
         rc.inListLimit = limit
         rc.save()
-        logging.info(f"Max limit of attendees is set to {limit}")
+        logging.info(f"[{_ts()}] Max limit of attendees is set to {limit}")
         await bot.send_message(cid, f"Max limit of attendees is set to {limit}")
 
         moved_from_in_to_wait = []
@@ -1831,7 +1839,7 @@ async def set_title(message):
         rc.save()
         
         await bot.send_message(cid, 'The roll call title is set to: ' + title)
-        logging.info(user + "-" + "The title has change to " + title)
+        logging.info(f"[{_ts()}] Title changed: {user} -> {title}")
 
     except Exception as e:
         await bot.send_message(message.chat.id, e)
@@ -1868,9 +1876,9 @@ async def end_roll_call(message):
         # End current rollcall
         await bot.send_message(message.chat.id, "🎉 Roll ended!")
         await bot.send_message(cid, rc.finishList().replace("__RCID__", str(rc_number + 1)))
-        logging.info("The roll call " + rc.title + " has ended")
+        logging.info(f"[{_ts()}] Rollcall ended: '{rc.title}' (RC #{rc_number+1})")
         manager.remove_rollcall(cid, rc_number)
-        logging.info(f"[CHAT {cid}] Rollcall ended: '{rc.title}' by {message.from_user.first_name} (@{message.from_user.username})")
+        logging.info(f"[{_ts()}] [CHAT {cid}] Rollcall ended: '{rc.title}' by {message.from_user.first_name} (@{message.from_user.username})")
         # Ghost tracking prompt - ask if ANY users were in rollcall (real OR proxy)
         if ghost_tracking_on and has_any_users and rc_db_id and not rc.absent_marked:
             markup = InlineKeyboardMarkup(row_width=2)
@@ -2642,7 +2650,7 @@ async def ghost_callback_handler(call):
                 _ghost_selections[key].discard(proxy_name)
             else:
                 _ghost_selections[key].add(proxy_name)
-            logging.info(f"ghost_togp: {proxy_name}, key={key}, selected now={_ghost_selections[key]}")
+            logging.info(f"[{_ts()}] ghost_togp: {proxy_name}, key={key}, selected now={_ghost_selections[key]}")
             save_ghost_selections(cid, rc_db_id, _ghost_selections[key])
             in_users = get_rollcall_in_users(rc_db_id)
             markup = _build_ghost_select_keyboard(rc_db_id, in_users, _ghost_selections[key])
@@ -2688,7 +2696,7 @@ async def ghost_callback_handler(call):
             selected = _ghost_selections.pop(key, set())
             mark_rollcall_absent_done(rc_db_id)
             
-            logging.info(f"ghost_done: key={key}, selected from map={selected}")
+            logging.info(f"[{_ts()}] ghost_done: key={key}, selected from map={selected}")
 
             if not selected:
                 await bot.answer_callback_query(call.id, "No ghosts selected — marking all as attended.")
@@ -2701,17 +2709,17 @@ async def ghost_callback_handler(call):
             proxy_map = {u['proxy_name']: u for u in in_users if u.get('proxy_name') is not None}
             lines = []
             
-            logging.info(f"Ghost callback: in_users={[u.get('first_name') or u.get('proxy_name') for u in in_users]}, selected={selected}")
+            logging.info(f"[{_ts()}] Ghost callback: in_users={[u.get('first_name') or u.get('proxy_name') for u in in_users]}, selected={selected}")
 
             for item in selected:
                 if isinstance(item, int):
                     # Real Telegram user — track ghost count in DB
                     u = user_map.get(item)
                     if not u:
-                        logging.warning(f"Ghost: real user {item} not found in user_map")
+                        logging.warning(f"[{_ts()}] Ghost: real user {item} not found in user_map")
                         continue
                     name = u.get('first_name') or u.get('username') or str(item)
-                    logging.info(f"Ghosting real user: {name}")
+                    logging.info(f"[{_ts()}] Ghosting real user: {name}")
                     increment_ghost_count(cid, item, name)
                     add_ghost_event(rc_db_id, cid, item, name)
                     new_count = get_ghost_count(cid, item)
@@ -2720,9 +2728,9 @@ async def ghost_callback_handler(call):
                     # Proxy user added via /sif — track ghost count for proxy user
                     proxy_name = str(item)
                     if proxy_name not in proxy_map:
-                        logging.warning(f"Ghost: proxy {proxy_name} not found in proxy_map: {list(proxy_map.keys())}")
+                        logging.warning(f"[{_ts()}] Ghost: proxy {proxy_name} not found in proxy_map: {list(proxy_map.keys())}")
                         continue
-                    logging.info(f"Ghosting proxy user: {proxy_name}")
+                    logging.info(f"[{_ts()}] Ghosting proxy user: {proxy_name}")
                     increment_ghost_count(cid, -1, proxy_name, proxy_name=proxy_name)
                     add_ghost_event(rc_db_id, cid, None, proxy_name=proxy_name)
                     new_count = get_ghost_count_by_proxy_name(cid, proxy_name)

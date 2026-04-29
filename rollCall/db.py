@@ -6,8 +6,13 @@ Supports both PostgreSQL and SQLite
 import os
 import json
 import logging
-#from datetime import datetime
+from datetime import datetime
 from typing import Dict, List, Optional, Any
+
+logging.basicConfig(
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 
 # Try PostgreSQL first, fall back to SQLite
 try:

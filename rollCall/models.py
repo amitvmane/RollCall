@@ -10,6 +10,15 @@ import re
 import traceback
 
 bot = telebot.TeleBot(token=TELEGRAM_TOKEN)
+
+logging.basicConfig(
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
+def _ts():
+    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
 def _parse_db_datetime(value):
     if value is None:
         return None
@@ -72,7 +81,7 @@ class RollCall:
             if chat_id:
                 # NEW: use db.create_rollcall and store DB id in self.id
                 self.id = db.create_rollcall(chat_id, title, self.timezone)
-                logging.info(f"[RC #{self.id}] Created rollcall '{title}' for chat {chat_id}")
+                logging.info(f"[{_ts()}] [RC #{self.id}] Created rollcall '{title}' for chat {chat_id}")
                 self.chat_id = chat_id
                 db.ensure_rollcall_stats(self.id)
             else:
@@ -97,7 +106,7 @@ class RollCall:
         try:
             self.inListLimit = int(raw_limit) if raw_limit is not None else None
         except (ValueError, TypeError):
-            logging.warning(f"[RC] Invalid in_list_limit from DB: {raw_limit!r}, defaulting to None")
+            logging.warning(f"[{_ts()}] [RC] Invalid in_list_limit from DB: {raw_limit!r}, defaulting to None")
             self.inListLimit = None
         self.reminder = data['reminder_hours']
         self.proxy_owners = {}
@@ -201,7 +210,7 @@ class RollCall:
             return 'maybe'
         elif user in self.waitList:
             return 'waitlist'
-        logging.warning(f"[RC #{self.id}] _get_user_current_status: user {repr(user)} not found in any list")
+        logging.warning(f"[{_ts()}] [RC #{self.id}] _get_user_current_status: user {repr(user)} not found in any list")
         return None
 
     def _resolve_display_name_conflict(self, user):
@@ -316,7 +325,7 @@ class RollCall:
         try:
             # Delete from database
             if db.delete_user_by_name(self.id, name):
-                logging.info(f"[RC #{self.id} '{self.title}'] User '{name}' deleted")
+                logging.info(f"[{_ts()}] [RC #{self.id} '{self.title}'] User '{name}' deleted")
                 # Reload from database to sync
                 self._load_users_from_db()
 
@@ -405,14 +414,14 @@ class RollCall:
                 if user not in self.allNames:
                     self.allNames.append(user)
                 self._save_user_to_db(user, 'waitlist')
-                logging.info(f"[RC #{self.id} '{self.title}'] {repr(user)} → WAITING (limit={self.inListLimit})")
+                logging.info(f"[{_ts()}] [RC #{self.id} '{self.title}'] {repr(user)} → WAITING (limit={self.inListLimit})")
                 return 'AC'
 
         self.inList.append(user)
         if user not in self.allNames:
             self.allNames.append(user)
         self._save_user_to_db(user, 'in')
-        logging.info(f"[RC #{self.id} '{self.title}'] {repr(user)} → IN")
+        logging.info(f"[{_ts()}] [RC #{self.id} '{self.title}'] {repr(user)} → IN")
 
 
 
@@ -473,14 +482,14 @@ class RollCall:
                     self.allNames.append(user)
                 self._save_user_to_db(result, 'in')
                 self._save_user_to_db(user, 'out')
-                logging.info(f"[RC #{self.id} '{self.title}'] {repr(user)} → OUT")
+                logging.info(f"[{_ts()}] [RC #{self.id} '{self.title}'] {repr(user)} → OUT")
                 return result
 
         self.outList.append(user)
         if user not in self.allNames:
             self.allNames.append(user)
         self._save_user_to_db(user, 'out')
-        logging.info(f"[RC #{self.id} '{self.title}'] {repr(user)} → OUT")
+        logging.info(f"[{_ts()}] [RC #{self.id} '{self.title}'] {repr(user)} → OUT")
 
     # ADD A NEW USER TO MAYBE LIST
     def addMaybe(self, user):
@@ -539,14 +548,14 @@ class RollCall:
                     self.allNames.append(user)
                 self._save_user_to_db(result, 'in')
                 self._save_user_to_db(user, 'maybe')
-                logging.info(f"[RC #{self.id} '{self.title}'] {repr(user)} → MAYBE")
+                logging.info(f"[{_ts()}] [RC #{self.id} '{self.title}'] {repr(user)} → MAYBE")
                 return result
 
         self.maybeList.append(user)
         if user not in self.allNames:
             self.allNames.append(user)
         self._save_user_to_db(user, 'maybe')
-        logging.info(f"[RC #{self.id} '{self.title}'] {repr(user)} → MAYBE")
+        logging.info(f"[{_ts()}] [RC #{self.id} '{self.title}'] {repr(user)} → MAYBE")
 
 
 

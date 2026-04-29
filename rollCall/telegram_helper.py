@@ -758,6 +758,8 @@ async def set_rollcall_time(message):
     try:
         if roll_call_not_started(message, manager) == False:
             raise rollCallNotStarted("Roll call is not active")
+        if await admin_rights(message, manager) == False:
+            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
         if len(message.text.split(" ")) == 1:
             raise parameterMissing("invalid datetime format, refer help section for details")
         cid = message.chat.id
@@ -833,6 +835,8 @@ async def reminder(message):
     try:
         if roll_call_not_started(message, manager) == False:
             raise rollCallNotStarted("Roll call is not active")
+        if await admin_rights(message, manager) == False:
+            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
 
         # IF NUMBER HAS 00:00 FORMAT
         if len(pmts) > 0 and pmts[0] != 'cancel' and len(pmts[0]) == 2:
@@ -898,7 +902,9 @@ async def event_fee(message):
     try:
         if roll_call_not_started(message, manager) == False:
             raise rollCallNotStarted("Roll call is not active")
-        
+        if await admin_rights(message, manager) == False:
+            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
+
         # IF RC_NUMBER IS SPECIFIED, STORE IT
         if len(pmts) > 0 and "::" in pmts[-1]:
             try:
@@ -910,7 +916,7 @@ async def event_fee(message):
             rollcalls = manager.get_rollcalls(cid)
             if len(rollcalls) < rc_number + 1:
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
-        
+
         rc = manager.get_rollcall(cid, rc_number)
         event_price = " ".join(pmts)
         event_price_number = re.findall('[0-9]+', event_price)
@@ -951,6 +957,8 @@ async def individual_fee(message):
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
         
         rc = manager.get_rollcall(cid, rc_number)
+        if rc.event_fee is None:
+            raise parameterMissing("No event fee set. Use /event_fee to set one first.")
         in_list = len(rc.inList)
         event_price = int(re.sub(r'[^0-9]', "", str(rc.event_fee)))
 
@@ -1056,7 +1064,7 @@ async def wait_limit(message):
             except:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
-        if len(pmts) == 0 or not str(pmts[0]).isdigit() or int(pmts[0]) < 0:
+        if len(pmts) == 0 or not str(pmts[0]).isdigit() or int(pmts[0]) <= 0:
             raise parameterMissing("Input limit is missing or it's not a positive number")
 
         limit = int(pmts[0])
@@ -1207,30 +1215,14 @@ async def delete_template_command(message):
 # RESUME NOTIFICATIONS
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/shh")
 async def shh(message):
-    try:
-        if roll_call_not_started(message, manager) == False:
-            raise rollCallNotStarted("Roll call is not active")
-        else:
-            manager.set_shh_mode(message.chat.id, True)
-            await bot.send_message(message.chat.id, "Ok, i will keep quiet!")
-
-    except rollCallNotStarted as e:
-        print(traceback.format_exc())
-        await bot.send_message(message.chat.id, "Roll call is not active")
+    manager.set_shh_mode(message.chat.id, True)
+    await bot.send_message(message.chat.id, "Ok, i will keep quiet!")
 
 # NON RESUME NOTIFICATIONS
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/louder")
 async def louder(message):
-    try:
-        if roll_call_not_started(message, manager) == False:
-            raise rollCallNotStarted("Roll call is not active")
-        else:
-            manager.set_shh_mode(message.chat.id, False)
-            await bot.send_message(message.chat.id, "Ok, i can hear you!")
-
-    except rollCallNotStarted as e:
-        print(traceback.format_exc())
-        await bot.send_message(message.chat.id, "Roll call is not active")
+    manager.set_shh_mode(message.chat.id, False)
+    await bot.send_message(message.chat.id, "Ok, i can hear you!")
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/in")
 async def in_user(message):
@@ -1807,6 +1799,8 @@ async def set_title(message):
     try:
         if roll_call_not_started(message, manager) == False:
             raise rollCallNotStarted("Roll call is not active")
+        if await admin_rights(message, manager) == False:
+            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
         elif len(message.text.split(" ")) <= 1:
             await bot.send_message(message.chat.id, "Input title is missing")
             return

@@ -1494,8 +1494,7 @@ async def set_in_for(message):
             # Check ghost count and ask confirmation if at/above limit
             ghost_count = get_ghost_count_by_proxy_name(cid, proxy_name)
             if ghost_count > 0:
-                chat_settings = manager.get_chat(cid)
-                limit = chat_settings.get('absent_limit', 1)
+                limit = manager.get_absent_limit(cid)
                 if ghost_count >= limit:
                     # Ask confirmation with buttons (consistent UI with /in)
                     markup = InlineKeyboardMarkup(row_width=2)
@@ -2645,7 +2644,9 @@ async def ghost_callback_handler(call):
             proxy_name = parts[3]
             key = (cid, rc_db_id)
             if key not in _ghost_selections:
-                _ghost_selections[key] = set()
+                from db import load_ghost_selections
+                saved = load_ghost_selections(cid, rc_db_id)
+                _ghost_selections[key] = saved if saved else set()
             if proxy_name in _ghost_selections[key]:
                 _ghost_selections[key].discard(proxy_name)
             else:
@@ -2671,7 +2672,9 @@ async def ghost_callback_handler(call):
             user_id = int(parts[3])
             key = (cid, rc_db_id)
             if key not in _ghost_selections:
-                _ghost_selections[key] = set()
+                from db import load_ghost_selections
+                saved = load_ghost_selections(cid, rc_db_id)
+                _ghost_selections[key] = saved if saved else set()
             if user_id in _ghost_selections[key]:
                 _ghost_selections[key].discard(user_id)
             else:
@@ -2693,6 +2696,12 @@ async def ghost_callback_handler(call):
         if data.startswith("ghost_done_"):
             rc_db_id = int(data.split("_", 2)[2])
             key = (cid, rc_db_id)
+            if key not in _ghost_selections:
+                # Bot may have restarted — restore selections from DB
+                from db import load_ghost_selections
+                saved = load_ghost_selections(cid, rc_db_id)
+                if saved:
+                    _ghost_selections[key] = saved
             selected = _ghost_selections.pop(key, set())
             mark_rollcall_absent_done(rc_db_id)
             
@@ -3235,7 +3244,13 @@ async def callback_handler(call):
             if member.status not in ["administrator", "creator"]:
                 await bot.send_message(cid, "⛔ Insufficient permissions to end rollcall.")
                 return
-            
+
+            # Capture ghost tracking info BEFORE removing from manager
+            rc_db_id = rc.id
+            ghost_tracking_on = manager.get_ghost_tracking_enabled(cid)
+            has_any_users = len(rc.inList) > 0
+            absent_already_marked = rc.absent_marked
+
             await bot.answer_callback_query(call.id, "Rollcall ended")
             ended_by = call.from_user.first_name or call.from_user.username or "someone"
 
@@ -3247,6 +3262,15 @@ async def callback_handler(call):
                 pass
 
             manager.remove_rollcall(cid, rc_number - 1)
+
+            # Ghost tracking prompt — mirrors /erc command behaviour
+            if ghost_tracking_on and has_any_users and rc_db_id and not absent_already_marked:
+                markup = InlineKeyboardMarkup(row_width=2)
+                markup.add(
+                    InlineKeyboardButton("👻 Yes, select ghosts", callback_data=f"ghost_yes_{rc_db_id}"),
+                    InlineKeyboardButton("✅ No, all showed up", callback_data=f"ghost_no_{rc_db_id}")
+                )
+                await bot.send_message(cid, "👻 Did anyone ghost today's session?", reply_markup=markup)
 
             updated_rollcalls = manager.get_rollcalls(cid)
             if len(updated_rollcalls) > 0:

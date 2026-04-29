@@ -134,13 +134,13 @@ class RollCallManager:
     def get_absent_limit(self, chat_id: int) -> int:
         """Get ghost threshold for a chat - uses group setting first, then default"""
         chat = self.get_chat(chat_id)
-        # Use group-level setting (absent_limit from DB), fallback to default
-        return chat.get('absent_limit', 1) or 1
+        # Cache key matches what get_chat stores: 'absentLimit'
+        return chat.get('absentLimit', 1) or 1
 
     def set_absent_limit(self, chat_id: int, limit: int):
         """Set ghost threshold for a chat"""
         chat = self.get_chat(chat_id)
-        chat['absent_limit'] = limit  # Use same key as DB
+        chat['absentLimit'] = limit  # Must match the key used in get_chat
         db.update_chat_settings(chat_id, absent_limit=limit)
 
     def get_ghost_tracking_enabled(self, chat_id: int) -> bool:

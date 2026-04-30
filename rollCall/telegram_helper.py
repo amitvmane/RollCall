@@ -244,105 +244,73 @@ async def welcome_and_explanation(message):
 async def help_commands(message):
   #  await bot.send_message(message.chat.id, '''The commands are:\n-/start  - To start the bot\n-/help - To see the commands\n-/start_roll_call - To start a new roll call (optional title)\n-/in - To let everybody know you will be attending (optional comment)\n-/out - To let everybody know you won't be attending (optional comment)\n-/maybe - To let everybody know you don't know (optional comment)\n-/whos_in - List of those who will go\n-/whos_out - List of those who will not go\n-/whos_maybe - List of those who maybe will go\n-/set_title - To set a title for the current roll call\n-/set_in_for - Allows you to respond for another user\n-/set_out_for - Allows you to respond for another user\n-/set_maybe_for - Allows you to respond for another user\n-/shh - to apply minimum output for each command\n-/louder - to disable minimum output for each command\n-/set_limit - To set a limit to IN state\n-/end_roll_call - To end a roll call\n-/set_rollcall_time - To set a finalize time to the current rc. Accepts 2 parameters date (DD-MM-YYYY) and time (H:M). Write cancel to delete it\n-/set_rollcall_reminder - To set a reminder before the ends of the rc. Accepts 1 parameter, hours as integers. Write 'cancel' to delete the reminder\n-/timezone - To set your timezone, accepts 1 parameter (Continent/Country) or (Continent/State)\n-/when - To check the start time of a roll call\n-/location - To check the location of a roll call''')
 
-    await bot.send_message(message.chat.id, '''**RollCall Bot Commands**
+    await bot.send_message(message.chat.id, '''RollCall Bot Commands
 
-    **Basic:**
+Basic:
+/start_roll_call (/src) [title] — Start a new rollcall
+/end_roll_call (/erc) [::N] — End rollcall
+/rollcalls (/r) — List all active rollcalls
+/panel [::N] — Show inline control panel
 
-    /start - Start the bot
+Voting (append ::N for a specific rollcall):
+/in [comment] — Mark yourself IN
+/out [comment] — Mark yourself OUT
+/maybe [comment] — Mark yourself MAYBE
 
-    /help - Show this help
+Lists:
+/whos_in (/wi) [::N] — IN list
+/whos_out (/wo) [::N] — OUT list
+/whos_maybe (/wm) [::N] — MAYBE list
+/whos_waiting (/ww) [::N] — Waitlist
 
-    /start_roll_call (/src) - Start new rollcall (optional title)
+Proxy (for non-Telegram members, admin only):
+/set_in_for (/sif) name [::N]
+/set_out_for (/sof) name [::N]
+/set_maybe_for (/smf) name [::N]
 
-    **Status Updates:**
+Event settings (admin only):
+/set_title (/st) title [::N]
+/set_limit (/sl) N [::N] — Max attendees
+/set_rollcall_time (/srt) DD-MM-YYYY H:M [::N]
+/set_rollcall_reminder (/srr) hours [::N]
+/event_fee (/ef) amount [::N]
+/individual_fee (/if) [::N] — Per-person fee split
+/location (/loc) place [::N]
+/when (/w) [::N] — Show event time
 
-    /in - Mark yourself attending (optional comment ::N)
+Templates (admin only):
+/set_template name "Title" [limit=N] [location=X] [fee=X]
+/templates — List saved templates
+/start_template name [extra title]
+/delete_template name
 
-    /out - Mark yourself not attending (optional comment ::N)
+Ghost tracking (admin only):
+/toggle_ghost_tracking — Enable/disable no-show tracking
+/set_absent_limit N — Reconfirmation threshold
+/absent_stats — Ghost leaderboard
+/mark_absent — Mark no-shows from a past session
+/clear_absent name — Clear ghost count
 
-    /maybe - Mark yourself maybe (optional comment ::N)
+Admin tools:
+/delete_user name [::N] — Remove user (with confirmation)
+/buzz [message] [::N] — Ping members who haven't voted yet
+/set_admins / /unset_admins — Toggle admin-only mode
 
-    **Lists:**
+Chat settings:
+/shh — Silent mode (no list after each vote)
+/louder — Show full list after each vote
+/timezone (/tz) Region/City — e.g. Asia/Kolkata
 
-    /rollcalls (/r) - List all active rollcalls with IDs
+Info:
+/stats (/s) [name|@user|group|top|bot] — Attendance stats & streaks
+/history [N] — Last N ended rollcalls (default 10)
+/version (/v) — Bot version
 
-    /whos_in (/wi) - Show attending (::N for specific)
+Super admin:
+/broadcast "message" — Send to all bot chats
 
-    /whos_out (/wo) - Show not attending (::N)
-
-    /whos_maybe (/wm) - Show maybe (::N)
-
-    /whos_waiting (/ww) - Show waitlist (::N)
-
-    /panel ::N - Show control panel with buttons for rollcall #N
-
-    **Admin Commands:**
-
-    /end_roll_call (/erc) ::N - End rollcall #N
-
-    /set_title (/st) ::N "title" - Set title for #N
-
-    /set_limit (/sl) ::N limit - Set max IN limit for #N
-
-    /delete_user ::N username - Remove user from #N (admin only)
-
-    /set_admins - Enable admin mode (group admin only)
-
-    /unset_admins - Disable admin mode
-
-    **Templates (per group, admin only):**
-
-    /set_template name - Create or update a template using name "Title" [limit=N] [location=Place] [fee="Amount"] [offset_days=D] [offset_hours=H] [offset_minutes=M]
-
-    /templates - List templates available in this chat
-
-    /start_template name [extra title] - Start new rollcall from a template
-
-    /delete_template name - Delete a template from this chat
-
-    **Proxy Voting (for others):**
-
-    /set_in_for (/sif) ::N username - Mark other user IN
-
-    /set_out_for (/sof) ::N username - Mark other user OUT
-
-    /set_maybe_for (/smf) ::N username - Mark other user MAYBE
-
-    **Event Management:**
-
-    /set_rollcall_time (/srt) ::N "DD-MM-YYYY H:M" - Set event time ('cancel' to clear)
-
-    /set_rollcall_reminder (/srr) ::N hours - Reminder hours before ('cancel' to clear)
-
-    /event_fee (/ef) ::N amount - Set total event fee
-
-    /individual_fee (/if) ::N - Calculate per-person fee
-
-    /when (/w) ::N - Show event time
-
-    /location (/loc) ::N "place" - Set location
-
-    **Chat Settings:**
-
-    /shh - Silent mode (no lists after responses)
-
-    /louder - Resume full output
-
-    /timezone (/tz) "Asia/Kolkata" - Set timezone
-
-    **Super Admin:**
-
-    /broadcast "message" - Send to all bot chats (super admin only)
-
-    **Info:**
-
-    /stats (/s) @username or group or firstname or top  or bot - Bot usage statistics for real telegram users , not for proxy users
-
-    /version (/v) - Show current version
-
-    **Usage:** Use `::N` to target rollcall #N (see /rollcalls)
-
-    ''')
+Tip: append ::N to most commands to target rollcall #N
+''')
 
 
 

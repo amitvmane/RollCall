@@ -44,6 +44,7 @@ class GhostTestBase(unittest.IsolatedAsyncioTestCase):
         # Clear in-memory ghost state between tests
         self.th._ghost_selections.clear()
         self.th._pending_reconf.clear()
+        self.th._rate_limits.clear()
 
         self.rc = self._make_rc()
         self.manager = self._make_manager([self.rc])

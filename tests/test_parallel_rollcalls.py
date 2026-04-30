@@ -30,6 +30,7 @@ class TestParallelRollcallsBase(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.th.bot.send_message = AsyncMock()
         self.th.bot.get_chat_member = AsyncMock()
+        self.th._rate_limits.clear()
         self.rc = self._make_rc()
         self.manager = self._make_manager([self.rc])
 
@@ -358,7 +359,7 @@ class TestDeleteUserWithParallel(TestParallelRollcallsBase):
     """Test delete_user with parallel rollcalls."""
 
     async def test_delete_user_from_specific_rollcall(self):
-        """Verify /delete_user targets correct rollcall."""
+        """Verify /delete_user stores pending delete for correct rollcall (confirmation step)."""
         rc1 = self._make_rc("Event 1", 1)
         rc2 = self._make_rc("Event 2", 2)
         rc2.delete_user.return_value = True
@@ -370,8 +371,12 @@ class TestDeleteUserWithParallel(TestParallelRollcallsBase):
         with self._rc_started(), self._admin_ok(), patch('telegram_helper.manager', mgr):
             await self.th.delete_user(msg)
 
-        rc2.delete_user.assert_called_once_with("Bob")
+        # delete_user now shows a confirmation prompt first
         rc1.delete_user.assert_not_called()
+        rc2.delete_user.assert_not_called()
+        # Pending delete for admin (user_id=1) in chat 100 should be stored
+        self.assertIn((100, 1), self.th._pending_deletes)
+        self.assertEqual(self.th._pending_deletes[(100, 1)]['name'], "Bob")
 
 
 class TestLimitWithParallel(TestParallelRollcallsBase):

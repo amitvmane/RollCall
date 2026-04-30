@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 # Import bot components
 try:
-    from config import TELEGRAM_TOKEN, DATABASE_URL, ADMINS
+    from config import TELEGRAM_TOKEN, DATABASE_URL, ADMINS, WEBHOOK_URL
     from telegram_helper import bot
     from rollcall_manager import manager
 except ImportError as e:
@@ -97,23 +97,43 @@ async def ping(request):
     return web.Response(text="pong", status=200)
 
 
+async def webhook_handler(request):
+    """Receive Telegram updates via webhook POST."""
+    import telebot
+    if request.content_type != 'application/json':
+        return web.Response(status=403)
+    try:
+        json_body = await request.json()
+        update = telebot.types.Update.de_json(json_body)
+        await bot.process_new_updates([update])
+        return web.Response(status=200)
+    except Exception as e:
+        logger.error(f"Webhook handler error: {e}")
+        return web.Response(status=500)
+
+
 async def start_health_server():
-    """Start HTTP health check server"""
+    """Start HTTP health check server (and webhook endpoint if WEBHOOK_URL is set)."""
     app = web.Application()
     app.router.add_get('/health', health_check)
     app.router.add_get('/ping', ping)
-    
+
+    if WEBHOOK_URL:
+        app.router.add_post('/webhook', webhook_handler)
+
     runner = web.AppRunner(app)
     await runner.setup()
-    
+
     # Use port from environment or default to 8080
     port = int(os.getenv('HEALTH_CHECK_PORT', '8080'))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    
+
     logger.info(f"✅ Health check server running on http://0.0.0.0:{port}")
     logger.info(f"   - Health: http://localhost:{port}/health")
     logger.info(f"   - Ping:   http://localhost:{port}/ping")
+    if WEBHOOK_URL:
+        logger.info(f"   - Webhook: POST http://localhost:{port}/webhook  →  {WEBHOOK_URL}")
 
 
 async def main():
@@ -157,40 +177,54 @@ async def main():
         logger.warning(f"⚠️  Health check server failed to start: {e}")
         logger.warning("Continuing without health check endpoint...")
     
-    # Start bot polling
-    logger.info("🚀 Bot is now running and listening for messages...")
-    logger.info("Press Ctrl+C to stop")
-    logger.info("=" * 60)
-    
+    # Start bot — webhook or polling
     try:
-        # Run bot with automatic reconnection
-        await bot.infinity_polling(
-            timeout=20,
-            request_timeout=60,  # Increased from 30 — reduces spurious timeouts on slow networks
-            skip_pending=True  # Skip messages sent while bot was offline
-        )
+        if WEBHOOK_URL:
+            logger.info(f"🔗 Webhook mode enabled → {WEBHOOK_URL}")
+            logger.info("🚀 Bot is now running via webhook...")
+            logger.info("=" * 60)
+            await bot.remove_webhook()
+            await bot.set_webhook(url=WEBHOOK_URL)
+            logger.info("✅ Webhook registered with Telegram")
+            # Keep alive — aiohttp serves the webhook endpoint
+            await asyncio.Event().wait()
+        else:
+            logger.info("🚀 Bot is now running via long-polling...")
+            logger.info("Press Ctrl+C to stop")
+            logger.info("=" * 60)
+            await bot.infinity_polling(
+                timeout=20,
+                request_timeout=60,
+                skip_pending=True
+            )
     except KeyboardInterrupt:
         logger.info("\n" + "=" * 60)
         logger.info("⏹️  Received shutdown signal (Ctrl+C)")
     except Exception as e:
-        logger.error(f"❌ Bot polling error: {e}", exc_info=True)
+        logger.error(f"❌ Bot error: {e}", exc_info=True)
     finally:
         logger.info("=" * 60)
         logger.info("🛑 Shutting down gracefully...")
-        
-        # Clean up resources
+
+        if WEBHOOK_URL:
+            try:
+                await bot.remove_webhook()
+                logger.info("✅ Webhook removed")
+            except Exception as e:
+                logger.error(f"⚠️  Error removing webhook: {e}")
+
         try:
             await bot.close_session()
             logger.info("✅ Bot session closed")
         except Exception as e:
             logger.error(f"⚠️  Error closing bot session: {e}")
-        
+
         try:
             manager.clear_cache()
             logger.info("✅ Manager cache cleared")
         except Exception as e:
             logger.error(f"⚠️  Error clearing cache: {e}")
-        
+
         logger.info("=" * 60)
         logger.info("👋 Goodbye!")
         logger.info("=" * 60)

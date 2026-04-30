@@ -112,5 +112,11 @@
         "Description": "Ghost feature fixes: absent_limit threshold now correctly loaded from DB on restart (cache key mismatch), ghost prompt now fires on panel end (btn_endconfirm) not just /erc command, ghost selections restored from DB on bot restart preventing silent data loss",
         "DeployedOnProd": "Y",
         "DeployedDatetime": "29-04-2026 00:00 UTC"
+    },
+    {
+        "Version": 5.5,
+        "Description": "Enhancements: webhook mode support (WEBHOOK_URL env var), attendance rate + streak display in /stats, /history command (last 10 ended sessions), /delete_user confirmation keyboard, attendance streak tracking (current & best), rate limiting on /in /out /maybe, ghost prompt after auto-close, streak updates on event end",
+        "DeployedOnProd": "N",
+        "DeployedDatetime": "30-04-2026 00:00 UTC"
     }
 ]

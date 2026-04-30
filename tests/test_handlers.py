@@ -38,6 +38,9 @@ class HandlerTestBase(unittest.IsolatedAsyncioTestCase):
         # Fresh AsyncMock for bot.send_message each test
         self.th.bot.send_message = AsyncMock()
         self.th.bot.get_chat_member = AsyncMock()
+        # Clear rate limit and pending state between tests
+        self.th._rate_limits.clear()
+        self.th._pending_deletes.clear()
         # Shared manager and rollcall mocks
         self.rc = self._make_rc()
         self.manager = self._make_manager([self.rc])
@@ -824,19 +827,26 @@ class TestSetLimit(HandlerTestBase):
 class TestDeleteUser(HandlerTestBase):
 
     async def test_deletes_existing_user(self):
+        """delete_user now shows a confirmation keyboard before deleting."""
         self.rc.delete_user.return_value = True
         msg = self._make_message("/delete_user Alice")
         with self._rc_started(), self._admin_ok(), self._patch_manager():
             await self.th.delete_user(msg)
-        self.rc.delete_user.assert_called_once_with("Alice")
-        self.assertIn("deleted", self._sent_text().lower())
+        # Should NOT delete directly — shows confirmation prompt instead
+        self.rc.delete_user.assert_not_called()
+        sent_text = self._sent_text().lower()
+        self.assertIn("alice", sent_text)
+        # Pending delete should be stored
+        self.assertIn((100, 1), self.th._pending_deletes)
 
     async def test_user_not_found_sends_notice(self):
+        """Confirmation is stored even for unknown users — callback handles not-found."""
         self.rc.delete_user.return_value = False
         msg = self._make_message("/delete_user Ghost")
         with self._rc_started(), self._admin_ok(), self._patch_manager():
             await self.th.delete_user(msg)
-        self.assertIn("wasn't found", self._sent_text())
+        # Confirmation prompt is sent; pending delete stored
+        self.assertIn((100, 1), self.th._pending_deletes)
 
     async def test_missing_name_sends_error(self):
         msg = self._make_message("/delete_user")

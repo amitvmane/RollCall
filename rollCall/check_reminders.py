@@ -5,9 +5,10 @@ from datetime import datetime, timedelta
 
 import pytz
 from telebot.async_telebot import AsyncTeleBot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import TELEGRAM_TOKEN
-from db import end_rollcall
+from db import end_rollcall, update_streak_on_checkin
 
 bot = AsyncTeleBot(token=TELEGRAM_TOKEN)
 
@@ -65,8 +66,34 @@ async def check(rollcalls, timezone, chat_id):
                         )
 
                         rc_db_id = getattr(rollcall, "db_id", None) or getattr(rollcall, "id", None)
+
+                        # Update attendance streaks for real users who were IN
+                        for u in rollcall.inList:
+                            if isinstance(u.user_id, int):
+                                try:
+                                    update_streak_on_checkin(chat_id, u.user_id)
+                                except Exception:
+                                    pass
+
                         if rc_db_id is not None:
                             end_rollcall(rc_db_id)
+
+                            # Fire ghost prompt if tracking is enabled and rollcall had IN users
+                            try:
+                                from rollcall_manager import manager
+                                from db import get_rollcall_in_users
+                                ghost_tracking_on = manager.get_ghost_tracking_enabled(chat_id)
+                                has_users = bool(get_rollcall_in_users(rc_db_id))
+                                absent_already = getattr(rollcall, "absent_marked", False)
+                                if ghost_tracking_on and has_users and not absent_already:
+                                    markup = InlineKeyboardMarkup(row_width=2)
+                                    markup.add(
+                                        InlineKeyboardButton("👻 Yes, select ghosts", callback_data=f"ghost_yes_{rc_db_id}"),
+                                        InlineKeyboardButton("✅ No, all showed up", callback_data=f"ghost_no_{rc_db_id}"),
+                                    )
+                                    await bot.send_message(chat_id, "👻 Did anyone ghost today's session?", reply_markup=markup)
+                            except Exception:
+                                logging.error(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error sending ghost prompt after auto-close: {traceback.format_exc()}")
 
                         if rollcall in rollcalls:
                             rollcalls.remove(rollcall)

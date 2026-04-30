@@ -23,5 +23,10 @@ ADMINS = _parse_admins()
 # Default to SQLite if DATABASE_URL is not set
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///rollcall.db")
 
+# Webhook mode: set WEBHOOK_URL to your public HTTPS URL to enable webhooks.
+# Leave unset (or empty) to use long-polling (default).
+# Example: https://mybot.example.com/webhook
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "").strip() or None
+
 # Ghost tracking defaults
 DEFAULT_ABSENT_LIMIT = 1

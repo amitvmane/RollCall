@@ -1886,5 +1886,99 @@ def create_ghost_selections_table() -> None:
             release_connection(conn)
 
 
+def update_streak_on_checkin(chat_id: int, user_id: int) -> None:
+    """Increment current_streak by 1 for a user at rollcall end; update best_streak if exceeded."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        if db_type == 'postgresql':
+            cursor.execute(f"""
+                INSERT INTO user_stats (chat_id, user_id, current_streak, best_streak)
+                VALUES ({ph}, {ph}, 1, 1)
+                ON CONFLICT (chat_id, user_id) DO UPDATE SET
+                    current_streak = user_stats.current_streak + 1,
+                    best_streak    = GREATEST(user_stats.best_streak, user_stats.current_streak + 1),
+                    updated_at     = CURRENT_TIMESTAMP
+            """, (chat_id, user_id))
+        else:
+            cursor.execute(f"""
+                INSERT OR IGNORE INTO user_stats (chat_id, user_id) VALUES ({ph}, {ph})
+            """, (chat_id, user_id))
+            cursor.execute(f"""
+                UPDATE user_stats
+                SET current_streak = current_streak + 1,
+                    best_streak    = MAX(best_streak, current_streak + 1),
+                    updated_at     = CURRENT_TIMESTAMP
+                WHERE chat_id = {ph} AND user_id = {ph}
+            """, (chat_id, user_id))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"Error updating streak on checkin: {e}")
+    finally:
+        if db_type == 'postgresql':
+            cursor.close()
+            release_connection(conn)
+
+
+def reset_streak_on_ghost(chat_id: int, user_id: int) -> None:
+    """Reset current_streak to 0 when a user ghosts a session."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(f"""
+            UPDATE user_stats SET current_streak = 0, updated_at = CURRENT_TIMESTAMP
+            WHERE chat_id = {ph} AND user_id = {ph}
+        """, (chat_id, user_id))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"Error resetting streak on ghost: {e}")
+    finally:
+        if db_type == 'postgresql':
+            cursor.close()
+            release_connection(conn)
+
+
+def get_rollcall_history(chat_id: int, limit: int = 10) -> List[Dict]:
+    """Return the last `limit` ended rollcalls for a chat with participant counts."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        if db_type == 'postgresql':
+            cursor.execute(f"""
+                SELECT r.id, r.title, r.ended_at,
+                    (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'in') +
+                    (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND p.status = 'in') AS in_count,
+                    (SELECT COUNT(*) FROM ghost_events g WHERE g.rollcall_id = r.id) AS ghost_count
+                FROM rollcalls r
+                WHERE r.chat_id = {ph} AND r.is_active = FALSE
+                ORDER BY r.ended_at DESC
+                LIMIT {ph}
+            """, (chat_id, limit))
+        else:
+            cursor.execute(f"""
+                SELECT r.id, r.title, r.ended_at,
+                    (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'in') +
+                    (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND p.status = 'in') AS in_count,
+                    (SELECT COUNT(*) FROM ghost_events g WHERE g.rollcall_id = r.id) AS ghost_count
+                FROM rollcalls r
+                WHERE r.chat_id = {ph} AND r.is_active = 0
+                ORDER BY r.ended_at DESC
+                LIMIT {ph}
+            """, (chat_id, limit))
+        return [dict(row) for row in cursor.fetchall()]
+    except Exception as e:
+        logging.error(f"Error getting rollcall history: {e}")
+        return []
+    finally:
+        if db_type == 'postgresql':
+            cursor.close()
+            release_connection(conn)
+
+
 # Initialize database on import
 init_db()

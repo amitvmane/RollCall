@@ -35,7 +35,8 @@ from db import (
     get_ghost_count, increment_ghost_count, reset_ghost_count,
     get_ghost_leaderboard, get_user_ghost_count_by_name, get_ghost_count_by_proxy_name,
     mark_rollcall_absent_done, get_unprocessed_rollcalls,
-    add_ghost_event, get_rollcall_in_users, save_ghost_selections
+    add_ghost_event, get_rollcall_in_users, save_ghost_selections,
+    update_streak_on_checkin, reset_streak_on_ghost, get_rollcall_history
 )
 
 bot = AsyncTeleBot(token=TELEGRAM_TOKEN)
@@ -46,6 +47,13 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _ghost_selections: dict = {}
 # (chat_id, user_id) -> {'rc_number': int, 'comment': str} for pending reconfirmation
 _pending_reconf: dict = {}
+
+# Rate limiting: (chat_id, user_id) -> last action timestamp
+_rate_limits: dict = {}
+_RATE_LIMIT_SECONDS = 2
+
+# Pending delete confirmations: (chat_id, admin_user_id) -> {'name': str, 'rc_number': int}
+_pending_deletes: dict = {}
 
 
 def _fmt_ended_at(ended_at) -> str:
@@ -100,7 +108,16 @@ def _get_display_name(tg_user) -> str:
     """Return a safe, non-None display name for a Telegram user object."""
     return tg_user.first_name or tg_user.last_name or str(tg_user.id)
 
-#logging.info("Bot already started")
+
+def _is_rate_limited(chat_id: int, user_id: int) -> bool:
+    """Return True if this user has acted within the rate limit window."""
+    key = (chat_id, user_id)
+    now = datetime.now().timestamp()
+    last = _rate_limits.get(key, 0)
+    if now - last < _RATE_LIMIT_SECONDS:
+        return True
+    _rate_limits[key] = now
+    return False
 
 def format_mention(user: User) -> str:
     """
@@ -1160,7 +1177,7 @@ async def delete_user(message):
         cid = message.chat.id
         arr = msg.split(" ")
         rc_number = 0
- 
+
         if len(arr) > 1 and "::" in arr[-1]:
             try:
                 rc_number = int(arr[-1].replace("::", "")) - 1
@@ -1171,15 +1188,23 @@ async def delete_user(message):
             rollcalls = manager.get_rollcalls(cid)
             if len(rollcalls) < rc_number + 1:
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
-        
+
         name = " ".join(arr[1:])
-        rc = manager.get_rollcall(cid, rc_number)
-        
-        if rc.delete_user(name) == True:
-            rc.save()
-            await bot.send_message(cid, "The user was deleted!")
-        else:
-            await bot.send_message(cid, "That user wasn't found")
+        admin_id = message.from_user.id
+
+        # Store pending delete and ask for confirmation
+        _pending_deletes[(cid, admin_id)] = {'name': name, 'rc_number': rc_number}
+        markup = InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            InlineKeyboardButton("✅ Yes, delete", callback_data=f"delconf_yes_{rc_number}_{admin_id}"),
+            InlineKeyboardButton("❌ Cancel", callback_data=f"delconf_no_{rc_number}_{admin_id}"),
+        )
+        await bot.send_message(
+            cid,
+            f"⚠️ Remove *{name}* from rollcall #{rc_number + 1}?",
+            parse_mode="Markdown",
+            reply_markup=markup,
+        )
 
     except Exception as e:
         await bot.send_message(message.chat.id, e)
@@ -1229,6 +1254,8 @@ async def in_user(message):
     try:
         if roll_call_not_started(message, manager) == False:
             raise rollCallNotStarted("Roll call is not active")
+        if _is_rate_limited(message.chat.id, message.from_user.id):
+            return
         msg = message.text
         pmts = msg.split(" ")
         cid = message.chat.id
@@ -1307,6 +1334,8 @@ async def out_user(message):
     try:
         if roll_call_not_started(message, manager) == False:
             raise rollCallNotStarted("Roll call is not active")
+        if _is_rate_limited(message.chat.id, message.from_user.id):
+            return
         msg = message.text
         pmts = msg.split(" ")
         cid = message.chat.id
@@ -1386,6 +1415,8 @@ async def maybe_user(message):
     try:
         if roll_call_not_started(message, manager) == False:
             raise rollCallNotStarted("Roll call is not active")
+        if _is_rate_limited(message.chat.id, message.from_user.id):
+            return
         msg = message.text
         pmts = msg.split(" ")
         cid = message.chat.id
@@ -1865,7 +1896,12 @@ async def end_roll_call(message):
         # Check BOTH real users and proxy users in IN list
         in_users = rc.inList
         has_any_users = len(in_users) > 0
-        
+
+        # Update attendance streaks for real users who were IN
+        for u in in_users:
+            if isinstance(u.user_id, int):
+                update_streak_on_checkin(cid, u.user_id)
+
         # End current rollcall
         await bot.send_message(message.chat.id, "🎉 Roll ended!")
         await bot.send_message(cid, rc.finishList().replace("__RCID__", str(rc_number + 1)))
@@ -2371,8 +2407,8 @@ async def build_user_stats_text(chat_id: int, user_id: int, first_name: str) -> 
         if db_type == "postgresql":
             cursor.execute(
                 """
-                SELECT total_in, total_out, total_maybe,
-                       total_waiting_to_in
+                SELECT total_in, total_out, total_maybe, total_waiting_to_in,
+                       total_rollcalls, current_streak, best_streak
                 FROM user_stats
                 WHERE chat_id = %s AND user_id = %s
                 """,
@@ -2381,8 +2417,8 @@ async def build_user_stats_text(chat_id: int, user_id: int, first_name: str) -> 
         else:
             cursor.execute(
                 """
-                SELECT total_in, total_out, total_maybe,
-                       total_waiting_to_in
+                SELECT total_in, total_out, total_maybe, total_waiting_to_in,
+                       total_rollcalls, current_streak, best_streak
                 FROM user_stats
                 WHERE chat_id = ? AND user_id = ?
                 """,
@@ -2399,10 +2435,15 @@ async def build_user_stats_text(chat_id: int, user_id: int, first_name: str) -> 
             cols = [d[0] for d in cursor.description]
             data = {cols[i]: row[i] for i in range(len(cols))}
 
-        total_in = data.get("total_in", 0)
-        total_out = data.get("total_out", 0)
-        total_maybe = data.get("total_maybe", 0)
-        total_wait = data.get("total_waiting_to_in", 0)
+        total_in       = data.get("total_in", 0) or 0
+        total_out      = data.get("total_out", 0) or 0
+        total_maybe    = data.get("total_maybe", 0) or 0
+        total_wait     = data.get("total_waiting_to_in", 0) or 0
+        total_rc       = data.get("total_rollcalls", 0) or 0
+        cur_streak     = data.get("current_streak", 0) or 0
+        best_streak    = data.get("best_streak", 0) or 0
+
+        attendance_pct = f"{round(total_in / total_rc * 100)}%" if total_rc > 0 else "—"
 
         lines = [
             f"*Stats for {first_name}:*",
@@ -2411,6 +2452,11 @@ async def build_user_stats_text(chat_id: int, user_id: int, first_name: str) -> 
             f"❌ OUT: {total_out}",
             f"🤔 MAYBE: {total_maybe}",
             f"⏫ From WAITING → IN: {total_wait}",
+            f"📋 Total rollcalls: {total_rc}",
+            f"📊 Attendance rate: {attendance_pct}",
+            "",
+            f"🔥 Current streak: {cur_streak} session(s)",
+            f"🏆 Best streak: {best_streak} session(s)",
         ]
         return "\n".join(lines)
     finally:
@@ -2485,6 +2531,41 @@ async def build_group_stats_text(chat_id: int) -> str:
             cursor.close()
             from db import release_connection
             release_connection(conn)
+
+
+@bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/history")
+async def history_command(message):
+    """
+    /history [N] — Show the last N ended rollcalls for this chat (default 10, max 20).
+    """
+    cid = message.chat.id
+    try:
+        parts = message.text.strip().split()
+        limit = 10
+        if len(parts) > 1:
+            try:
+                limit = max(1, min(20, int(parts[1])))
+            except ValueError:
+                pass
+
+        records = get_rollcall_history(cid, limit)
+        if not records:
+            await bot.send_message(cid, "No ended rollcalls found for this chat yet.")
+            return
+
+        lines = [f"*📋 Last {len(records)} rollcall(s):*", ""]
+        for i, r in enumerate(records, 1):
+            ended = _fmt_ended_at(r.get("ended_at"))
+            title = r.get("title") or "Untitled"
+            in_count = r.get("in_count", 0)
+            ghost_count = r.get("ghost_count", 0)
+            ghost_str = f"  👻 {ghost_count}" if ghost_count else ""
+            lines.append(f"{i}. *{title}* — {ended}  ✅ {in_count}{ghost_str}")
+
+        await bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
+    except Exception as e:
+        logging.exception("Error in /history")
+        await bot.send_message(cid, "Error fetching history, please try again later.")
 
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/panel")
@@ -2573,7 +2654,9 @@ async def get_end_confirm_keyboard(rc_number: int) -> InlineKeyboardMarkup:
 
 
 @bot.callback_query_handler(func=lambda call: call.data and (
-    call.data.startswith("ghost_") or call.data.startswith("reconf_") or call.data.startswith("mabs_") or call.data.startswith("proxy_add_") or call.data.startswith("proxy_cancel_")
+    call.data.startswith("ghost_") or call.data.startswith("reconf_") or call.data.startswith("mabs_")
+    or call.data.startswith("proxy_add_") or call.data.startswith("proxy_cancel_")
+    or call.data.startswith("delconf_")
 ))
 async def ghost_callback_handler(call):
     """
@@ -2725,6 +2808,7 @@ async def ghost_callback_handler(call):
                     logging.info(f"[{_ts()}] Ghosting real user: {name}")
                     increment_ghost_count(cid, item, name)
                     add_ghost_event(rc_db_id, cid, item, name)
+                    reset_streak_on_ghost(cid, item)
                     new_count = get_ghost_count(cid, item)
                     lines.append(f"👻 {name} — ghosted {new_count} session(s) total")
                 else:
@@ -2883,7 +2967,37 @@ async def ghost_callback_handler(call):
             await bot.answer_callback_query(call.id, "❌ Cancelled")
             await bot.edit_message_text("❌ Cancelled — user not added", cid, call.message.message_id)
             return
-        
+
+        # ----------------------------------------------------------------
+        # delconf_yes_ / delconf_no_ — delete user confirmation
+        # ----------------------------------------------------------------
+        if data.startswith("delconf_yes_") or data.startswith("delconf_no_"):
+            parts = data.split("_", 3)   # ["delconf", "yes"/"no", rc_number, admin_id]
+            confirmed = parts[1] == "yes"
+            admin_id = int(parts[3])
+
+            if call.from_user.id != admin_id:
+                await bot.answer_callback_query(call.id, "This action is not for you.", show_alert=True)
+                return
+
+            pending = _pending_deletes.pop((cid, admin_id), None)
+            if not confirmed or pending is None:
+                await bot.answer_callback_query(call.id, "❌ Cancelled")
+                await bot.edit_message_text("❌ Delete cancelled.", cid, call.message.message_id)
+                return
+
+            name = pending['name']
+            rc_number = pending['rc_number']
+            rc = manager.get_rollcall(cid, rc_number)
+            if rc and rc.delete_user(name):
+                rc.save()
+                await bot.answer_callback_query(call.id, f"✅ Deleted {name}")
+                await bot.edit_message_text(f"✅ *{name}* removed from rollcall #{rc_number + 1}.", cid, call.message.message_id, parse_mode="Markdown")
+            else:
+                await bot.answer_callback_query(call.id, "User not found")
+                await bot.edit_message_text(f"⚠️ User *{name}* not found.", cid, call.message.message_id, parse_mode="Markdown")
+            return
+
         # ----------------------------------------------------------------
         # mabs_sel — admin selected a rollcall from /mark_absent list
         # ----------------------------------------------------------------
@@ -3244,6 +3358,11 @@ async def callback_handler(call):
             ghost_tracking_on = manager.get_ghost_tracking_enabled(cid)
             has_any_users = len(rc.inList) > 0
             absent_already_marked = rc.absent_marked
+
+            # Update attendance streaks for real users who were IN
+            for u in rc.inList:
+                if isinstance(u.user_id, int):
+                    update_streak_on_checkin(cid, u.user_id)
 
             await bot.answer_callback_query(call.id, "Rollcall ended")
             ended_by = call.from_user.first_name or call.from_user.username or "someone"

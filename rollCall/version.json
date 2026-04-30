@@ -118,5 +118,11 @@
         "Description": "Enhancements: webhook mode support (WEBHOOK_URL env var), attendance rate + streak display in /stats, /history command (last 10 ended sessions), /delete_user confirmation keyboard, attendance streak tracking (current & best), rate limiting on /in /out /maybe, ghost prompt after auto-close, streak updates on event end",
         "DeployedOnProd": "N",
         "DeployedDatetime": "30-04-2026 00:00 UTC"
+    },
+    {
+        "Version": 5.6,
+        "Description": "/buzz command: admin can ping group members who haven't voted yet; if no rollcall is running, pings all known members. Supports ::N for multi-rollcall targeting and optional custom message.",
+        "DeployedOnProd": "N",
+        "DeployedDatetime": "30-04-2026 00:00 UTC"
     }
 ]

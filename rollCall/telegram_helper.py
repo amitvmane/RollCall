@@ -36,7 +36,8 @@ from db import (
     get_ghost_leaderboard, get_user_ghost_count_by_name, get_ghost_count_by_proxy_name,
     mark_rollcall_absent_done, get_unprocessed_rollcalls,
     add_ghost_event, get_rollcall_in_users, save_ghost_selections,
-    update_streak_on_checkin, reset_streak_on_ghost, get_rollcall_history
+    update_streak_on_checkin, reset_streak_on_ghost, get_rollcall_history,
+    get_all_known_users
 )
 
 bot = AsyncTeleBot(token=TELEGRAM_TOKEN)
@@ -2566,6 +2567,116 @@ async def history_command(message):
     except Exception as e:
         logging.exception("Error in /history")
         await bot.send_message(cid, "Error fetching history, please try again later.")
+
+
+@bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/buzz")
+async def buzz_command(message):
+    """
+    /buzz [message] [::N]
+    Ping users who have not yet voted in the active rollcall.
+    If no rollcall is running, pings all known group members the bot has seen.
+    Supports ::N to target a specific rollcall when multiple are open.
+
+    Admin-only.
+    """
+    cid = message.chat.id
+    try:
+        if await admin_rights(message, manager) == False:
+            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
+
+        msg = message.text.strip()
+        parts = msg.split()
+
+        # Parse optional ::N rollcall selector and optional custom message
+        rc_number = 0
+        custom_msg = None
+        filtered = []
+        for part in parts[1:]:
+            if part.startswith("::"):
+                try:
+                    rc_number = int(part.replace("::", "")) - 1
+                except ValueError:
+                    pass
+            else:
+                filtered.append(part)
+        if filtered:
+            custom_msg = " ".join(filtered)
+
+        no_rollcall = roll_call_not_started(message, manager) == False
+
+        if no_rollcall:
+            # --- No rollcall running: ping everyone the bot knows ---
+            all_users = get_all_known_users(cid)
+            if not all_users:
+                await bot.send_message(
+                    cid,
+                    "No known group members found yet. Users appear here after they vote in any rollcall."
+                )
+                return
+
+            mentions = _build_mention_list(all_users)
+            note = custom_msg or "Just a heads-up from the group! 👋"
+            await bot.send_message(
+                cid,
+                f"📣 {note}\n\n{mentions}",
+                parse_mode="Markdown"
+            )
+
+        else:
+            # --- Rollcall is running: ping those who haven't voted yet ---
+            rollcalls = manager.get_rollcalls(cid)
+            if len(rollcalls) <= rc_number:
+                raise incorrectParameter(
+                    f"Rollcall #{rc_number + 1} doesn't exist. Check /rollcalls."
+                )
+
+            rc = manager.get_rollcall(cid, rc_number)
+
+            # Collect user_ids that have already voted
+            voted_ids = set()
+            for u in rc.inList + rc.outList + rc.maybeList + rc.waitList:
+                if isinstance(u.user_id, int):
+                    voted_ids.add(u.user_id)
+
+            all_users = get_all_known_users(cid)
+            unvoted = [u for u in all_users if u['user_id'] not in voted_ids]
+
+            if not unvoted:
+                await bot.send_message(
+                    cid,
+                    f"✅ Everyone the bot knows has already voted on *{rc.title}*!",
+                    parse_mode="Markdown"
+                )
+                return
+
+            mentions = _build_mention_list(unvoted)
+            note = custom_msg or f"rollcall *{rc.title}* is open — have you voted?"
+            await bot.send_message(
+                cid,
+                f"👋 Hey {mentions}\n\n{note}",
+                parse_mode="Markdown"
+            )
+
+    except (rollCallNotStarted, incorrectParameter, insufficientPermissions,
+            parameterMissing) as e:
+        await bot.send_message(cid, str(e))
+    except Exception:
+        logging.exception("Error in /buzz")
+        await bot.send_message(cid, "Error running buzz, please try again later.")
+
+
+def _build_mention_list(users: list) -> str:
+    """Build a space-separated string of Telegram mention links for a list of user dicts."""
+    parts = []
+    for u in users:
+        uid = u.get('user_id')
+        name = u.get('first_name') or u.get('username') or str(uid)
+        username = u.get('username')
+        if username:
+            parts.append(f"@{username}")
+        elif uid:
+            parts.append(f"[{name}](tg://user?id={uid})")
+    return " ".join(parts)
 
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/panel")

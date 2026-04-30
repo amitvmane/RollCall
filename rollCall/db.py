@@ -1980,5 +1980,47 @@ def get_rollcall_history(chat_id: int, limit: int = 10) -> List[Dict]:
             release_connection(conn)
 
 
+def get_all_known_users(chat_id: int) -> List[Dict]:
+    """Return all distinct real users the bot has ever seen in a chat.
+
+    Pulls from the ``users`` table (which stores first_name/username) joined
+    to rollcalls scoped to ``chat_id``.  Returns the most-recent name seen for
+    each user_id so that stale display names are avoided.
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        # Pick the latest first_name / username for each real user in this chat.
+        # user_id is stored as BIGINT so proxy users (string ids) are excluded
+        # automatically because they were never inserted into the users table.
+        cursor.execute(f"""
+            SELECT u.user_id, u.first_name, u.username
+            FROM users u
+            JOIN rollcalls r ON r.id = u.rollcall_id
+            WHERE r.chat_id = {ph}
+              AND u.user_id IS NOT NULL
+            GROUP BY u.user_id, u.first_name, u.username
+            ORDER BY MAX(u.created_at) DESC
+        """, (chat_id,))
+        # Deduplicate by user_id, keeping the most-recent row
+        seen: set = set()
+        result: List[Dict] = []
+        for row in cursor.fetchall():
+            d = dict(row)
+            uid = d['user_id']
+            if uid not in seen:
+                seen.add(uid)
+                result.append(d)
+        return result
+    except Exception as e:
+        logging.error(f"Error getting known users for buzz: {e}")
+        return []
+    finally:
+        if db_type == 'postgresql':
+            cursor.close()
+            release_connection(conn)
+
+
 # Initialize database on import
 init_db()

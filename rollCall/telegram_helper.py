@@ -56,6 +56,10 @@ _RATE_LIMIT_SECONDS = 2
 # Pending delete confirmations: (chat_id, admin_user_id) -> {'name': str, 'rc_number': int}
 _pending_deletes: dict = {}
 
+# Panel message tracking: (chat_id, rc_1based) -> message_id of the active panel message.
+# Used by _update_panel() to edit the panel in-place instead of posting a new message.
+_panel_msg_ids: dict = {}
+
 
 def _fmt_ended_at(ended_at) -> str:
     """Format a rollcall ended_at timestamp to a human-readable date string."""
@@ -536,7 +540,8 @@ async def start_roll_call(message):
         rc = manager.add_rollcall(cid, title)
         logging.info(f"[{_ts()}] [CHAT {cid}] Rollcall started: '{title}' (RC #{rc_index+1}) by {message.from_user.first_name} (@{message.from_user.username})")
         markup = await get_status_keyboard(rc_index+1)
-        await bot.send_message(message.chat.id, f"Roll call '{title}' started! ID: {rc_index+1}\nUse buttons below:", reply_markup=markup)
+        sent = await bot.send_message(message.chat.id, f"Roll call '{title}' started! ID: {rc_index+1}\nUse buttons below:", reply_markup=markup)
+        _panel_msg_ids[(cid, rc_index + 1)] = sent.message_id
         #await bot.send_message(message.chat.id, f"Roll call with title: {title} started!\nRollcall id is set to {rc_index + 1}\nTo vote for this RollCall, please use ::RollCallID eg. /in ::{rc_index + 1}")
 
     except Exception as e:
@@ -1324,7 +1329,7 @@ async def in_user(message):
             await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
 
         if send_list(message, manager):
-            await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number + 1)))
+            await _update_panel(cid, rc_number + 1, rc)
 
     except Exception as e:
         await bot.send_message(message.chat.id, e)
@@ -1405,7 +1410,7 @@ async def out_user(message):
             )
 
         if send_list(message, manager):
-            await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number + 1)))
+            await _update_panel(cid, rc_number + 1, rc)
 
     except Exception as e:
         await bot.send_message(message.chat.id, e)
@@ -1472,7 +1477,7 @@ async def maybe_user(message):
                 await bot.send_message(cid, f"{result.name} now you are in!")
 
         if send_list(message, manager):
-            await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number + 1)))
+            await _update_panel(cid, rc_number + 1, rc)
 
     except Exception as e:
         await bot.send_message(message.chat.id, e)
@@ -1907,6 +1912,7 @@ async def end_roll_call(message):
         await bot.send_message(message.chat.id, "🎉 Roll ended!")
         await bot.send_message(cid, rc.finishList().replace("__RCID__", str(rc_number + 1)))
         logging.info(f"[{_ts()}] Rollcall ended: '{rc.title}' (RC #{rc_number+1})")
+        _panel_msg_ids.pop((cid, rc_number + 1), None)
         manager.remove_rollcall(cid, rc_number)
         logging.info(f"[{_ts()}] [CHAT {cid}] Rollcall ended: '{rc.title}' by {message.from_user.first_name} (@{message.from_user.username})")
         # Ghost tracking prompt - ask if ANY users were in rollcall (real OR proxy)
@@ -2679,6 +2685,36 @@ def _build_mention_list(users: list) -> str:
     return " ".join(parts)
 
 
+async def _update_panel(cid: int, rc_number: int, rc) -> None:
+    """Edit the existing panel message in-place; fall back to a new send if needed.
+
+    ``rc_number`` is 1-based (the public rollcall number shown to users).
+    Stores/updates ``_panel_msg_ids[(cid, rc_number)]`` so future calls always
+    target the right message.
+    """
+    text = rc.allList().replace("__RCID__", str(rc_number))
+    markup = await get_status_keyboard(rc_number)
+    key = (cid, rc_number)
+
+    existing_msg_id = _panel_msg_ids.get(key)
+    if existing_msg_id:
+        try:
+            await bot.edit_message_text(
+                text, cid, existing_msg_id, reply_markup=markup
+            )
+            return  # success — panel updated in-place
+        except Exception as e:
+            err = str(e).lower()
+            if "message is not modified" in err:
+                return  # content unchanged — fine, nothing to do
+            # Message was deleted, too old, or otherwise unreachable — fall through
+            logging.debug(f"Panel edit failed for ({cid}, {rc_number}): {e}")
+
+    # No stored panel or edit failed — send a fresh panel and remember its id
+    sent = await bot.send_message(cid, text, reply_markup=markup)
+    _panel_msg_ids[key] = sent.message_id
+
+
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/panel")
 async def show_panel(message):
     """
@@ -2708,11 +2744,9 @@ async def show_panel(message):
         text = rc.allList().replace("__RCID__", str(rc_number + 1))
         markup = await get_status_keyboard(rc_number + 1)
 
-        await bot.send_message(
-            cid,
-            text,
-            reply_markup=markup,
-        )
+        sent = await bot.send_message(cid, text, reply_markup=markup)
+        # Register as the new panel to target for future in-place edits
+        _panel_msg_ids[(cid, rc_number + 1)] = sent.message_id
 
     except Exception as e:
         await bot.send_message(message.chat.id, e)
@@ -3337,6 +3371,9 @@ async def callback_handler(call):
                     call.message.message_id,
                     reply_markup=markup,
                 )
+                # Keep track of which message is the live panel so commands
+                # (/in /out /maybe) can also edit it in-place.
+                _panel_msg_ids[(cid, rc_number)] = call.message.message_id
             except Exception as e:
                 if "message is not modified" not in str(e):
                     raise
@@ -3421,10 +3458,11 @@ async def callback_handler(call):
                     call.message.message_id,
                     reply_markup=markup,
                 )
+                _panel_msg_ids[(cid, rc_number)] = call.message.message_id
             except Exception as e:
                 if "message is not modified" not in str(e):
-                    raise 
-                
+                    raise
+
             return
 
         # --------------------------------------------------------------
@@ -3485,6 +3523,7 @@ async def callback_handler(call):
             except Exception:
                 pass
 
+            _panel_msg_ids.pop((cid, rc_number), None)
             manager.remove_rollcall(cid, rc_number - 1)
 
             # Ghost tracking prompt — mirrors /erc command behaviour

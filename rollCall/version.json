@@ -130,5 +130,11 @@
         "Description": "In-place panel editing (#9): /in, /out, /maybe commands now edit the existing rollcall panel instead of posting a new message. Falls back to a new panel send if the original was deleted or expired. Panel message_id tracked per rollcall; cleaned up on rollcall end.",
         "DeployedOnProd": "N",
         "DeployedDatetime": "30-04-2026 00:00 UTC"
+    },
+    {
+        "Version": 5.8,
+        "Description": "/buzz rework: member list persisted in new chat_members DB table (no in-memory state). Members recorded on every vote with fresh display names. Before each buzz, concurrently verifies group membership via Telegram API and marks leavers inactive so they are never pinged again. No duplicate pings — table primary key guarantees one record per user per chat.",
+        "DeployedOnProd": "N",
+        "DeployedDatetime": "30-04-2026 00:00 UTC"
     }
 ]

@@ -375,7 +375,34 @@ def create_tables():
                 CREATE INDEX IF NOT EXISTS idx_proxy_users_rollcall
                 ON proxy_users(rollcall_id, status)
             """)
-        
+
+        # chat_members: one row per real Telegram user seen in a chat.
+        # Kept up-to-date on every vote; used by /buzz to know who to ping.
+        if db_type == 'postgresql':
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS chat_members (
+                    chat_id BIGINT NOT NULL,
+                    user_id BIGINT NOT NULL,
+                    first_name TEXT,
+                    username TEXT,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (chat_id, user_id)
+                )
+            """)
+        else:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS chat_members (
+                    chat_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    first_name TEXT,
+                    username TEXT,
+                    is_active INTEGER DEFAULT 1,
+                    last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (chat_id, user_id)
+                )
+            """)
+
         # Ghost tracking tables
         if db_type == 'postgresql':
             cursor.execute("""
@@ -1980,41 +2007,86 @@ def get_rollcall_history(chat_id: int, limit: int = 10) -> List[Dict]:
             release_connection(conn)
 
 
-def get_all_known_users(chat_id: int) -> List[Dict]:
-    """Return all distinct real users the bot has ever seen in a chat.
+def upsert_chat_member(chat_id: int, user_id: int, first_name: str, username: str = None) -> None:
+    """Insert or update a chat member record.
 
-    Pulls from the ``users`` table (which stores first_name/username) joined
-    to rollcalls scoped to ``chat_id``.  Returns the most-recent name seen for
-    each user_id so that stale display names are avoided.
+    Called every time a real Telegram user votes so that display names stay
+    fresh and the member is (re-)marked active.
     """
     conn = get_connection()
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
-        # Pick the latest first_name / username for each real user in this chat.
-        # user_id is stored as BIGINT so proxy users (string ids) are excluded
-        # automatically because they were never inserted into the users table.
-        cursor.execute(f"""
-            SELECT u.user_id, u.first_name, u.username
-            FROM users u
-            JOIN rollcalls r ON r.id = u.rollcall_id
-            WHERE r.chat_id = {ph}
-              AND u.user_id IS NOT NULL
-            GROUP BY u.user_id, u.first_name, u.username
-            ORDER BY MAX(u.created_at) DESC
-        """, (chat_id,))
-        # Deduplicate by user_id, keeping the most-recent row
-        seen: set = set()
-        result: List[Dict] = []
-        for row in cursor.fetchall():
-            d = dict(row)
-            uid = d['user_id']
-            if uid not in seen:
-                seen.add(uid)
-                result.append(d)
-        return result
+        now = datetime.utcnow()
+        if db_type == 'postgresql':
+            cursor.execute(f"""
+                INSERT INTO chat_members (chat_id, user_id, first_name, username, is_active, last_seen)
+                VALUES ({ph}, {ph}, {ph}, {ph}, TRUE, {ph})
+                ON CONFLICT (chat_id, user_id) DO UPDATE SET
+                    first_name = EXCLUDED.first_name,
+                    username   = EXCLUDED.username,
+                    is_active  = TRUE,
+                    last_seen  = EXCLUDED.last_seen
+            """, (chat_id, user_id, first_name, username, now))
+        else:
+            cursor.execute(f"""
+                INSERT INTO chat_members (chat_id, user_id, first_name, username, is_active, last_seen)
+                VALUES ({ph}, {ph}, {ph}, {ph}, 1, {ph})
+                ON CONFLICT (chat_id, user_id) DO UPDATE SET
+                    first_name = excluded.first_name,
+                    username   = excluded.username,
+                    is_active  = 1,
+                    last_seen  = excluded.last_seen
+            """, (chat_id, user_id, first_name, username, now))
+        conn.commit()
     except Exception as e:
-        logging.error(f"Error getting known users for buzz: {e}")
+        logging.error(f"Error upserting chat member: {e}")
+    finally:
+        if db_type == 'postgresql':
+            cursor.close()
+            release_connection(conn)
+
+
+def mark_member_inactive(chat_id: int, user_id: int) -> None:
+    """Mark a member as no longer in the group (left or kicked)."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        active_val = False if db_type == 'postgresql' else 0
+        cursor.execute(f"""
+            UPDATE chat_members SET is_active = {ph}
+            WHERE chat_id = {ph} AND user_id = {ph}
+        """, (active_val, chat_id, user_id))
+        conn.commit()
+    except Exception as e:
+        logging.error(f"Error marking member inactive: {e}")
+    finally:
+        if db_type == 'postgresql':
+            cursor.close()
+            release_connection(conn)
+
+
+def get_active_members(chat_id: int) -> List[Dict]:
+    """Return all members currently marked active for a chat.
+
+    These are real Telegram users (not proxy users) who have voted at least
+    once and have not been detected as having left the group.
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        active_val = True if db_type == 'postgresql' else 1
+        cursor.execute(f"""
+            SELECT user_id, first_name, username
+            FROM chat_members
+            WHERE chat_id = {ph} AND is_active = {ph}
+            ORDER BY last_seen DESC
+        """, (chat_id, active_val))
+        return [dict(row) for row in cursor.fetchall()]
+    except Exception as e:
+        logging.error(f"Error getting active members: {e}")
         return []
     finally:
         if db_type == 'postgresql':

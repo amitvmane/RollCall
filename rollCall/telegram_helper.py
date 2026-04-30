@@ -37,7 +37,7 @@ from db import (
     mark_rollcall_absent_done, get_unprocessed_rollcalls,
     add_ghost_event, get_rollcall_in_users, save_ghost_selections,
     update_streak_on_checkin, reset_streak_on_ghost, get_rollcall_history,
-    get_all_known_users
+    upsert_chat_member, mark_member_inactive, get_active_members
 )
 
 bot = AsyncTeleBot(token=TELEGRAM_TOKEN)
@@ -1314,6 +1314,10 @@ async def in_user(message):
                 )
                 return
 
+        # Keep the members table current so /buzz has fresh names
+        if isinstance(user.user_id, int):
+            upsert_chat_member(cid, user.user_id, _display_name, _username)
+
         result = rc.addIn(user)
         rc.save()
 
@@ -1372,6 +1376,10 @@ async def out_user(message):
             arr.pop(0)
             comment = ' '.join(arr)
         user.comment = comment
+
+        # Keep the members table current so /buzz has fresh names
+        if isinstance(user.user_id, int):
+            upsert_chat_member(cid, user.user_id, _display_name, _username)
 
         # Capture state BEFORE addOut
         was_in = any(u.user_id == user.user_id for u in rc.inList)
@@ -1453,6 +1461,10 @@ async def maybe_user(message):
             arr.pop(0)
             comment = ' '.join(arr)
         user.comment = comment
+
+        # Keep the members table current so /buzz has fresh names
+        if isinstance(user.user_id, int):
+            upsert_chat_member(cid, user.user_id, _display_name, _username)
 
         result = rc.addMaybe(user)
         rc.save()
@@ -2580,8 +2592,10 @@ async def buzz_command(message):
     """
     /buzz [message] [::N]
     Ping users who have not yet voted in the active rollcall.
-    If no rollcall is running, pings all known group members the bot has seen.
+    If no rollcall is running, pings all active known group members.
     Supports ::N to target a specific rollcall when multiple are open.
+    Before pinging, verifies each member is still in the group and marks
+    leavers inactive in the DB so they won't be pinged again.
 
     Admin-only.
     """
@@ -2610,44 +2624,30 @@ async def buzz_command(message):
 
         no_rollcall = roll_call_not_started(message, manager) == False
 
-        if no_rollcall:
-            # --- No rollcall running: ping everyone the bot knows ---
-            all_users = get_all_known_users(cid)
-            if not all_users:
-                await bot.send_message(
-                    cid,
-                    "No known group members found yet. Users appear here after they vote in any rollcall."
-                )
-                return
-
-            mentions = _build_mention_list(all_users)
-            note = custom_msg or "Just a heads-up from the group! 👋"
+        # Load candidates from DB
+        candidates = get_active_members(cid)
+        if not candidates:
             await bot.send_message(
                 cid,
-                f"📣 {note}\n\n{mentions}",
-                parse_mode="Markdown"
+                "No known group members yet. Members are recorded the first time they vote in any rollcall."
             )
+            return
 
-        else:
-            # --- Rollcall is running: ping those who haven't voted yet ---
+        # If a rollcall is running, exclude members who have already voted
+        if not no_rollcall:
             rollcalls = manager.get_rollcalls(cid)
             if len(rollcalls) <= rc_number:
                 raise incorrectParameter(
                     f"Rollcall #{rc_number + 1} doesn't exist. Check /rollcalls."
                 )
-
             rc = manager.get_rollcall(cid, rc_number)
+            voted_ids = {
+                u.user_id for u in rc.inList + rc.outList + rc.maybeList + rc.waitList
+                if isinstance(u.user_id, int)
+            }
+            candidates = [u for u in candidates if u['user_id'] not in voted_ids]
 
-            # Collect user_ids that have already voted
-            voted_ids = set()
-            for u in rc.inList + rc.outList + rc.maybeList + rc.waitList:
-                if isinstance(u.user_id, int):
-                    voted_ids.add(u.user_id)
-
-            all_users = get_all_known_users(cid)
-            unvoted = [u for u in all_users if u['user_id'] not in voted_ids]
-
-            if not unvoted:
+            if not candidates:
                 await bot.send_message(
                     cid,
                     f"✅ Everyone the bot knows has already voted on *{rc.title}*!",
@@ -2655,13 +2655,41 @@ async def buzz_command(message):
                 )
                 return
 
-            mentions = _build_mention_list(unvoted)
+        # Verify each candidate is still in the group (concurrent API calls)
+        async def _check_member(u):
+            uid = u['user_id']
+            try:
+                member = await bot.get_chat_member(cid, uid)
+                if member.status in ("left", "kicked"):
+                    mark_member_inactive(cid, uid)
+                    return None
+                return u
+            except Exception:
+                # User not found or API error — skip but don't mark inactive
+                return None
+
+        results = await asyncio.gather(*[_check_member(u) for u in candidates])
+        to_ping = [u for u in results if u is not None]
+
+        if not to_ping:
+            if no_rollcall:
+                await bot.send_message(cid, "All known members appear to have left the group.")
+            else:
+                await bot.send_message(
+                    cid,
+                    f"✅ Everyone the bot knows has already voted on *{rc.title}*!",
+                    parse_mode="Markdown"
+                )
+            return
+
+        mentions = _build_mention_list(to_ping)
+
+        if no_rollcall:
+            note = custom_msg or "Just a heads-up from the group! 👋"
+            await bot.send_message(cid, f"📣 {note}\n\n{mentions}", parse_mode="Markdown")
+        else:
             note = custom_msg or f"rollcall *{rc.title}* is open — have you voted?"
-            await bot.send_message(
-                cid,
-                f"👋 Hey {mentions}\n\n{note}",
-                parse_mode="Markdown"
-            )
+            await bot.send_message(cid, f"👋 Hey {mentions}\n\n{note}", parse_mode="Markdown")
 
     except (rollCallNotStarted, incorrectParameter, insufficientPermissions,
             parameterMissing) as e:
@@ -2672,16 +2700,24 @@ async def buzz_command(message):
 
 
 def _build_mention_list(users: list) -> str:
-    """Build a space-separated string of Telegram mention links for a list of user dicts."""
+    """Build a space-separated string of Telegram user mentions.
+
+    Prefers @username (plain text, always renders) over inline tg:// links.
+    Inline links show the stored first_name but only work in parse_mode=Markdown
+    and require the user to have interacted with the bot at some point.
+    Both forms produce a notification ping for the mentioned user.
+    """
     parts = []
     for u in users:
         uid = u.get('user_id')
-        name = u.get('first_name') or u.get('username') or str(uid)
         username = u.get('username')
+        name = (u.get('first_name') or username or str(uid)).strip()
+        # Escape Markdown special chars in the display name so the link renders
+        safe_name = name.replace("[", "\\[").replace("]", "\\]").replace("_", "\\_").replace("*", "\\*")
         if username:
             parts.append(f"@{username}")
         elif uid:
-            parts.append(f"[{name}](tg://user?id={uid})")
+            parts.append(f"[{safe_name}](tg://user?id={uid})")
     return " ".join(parts)
 
 
@@ -3223,13 +3259,17 @@ async def callback_handler(call):
             _username = call.from_user.username or None
             if not _username:
                 asyncio.create_task(warn_no_username(cid, call.from_user.first_name))
+            _first_name = _get_display_name(call.from_user)
             user = User(
-                call.from_user.first_name,
+                _first_name,
                 _username,
                 call.from_user.id,
                 rc.allNames,
             )
-            
+
+            # Keep the members table current so /buzz has fresh names
+            upsert_chat_member(cid, call.from_user.id, _first_name, _username)
+
             # Ghost reconfirmation check for panel IN button
             if action == "in" and isinstance(user.user_id, int) and manager.get_ghost_tracking_enabled(cid):
                 ghost_count = get_ghost_count(cid, user.user_id)

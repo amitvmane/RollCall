@@ -1,7 +1,7 @@
 from exceptions import *
 import logging
 import Levenshtein
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 import asyncio
 from telebot.async_telebot import AsyncTeleBot
@@ -123,3 +123,46 @@ def auto_complete_timezone(timezone):
     except Exception as e:
         logging.error(f"[{_ts()}] Error in auto_complete_timezone: {e}")
         return None
+
+
+WEEKDAY_MAP = {
+    "monday": 0,
+    "tuesday": 1,
+    "wednesday": 2,
+    "thursday": 3,
+    "friday": 4,
+    "saturday": 5,
+    "sunday": 6,
+}
+
+
+def get_next_weekday_datetime(tz, target_day: str, target_time: str):
+    """Return next datetime in tz with given weekday name and HH:MM time."""
+    target_idx = WEEKDAY_MAP.get(target_day.lower())
+    if target_idx is None:
+        return None
+    now = datetime.now(tz)
+    try:
+        hour, minute = map(int, target_time.split(":"))
+    except ValueError:
+        return None
+    candidate = tz.localize(datetime(now.year, now.month, now.day, hour, minute))
+    days_ahead = (target_idx - candidate.weekday()) % 7
+    candidate = candidate + timedelta(days=days_ahead)
+    if candidate <= now:
+        candidate = candidate + timedelta(days=7)
+    return candidate
+
+
+def weekly_minutes(day: str, time_str: str):
+    """Return minutes since Monday 00:00 for a weekday + HH:MM pair, or None if invalid."""
+    day_idx = WEEKDAY_MAP.get(day.lower())
+    if day_idx is None:
+        return None
+    try:
+        h, m = map(int, time_str.split(":"))
+        if not (0 <= h < 24 and 0 <= m < 60):
+            return None
+    except ValueError:
+        return None
+    return day_idx * 24 * 60 + h * 60 + m

@@ -8,7 +8,7 @@ from telebot.async_telebot import AsyncTeleBot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import TELEGRAM_TOKEN
-from db import end_rollcall, update_streak_on_checkin
+from db import end_rollcall, update_streak_on_checkin, get_all_scheduled_templates, update_template_last_scheduled_date
 
 bot = AsyncTeleBot(token=TELEGRAM_TOKEN)
 
@@ -121,3 +121,111 @@ async def start(rollcalls, timezone, chat_id):
         await check(rollcalls, timezone, chat_id)
     except Exception as e:
         logging.error(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Unexpected error in reminder loop: {traceback.format_exc()}")
+
+
+async def _auto_start_from_template(chat_id: int, tmpl: dict):
+    """Create a rollcall from a scheduled template and announce it to the group."""
+    from rollcall_manager import manager
+    from functions import get_next_weekday_datetime
+
+    chat = manager.get_chat(chat_id)
+    tzname = chat.get("timezone", "Asia/Calcutta")
+    try:
+        tz = pytz.timezone(tzname)
+    except Exception:
+        tz = pytz.timezone("Asia/Calcutta")
+        tzname = "Asia/Calcutta"
+
+    rollcalls = manager.get_rollcalls(chat_id)
+    if len(rollcalls) >= 3:
+        await bot.send_message(
+            chat_id,
+            f"⚠️ Could not auto-start template '{tmpl['name']}': maximum 3 active rollcalls already open."
+        )
+        return
+
+    title = tmpl.get("title") or tmpl["name"]
+    rc = manager.add_rollcall(chat_id, title)
+
+    if tmpl.get("inlistlimit") is not None:
+        rc.inListLimit = tmpl["inlistlimit"]
+    if tmpl.get("location"):
+        rc.location = tmpl["location"]
+    if tmpl.get("eventfee"):
+        rc.event_fee = tmpl["eventfee"]
+
+    rc.timezone = tzname
+    rc.finalizeDate = None
+
+    event_day = tmpl.get("event_day")
+    event_time = tmpl.get("event_time")
+    if event_day and event_time:
+        dt = get_next_weekday_datetime(tz, event_day, event_time)
+        if dt:
+            rc.finalizeDate = dt
+
+    rc.save()
+
+    close_info = ""
+    if rc.finalizeDate:
+        close_info = f"\nCloses: {rc.finalizeDate.strftime('%A, %d %b at %H:%M')}"
+
+    await bot.send_message(
+        chat_id,
+        f"📋 *{title}* rollcall is now open!{close_info}\nVote with /in or /out.",
+        parse_mode="Markdown"
+    )
+    logging.info(
+        f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+        f"Auto-started template '{tmpl['name']}' for chat {chat_id}"
+    )
+
+
+async def check_template_schedules():
+    """Persistent loop that fires scheduled templates at their configured day/time."""
+    # Align to the next minute boundary before entering the loop
+    current_sec = int(datetime.now().strftime("%S"))
+    if current_sec != 0:
+        await asyncio.sleep(60 - current_sec)
+
+    while True:
+        try:
+            scheduled = get_all_scheduled_templates()
+            for tmpl in scheduled:
+                chat_id = tmpl.get("chatid")
+                schedule_day = tmpl.get("schedule_day")
+                schedule_time = tmpl.get("schedule_time")
+                last_date = tmpl.get("last_scheduled_date")
+
+                if not chat_id or not schedule_day or not schedule_time:
+                    continue
+
+                try:
+                    from rollcall_manager import manager
+                    chat = manager.get_chat(chat_id)
+                    tz = pytz.timezone(chat.get("timezone", "Asia/Calcutta"))
+                except Exception:
+                    tz = pytz.timezone("Asia/Calcutta")
+
+                now = datetime.now(tz)
+                today_name = now.strftime("%A").lower()
+                now_time_str = now.strftime("%H:%M")
+                today_date = now.strftime("%Y-%m-%d")
+
+                if today_name != schedule_day.lower():
+                    continue
+                if now_time_str != schedule_time:
+                    continue
+                if last_date == today_date:
+                    continue
+
+                await _auto_start_from_template(chat_id, tmpl)
+                update_template_last_scheduled_date(chat_id, tmpl["name"], today_date)
+
+        except Exception:
+            logging.error(
+                f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+                f"Error in template schedule loop: {traceback.format_exc()}"
+            )
+
+        await asyncio.sleep(60)

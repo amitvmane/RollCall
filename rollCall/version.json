@@ -68,7 +68,7 @@
     {
         "Version": 4.6,
         "Description": "Bug fixes & security hardening: improved error handling for /version and broadcast commands, fixed proxy owner data loss, safer username and limit handling, errors now properly logged",
-        "DeployedOnProd": "Y",
+        "DeployedOnProd": "N",
         "DeployedDatetime": "23-04-2026 00:00 IST"
     },
     {
@@ -110,31 +110,37 @@
     {
         "Version": 5.4,
         "Description": "Ghost feature fixes: absent_limit threshold now correctly loaded from DB on restart (cache key mismatch), ghost prompt now fires on panel end (btn_endconfirm) not just /erc command, ghost selections restored from DB on bot restart preventing silent data loss",
-        "DeployedOnProd": "Y",
+        "DeployedOnProd": "N",
         "DeployedDatetime": "29-04-2026 00:00 UTC"
     },
     {
         "Version": 5.5,
         "Description": "Enhancements: webhook mode support (WEBHOOK_URL env var), attendance rate + streak display in /stats, /history command (last 10 ended sessions), /delete_user confirmation keyboard, attendance streak tracking (current & best), rate limiting on /in /out /maybe, ghost prompt after auto-close, streak updates on event end",
-        "DeployedOnProd": "Y",
+        "DeployedOnProd": "N",
         "DeployedDatetime": "30-04-2026 00:00 UTC"
     },
     {
         "Version": 5.6,
         "Description": "/buzz command: admin can ping group members who haven't voted yet; if no rollcall is running, pings all known members. Supports ::N for multi-rollcall targeting and optional custom message.",
-        "DeployedOnProd": "Y",
+        "DeployedOnProd": "N",
         "DeployedDatetime": "30-04-2026 00:00 UTC"
     },
     {
         "Version": 5.7,
         "Description": "In-place panel editing (#9): /in, /out, /maybe commands now edit the existing rollcall panel instead of posting a new message. Falls back to a new panel send if the original was deleted or expired. Panel message_id tracked per rollcall; cleaned up on rollcall end.",
-        "DeployedOnProd": "Y",
+        "DeployedOnProd": "N",
         "DeployedDatetime": "30-04-2026 00:00 UTC"
     },
     {
         "Version": 5.8,
         "Description": "/buzz rework: member list persisted in new chat_members DB table (no in-memory state). Members recorded on every vote with fresh display names. Before each buzz, concurrently verifies group membership via Telegram API and marks leavers inactive so they are never pinged again. No duplicate pings — table primary key guarantees one record per user per chat.",
-        "DeployedOnProd": "Y",
+        "DeployedOnProd": "N",
         "DeployedDatetime": "30-04-2026 00:00 UTC"
+    },
+    {
+        "Version": 5.9,
+        "Description": "Scheduled templates: /schedule_template command lets admins enable recurring weekly auto-start for individual templates. Rollcall opens at configured schedule_day+time and closes at the template's event_day+time. Persistent scheduler loop runs at bot startup, fires per-chat in the group's timezone, deduplicates via last_scheduled_date. Ghost tracking fix: _migrate_schema no longer stamps active rollcalls as absent_marked on every restart. toggle_ghost_tracking now accepts explicit true/false/on/off args. Migration adds ghost_tracking_enabled and schedule columns to existing DBs.",
+        "DeployedOnProd": "Y",
+        "DeployedDatetime": "02-05-2026 00:00 UTC"
     }
 ]

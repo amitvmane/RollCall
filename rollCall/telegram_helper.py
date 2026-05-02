@@ -30,6 +30,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from db import add_or_update_proxy_user
 from db import increment_user_stat, increment_rollcall_stat
 from db import create_or_update_template, get_templates, get_template, delete_template
+from db import set_template_schedule, disable_template_schedule
 from db import get_all_chat_ids
 from db import (
     get_ghost_count, increment_ghost_count, reset_ghost_count,
@@ -161,43 +162,6 @@ async def warn_no_username(cid: int, first_name: str):
     except Exception:
         pass
 
-WEEKDAY_MAP = {
-    "monday": 0,
-    "tuesday": 1,
-    "wednesday": 2,
-    "thursday": 3,
-    "friday": 4,
-    "saturday": 5,
-    "sunday": 6,
-}
-
-def get_next_weekday_datetime(tz, target_day: str, target_time: str):
-    """Return next datetime in tz with given weekday name and HH:MM time."""
-    target_idx = WEEKDAY_MAP.get(target_day.lower())
-    if target_idx is None:
-        return None
-
-    from datetime import datetime as _dt
-
-    now = _dt.now(tz)
-    try:
-        hour, minute = map(int, target_time.split(":"))
-    except ValueError:
-        return None
-
-    # Start from today with target time
-    candidate = tz.localize(_dt(now.year, now.month, now.day, hour, minute))
-
-    # Adjust to target weekday
-    days_ahead = (target_idx - candidate.weekday()) % 7
-    candidate = candidate + timedelta(days=days_ahead)
-
-    # If that datetime is in the past, jump one week
-    if candidate <= now:
-        candidate = candidate + timedelta(days=7)
-
-    return candidate
-
 
 def get_rollcall_db_id(rc: RollCall) -> int:
     """
@@ -283,6 +247,8 @@ Templates (admin only):
 /templates — List saved templates
 /start_template name [extra title]
 /delete_template name
+/schedule_template name <weekday> <HH:MM> — Auto-start on schedule
+/schedule_template name off — Disable schedule
 
 Ghost tracking (admin only):
 /toggle_ghost_tracking — Enable/disable no-show tracking
@@ -444,9 +410,7 @@ async def show_reminders(message):
 
 @bot.message_handler(func=lambda message: message.text.split(" ")[0].split("@")[0].lower() == "/templates")
 async def list_templates(message):
-    """
-    List templates defined for this chat.
-    """
+    """List templates defined for this chat."""
     cid = message.chat.id
     templates = get_templates(cid)
 
@@ -457,9 +421,162 @@ async def list_templates(message):
     lines = []
     for t in templates:
         t_title = t.get("title") or "(no title)"
-        lines.append(f"- {t['name']}: {t_title}")
+        sched_enabled = t.get("schedule_enabled")
+        sched_day = t.get("schedule_day")
+        sched_time = t.get("schedule_time")
+        event_day = t.get("event_day")
+        event_time = t.get("event_time")
+        last_run = t.get("last_scheduled_date")
+
+        if sched_enabled and sched_day and sched_time:
+            sched_info = f"  🗓 Opens {sched_day.capitalize()} {sched_time}"
+            if event_day and event_time:
+                sched_info += f" → closes {event_day.capitalize()} {event_time}"
+            if last_run:
+                sched_info += f"  (last: {last_run})"
+        elif event_day and event_time:
+            sched_info = f"  📅 Event: {event_day.capitalize()} {event_time}"
+        else:
+            sched_info = ""
+
+        lines.append(f"- {t['name']}: {t_title}{sched_info}")
 
     await bot.send_message(cid, "Templates:\n" + "\n".join(lines))
+
+
+@bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/schedule_template")
+async def schedule_template_cmd(message):
+    """Admin only: enable or disable scheduled auto-start for a template.
+
+    Usage:
+      /schedule_template <name> <weekday> <HH:MM>   — set schedule and enable
+      /schedule_template <name> off                  — disable schedule
+      /schedule_template <name>                      — show current schedule
+    """
+    try:
+        if await admin_rights(message, manager) is False:
+            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
+
+        cid = message.chat.id
+        parts = message.text.strip().split()
+
+        if len(parts) < 2:
+            await bot.send_message(
+                cid,
+                "Usage:\n"
+                "/schedule_template <name> <weekday> <HH:MM>  — enable auto-start\n"
+                "/schedule_template <name> off                 — disable\n"
+                "/schedule_template <name>                     — show current schedule\n\n"
+                "Example: /schedule_template sunday_game friday 09:00"
+            )
+            return
+
+        name = parts[1]
+        tmpl = get_template(cid, name)
+        if not tmpl:
+            await bot.send_message(cid, f"Template '{name}' not found. Use /templates to list available templates.")
+            return
+
+        # Show current schedule if no further args
+        if len(parts) == 2:
+            sched_enabled = tmpl.get("schedule_enabled")
+            sched_day = tmpl.get("schedule_day")
+            sched_time = tmpl.get("schedule_time")
+            event_day = tmpl.get("event_day")
+            event_time = tmpl.get("event_time")
+            last_run = tmpl.get("last_scheduled_date")
+            if sched_enabled and sched_day and sched_time:
+                status = (
+                    f"🗓 *{name}* schedule: 🟢 enabled\n"
+                    f"Opens: {sched_day.capitalize()} {sched_time}\n"
+                )
+                if event_day and event_time:
+                    status += f"Closes: {event_day.capitalize()} {event_time}\n"
+                if last_run:
+                    status += f"Last auto-started: {last_run}"
+            else:
+                status = f"🗓 *{name}* schedule: 🔴 disabled"
+            await bot.send_message(cid, status, parse_mode="Markdown")
+            return
+
+        # Disable
+        if parts[2].lower() == "off":
+            ok = disable_template_schedule(cid, name)
+            if ok:
+                await bot.send_message(cid, f"🔴 Schedule disabled for template '{name}'.")
+            else:
+                await bot.send_message(cid, f"Failed to update template '{name}'.")
+            return
+
+        # Enable: expect <weekday> <HH:MM>
+        if len(parts) < 4:
+            await bot.send_message(
+                cid,
+                "To enable scheduling provide both a weekday and a time.\n"
+                "Example: /schedule_template sunday_game friday 09:00"
+            )
+            return
+
+        sched_day = parts[2].lower()
+        sched_time = parts[3]
+
+        if sched_day not in WEEKDAY_MAP:
+            await bot.send_message(
+                cid,
+                f"'{sched_day}' is not a valid weekday.\n"
+                "Use: monday, tuesday, wednesday, thursday, friday, saturday, sunday"
+            )
+            return
+
+        # Validate HH:MM format
+        try:
+            sh, sm = map(int, sched_time.split(":"))
+            if not (0 <= sh < 24 and 0 <= sm < 60):
+                raise ValueError
+        except ValueError:
+            await bot.send_message(cid, f"'{sched_time}' is not a valid time. Use HH:MM (e.g. 09:00).")
+            return
+
+        # Require event_day + event_time so the rollcall has a close time
+        event_day = tmpl.get("event_day")
+        event_time = tmpl.get("event_time")
+        if not event_day or not event_time:
+            await bot.send_message(
+                cid,
+                f"Template '{name}' has no event_day/event_time set.\n"
+                "Set them first so the auto-started rollcall knows when to close:\n"
+                f"/set_template {name} event_day=sunday event_time=17:00"
+            )
+            return
+
+        # Validate schedule is strictly before event in the weekly cycle
+        sched_mins = weekly_minutes(sched_day, sched_time)
+        event_mins = weekly_minutes(event_day, event_time)
+        if sched_mins is None or event_mins is None:
+            await bot.send_message(cid, "Could not validate schedule vs event time. Check day/time formats.")
+            return
+        if sched_mins >= event_mins:
+            await bot.send_message(
+                cid,
+                f"Schedule time ({sched_day.capitalize()} {sched_time}) must be "
+                f"before event time ({event_day.capitalize()} {event_time}) in the weekly cycle."
+            )
+            return
+
+        ok = set_template_schedule(cid, name, sched_day, sched_time)
+        if ok:
+            await bot.send_message(
+                cid,
+                f"🟢 Schedule set for template *{name}*:\n"
+                f"Opens: {sched_day.capitalize()} at {sched_time}\n"
+                f"Closes: {event_day.capitalize()} at {event_time}",
+                parse_mode="Markdown"
+            )
+        else:
+            await bot.send_message(cid, f"Failed to save schedule for '{name}'.")
+
+    except Exception as e:
+        await bot.send_message(message.chat.id, e)
 
 
 # START A ROLL CALL
@@ -3647,8 +3764,14 @@ async def toggle_ghost_tracking(message):
         if await admin_rights(message, manager) == False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
         cid = message.chat.id
-        current = manager.get_ghost_tracking_enabled(cid)
-        new_state = not current
+        parts = message.text.strip().split()
+        arg = parts[1].lower() if len(parts) > 1 else None
+        if arg in ("true", "on", "1", "enable", "enabled"):
+            new_state = True
+        elif arg in ("false", "off", "0", "disable", "disabled"):
+            new_state = False
+        else:
+            new_state = not manager.get_ghost_tracking_enabled(cid)
         manager.set_ghost_tracking_enabled(cid, new_state)
         if new_state:
             await bot.send_message(

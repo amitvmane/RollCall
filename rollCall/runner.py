@@ -34,6 +34,7 @@ try:
     from config import TELEGRAM_TOKEN, DATABASE_URL, ADMINS, WEBHOOK_URL
     from telegram_helper import bot
     from rollcall_manager import manager
+    from check_reminders import check_template_schedules
 except ImportError as e:
     logger.error(f"Failed to import required modules: {e}")
     sys.exit(1)
@@ -177,6 +178,10 @@ async def main():
         logger.warning(f"⚠️  Health check server failed to start: {e}")
         logger.warning("Continuing without health check endpoint...")
     
+    # Start template auto-scheduler (persistent background task)
+    asyncio.create_task(check_template_schedules())
+    logger.info("✅ Template scheduler started")
+
     # Start bot — webhook or polling
     try:
         if WEBHOOK_URL:

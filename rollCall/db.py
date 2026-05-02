@@ -475,7 +475,21 @@ def create_tables():
 def _migrate_schema(conn):
     """Add new columns to existing tables for databases created before ghost tracking."""
     cursor = conn.cursor()
-    
+
+    # Add ghost_tracking_enabled to chats (may not exist in older deployments)
+    if db_type == 'postgresql':
+        try:
+            cursor.execute("ALTER TABLE chats ADD COLUMN IF NOT EXISTS ghost_tracking_enabled BOOLEAN DEFAULT TRUE")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    else:
+        try:
+            cursor.execute("ALTER TABLE chats ADD COLUMN ghost_tracking_enabled INTEGER DEFAULT 1")
+            conn.commit()
+        except Exception:
+            conn.rollback()  # column already exists — safe to ignore
+
     # Add missing columns
     if db_type == 'postgresql':
         try:
@@ -513,18 +527,34 @@ def _migrate_schema(conn):
             logging.error(f"Error migrating ghost_records: {e}")
             conn.rollback()
 
+    # Add schedule columns to templates (new feature — safe to run repeatedly)
+    if db_type == 'postgresql':
+        for col_ddl in [
+            "ADD COLUMN IF NOT EXISTS schedule_day TEXT DEFAULT NULL",
+            "ADD COLUMN IF NOT EXISTS schedule_time TEXT DEFAULT NULL",
+            "ADD COLUMN IF NOT EXISTS schedule_enabled BOOLEAN DEFAULT FALSE",
+            "ADD COLUMN IF NOT EXISTS last_scheduled_date TEXT DEFAULT NULL",
+        ]:
+            try:
+                cursor.execute(f"ALTER TABLE templates {col_ddl}")
+                conn.commit()
+            except Exception:
+                conn.rollback()
+    else:
+        for col, defval in [
+            ("schedule_day", "NULL"),
+            ("schedule_time", "NULL"),
+            ("schedule_enabled", "0"),
+            ("last_scheduled_date", "NULL"),
+        ]:
+            try:
+                cursor.execute(f"ALTER TABLE templates ADD COLUMN {col} TEXT DEFAULT {defval}")
+                conn.commit()
+            except Exception:
+                conn.rollback()  # column already exists — safe to ignore
+
     if db_type == 'postgresql':
         cursor.close()
-
-    # Stamp all pre-existing rollcalls as already processed
-    try:
-        if db_type == 'postgresql':
-            cursor.execute("UPDATE rollcalls SET absent_marked = TRUE WHERE absent_marked = FALSE")
-        else:
-            cursor.execute("UPDATE rollcalls SET absent_marked = 1 WHERE absent_marked = 0")
-        conn.commit()
-    except Exception:
-        conn.rollback()
 
 
 def get_or_create_chat(chat_id: int) -> Dict:
@@ -1224,6 +1254,96 @@ def delete_template(chatid: int, name: str) -> bool:
         conn.rollback()
         logging.error(f"Error deleting template: {e}")
         return False
+    finally:
+        if db_type == "postgresql":
+            cursor.close()
+            release_connection(conn)
+
+
+def set_template_schedule(chatid: int, name: str, schedule_day: str, schedule_time: str) -> bool:
+    """Set schedule day/time and enable auto-start for a template."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        enabled = True if db_type == "postgresql" else 1
+        cursor.execute(
+            f"UPDATE templates SET schedule_day = {ph}, schedule_time = {ph}, "
+            f"schedule_enabled = {ph}, last_scheduled_date = NULL "
+            f"WHERE chatid = {ph} AND name = {ph}",
+            (schedule_day, schedule_time, enabled, chatid, name),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"Error setting template schedule: {e}")
+        return False
+    finally:
+        if db_type == "postgresql":
+            cursor.close()
+            release_connection(conn)
+
+
+def disable_template_schedule(chatid: int, name: str) -> bool:
+    """Disable auto-start scheduling for a template."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        disabled = False if db_type == "postgresql" else 0
+        cursor.execute(
+            f"UPDATE templates SET schedule_enabled = {ph} WHERE chatid = {ph} AND name = {ph}",
+            (disabled, chatid, name),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"Error disabling template schedule: {e}")
+        return False
+    finally:
+        if db_type == "postgresql":
+            cursor.close()
+            release_connection(conn)
+
+
+def update_template_last_scheduled_date(chatid: int, name: str, date_str: str) -> bool:
+    """Record the date (YYYY-MM-DD) when a template was last auto-started."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"UPDATE templates SET last_scheduled_date = {ph} WHERE chatid = {ph} AND name = {ph}",
+            (date_str, chatid, name),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"Error updating last_scheduled_date: {e}")
+        return False
+    finally:
+        if db_type == "postgresql":
+            cursor.close()
+            release_connection(conn)
+
+
+def get_all_scheduled_templates() -> List[Dict]:
+    """Return all templates with schedule_enabled=True across all chats."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        if db_type == "postgresql":
+            cursor.execute("SELECT * FROM templates WHERE schedule_enabled = TRUE")
+        else:
+            cursor.execute("SELECT * FROM templates WHERE schedule_enabled = 1")
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logging.error(f"Error fetching scheduled templates: {e}")
+        return []
     finally:
         if db_type == "postgresql":
             cursor.close()

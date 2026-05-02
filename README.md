@@ -146,10 +146,13 @@ For adding non-Telegram members to a rollcall:
 
 | Command | Description |
 |---|---|
-| `/set_template name "Title" [limit=N] [location=X] [fee=X] [offset_days=D]` | Save a template |
-| `/templates` | List saved templates |
+| `/set_template name "Title" [limit=N] [location=X] [fee=X] [offset_days=D] [event_day=weekday] [event_time=HH:MM]` | Save a template (`event_day`/`event_time` set when the rollcall auto-closes) |
+| `/templates` | List saved templates (shows schedule status) |
 | `/start_template name [extra title]` | Start a rollcall from a template |
 | `/delete_template name` | Delete a template |
+| `/schedule_template name <weekday> <HH:MM>` | Enable auto-start for a template on a recurring weekly schedule (must be before `event_time`) |
+| `/schedule_template name off` | Disable auto-start for a template |
+| `/schedule_template name` | Show current schedule for a template |
 
 ### Ghost Tracking (admin only)
 

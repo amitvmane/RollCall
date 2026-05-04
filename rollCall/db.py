@@ -964,8 +964,14 @@ def get_all_chat_ids() -> List[int]:
             release_connection(conn)
 
 
+_VALID_STATUSES = {'in', 'out', 'maybe', 'waitlist'}
+
+
 def add_or_update_user(rollcall_id: int, user_id: int, first_name: str, username: str, status: str, comment: str = '') -> bool:
     """Insert or update a regular user. Position assigned once per bucket, preserved on re-entry."""
+    if status not in _VALID_STATUSES:
+        logging.error(f"add_or_update_user: invalid status '{status}' for user {user_id}")
+        return False
     conn = get_connection()
     cursor = None
     try:
@@ -984,7 +990,12 @@ def add_or_update_user(rollcall_id: int, user_id: int, first_name: str, username
             in_pos   = existing['in_pos']
             out_pos  = existing['out_pos']
             wait_pos = existing['wait_pos']
-            # Only assign NEW position if entering this bucket for the FIRST TIME
+            # Moving away from IN resets in_pos so a re-vote IN gets a fresh
+            # position at the end of the list (reflects actual join order).
+            if status in ('out', 'maybe'):
+                in_pos = None
+            # Assign NEW position when entering a bucket for the first time
+            # (or re-entering IN after having left).
             if status == 'in' and in_pos is None:
                 in_pos = get_next_position(rollcall_id, 'in')
             elif status == 'out' and out_pos is None:
@@ -1043,6 +1054,9 @@ def add_or_update_user(rollcall_id: int, user_id: int, first_name: str, username
 
 def add_or_update_proxy_user(rollcall_id: int, name: str, status: str, comment: str = '', proxy_owner_id: Optional[int] = None) -> bool:
     """Add or update a proxy user with position tracking."""
+    if status not in _VALID_STATUSES:
+        logging.error(f"add_or_update_proxy_user: invalid status '{status}' for proxy '{name}'")
+        return False
     conn = get_connection()
     cursor = None
     try:
@@ -1061,7 +1075,12 @@ def add_or_update_proxy_user(rollcall_id: int, name: str, status: str, comment: 
             in_pos   = existing['in_pos']
             out_pos  = existing['out_pos']
             wait_pos = existing['wait_pos']
-            # Only assign NEW position if entering this bucket for the FIRST TIME
+            # Moving away from IN resets in_pos so a re-vote IN gets a fresh
+            # position at the end of the list (reflects actual join order).
+            if status in ('out', 'maybe'):
+                in_pos = None
+            # Assign NEW position when entering a bucket for the first time
+            # (or re-entering IN after having left).
             if status == 'in' and in_pos is None:
                 in_pos = get_next_position(rollcall_id, 'in')
             elif status == 'out' and out_pos is None:

@@ -873,7 +873,7 @@ async def set_rollcall_time(message):
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
-            except:
+            except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
         rollcalls = manager.get_rollcalls(cid)
         if len(rollcalls) < rc_number + 1:
@@ -950,7 +950,7 @@ async def reminder(message):
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
-            except:
+            except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
             rollcalls = manager.get_rollcalls(cid)
@@ -1012,7 +1012,7 @@ async def event_fee(message):
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
-            except:
+            except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
             rollcalls = manager.get_rollcalls(cid)
@@ -1051,7 +1051,7 @@ async def individual_fee(message):
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
-            except:
+            except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
             rollcalls = manager.get_rollcalls(cid)
@@ -1091,7 +1091,7 @@ async def when(message):
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
-            except:
+            except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
             rollcalls = manager.get_rollcalls(cid)
@@ -1125,7 +1125,7 @@ async def set_location(message):
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
-            except:
+            except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
         rollcalls = manager.get_rollcalls(cid)
         if len(rollcalls) < rc_number + 1:
@@ -1163,7 +1163,7 @@ async def wait_limit(message):
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
-            except:
+            except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
         if len(pmts) == 0 or not str(pmts[0]).isdigit() or int(pmts[0]) <= 0:
@@ -1267,7 +1267,7 @@ async def delete_user(message):
             try:
                 rc_number = int(arr[-1].replace("::", "")) - 1
                 del arr[-1]
-            except:
+            except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
             rollcalls = manager.get_rollcalls(cid)
@@ -1352,7 +1352,7 @@ async def in_user(message):
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
                 msg = " ".join(pmts)
-            except:
+            except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
         rollcalls = manager.get_rollcalls(cid)
@@ -1436,7 +1436,7 @@ async def out_user(message):
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
                 msg = " ".join(pmts)
-            except:
+            except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
         rollcalls = manager.get_rollcalls(cid)
@@ -1521,7 +1521,7 @@ async def maybe_user(message):
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
                 msg = " ".join(pmts)
-            except:
+            except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
         rollcalls = manager.get_rollcalls(cid)
@@ -1594,7 +1594,7 @@ async def set_in_for(message):
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
                 msg = " ".join(pmts)
-            except:
+            except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
         rollcalls = manager.get_rollcalls(cid)
@@ -1708,7 +1708,7 @@ async def set_out_for(message):
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
                 msg = " ".join(pmts)
-            except:
+            except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
         rollcalls = manager.get_rollcalls(cid)
@@ -1786,7 +1786,7 @@ async def set_maybe_for(message):
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
                 msg = " ".join(pmts)
-            except:
+            except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
             rollcalls = manager.get_rollcalls(cid)
@@ -1836,7 +1836,7 @@ async def whos_in(message):
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
-            except:
+            except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
             rollcalls = manager.get_rollcalls(cid)
@@ -1864,7 +1864,7 @@ async def whos_out(message):
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
-            except:
+            except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
             rollcalls = manager.get_rollcalls(cid)
@@ -1892,7 +1892,7 @@ async def whos_maybe(message):
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
-            except:
+            except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
             rollcalls = manager.get_rollcalls(cid)
@@ -1920,7 +1920,7 @@ async def whos_waiting(message):
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
-            except:
+            except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
             rollcalls = manager.get_rollcalls(cid)
@@ -1955,7 +1955,7 @@ async def set_title(message):
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
-            except:
+            except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
             rollcalls = manager.get_rollcalls(cid)
@@ -1993,7 +1993,7 @@ async def end_roll_call(message):
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
-            except:
+            except Exception:
                 raise incorrectParameter("The RollCallnumber must be a positive integer")
 
         async with manager.get_erc_lock(cid):
@@ -2868,7 +2868,7 @@ async def show_panel(message):
             try:
                 rc_number = int(pmts[-1].replace("::", "")) - 1
                 del pmts[-1]
-            except:
+            except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
         rollcalls = manager.get_rollcalls(cid)

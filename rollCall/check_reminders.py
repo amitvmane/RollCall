@@ -219,8 +219,15 @@ async def check_template_schedules():
                 if last_date == today_date:
                     continue
 
-                await _auto_start_from_template(chat_id, tmpl)
-                update_template_last_scheduled_date(chat_id, tmpl["name"], today_date)
+                try:
+                    await _auto_start_from_template(chat_id, tmpl)
+                    update_template_last_scheduled_date(chat_id, tmpl["name"], today_date)
+                except Exception:
+                    logging.error(
+                        f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+                        f"Failed to auto-start template '{tmpl.get('name')}' for chat {chat_id}: "
+                        f"{traceback.format_exc()}"
+                    )
 
         except Exception:
             logging.error(

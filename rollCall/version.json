@@ -152,6 +152,12 @@
     {
         "Version": 6.1,
         "Description": "Bug fixes H1/H2/H3: per-chat asyncio.Lock in manager prevents concurrent /erc double-end; deleting a proxy user now also removes their ghost_records row so they no longer appear on /absent_stats; proxy ghost events now record user_name in ghost_events table for complete audit trail.",
+        "DeployedOnProd": "N",
+        "DeployedDatetime": "04-05-2026 00:00 UTC"
+    },
+    {
+        "Version": 6.2,
+        "Description": "Bug fixes M1/L1-L4: bare except replaced with logged Exception throughout; roll_call_not_started errors now surface in logs; user IN-position reset on OUT/MAYBE vote so re-joining IN gets correct order; status validation added to add_or_update_user/proxy; template auto-start failures logged per-template without blocking other templates.",
         "DeployedOnProd": "Y",
         "DeployedDatetime": "04-05-2026 00:00 UTC"
     }

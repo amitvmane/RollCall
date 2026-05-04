@@ -5,7 +5,7 @@ A feature-rich Telegram bot for tracking event attendance in group chats. Member
 [![CI](https://github.com/amitvmane/RollCall/actions/workflows/ci.yml/badge.svg)](https://github.com/amitvmane/RollCall/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-6.1-green)](rollCall/version.json)
+[![Version](https://img.shields.io/badge/version-6.2-green)](rollCall/version.json)
 
 ---
 
@@ -295,6 +295,7 @@ See [version.json](rollCall/version.json) for the full version history.
 
 | Version | Highlights |
 |---|---|
+| **6.2** | Bug fixes — bare except cleanup, IN-position reset on re-vote, status validation, per-template auto-start error handling |
 | **6.1** | Bug fixes — concurrent /erc lock, proxy delete cleans ghost record, proxy ghost events audit trail |
 | **6.0** | Code review hardening — background task exceptions surfaced, buzz timeout, duplicate proxy guard, partial template update, improved renumber message |
 | **5.9** | Scheduled templates — weekly auto-start per template via `/schedule_template` |

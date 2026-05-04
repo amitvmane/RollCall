@@ -28,7 +28,8 @@ def roll_call_already_started(message, manager):
             return False
         else:
             return True
-    except:
+    except Exception:
+        logging.error(f"[{_ts()}] roll_call_already_started: unexpected error", exc_info=True)
         return True
 
 # FUNCTION TO RAISE RC NOT STARTED ERROR
@@ -41,7 +42,8 @@ def roll_call_not_started(message, manager):
             return False
         else:
             return True
-    except:
+    except Exception:
+        logging.error(f"[{_ts()}] roll_call_not_started: unexpected error", exc_info=True)
         return False
 
 # FUNCTION TO RAISE NO ADMIN RIGHTS ERROR

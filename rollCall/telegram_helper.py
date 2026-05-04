@@ -62,6 +62,12 @@ _pending_deletes: dict = {}
 _panel_msg_ids: dict = {}
 
 
+def _log_task_exc(task: asyncio.Task):
+    """Done-callback for fire-and-forget tasks — logs any unhandled exception."""
+    if not task.cancelled() and task.exception():
+        logging.error(f"Background task '{task.get_name()}' raised: {task.exception()}")
+
+
 def _fmt_ended_at(ended_at) -> str:
     """Format a rollcall ended_at timestamp to a human-readable date string."""
     if not ended_at:
@@ -587,21 +593,6 @@ async def start_roll_call(message):
     msg = message.text
     title = ''
 
-    # Save chat to database.json for broadcast
-    with open(data_file_path('database.json'), 'r') as read_file:
-        database = json.load(read_file)
-        read_file.close()
-    
-    cond = True
-    for i in database:
-        if int(i['chat_id']) == cid:
-            cond = False
-
-    if cond == True:
-        database.append({'chat_id': cid})
-        with open(data_file_path('database.json'), 'w') as write_file:
-            json.dump(database, write_file)
-
     try:
         rollcalls = manager.get_rollcalls(cid)
         
@@ -756,39 +747,42 @@ async def set_template(message):
         else:
             tail = parts[2].strip()
 
-        # --- extract quoted multi-word title if present ---
+        # Load existing template so unspecified fields are preserved (partial update)
+        existing = get_template(cid, name)
+        if existing:
+            title       = existing.get('title')
+            inlistlimit = existing.get('inlistlimit')
+            location    = existing.get('location')
+            eventfee    = existing.get('eventfee')
+            offsetdays  = existing.get('offsetdays')
+            offsethours = existing.get('offsethours')
+            offsetminutes = existing.get('offsetminutes')
+            event_day   = existing.get('event_day')
+            event_time  = existing.get('event_time')
+        else:
+            title = inlistlimit = location = eventfee = None
+            offsetdays = offsethours = offsetminutes = None
+            event_day = event_time = None
+
+        # Extract title from tail only if explicitly provided.
+        # A token containing '=' is a key=value option, not a title.
         if tail.startswith('"'):
             end_quote = tail.find('"', 1)
             if end_quote != -1:
-                # "Wed Game" -> title = Wed Game, tail = rest
                 title = tail[1:end_quote]
-                tail = tail[end_quote + 1 :].strip()
+                tail = tail[end_quote + 1:].strip()
             else:
-                # No closing quote; take everything after first quote as title
                 title = tail[1:]
                 tail = ""
         else:
-            # Optional: allow a single-word title before options
-            # /set_template MG WedGame limit=...
             first_space = tail.find(" ")
-            if first_space == -1 and tail:
-                title = tail
-                tail = ""
-            elif first_space > 0:
-                title = tail[:first_space]
-                tail = tail[first_space + 1 :].strip()
+            first_token = tail[:first_space] if first_space > 0 else tail
+            if tail and '=' not in first_token:
+                # It's an explicit title word (not a key=value pair)
+                title = first_token
+                tail = tail[first_space + 1:].strip() if first_space > 0 else ""
 
-        # Default values
-        inlistlimit = None
-        location = None
-        eventfee = None
-        offsetdays = None
-        offsethours = None
-        offsetminutes = None
-        event_day = None
-        event_time = None
-
-        # key=value parsing
+        # key=value parsing — only provided keys override existing values
         tokens = tail.split()
         for tok in tokens:
             if "=" not in tok:
@@ -822,9 +816,9 @@ async def set_template(message):
                 except ValueError:
                     pass
             elif key == "event_day":
-                event_day = val.lower()  # e.g. wednesday
+                event_day = val.lower()
             elif key == "event_time":
-                event_time = val         # e.g. 07:00
+                event_time = val
 
         ok = create_or_update_template(
             chatid=cid,
@@ -915,7 +909,7 @@ async def set_rollcall_time(message):
             await bot.send_message(cid, f"Event notification time is set to {rc.finalizeDate.strftime('%d-%m-%Y %H:%M')} {rc.timezone} for '{rc.title}' (ID: {rc_number + 1}).{backslash*2+'Reminder has been reset!' if changed else ''}")
             
             rollcalls = manager.get_rollcalls(cid)
-            asyncio.create_task(start(rollcalls, rc.timezone, cid))
+            asyncio.create_task(start(rollcalls, rc.timezone, cid)).add_done_callback(_log_task_exc)
         else:
             rc.finalizeDate = date
             changed = False
@@ -1369,7 +1363,7 @@ async def in_user(message):
         _username = message.from_user.username or None
         _display_name = _get_display_name(message.from_user)
         if not _username:
-            asyncio.create_task(warn_no_username(cid, _display_name))
+            asyncio.create_task(warn_no_username(cid, _display_name)).add_done_callback(_log_task_exc)
         user = User(_display_name, _username, message.from_user.id, rc.allNames)
 
         arr = msg.split(" ")
@@ -1453,7 +1447,7 @@ async def out_user(message):
         _username = message.from_user.username or None
         _display_name = _get_display_name(message.from_user)
         if not _username:
-            asyncio.create_task(warn_no_username(cid, _display_name))
+            asyncio.create_task(warn_no_username(cid, _display_name)).add_done_callback(_log_task_exc)
         user = User(_display_name, _username, message.from_user.id, rc.allNames)
 
         arr = msg.split(" ")
@@ -1538,7 +1532,7 @@ async def maybe_user(message):
         _username = message.from_user.username or None
         _display_name = _get_display_name(message.from_user)
         if not _username:
-            asyncio.create_task(warn_no_username(cid, _display_name))
+            asyncio.create_task(warn_no_username(cid, _display_name)).add_done_callback(_log_task_exc)
         user = User(_display_name, _username, message.from_user.id, rc.allNames)
 
         arr = msg.split(" ")
@@ -1613,10 +1607,23 @@ async def set_in_for(message):
         if len(arr) > 1:
             # Proxy user: name as user_id (string)
             proxy_name = arr[1]
+
+            # Guard: reject if this proxy is already IN or WAITING (prevents duplicate DB write)
+            already_present = any(
+                u.name == proxy_name and isinstance(u.user_id, str)
+                for u in rc.inList + rc.waitList
+            )
+            if already_present:
+                await bot.send_message(
+                    cid,
+                    f"⚠️ '{proxy_name}' is already IN or WAITING for '{rc.title}'."
+                )
+                return
+
             user = User(proxy_name, None, proxy_name, rc.allNames)
             comment = " ".join(arr[2:]) if len(arr) > 2 else ""
             user.comment = comment
-            
+
             # Check ghost count and ask confirmation if at/above limit
             ghost_count = get_ghost_count_by_proxy_name(cid, proxy_name)
             if ghost_count > 0:
@@ -1992,9 +1999,10 @@ async def end_roll_call(message):
         if len(rollcalls) < rc_number + 1:
             raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
         rc = manager.get_rollcall(cid, rc_number)
-        # Capture ghost tracking info before removing from manager
+        # Capture info before removing from manager
         rc_db_id = rc.id
         ghost_tracking_on = manager.get_ghost_tracking_enabled(cid)
+        ended_number = rc_number + 1  # 1-based display ID of the rollcall being ended
         
         # Check BOTH real users and proxy users in IN list
         in_users = rc.inList
@@ -2020,16 +2028,18 @@ async def end_roll_call(message):
                 InlineKeyboardButton("✅ No, all showed up", callback_data=f"ghost_no_{rc_db_id}")
             )
             await bot.send_message(cid, "👻 Did anyone ghost today's session?", reply_markup=markup)
-        # warning + optional re-broadcast
+        # warning + optional re-broadcast with specific ID mapping
         updated_rollcalls = manager.get_rollcalls(cid)
         if len(updated_rollcalls) > 0:
-            await bot.send_message(
-                cid,
-                "⚠️ Active rollcall IDs have been updated because one rollcall was ended.\n"
-                "Use /rollcalls to see the current list and IDs."
-            )
-            for rollcall in updated_rollcalls:
-                new_id = updated_rollcalls.index(rollcall) + 1
+            lines = [f"⚠️ Rollcall #{ended_number} ended. IDs updated:"]
+            for idx, rollcall in enumerate(updated_rollcalls):
+                new_id = idx + 1
+                old_id = new_id if new_id < ended_number else new_id + 1
+                if old_id != new_id:
+                    lines.append(f"  #{old_id} '{rollcall.title}' → #{new_id}")
+            await bot.send_message(cid, "\n".join(lines))
+            for idx, rollcall in enumerate(updated_rollcalls):
+                new_id = idx + 1
                 text = f"Rollcall number {new_id}\n\n" + rollcall.allList().replace("__RCID__", str(new_id))
                 await bot.send_message(cid, text)
     except Exception as e:
@@ -2744,13 +2754,15 @@ async def buzz_command(message):
         async def _check_member(u):
             uid = u['user_id']
             try:
-                member = await bot.get_chat_member(cid, uid)
+                member = await asyncio.wait_for(bot.get_chat_member(cid, uid), timeout=5.0)
                 if member.status in ("left", "kicked"):
                     mark_member_inactive(cid, uid)
                     return None
                 return u
+            except asyncio.TimeoutError:
+                logging.warning(f"[/buzz] Timeout checking member {uid} — keeping in ping list")
+                return u  # don't mark inactive; could be a transient API issue
             except Exception:
-                # User not found or API error — skip but don't mark inactive
                 return None
 
         results = await asyncio.gather(*[_check_member(u) for u in candidates])
@@ -3343,7 +3355,7 @@ async def callback_handler(call):
         if action in ("in", "out", "maybe"):
             _username = call.from_user.username or None
             if not _username:
-                asyncio.create_task(warn_no_username(cid, call.from_user.first_name))
+                asyncio.create_task(warn_no_username(cid, call.from_user.first_name)).add_done_callback(_log_task_exc)
             _first_name = _get_display_name(call.from_user)
             user = User(
                 _first_name,
@@ -3632,6 +3644,7 @@ async def callback_handler(call):
             ghost_tracking_on = manager.get_ghost_tracking_enabled(cid)
             has_any_users = len(rc.inList) > 0
             absent_already_marked = rc.absent_marked
+            ended_number = rc_number  # 1-based display ID of the rollcall being ended
 
             # Update attendance streaks for real users who were IN
             for u in rc.inList:
@@ -3662,11 +3675,13 @@ async def callback_handler(call):
 
             updated_rollcalls = manager.get_rollcalls(cid)
             if len(updated_rollcalls) > 0:
-                await bot.send_message(
-                    cid,
-                    "⚠️ Active rollcall IDs have been updated because one rollcall was ended. "
-                    "Use /rollcalls to see the current list and IDs.",
-                )
+                lines = [f"⚠️ Rollcall #{ended_number} ended. IDs updated:"]
+                for idx, rollcall in enumerate(updated_rollcalls):
+                    new_id = idx + 1
+                    old_id = new_id if new_id < ended_number else new_id + 1
+                    if old_id != new_id:
+                        lines.append(f"  #{old_id} '{rollcall.title}' → #{new_id}")
+                await bot.send_message(cid, "\n".join(lines))
                 for idx, rollcall in enumerate(updated_rollcalls):
                     new_id = idx + 1
                     text = rollcall.allList().replace("__RCID__", str(new_id))

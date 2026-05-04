@@ -504,25 +504,30 @@ def _migrate_schema(conn):
         except Exception:
             conn.rollback()
 
-    # For SQLite, drop the unique constraint on ghost_records that causes issues with proxy users
+    # For SQLite, drop the unique constraint on ghost_records that causes issues with proxy users.
+    # Guard: only run if the table still has a UNIQUE constraint (i.e. hasn't been migrated yet).
     if db_type == 'sqlite':
         try:
-            # Recreate ghost_records without unique constraint on user_id (proxy users use -1)
-            cursor.execute("""CREATE TABLE IF NOT EXISTS ghost_records_new (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                chat_id INTEGER NOT NULL,
-                user_id INTEGER NOT NULL DEFAULT -1,
-                proxy_name TEXT,
-                user_name TEXT,
-                ghost_count INTEGER DEFAULT 0,
-                last_ghosted_at TIMESTAMP
-            )""")
-            cursor.execute("""INSERT INTO ghost_records_new (chat_id, user_id, proxy_name, user_name, ghost_count, last_ghosted_at)
-                SELECT chat_id, COALESCE(user_id, -1), proxy_name, user_name, ghost_count, last_ghosted_at
-                FROM ghost_records""")
-            cursor.execute("DROP TABLE ghost_records")
-            cursor.execute("ALTER TABLE ghost_records_new RENAME TO ghost_records")
-            conn.commit()
+            cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='ghost_records'")
+            row = cursor.fetchone()
+            table_sql = (row[0] if row else '') or ''
+            if 'UNIQUE' in table_sql.upper():
+                cursor.execute("""CREATE TABLE IF NOT EXISTS ghost_records_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL DEFAULT -1,
+                    proxy_name TEXT,
+                    user_name TEXT,
+                    ghost_count INTEGER DEFAULT 0,
+                    last_ghosted_at TIMESTAMP
+                )""")
+                cursor.execute("""INSERT INTO ghost_records_new (chat_id, user_id, proxy_name, user_name, ghost_count, last_ghosted_at)
+                    SELECT chat_id, COALESCE(user_id, -1), proxy_name, user_name, ghost_count, last_ghosted_at
+                    FROM ghost_records""")
+                cursor.execute("DROP TABLE ghost_records")
+                cursor.execute("ALTER TABLE ghost_records_new RENAME TO ghost_records")
+                conn.commit()
+                logging.info("Migrated ghost_records: removed UNIQUE constraint on user_id")
         except Exception as e:
             logging.error(f"Error migrating ghost_records: {e}")
             conn.rollback()

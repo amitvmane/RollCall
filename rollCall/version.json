@@ -140,6 +140,12 @@
     {
         "Version": 5.9,
         "Description": "Scheduled templates: /schedule_template command lets admins enable recurring weekly auto-start for individual templates. Rollcall opens at configured schedule_day+time and closes at the template's event_day+time. Persistent scheduler loop runs at bot startup, fires per-chat in the group's timezone, deduplicates via last_scheduled_date. Ghost tracking fix: _migrate_schema no longer stamps active rollcalls as absent_marked on every restart. toggle_ghost_tracking now accepts explicit true/false/on/off args. Migration adds ghost_tracking_enabled and schedule columns to existing DBs.",
+        "DeployedOnProd": "N",
+        "DeployedDatetime": "02-05-2026 00:00 UTC"
+    },
+    {
+        "Version": 6.0,
+        "Description": "Code review hardening: background tasks now surface exceptions via _log_task_exc done-callback; /buzz membership check uses asyncio.wait_for(timeout=5s) so slow API responses don't block; legacy database.json write removed from start_roll_call; /sif rejects duplicate proxy before any DB write; /set_template partial-update preserves existing fields; /set_template first-token fix prevents key=value args being parsed as titles; /erc and panel-end renumber message now shows specific old→new ID mapping instead of generic text.",
         "DeployedOnProd": "Y",
         "DeployedDatetime": "02-05-2026 00:00 UTC"
     }

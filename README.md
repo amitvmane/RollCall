@@ -5,7 +5,7 @@ A feature-rich Telegram bot for tracking event attendance in group chats. Member
 [![CI](https://github.com/amitvmane/RollCall/actions/workflows/ci.yml/badge.svg)](https://github.com/amitvmane/RollCall/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-5.8-green)](rollCall/version.json)
+[![Version](https://img.shields.io/badge/version-6.0-green)](rollCall/version.json)
 
 ---
 
@@ -212,7 +212,7 @@ RollCall/
 │   ├── check_reminders.py     # Timed reminder and auto-close scheduler
 │   ├── version.json           # Version history
 │   └── exceptions.py          # Custom exception types
-├── tests/                     # pytest test suite (270+ tests)
+├── tests/                     # pytest test suite (285+ tests)
 ├── .github/workflows/         # GitHub Actions CI/CD
 ├── dockerfile
 ├── docker-compose.yml
@@ -295,6 +295,8 @@ See [version.json](rollCall/version.json) for the full version history.
 
 | Version | Highlights |
 |---|---|
+| **6.0** | Code review hardening — background task exceptions surfaced, buzz timeout, duplicate proxy guard, partial template update, improved renumber message |
+| **5.9** | Scheduled templates — weekly auto-start per template via `/schedule_template` |
 | **5.8** | `/buzz` rework — DB-persisted member list, concurrent membership check, auto-remove leavers |
 | **5.7** | In-place panel editing — votes update the panel instead of flooding the chat |
 | **5.6** | `/buzz` command — ping unvoted members or all known members |

@@ -585,5 +585,431 @@ class TestDbCursorSafety(unittest.TestCase):
         self.assertIsNotNone(result)
 
 
+# ---------------------------------------------------------------------------
+# FIX-3: asyncio.create_task calls use _log_task_exc done-callback
+# ---------------------------------------------------------------------------
+
+class TestLogTaskExc(unittest.TestCase):
+    """
+    telegram_helper.py: all asyncio.create_task() calls must attach
+    _log_task_exc so background-task crashes surface in the log.
+    """
+
+    def test_log_task_exc_helper_exists(self):
+        import telegram_helper as th
+        self.assertTrue(
+            callable(getattr(th, '_log_task_exc', None)),
+            "_log_task_exc must be a callable defined in telegram_helper"
+        )
+
+    def test_log_task_exc_logs_exception(self):
+        """_log_task_exc must call logging.error when the task raised."""
+        import logging
+        import telegram_helper as th
+
+        failing_task = MagicMock()
+        failing_task.cancelled.return_value = False
+        failing_task.exception.return_value = RuntimeError("boom")
+
+        with patch.object(logging, 'error') as mock_err:
+            th._log_task_exc(failing_task)
+
+        mock_err.assert_called_once()
+
+    def test_log_task_exc_silent_on_cancel(self):
+        """_log_task_exc must not log when the task was cancelled."""
+        import logging
+        import telegram_helper as th
+
+        cancelled_task = MagicMock()
+        cancelled_task.cancelled.return_value = True
+
+        with patch.object(logging, 'error') as mock_err:
+            th._log_task_exc(cancelled_task)
+
+        mock_err.assert_not_called()
+
+    def test_log_task_exc_silent_on_success(self):
+        """_log_task_exc must not log when the task completed normally."""
+        import logging
+        import telegram_helper as th
+
+        ok_task = MagicMock()
+        ok_task.cancelled.return_value = False
+        ok_task.exception.return_value = None
+
+        with patch.object(logging, 'error') as mock_err:
+            th._log_task_exc(ok_task)
+
+        mock_err.assert_not_called()
+
+    def test_source_all_create_task_calls_attach_callback(self):
+        """
+        Source check: every asyncio.create_task(...) call must be followed by
+        .add_done_callback(_log_task_exc) on the same logical line.
+        """
+        module_path = os.path.join(
+            os.path.dirname(__file__), "..", "rollCall", "telegram_helper.py"
+        )
+        with open(module_path) as f:
+            source = f.read()
+
+        import re
+        # Find lines with asyncio.create_task(
+        lines = source.splitlines()
+        for i, line in enumerate(lines):
+            if "asyncio.create_task(" in line and "add_done_callback" not in line:
+                # Allow the callback on the very next line
+                next_line = lines[i + 1] if i + 1 < len(lines) else ""
+                self.assertIn(
+                    "add_done_callback",
+                    next_line,
+                    f"Line {i + 1}: asyncio.create_task() without .add_done_callback(_log_task_exc): {line.strip()}"
+                )
+
+
+# ---------------------------------------------------------------------------
+# FIX-4: buzz _check_member uses asyncio.wait_for with 5 s timeout
+# ---------------------------------------------------------------------------
+
+class TestBuzzCheckMemberTimeout(unittest.TestCase):
+    """
+    telegram_helper.py buzz handler: get_chat_member must be wrapped in
+    asyncio.wait_for(..., timeout=5.0) so a slow Telegram API response
+    does not block the entire buzz batch indefinitely.
+    """
+
+    def test_source_check_member_uses_wait_for(self):
+        module_path = os.path.join(
+            os.path.dirname(__file__), "..", "rollCall", "telegram_helper.py"
+        )
+        with open(module_path) as f:
+            source = f.read()
+
+        self.assertIn(
+            "asyncio.wait_for",
+            source,
+            "buzz _check_member must use asyncio.wait_for for get_chat_member"
+        )
+        self.assertIn(
+            "timeout=5.0",
+            source,
+            "wait_for timeout must be 5.0 seconds"
+        )
+
+    def test_source_timeout_error_keeps_user(self):
+        """On TimeoutError, the user should NOT be marked inactive."""
+        module_path = os.path.join(
+            os.path.dirname(__file__), "..", "rollCall", "telegram_helper.py"
+        )
+        with open(module_path) as f:
+            source = f.read()
+
+        self.assertIn(
+            "asyncio.TimeoutError",
+            source,
+            "TimeoutError must be explicitly caught in the buzz membership check"
+        )
+
+
+# ---------------------------------------------------------------------------
+# FIX-5: start_roll_call no longer writes database.json
+# ---------------------------------------------------------------------------
+
+class TestStartRollCallNoDatabaseJson(unittest.TestCase):
+    """
+    telegram_helper.py start_roll_call: the legacy database.json write block
+    must be removed. Broadcast now uses get_all_chat_ids() from db.py.
+    """
+
+    def test_source_no_database_json_write(self):
+        module_path = os.path.join(
+            os.path.dirname(__file__), "..", "rollCall", "telegram_helper.py"
+        )
+        with open(module_path) as f:
+            source = f.read()
+
+        self.assertNotIn(
+            "database.json",
+            source,
+            "database.json must not appear in telegram_helper — legacy write block must be removed"
+        )
+
+
+# ---------------------------------------------------------------------------
+# FIX-6: /sif duplicate proxy pre-check
+# ---------------------------------------------------------------------------
+
+class TestSifDuplicateProxyGuard(unittest.IsolatedAsyncioTestCase):
+    """
+    telegram_helper.py set_in_for (/sif): if the same proxy name is already
+    IN or WAITING, the handler must send a warning and return early without
+    calling addIn or touching the DB.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        import telegram_helper as th
+        cls.th = th
+
+    def setUp(self):
+        self.th.bot.send_message = AsyncMock()
+        self.th._rate_limits.clear()
+        self.th._pending_deletes.clear()
+
+    def _make_message(self, text, chat_id=100, user_id=1):
+        msg = MagicMock()
+        msg.text = text
+        msg.chat.id = chat_id
+        msg.from_user.id = user_id
+        msg.from_user.first_name = "Admin"
+        msg.from_user.username = "admin"
+        return msg
+
+    def _make_proxy_user(self, name):
+        u = MagicMock()
+        u.name = name
+        u.user_id = name  # string → proxy
+        return u
+
+    async def test_duplicate_proxy_in_inlist_sends_warning(self):
+        rc = MagicMock()
+        rc.title = "Game Night"
+        rc.id = 1
+        existing_proxy = self._make_proxy_user("Charlie")
+        rc.inList = [existing_proxy]
+        rc.waitList = []
+        rc.allNames = ["Charlie"]
+        rc.absent_marked = False
+
+        m = MagicMock()
+        m.get_rollcalls.return_value = [rc]
+        m.get_rollcall.return_value = rc
+        m.get_admin_rights.return_value = False
+        m.get_ghost_tracking_enabled.return_value = False
+        m.get_absent_limit.return_value = 1
+
+        with patch('telegram_helper.manager', m), \
+             patch('telegram_helper.admin_rights', new=AsyncMock(return_value=True)), \
+             patch('telegram_helper.get_ghost_count_by_proxy_name', return_value=0):
+            msg = self._make_message("/sif Charlie")
+            await self.th.set_in_for(msg)
+
+        sent_texts = [call[0][1] for call in self.th.bot.send_message.call_args_list]
+        self.assertTrue(
+            any("already IN or WAITING" in t for t in sent_texts),
+            f"Expected duplicate warning, got: {sent_texts}"
+        )
+        rc.addIn.assert_not_called()
+
+    async def test_duplicate_proxy_in_waitlist_sends_warning(self):
+        rc = MagicMock()
+        rc.title = "Game Night"
+        rc.id = 1
+        existing_proxy = self._make_proxy_user("Dave")
+        rc.inList = []
+        rc.waitList = [existing_proxy]
+        rc.allNames = ["Dave"]
+        rc.absent_marked = False
+
+        m = MagicMock()
+        m.get_rollcalls.return_value = [rc]
+        m.get_rollcall.return_value = rc
+        m.get_admin_rights.return_value = False
+        m.get_ghost_tracking_enabled.return_value = False
+        m.get_absent_limit.return_value = 1
+
+        with patch('telegram_helper.manager', m), \
+             patch('telegram_helper.admin_rights', new=AsyncMock(return_value=True)), \
+             patch('telegram_helper.get_ghost_count_by_proxy_name', return_value=0):
+            msg = self._make_message("/sif Dave")
+            await self.th.set_in_for(msg)
+
+        sent_texts = [call[0][1] for call in self.th.bot.send_message.call_args_list]
+        self.assertTrue(
+            any("already IN or WAITING" in t for t in sent_texts),
+            f"Expected duplicate warning, got: {sent_texts}"
+        )
+        rc.addIn.assert_not_called()
+
+    async def test_new_proxy_not_in_any_list_proceeds_normally(self):
+        rc = MagicMock()
+        rc.title = "Game Night"
+        rc.id = 1
+        rc.inList = []
+        rc.waitList = []
+        rc.allNames = []
+        rc.absent_marked = False
+        rc.addIn.return_value = None
+        rc.allList.return_value = "Title: Game Night\nID: __RCID__\n"
+
+        m = MagicMock()
+        m.get_rollcalls.return_value = [rc]
+        m.get_rollcall.return_value = rc
+        m.get_admin_rights.return_value = False
+        m.get_shh_mode.return_value = False
+        m.get_ghost_tracking_enabled.return_value = False
+        m.get_absent_limit.return_value = 1
+
+        with patch('telegram_helper.manager', m), \
+             patch('telegram_helper.admin_rights', new=AsyncMock(return_value=True)), \
+             patch('telegram_helper.get_ghost_count_by_proxy_name', return_value=0):
+            msg = self._make_message("/sif Eve")
+            await self.th.set_in_for(msg)
+
+        sent_texts = [call[0][1] for call in self.th.bot.send_message.call_args_list]
+        self.assertFalse(
+            any("already IN or WAITING" in t for t in sent_texts),
+            "Should NOT send duplicate warning for a new proxy user"
+        )
+
+
+# ---------------------------------------------------------------------------
+# FIX-8 & FIX-10: /set_template partial update and first-token parsing
+# ---------------------------------------------------------------------------
+
+class TestSetTemplatePartialUpdate(unittest.TestCase):
+    """
+    FIX-8: /set_template must load existing template and only override
+    explicitly provided fields so partial updates don't erase other values.
+
+    FIX-10: A leading token like 'event_day=sunday' must NOT be treated
+    as a title — only a token without '=' is a bare title.
+    """
+
+    def test_source_loads_existing_template_before_overwrite(self):
+        """Source must call get_template to load the existing record."""
+        module_path = os.path.join(
+            os.path.dirname(__file__), "..", "rollCall", "telegram_helper.py"
+        )
+        with open(module_path) as f:
+            source = f.read()
+
+        self.assertIn(
+            "get_template(cid, name)",
+            source,
+            "/set_template must call get_template to load existing data before overwriting"
+        )
+        self.assertIn(
+            "existing.get(",
+            source,
+            "Existing template fields must be loaded with dict.get()"
+        )
+
+    def test_source_first_token_eq_check(self):
+        """Source must guard that the first token has no '=' before treating it as title."""
+        module_path = os.path.join(
+            os.path.dirname(__file__), "..", "rollCall", "telegram_helper.py"
+        )
+        with open(module_path) as f:
+            source = f.read()
+
+        self.assertIn(
+            "'=' not in first_token",
+            source,
+            "First-token check must guard against key=value tokens being parsed as titles"
+        )
+
+
+# ---------------------------------------------------------------------------
+# FIX-11: /erc renumbering message shows specific old→new ID mapping
+# ---------------------------------------------------------------------------
+
+class TestErcRenumberingMessage(unittest.IsolatedAsyncioTestCase):
+    """
+    telegram_helper.py end_roll_call: when rollcalls remain after ending one,
+    the warning must show the specific old→new ID mapping (e.g. '#3 ... → #2')
+    instead of a generic "IDs have been updated" message.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        import telegram_helper as th
+        cls.th = th
+
+    def setUp(self):
+        self.th.bot.send_message = AsyncMock()
+        self.th._rate_limits.clear()
+        self.th._pending_deletes.clear()
+
+    def _make_rc(self, title, rc_id=1):
+        rc = MagicMock()
+        rc.title = title
+        rc.id = rc_id
+        rc.inList = []
+        rc.outList = []
+        rc.maybeList = []
+        rc.waitList = []
+        rc.allNames = []
+        rc.absent_marked = True
+        rc.finishList.return_value = f"Title: {title}\nID: __RCID__\n"
+        rc.allList.return_value = f"Title: {title}\nID: __RCID__\n"
+        return rc
+
+    async def test_renumbering_message_shows_mapping(self):
+        """
+        Ending rollcall #1 of 2 should produce a message containing '→' arrow
+        for the surviving rollcall, not just a generic 'IDs have been updated' message.
+        """
+        rc1 = self._make_rc("First Game", rc_id=1)
+        rc2 = self._make_rc("Second Game", rc_id=2)
+        surviving = [rc2]
+
+        m = MagicMock()
+        # Always return [rc1, rc2] for count check and [rc2] for post-end renaming.
+        # Use a counter to distinguish calls.
+        call_count = [0]
+
+        def get_rollcalls_side_effect(cid):
+            call_count[0] += 1
+            # First call: pre-end check (must have >= 1 rollcall)
+            if call_count[0] == 1:
+                return [rc1, rc2]
+            # Subsequent calls: post-end state
+            return surviving
+
+        m.get_rollcalls.side_effect = get_rollcalls_side_effect
+        m.get_rollcall.return_value = rc1
+        m.get_admin_rights.return_value = False
+        m.get_ghost_tracking_enabled.return_value = False
+        m.get_shh_mode.return_value = False
+
+        msg = MagicMock()
+        msg.text = "/erc"
+        msg.chat.id = 100
+        msg.from_user.id = 1
+        msg.from_user.first_name = "Alice"
+        msg.from_user.username = "alice"
+
+        with patch('telegram_helper.manager', m), \
+             patch('telegram_helper.admin_rights', new=AsyncMock(return_value=True)), \
+             patch('telegram_helper.update_streak_on_checkin', return_value=None):
+            await self.th.end_roll_call(msg)
+
+        sent_texts = " ".join(
+            str(call[0][1]) for call in self.th.bot.send_message.call_args_list
+        )
+        self.assertIn("→", sent_texts, "Renumbering message must contain '→' arrow mapping")
+        self.assertNotIn(
+            "IDs have been updated",
+            sent_texts,
+            "Generic 'IDs have been updated' message must be replaced with specific mapping"
+        )
+
+    def test_source_no_generic_ids_updated_message(self):
+        """The old generic message must not appear in source."""
+        module_path = os.path.join(
+            os.path.dirname(__file__), "..", "rollCall", "telegram_helper.py"
+        )
+        with open(module_path) as f:
+            source = f.read()
+
+        self.assertNotIn(
+            "Active rollcall IDs have been updated because one rollcall was ended.",
+            source,
+            "Generic renumber message must be replaced with specific ID mapping"
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

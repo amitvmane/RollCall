@@ -6,6 +6,7 @@ This replaces the chat={} dictionary with proper database-backed storage
 from typing import List, Dict, Optional
 from models import RollCall, db
 from db import create_rollcall
+import asyncio
 import logging
 from datetime import datetime
 
@@ -32,6 +33,15 @@ class RollCallManager:
         #   }
         # }
         self._cache = {}
+        # Per-chat asyncio locks to prevent concurrent /erc calls from
+        # double-ending the same rollcall.
+        self._erc_locks: Dict[int, asyncio.Lock] = {}
+
+    def get_erc_lock(self, chat_id: int) -> asyncio.Lock:
+        """Return (creating if needed) the per-chat lock for end-rollcall operations."""
+        if chat_id not in self._erc_locks:
+            self._erc_locks[chat_id] = asyncio.Lock()
+        return self._erc_locks[chat_id]
 
     def get_chat(self, chat_id: int) -> Dict:
         """Get or create chat data"""

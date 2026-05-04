@@ -1011,5 +1011,171 @@ class TestErcRenumberingMessage(unittest.IsolatedAsyncioTestCase):
         )
 
 
+# ---------------------------------------------------------------------------
+# H1: Per-chat asyncio.Lock guards concurrent /erc calls
+# ---------------------------------------------------------------------------
+
+class TestErcConcurrencyLock(unittest.IsolatedAsyncioTestCase):
+    """
+    rollcall_manager.py: get_erc_lock(chat_id) must return an asyncio.Lock
+    that serialises concurrent end-rollcall operations in the same chat.
+    """
+
+    def _load_manager_mod(self, name="_real_mgr"):
+        import importlib.util, sys
+        spec = importlib.util.spec_from_file_location(
+            name,
+            os.path.join(os.path.dirname(__file__), "..", "rollCall", "rollcall_manager.py")
+        )
+        mod = importlib.util.module_from_spec(spec)
+        with patch.dict('sys.modules', {'db': sys.modules['db'], 'models': MagicMock()}):
+            spec.loader.exec_module(mod)
+        return mod
+
+    async def test_get_erc_lock_returns_asyncio_lock(self):
+        mod = self._load_manager_mod("_rm1")
+        mgr = mod.RollCallManager()
+        lock = mgr.get_erc_lock(123)
+        self.assertIsInstance(lock, asyncio.Lock)
+
+    async def test_same_chat_returns_same_lock(self):
+        """get_erc_lock must return the identical lock object for the same chat_id."""
+        mod = self._load_manager_mod("_rm2")
+        mgr = mod.RollCallManager()
+        self.assertIs(mgr.get_erc_lock(42), mgr.get_erc_lock(42))
+
+    async def test_different_chats_return_different_locks(self):
+        mod = self._load_manager_mod("_rm3")
+        mgr = mod.RollCallManager()
+        self.assertIsNot(mgr.get_erc_lock(1), mgr.get_erc_lock(2))
+
+    async def test_lock_prevents_concurrent_entry(self):
+        """Acquiring the lock twice concurrently — second coroutine must wait."""
+        mod = self._load_manager_mod("_rm4")
+        mgr = mod.RollCallManager()
+        lock = mgr.get_erc_lock(999)
+        order = []
+
+        async def first():
+            async with lock:
+                order.append('first-in')
+                await asyncio.sleep(0)
+                order.append('first-out')
+
+        async def second():
+            async with lock:
+                order.append('second-in')
+
+        await asyncio.gather(first(), second())
+        # second must enter only after first releases
+        self.assertEqual(order, ['first-in', 'first-out', 'second-in'])
+
+    def test_source_erc_handler_uses_lock(self):
+        """The /erc handler source must contain 'async with manager.get_erc_lock'."""
+        module_path = os.path.join(
+            os.path.dirname(__file__), "..", "rollCall", "telegram_helper.py"
+        )
+        with open(module_path) as f:
+            source = f.read()
+        self.assertIn(
+            "async with manager.get_erc_lock(cid)",
+            source,
+            "/erc handler must acquire per-chat lock to prevent concurrent double-end"
+        )
+
+    def test_source_endconfirm_uses_lock(self):
+        """The panel endconfirm callback must also use the per-chat lock."""
+        module_path = os.path.join(
+            os.path.dirname(__file__), "..", "rollCall", "telegram_helper.py"
+        )
+        with open(module_path) as f:
+            source = f.read()
+        # There must be at least two occurrences (one per code path)
+        count = source.count("async with manager.get_erc_lock(cid)")
+        self.assertGreaterEqual(count, 2, "Both /erc and endconfirm must hold the per-chat lock")
+
+
+# ---------------------------------------------------------------------------
+# H2: Deleting a proxy user purges their ghost_records row
+# ---------------------------------------------------------------------------
+
+class TestProxyDeleteCleansGhostRecord(unittest.TestCase):
+    """
+    db.py delete_user_by_name: after deleting a proxy from proxy_users, the
+    matching ghost_records row must also be removed so the user stops
+    appearing on the /absent_stats leaderboard.
+    """
+
+    def test_source_ghost_records_delete_on_proxy_removal(self):
+        """Source must delete from ghost_records when proxy_users row is removed."""
+        module_path = os.path.join(
+            os.path.dirname(__file__), "..", "rollCall", "db.py"
+        )
+        with open(module_path) as f:
+            source = f.read()
+
+        self.assertIn(
+            "DELETE FROM ghost_records",
+            source,
+            "delete_user_by_name must delete from ghost_records when a proxy is removed"
+        )
+        self.assertIn(
+            "proxy_name",
+            source,
+            "ghost_records deletion must filter by proxy_name"
+        )
+
+    def test_source_uses_subquery_for_chat_id(self):
+        """The ghost_records DELETE must resolve chat_id via rollcalls subquery."""
+        module_path = os.path.join(
+            os.path.dirname(__file__), "..", "rollCall", "db.py"
+        )
+        with open(module_path) as f:
+            source = f.read()
+
+        self.assertIn(
+            "SELECT chat_id FROM rollcalls WHERE id",
+            source,
+            "ghost_records deletion must look up chat_id via the rollcalls table"
+        )
+
+
+# ---------------------------------------------------------------------------
+# H3: Proxy ghost events record user_name in ghost_events table
+# ---------------------------------------------------------------------------
+
+class TestProxyGhostEventUserName(unittest.TestCase):
+    """
+    telegram_helper.py ghost_done callback: add_ghost_event for proxy users
+    must pass user_name=proxy_name so the ghost_events audit table is always
+    populated (not NULL) for every ghost event.
+    """
+
+    def test_source_proxy_ghost_event_passes_user_name(self):
+        module_path = os.path.join(
+            os.path.dirname(__file__), "..", "rollCall", "telegram_helper.py"
+        )
+        with open(module_path) as f:
+            source = f.read()
+
+        self.assertIn(
+            "add_ghost_event(rc_db_id, cid, None, user_name=proxy_name, proxy_name=proxy_name)",
+            source,
+            "Proxy ghost event must pass user_name=proxy_name to keep audit trail complete"
+        )
+
+    def test_add_ghost_event_signature_accepts_user_name(self):
+        """add_ghost_event DB function must accept a user_name keyword argument."""
+        import inspect
+        import db as db_mod
+        if not isinstance(db_mod.add_ghost_event, MagicMock):
+            sig = inspect.signature(db_mod.add_ghost_event)
+            self.assertIn(
+                'user_name',
+                sig.parameters,
+                "add_ghost_event must have a user_name parameter"
+            )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

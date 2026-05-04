@@ -146,7 +146,13 @@
     {
         "Version": 6.0,
         "Description": "Code review hardening: background tasks now surface exceptions via _log_task_exc done-callback; /buzz membership check uses asyncio.wait_for(timeout=5s) so slow API responses don't block; legacy database.json write removed from start_roll_call; /sif rejects duplicate proxy before any DB write; /set_template partial-update preserves existing fields; /set_template first-token fix prevents key=value args being parsed as titles; /erc and panel-end renumber message now shows specific old→new ID mapping instead of generic text.",
-        "DeployedOnProd": "Y",
+        "DeployedOnProd": "N",
         "DeployedDatetime": "02-05-2026 00:00 UTC"
+    },
+    {
+        "Version": 6.1,
+        "Description": "Bug fixes H1/H2/H3: per-chat asyncio.Lock in manager prevents concurrent /erc double-end; deleting a proxy user now also removes their ghost_records row so they no longer appear on /absent_stats; proxy ghost events now record user_name in ghost_events table for complete audit trail.",
+        "DeployedOnProd": "Y",
+        "DeployedDatetime": "04-05-2026 00:00 UTC"
     }
 ]

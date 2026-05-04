@@ -1371,6 +1371,16 @@ def delete_user_by_name(rollcall_id: int, name: str) -> bool:
         )
         rows_deleted = cursor.rowcount
 
+        # When a proxy is deleted, also purge their ghost_records row so they
+        # no longer appear on the /absent_stats leaderboard.
+        if rows_deleted > 0:
+            cursor.execute(
+                f"""DELETE FROM ghost_records
+                    WHERE proxy_name = {ph}
+                    AND chat_id = (SELECT chat_id FROM rollcalls WHERE id = {ph})""",
+                (name, rollcall_id)
+            )
+
         # Only try real users if no proxy was deleted
         if rows_deleted == 0:
             # Strip @ if admin passed @username format

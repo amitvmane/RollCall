@@ -38,7 +38,8 @@ from db import (
     mark_rollcall_absent_done, get_unprocessed_rollcalls,
     add_ghost_event, get_rollcall_in_users, save_ghost_selections,
     update_streak_on_checkin, reset_streak_on_ghost, get_rollcall_history,
-    upsert_chat_member, mark_member_inactive, get_active_members
+    upsert_chat_member, mark_member_inactive, get_active_members,
+    log_admin_action, get_admin_audit_log,
 )
 
 bot = AsyncTeleBot(token=TELEGRAM_TOKEN)
@@ -57,6 +58,13 @@ _RATE_LIMIT_SECONDS = 2
 # Pending delete confirmations: (chat_id, admin_user_id) -> {'name': str, 'rc_number': int}
 _pending_deletes: dict = {}
 
+# Pending status overrides: (chat_id, admin_user_id) -> {'user': User, 'new_status': str, 'rc_number': int}
+_pending_overrides: dict = {}
+
+# Per-chat /buzz rate limiting: chat_id -> last buzz timestamp
+_buzz_cooldowns: dict = {}
+_BUZZ_COOLDOWN_SECONDS = 30
+
 # Panel message tracking: (chat_id, rc_1based) -> message_id of the active panel message.
 # Used by _update_panel() to edit the panel in-place instead of posting a new message.
 _panel_msg_ids: dict = {}
@@ -66,6 +74,29 @@ def _log_task_exc(task: asyncio.Task):
     """Done-callback for fire-and-forget tasks — logs any unhandled exception."""
     if not task.cancelled() and task.exception():
         logging.error(f"Background task '{task.get_name()}' raised: {task.exception()}")
+
+
+def _is_buzz_rate_limited(chat_id: int) -> bool:
+    """Return True if /buzz was used in this chat within the cooldown window."""
+    now = datetime.now().timestamp()
+    last = _buzz_cooldowns.get(chat_id, 0)
+    if now - last < _BUZZ_COOLDOWN_SECONDS:
+        return True
+    _buzz_cooldowns[chat_id] = now
+    return False
+
+
+async def _dm_promoted_real_user(user_id: int, rc_title: str, rc_number: int):
+    """Try to DM a real Telegram user that they've been promoted from waitlist to IN.
+    Silently swallows errors — the user may not have started a conversation with the bot."""
+    try:
+        await bot.send_message(
+            user_id,
+            f"🎉 Good news! A spot opened up and you're now *IN* for *{rc_title}* (#{rc_number}). See you there!",
+            parse_mode="Markdown",
+        )
+    except Exception:
+        pass
 
 
 def _fmt_ended_at(ended_at) -> str:
@@ -298,6 +329,7 @@ async def set_admins(message):
         return
     
     manager.set_admin_rights(cid, True)
+    log_admin_action(cid, message.from_user.id, message.from_user.first_name, "set_admins")
     await bot.send_message(cid, 'Admin permissions activated')
 
 # SET ADMIN RIGHTS TO FALSE
@@ -312,6 +344,7 @@ async def unset_admins(message):
         return
     
     manager.set_admin_rights(cid, False)
+    log_admin_action(cid, message.from_user.id, message.from_user.first_name, "unset_admins")
     await bot.send_message(cid, 'Admin permissions disabled')
 
 # SEND ANNOUNCEMENTS TO ALL GROUPS
@@ -470,10 +503,15 @@ async def schedule_template_cmd(message):
             await bot.send_message(
                 cid,
                 "Usage:\n"
-                "/schedule_template <name> <weekday> <HH:MM>  — enable auto-start\n"
-                "/schedule_template <name> off                 — disable\n"
-                "/schedule_template <name>                     — show current schedule\n\n"
-                "Example: /schedule_template sunday_game friday 09:00"
+                "/schedule_template <name> <weekday> <HH:MM>           — weekly auto-start\n"
+                "/schedule_template <name> <weekday> <HH:MM> biweekly  — every 2 weeks\n"
+                "/schedule_template <name> monthly <day> <HH:MM>       — monthly on day N\n"
+                "/schedule_template <name> off                          — disable\n"
+                "/schedule_template <name>                              — show current schedule\n\n"
+                "Examples:\n"
+                "/schedule_template sunday_game friday 09:00\n"
+                "/schedule_template sunday_game friday 09:00 biweekly\n"
+                "/schedule_template sunday_game monthly 15 09:00"
             )
             return
 
@@ -491,10 +529,16 @@ async def schedule_template_cmd(message):
             event_day = tmpl.get("event_day")
             event_time = tmpl.get("event_time")
             last_run = tmpl.get("last_scheduled_date")
+            recurrence_type = tmpl.get("recurrence_type") or "weekly"
             if sched_enabled and sched_day and sched_time:
+                recurrence_label = {"weekly": "weekly", "biweekly": "every 2 weeks", "monthly": "monthly"}.get(recurrence_type, recurrence_type)
+                if recurrence_type == "monthly":
+                    opens_str = f"day {sched_day} of each month at {sched_time}"
+                else:
+                    opens_str = f"{sched_day.capitalize()} {sched_time} ({recurrence_label})"
                 status = (
                     f"🗓 *{name}* schedule: 🟢 enabled\n"
-                    f"Opens: {sched_day.capitalize()} {sched_time}\n"
+                    f"Opens: {opens_str}\n"
                 )
                 if event_day and event_time:
                     status += f"Closes: {event_day.capitalize()} {event_time}\n"
@@ -514,25 +558,47 @@ async def schedule_template_cmd(message):
                 await bot.send_message(cid, f"Failed to update template '{name}'.")
             return
 
-        # Enable: expect <weekday> <HH:MM>
+        # Enable: expect <weekday> <HH:MM> [biweekly] or monthly <day> <HH:MM>
         if len(parts) < 4:
             await bot.send_message(
                 cid,
-                "To enable scheduling provide both a weekday and a time.\n"
-                "Example: /schedule_template sunday_game friday 09:00"
+                "To enable scheduling provide a weekday and time.\n"
+                "Example: /schedule_template sunday_game friday 09:00\n"
+                "         /schedule_template sunday_game monthly 15 09:00"
             )
             return
 
+        recurrence_type = "weekly"
         sched_day = parts[2].lower()
-        sched_time = parts[3]
 
-        if sched_day not in WEEKDAY_MAP:
-            await bot.send_message(
-                cid,
-                f"'{sched_day}' is not a valid weekday.\n"
-                "Use: monday, tuesday, wednesday, thursday, friday, saturday, sunday"
-            )
-            return
+        if sched_day == "monthly":
+            # monthly <day_number> <HH:MM>
+            if len(parts) < 5:
+                await bot.send_message(cid, "For monthly scheduling: /schedule_template <name> monthly <day_number> <HH:MM>\nExample: /schedule_template sunday_game monthly 15 09:00")
+                return
+            try:
+                day_num = int(parts[3])
+                if not 1 <= day_num <= 31:
+                    raise ValueError
+            except ValueError:
+                await bot.send_message(cid, f"'{parts[3]}' is not a valid day number (1–31).")
+                return
+            sched_day = str(day_num)
+            sched_time = parts[4]
+            recurrence_type = "monthly"
+        else:
+            sched_time = parts[3]
+            # Optional biweekly flag
+            if len(parts) > 4 and parts[4].lower() == "biweekly":
+                recurrence_type = "biweekly"
+
+            if sched_day not in WEEKDAY_MAP:
+                await bot.send_message(
+                    cid,
+                    f"'{sched_day}' is not a valid weekday.\n"
+                    "Use: monday, tuesday, wednesday, thursday, friday, saturday, sunday"
+                )
+                return
 
         # Validate HH:MM format
         try:
@@ -555,26 +621,32 @@ async def schedule_template_cmd(message):
             )
             return
 
-        # Validate schedule is strictly before event in the weekly cycle
-        sched_mins = weekly_minutes(sched_day, sched_time)
-        event_mins = weekly_minutes(event_day, event_time)
-        if sched_mins is None or event_mins is None:
-            await bot.send_message(cid, "Could not validate schedule vs event time. Check day/time formats.")
-            return
-        if sched_mins >= event_mins:
-            await bot.send_message(
-                cid,
-                f"Schedule time ({sched_day.capitalize()} {sched_time}) must be "
-                f"before event time ({event_day.capitalize()} {event_time}) in the weekly cycle."
-            )
-            return
+        # For weekly/biweekly, validate schedule is strictly before event in the weekly cycle
+        if recurrence_type in ("weekly", "biweekly"):
+            sched_mins = weekly_minutes(sched_day, sched_time)
+            event_mins = weekly_minutes(event_day, event_time)
+            if sched_mins is None or event_mins is None:
+                await bot.send_message(cid, "Could not validate schedule vs event time. Check day/time formats.")
+                return
+            if sched_mins >= event_mins:
+                await bot.send_message(
+                    cid,
+                    f"Schedule time ({sched_day.capitalize()} {sched_time}) must be "
+                    f"before event time ({event_day.capitalize()} {event_time}) in the weekly cycle."
+                )
+                return
 
-        ok = set_template_schedule(cid, name, sched_day, sched_time)
+        ok = set_template_schedule(cid, name, sched_day, sched_time, recurrence_type)
         if ok:
+            recurrence_label = {"weekly": "weekly", "biweekly": "every 2 weeks", "monthly": "monthly"}.get(recurrence_type, recurrence_type)
+            if recurrence_type == "monthly":
+                opens_str = f"day {sched_day} of each month at {sched_time}"
+            else:
+                opens_str = f"{sched_day.capitalize()} at {sched_time} ({recurrence_label})"
             await bot.send_message(
                 cid,
                 f"🟢 Schedule set for template *{name}*:\n"
-                f"Opens: {sched_day.capitalize()} at {sched_time}\n"
+                f"Opens: {opens_str}\n"
                 f"Closes: {event_day.capitalize()} at {event_time}",
                 parse_mode="Markdown"
             )
@@ -1220,6 +1292,7 @@ async def wait_limit(message):
                         f"{format_mention_with_name(u)} → IN (from WAITING) for '{rc.title}' (#{rc_number + 1})",
                         parse_mode="Markdown",
                     )
+                    asyncio.create_task(_dm_promoted_real_user(u.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
                 else:
                     await bot.send_message(
                         cid,
@@ -1317,6 +1390,7 @@ async def delete_template_command(message):
     name = parts[1].strip()
     ok = delete_template(cid, name)
     if ok:
+        log_admin_action(cid, message.from_user.id, message.from_user.first_name, "delete_template", target_name=name)
         await bot.send_message(cid, f"Template '{name}' deleted.")
     else:
         await bot.send_message(cid, f"Template '{name}' not found or could not be deleted.")
@@ -1482,6 +1556,7 @@ async def out_user(message):
                     f"{format_mention_with_name(result)} → IN",
                     parse_mode="Markdown",
                 )
+                asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
             else:
                 await bot.send_message(cid, f"{result.name} → IN")
 
@@ -1564,6 +1639,7 @@ async def maybe_user(message):
                     f"{'@'+result.username if result.username != None else f'[{result.name}](tg://user?id={result.user_id})'} now you are in!",
                     parse_mode="Markdown"
                 )
+                asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
             else:
                 await bot.send_message(cid, f"{result.name} now you are in!")
 
@@ -1662,6 +1738,8 @@ async def set_in_for(message):
             result = rc.addIn(user)
             rc.save()
 
+            log_admin_action(cid, message.from_user.id, message.from_user.first_name, "sif", target_name=proxy_name, rollcall_id=rc.id, details=f"rc_number={rc_number + 1}")
+
             if result == 'AB':
                 raise duplicateProxy("No duplicate proxy please :-), Thanks!")
             elif result == 'AC':
@@ -1729,6 +1807,8 @@ async def set_out_for(message):
             result = rc.addOut(user)
             rc.save()
 
+            log_admin_action(cid, message.from_user.id, message.from_user.first_name, "sof", target_name=arr[1], rollcall_id=rc.id, details=f"rc_number={rc_number + 1}")
+
             if result == 'AB':
                 raise duplicateProxy("No duplicate proxy please :-), Thanks!")
             elif result == 'AC':
@@ -1743,6 +1823,7 @@ async def set_out_for(message):
                         f"{format_mention_with_name(result)} → IN",
                         parse_mode="Markdown",
                     )
+                    asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
                 else:
                     await bot.send_message(cid, f"{result.name} → IN")
 
@@ -1803,6 +1884,8 @@ async def set_maybe_for(message):
 
             result = rc.addMaybe(user)
             rc.save()
+
+            log_admin_action(cid, message.from_user.id, message.from_user.first_name, "smf", target_name=arr[1], rollcall_id=rc.id, details=f"rc_number={rc_number + 1}")
 
             if result == 'AB':
                 raise duplicateProxy("No duplicate proxy please :-), Thanks!")
@@ -2652,31 +2735,44 @@ async def build_group_stats_text(chat_id: int) -> str:
 @bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/history")
 async def history_command(message):
     """
-    /history [N] — Show the last N ended rollcalls for this chat (default 10, max 20).
+    /history [N] [page] — Show ended rollcalls. N items per page (default 10, max 20), page starts at 1.
     """
     cid = message.chat.id
     try:
         parts = message.text.strip().split()
         limit = 10
+        page = 1
         if len(parts) > 1:
             try:
                 limit = max(1, min(20, int(parts[1])))
             except ValueError:
                 pass
+        if len(parts) > 2:
+            try:
+                page = max(1, int(parts[2]))
+            except ValueError:
+                pass
 
-        records = get_rollcall_history(cid, limit)
+        offset = (page - 1) * limit
+        records = get_rollcall_history(cid, limit, offset)
         if not records:
-            await bot.send_message(cid, "No ended rollcalls found for this chat yet.")
+            msg = "No ended rollcalls found for this chat yet." if page == 1 else f"No rollcalls found on page {page}."
+            await bot.send_message(cid, msg)
             return
 
-        lines = [f"*📋 Last {len(records)} rollcall(s):*", ""]
-        for i, r in enumerate(records, 1):
+        start_num = offset + 1
+        header = f"*📋 Rollcalls {start_num}–{start_num + len(records) - 1}*" + (f" (page {page})" if page > 1 else "") + ":"
+        lines = [header, ""]
+        for i, r in enumerate(records, start_num):
             ended = _fmt_ended_at(r.get("ended_at"))
             title = r.get("title") or "Untitled"
             in_count = r.get("in_count", 0)
             ghost_count = r.get("ghost_count", 0)
             ghost_str = f"  👻 {ghost_count}" if ghost_count else ""
             lines.append(f"{i}. *{title}* — {ended}  ✅ {in_count}{ghost_str}")
+
+        if len(records) == limit:
+            lines.append(f"\n_Use /history {limit} {page + 1} to see more_")
 
         await bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
     except Exception as e:
@@ -2700,6 +2796,11 @@ async def buzz_command(message):
     try:
         if await admin_rights(message, manager) == False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
+
+        if _is_buzz_rate_limited(cid):
+            remaining = int(_BUZZ_COOLDOWN_SECONDS - (datetime.now().timestamp() - _buzz_cooldowns.get(cid, 0))) + 1
+            await bot.send_message(cid, f"⏳ /buzz was used recently. Please wait {remaining}s before buzzing again.")
+            return
 
         msg = message.text.strip()
         parts = msg.split()
@@ -3271,11 +3372,59 @@ async def ghost_callback_handler(call):
             rc = manager.get_rollcall(cid, rc_number)
             if rc and rc.delete_user(name):
                 rc.save()
+                log_admin_action(cid, admin_id, call.from_user.first_name, "delete_user", target_name=name, rollcall_id=getattr(rc, 'db_id', None) or getattr(rc, 'id', None), details=f"rc_number={rc_number + 1}")
                 await bot.answer_callback_query(call.id, f"✅ Deleted {name}")
                 await bot.edit_message_text(f"✅ *{name}* removed from rollcall #{rc_number + 1}.", cid, call.message.message_id, parse_mode="Markdown")
             else:
                 await bot.answer_callback_query(call.id, "User not found")
                 await bot.edit_message_text(f"⚠️ User *{name}* not found.", cid, call.message.message_id, parse_mode="Markdown")
+            return
+
+        # ----------------------------------------------------------------
+        # ovrd_yes_ / ovrd_no_ — /set_status override confirmation
+        # ----------------------------------------------------------------
+        if data.startswith("ovrd_yes_") or data.startswith("ovrd_no_"):
+            parts = data.split("_", 3)   # ["ovrd", "yes"/"no", rc_number, admin_id]
+            confirmed = parts[1] == "yes"
+            admin_id = int(parts[3])
+
+            if call.from_user.id != admin_id:
+                await bot.answer_callback_query(call.id, "This action is not for you.", show_alert=True)
+                return
+
+            pending = _pending_overrides.pop((cid, admin_id), None)
+            if not confirmed or pending is None:
+                await bot.answer_callback_query(call.id, "❌ Cancelled")
+                await bot.edit_message_text("❌ Override cancelled.", cid, call.message.message_id)
+                return
+
+            user = pending['user']
+            new_status = pending['new_status']
+            rc_number = pending['rc_number']
+            rc = manager.get_rollcall(cid, rc_number)
+            if not rc:
+                await bot.answer_callback_query(call.id, "Rollcall not found")
+                await bot.edit_message_text("⚠️ Rollcall not found.", cid, call.message.message_id)
+                return
+
+            rc.delete_user(user.name)
+            if new_status == 'in':
+                result = rc.addIn(user)
+            elif new_status == 'out':
+                result = rc.addOut(user)
+            else:
+                result = rc.addMaybe(user)
+            rc.save()
+
+            status_label = new_status.upper()
+            if result == 'AC':
+                status_label = "WAITING (limit reached)"
+            log_admin_action(cid, admin_id, call.from_user.first_name, "set_status", target_name=user.name, rollcall_id=getattr(rc, 'db_id', None) or getattr(rc, 'id', None), details=f"status={new_status}")
+            await bot.answer_callback_query(call.id, f"✅ Moved to {status_label}")
+            await bot.edit_message_text(
+                f"✅ *{user.name}* → *{status_label}* in rollcall #{rc_number + 1}.",
+                cid, call.message.message_id, parse_mode="Markdown"
+            )
             return
 
         # ----------------------------------------------------------------
@@ -3488,6 +3637,7 @@ async def callback_handler(call):
                         f"{format_mention_with_name(result)} → IN (from WAITING) for '{rc.title}' (#{rc_number})",
                         parse_mode="Markdown",
                     )
+                    asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number)).add_done_callback(_log_task_exc)
                 else:
                     await bot.send_message(
                         cid,
@@ -3774,6 +3924,16 @@ async def notify_proxy_owner_wait_to_in(rc, moved_user: User, cid, title: str, r
 
         txt = f"{owner_mention}, your proxy {format_mention_with_name(moved_user)} → IN for '{title}' (#{rc_number})"
         await bot.send_message(cid, txt, parse_mode="Markdown")
+
+        # Also DM the proxy owner
+        try:
+            await bot.send_message(
+                owner_id,
+                f"🎉 Your proxy *{moved_user.name}* got promoted from WAITING → IN for *{title}* (#{rc_number})!",
+                parse_mode="Markdown",
+            )
+        except Exception:
+            pass
     except Exception:
         logging.exception("Failed to notify proxy owner for WAITING→IN")
 
@@ -3798,6 +3958,7 @@ async def toggle_ghost_tracking(message):
         else:
             new_state = not manager.get_ghost_tracking_enabled(cid)
         manager.set_ghost_tracking_enabled(cid, new_state)
+        log_admin_action(cid, message.from_user.id, message.from_user.first_name, "toggle_ghost_tracking", details=f"enabled={new_state}")
         if new_state:
             await bot.send_message(
                 cid,
@@ -3919,3 +4080,131 @@ async def mark_absent(message):
         await bot.send_message(cid, "Which session do you want to review?", reply_markup=markup)
     except Exception as e:
         await bot.send_message(message.chat.id, e)
+
+
+@bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/audit_log")
+async def audit_log_command(message):
+    """Admin only: show recent admin actions for this chat.
+    Usage: /audit_log [N]  (default 20, max 50)
+    """
+    try:
+        if await admin_rights(message, manager) == False:
+            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
+
+        cid = message.chat.id
+        parts = message.text.strip().split()
+        limit = 20
+        if len(parts) > 1:
+            try:
+                limit = max(1, min(50, int(parts[1])))
+            except ValueError:
+                pass
+
+        records = get_admin_audit_log(cid, limit)
+        if not records:
+            await bot.send_message(cid, "No admin actions recorded yet.")
+            return
+
+        lines = [f"*🔍 Last {len(records)} admin action(s):*", ""]
+        for r in records:
+            ts = str(r.get("created_at", ""))[:16]
+            admin = r.get("admin_name") or "Admin"
+            action = r.get("action_type", "")
+            target = r.get("target_name")
+            details = r.get("details")
+            entry = f"• `{ts}` *{admin}* — {action}"
+            if target:
+                entry += f" → {target}"
+            if details:
+                entry += f" _{details}_"
+            lines.append(entry)
+
+        await bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
+    except (insufficientPermissions,) as e:
+        await bot.send_message(message.chat.id, str(e))
+    except Exception:
+        logging.exception("Error in /audit_log")
+        await bot.send_message(message.chat.id, "Error fetching audit log.")
+
+
+@bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/set_status")
+async def set_status_override(message):
+    """Admin only: move a user to a different status in the active rollcall.
+    Usage: /set_status <name> <in|out|maybe> [::N]
+    """
+    cid = message.chat.id
+    try:
+        if roll_call_not_started(message, manager) == False:
+            raise rollCallNotStarted("Roll call is not active")
+        if await admin_rights(message, manager) == False:
+            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
+
+        parts = message.text.strip().split()
+        rc_number = 0
+
+        if len(parts) > 1 and "::" in parts[-1]:
+            try:
+                rc_number = int(parts[-1].replace("::", "")) - 1
+                parts = parts[:-1]
+            except Exception:
+                raise incorrectParameter("The rollcall number must be a positive integer")
+
+        if len(parts) < 3:
+            await bot.send_message(
+                cid,
+                "Usage: /set_status <name> <in|out|maybe> [::N]\n"
+                "Example: /set_status Alice in"
+            )
+            return
+
+        new_status = parts[-1].lower()
+        if new_status not in ("in", "out", "maybe"):
+            await bot.send_message(cid, "Status must be one of: in, out, maybe")
+            return
+
+        name = " ".join(parts[1:-1])
+
+        rollcalls = manager.get_rollcalls(cid)
+        if len(rollcalls) < rc_number + 1:
+            raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+
+        rc = manager.get_rollcall(cid, rc_number)
+
+        # Find the user in any list
+        found_user = None
+        for lst in (rc.inList, rc.outList, rc.maybeList, rc.waitList):
+            for u in lst:
+                if u.name.lower() == name.lower() or (u.username and u.username.lower() == name.lstrip("@").lower()):
+                    found_user = u
+                    break
+            if found_user:
+                break
+
+        if not found_user:
+            await bot.send_message(cid, f"⚠️ User '{name}' not found in rollcall #{rc_number + 1}.")
+            return
+
+        admin_id = message.from_user.id
+        _pending_overrides[(cid, admin_id)] = {
+            'user': found_user,
+            'new_status': new_status,
+            'rc_number': rc_number,
+        }
+
+        markup = InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            InlineKeyboardButton(f"✅ Move to {new_status.upper()}", callback_data=f"ovrd_yes_{rc_number}_{admin_id}"),
+            InlineKeyboardButton("❌ Cancel", callback_data=f"ovrd_no_{rc_number}_{admin_id}"),
+        )
+        await bot.send_message(
+            cid,
+            f"Move *{found_user.name}* → *{new_status.upper()}* in rollcall #{rc_number + 1}?",
+            parse_mode="Markdown",
+            reply_markup=markup,
+        )
+
+    except (rollCallNotStarted, incorrectParameter, insufficientPermissions, parameterMissing) as e:
+        await bot.send_message(cid, str(e))
+    except Exception:
+        logging.exception("Error in /set_status")
+        await bot.send_message(cid, "Error processing /set_status, please try again.")

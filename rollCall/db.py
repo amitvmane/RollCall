@@ -456,6 +456,36 @@ def create_tables():
                 )
             """)
 
+        # Admin audit log table
+        if db_type == 'postgresql':
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS admin_actions (
+                    id SERIAL PRIMARY KEY,
+                    chat_id BIGINT NOT NULL,
+                    admin_id BIGINT NOT NULL,
+                    admin_name TEXT,
+                    action_type TEXT NOT NULL,
+                    target_name TEXT,
+                    rollcall_id INTEGER,
+                    details TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+        else:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS admin_actions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id INTEGER NOT NULL,
+                    admin_id INTEGER NOT NULL,
+                    admin_name TEXT,
+                    action_type TEXT NOT NULL,
+                    target_name TEXT,
+                    rollcall_id INTEGER,
+                    details TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
         conn.commit()
         logging.debug("Database tables created successfully")
 
@@ -557,6 +587,58 @@ def _migrate_schema(conn):
                 conn.commit()
             except Exception:
                 conn.rollback()  # column already exists — safe to ignore
+
+    # Add recurrence_type to templates
+    if db_type == 'postgresql':
+        try:
+            cursor.execute("ALTER TABLE templates ADD COLUMN IF NOT EXISTS recurrence_type TEXT DEFAULT 'weekly'")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    else:
+        try:
+            cursor.execute("ALTER TABLE templates ADD COLUMN recurrence_type TEXT DEFAULT 'weekly'")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+    # Ensure admin_actions table exists (for databases created before this feature)
+    if db_type == 'postgresql':
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS admin_actions (
+                    id SERIAL PRIMARY KEY,
+                    chat_id BIGINT NOT NULL,
+                    admin_id BIGINT NOT NULL,
+                    admin_name TEXT,
+                    action_type TEXT NOT NULL,
+                    target_name TEXT,
+                    rollcall_id INTEGER,
+                    details TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    else:
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS admin_actions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id INTEGER NOT NULL,
+                    admin_id INTEGER NOT NULL,
+                    admin_name TEXT,
+                    action_type TEXT NOT NULL,
+                    target_name TEXT,
+                    rollcall_id INTEGER,
+                    details TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.commit()
+        except Exception:
+            conn.rollback()
 
     if db_type == 'postgresql':
         cursor.close()
@@ -1284,7 +1366,7 @@ def delete_template(chatid: int, name: str) -> bool:
             release_connection(conn)
 
 
-def set_template_schedule(chatid: int, name: str, schedule_day: str, schedule_time: str) -> bool:
+def set_template_schedule(chatid: int, name: str, schedule_day: str, schedule_time: str, recurrence_type: str = 'weekly') -> bool:
     """Set schedule day/time and enable auto-start for a template."""
     conn = get_connection()
     try:
@@ -1293,9 +1375,9 @@ def set_template_schedule(chatid: int, name: str, schedule_day: str, schedule_ti
         enabled = True if db_type == "postgresql" else 1
         cursor.execute(
             f"UPDATE templates SET schedule_day = {ph}, schedule_time = {ph}, "
-            f"schedule_enabled = {ph}, last_scheduled_date = NULL "
+            f"schedule_enabled = {ph}, last_scheduled_date = NULL, recurrence_type = {ph} "
             f"WHERE chatid = {ph} AND name = {ph}",
-            (schedule_day, schedule_time, enabled, chatid, name),
+            (schedule_day, schedule_time, enabled, recurrence_type, chatid, name),
         )
         conn.commit()
         return cursor.rowcount > 0
@@ -2123,8 +2205,8 @@ def reset_streak_on_ghost(chat_id: int, user_id: int) -> None:
             release_connection(conn)
 
 
-def get_rollcall_history(chat_id: int, limit: int = 10) -> List[Dict]:
-    """Return the last `limit` ended rollcalls for a chat with participant counts."""
+def get_rollcall_history(chat_id: int, limit: int = 10, offset: int = 0) -> List[Dict]:
+    """Return ended rollcalls for a chat with participant counts, supporting pagination."""
     conn = get_connection()
     try:
         cursor = conn.cursor()
@@ -2138,8 +2220,8 @@ def get_rollcall_history(chat_id: int, limit: int = 10) -> List[Dict]:
                 FROM rollcalls r
                 WHERE r.chat_id = {ph} AND r.is_active = FALSE
                 ORDER BY r.ended_at DESC
-                LIMIT {ph}
-            """, (chat_id, limit))
+                LIMIT {ph} OFFSET {ph}
+            """, (chat_id, limit, offset))
         else:
             cursor.execute(f"""
                 SELECT r.id, r.title, r.ended_at,
@@ -2149,11 +2231,64 @@ def get_rollcall_history(chat_id: int, limit: int = 10) -> List[Dict]:
                 FROM rollcalls r
                 WHERE r.chat_id = {ph} AND r.is_active = 0
                 ORDER BY r.ended_at DESC
-                LIMIT {ph}
-            """, (chat_id, limit))
+                LIMIT {ph} OFFSET {ph}
+            """, (chat_id, limit, offset))
         return [dict(row) for row in cursor.fetchall()]
     except Exception as e:
         logging.error(f"Error getting rollcall history: {e}")
+        return []
+    finally:
+        if db_type == 'postgresql':
+            cursor.close()
+            release_connection(conn)
+
+
+def log_admin_action(
+    chat_id: int,
+    admin_id: int,
+    admin_name: str,
+    action_type: str,
+    target_name: str = None,
+    rollcall_id: int = None,
+    details: str = None,
+) -> None:
+    """Record an admin action in the audit log."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(
+            f"INSERT INTO admin_actions (chat_id, admin_id, admin_name, action_type, target_name, rollcall_id, details) "
+            f"VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})",
+            (chat_id, admin_id, admin_name, action_type, target_name, rollcall_id, details),
+        )
+        conn.commit()
+    except Exception as e:
+        logging.error(f"Error logging admin action: {e}")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    finally:
+        if db_type == 'postgresql':
+            cursor.close()
+            release_connection(conn)
+
+
+def get_admin_audit_log(chat_id: int, limit: int = 20) -> List[Dict]:
+    """Return the most recent admin actions for a chat."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(
+            f"SELECT id, admin_name, action_type, target_name, rollcall_id, details, created_at "
+            f"FROM admin_actions WHERE chat_id = {ph} ORDER BY created_at DESC LIMIT {ph}",
+            (chat_id, limit),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    except Exception as e:
+        logging.error(f"Error fetching admin audit log: {e}")
         return []
     finally:
         if db_type == 'postgresql':

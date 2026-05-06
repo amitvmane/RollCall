@@ -212,12 +212,42 @@ async def check_template_schedules():
                 now_time_str = now.strftime("%H:%M")
                 today_date = now.strftime("%Y-%m-%d")
 
-                if today_name != schedule_day.lower():
-                    continue
-                if now_time_str != schedule_time:
-                    continue
-                if last_date == today_date:
-                    continue
+                recurrence_type = tmpl.get("recurrence_type", "weekly") or "weekly"
+
+                if recurrence_type == "monthly":
+                    # schedule_day is a day-of-month integer string (e.g. "15")
+                    try:
+                        target_day = int(schedule_day)
+                    except (ValueError, TypeError):
+                        continue
+                    if now.day != target_day:
+                        continue
+                    if now_time_str != schedule_time:
+                        continue
+                    if last_date == today_date:
+                        continue
+                elif recurrence_type == "biweekly":
+                    if today_name != schedule_day.lower():
+                        continue
+                    if now_time_str != schedule_time:
+                        continue
+                    if last_date == today_date:
+                        continue
+                    if last_date:
+                        try:
+                            last_dt = datetime.strptime(last_date, "%Y-%m-%d").date()
+                            if (now.date() - last_dt).days < 14:
+                                continue
+                        except (ValueError, TypeError):
+                            pass
+                else:
+                    # weekly (default)
+                    if today_name != schedule_day.lower():
+                        continue
+                    if now_time_str != schedule_time:
+                        continue
+                    if last_date == today_date:
+                        continue
 
                 try:
                     await _auto_start_from_template(chat_id, tmpl)

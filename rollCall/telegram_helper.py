@@ -284,7 +284,9 @@ Templates (admin only):
 /templates — List saved templates
 /start_template name [extra title]
 /delete_template name
-/schedule_template name <weekday> <HH:MM> — Auto-start on schedule
+/schedule_template name <weekday> <HH:MM> — Weekly auto-start
+/schedule_template name <weekday> <HH:MM> biweekly — Every 2 weeks
+/schedule_template name monthly <day> <HH:MM> — Monthly on day N
 /schedule_template name off — Disable schedule
 
 Ghost tracking (admin only):
@@ -296,7 +298,9 @@ Ghost tracking (admin only):
 
 Admin tools:
 /delete_user name [::N] — Remove user (with confirmation)
-/buzz [message] [::N] — Ping members who haven't voted yet
+/set_status name <in|out|maybe> [::N] — Move user to a different status
+/buzz [message] [::N] — Ping members who haven't voted (30s cooldown)
+/audit_log [N] — Show last N admin actions (default 20)
 /set_admins / /unset_admins — Toggle admin-only mode
 
 Chat settings:
@@ -306,7 +310,7 @@ Chat settings:
 
 Info:
 /stats (/s) [name|@user|group|top|bot] — Attendance stats & streaks
-/history [N] — Last N ended rollcalls (default 10)
+/history [N] [page] — Paginated ended rollcalls (default 10 per page)
 /version (/v) — Bot version
 
 Super admin:

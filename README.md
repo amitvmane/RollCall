@@ -5,7 +5,7 @@ A feature-rich Telegram bot for tracking event attendance in group chats. Member
 [![CI](https://github.com/amitvmane/RollCall/actions/workflows/ci.yml/badge.svg)](https://github.com/amitvmane/RollCall/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-6.2-green)](rollCall/version.json)
+[![Version](https://img.shields.io/badge/version-7.0-green)](rollCall/version.json)
 
 ---
 
@@ -13,17 +13,20 @@ A feature-rich Telegram bot for tracking event attendance in group chats. Member
 
 - **Attendance tracking** — in / out / maybe with optional comments
 - **Multiple roll calls** — run up to 3 events simultaneously in one group
-- **Attendance limits & waitlists** — cap attendees; overflow goes on a waitlist
+- **Attendance limits & waitlists** — cap attendees; overflow goes on a waitlist; promoted users get a private DM
 - **Proxy responses** — mark attendance on behalf of non-Telegram members (`/sif`, `/sof`, `/smf`)
 - **Event details** — title, date/time, location, and fee with automatic per-person cost splitting
 - **Templates** — save and reuse roll call configurations
+- **Scheduled templates** — weekly, biweekly, or monthly auto-start per template
 - **Reminders** — scheduled notifications before events; auto-closes at event time
 - **Ghost tracking** — record no-shows per user, show leaderboard, prompt for reconfirmation on repeat offenders
-- **Buzz** — ping members who haven't voted yet; auto-removes members who have left the group
+- **Buzz** — ping members who haven't voted yet; 30s rate-limited; auto-removes members who have left the group
 - **Attendance streaks** — track current and best consecutive-session streaks per user
 - **In-place panel editing** — votes update the panel message instead of flooding the chat
 - **Statistics** — per-user attendance rate, streaks, IN/OUT/MAYBE counts
-- **History** — view the last N ended rollcalls with participant and ghost counts
+- **History** — paginated view of ended rollcalls with participant and ghost counts
+- **Admin audit log** — every admin action recorded; viewable with `/audit_log`
+- **Manual status override** — admin can move any user to a different status with `/set_status`
 - **Admin controls** — restrict commands to designated group admins
 - **Webhook mode** — opt-in webhook support via `WEBHOOK_URL` env var (falls back to long-polling)
 - **Dual database support** — SQLite (default) or PostgreSQL
@@ -150,7 +153,9 @@ For adding non-Telegram members to a rollcall:
 | `/templates` | List saved templates (shows schedule status) |
 | `/start_template name [extra title]` | Start a rollcall from a template |
 | `/delete_template name` | Delete a template |
-| `/schedule_template name <weekday> <HH:MM>` | Enable auto-start for a template on a recurring weekly schedule (must be before `event_time`) |
+| `/schedule_template name <weekday> <HH:MM>` | Weekly auto-start (must be before `event_time`) |
+| `/schedule_template name <weekday> <HH:MM> biweekly` | Every-2-weeks auto-start |
+| `/schedule_template name monthly <day> <HH:MM>` | Monthly auto-start on day N of the month |
 | `/schedule_template name off` | Disable auto-start for a template |
 | `/schedule_template name` | Show current schedule for a template |
 
@@ -169,7 +174,9 @@ For adding non-Telegram members to a rollcall:
 | Command | Description |
 |---|---|
 | `/delete_user name [::N]` | Remove a user (shows confirmation prompt) |
-| `/buzz [message] [::N]` | Ping members who haven't voted; pings all known members if no rollcall is active |
+| `/set_status name <in\|out\|maybe> [::N]` | ⭐ Move a user to a different status (shows confirmation prompt) |
+| `/buzz [message] [::N]` | Ping members who haven't voted; 30s rate-limited; pings all known members if no rollcall is active |
+| `/audit_log [N]` | ⭐ Show last N admin actions for this chat (default 20) |
 | `/set_admins` | Enable admin-only mode (group admins only) |
 | `/unset_admins` | Disable admin-only mode |
 
@@ -178,7 +185,7 @@ For adding non-Telegram members to a rollcall:
 | Command | Alias | Description |
 |---|---|---|
 | `/stats [name\|@user\|group\|top\|bot]` | `/s` | Attendance rate, streaks, IN/OUT/MAYBE counts |
-| `/history [N]` | | Last N ended rollcalls with counts (default 10) |
+| `/history [N] [page]` | | Paginated ended rollcalls with counts (default 10 per page) |
 | `/version` | `/v` | Show bot version |
 
 ### Chat Settings
@@ -295,6 +302,7 @@ See [version.json](rollCall/version.json) for the full version history.
 
 | Version | Highlights |
 |---|---|
+| **7.0** | Waitlist DMs, admin audit log (`/audit_log`), `/buzz` rate limiting, `/history` pagination, biweekly/monthly template schedules, `/set_status` manual override |
 | **6.2** | Bug fixes — bare except cleanup, IN-position reset on re-vote, status validation, per-template auto-start error handling |
 | **6.1** | Bug fixes — concurrent /erc lock, proxy delete cleans ghost record, proxy ghost events audit trail |
 | **6.0** | Code review hardening — background task exceptions surfaced, buzz timeout, duplicate proxy guard, partial template update, improved renumber message |

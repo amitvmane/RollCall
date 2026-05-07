@@ -996,7 +996,10 @@ async def set_rollcall_time(message):
             rc.save()
             backslash = '\n'
             await bot.send_message(cid, f"Event notification time is set to {date.strftime('%d-%m-%Y %H:%M')} {rc.timezone} for '{rc.title}' (ID: {rc_number + 1}).{backslash*2+'Reminder has been reset!' if changed else ''}")
-        
+
+            rollcalls = manager.get_rollcalls(cid)
+            asyncio.create_task(start(rollcalls, rc.timezone, cid)).add_done_callback(_log_task_exc)
+
     except Exception as e:
         print(traceback.format_exc())
         await bot.send_message(message.chat.id, e)

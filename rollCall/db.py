@@ -1124,6 +1124,7 @@ def add_or_update_user(rollcall_id: int, user_id: int, first_name: str, username
             """, (rollcall_id, user_id, first_name, username, status, comment, in_pos, out_pos, wait_pos))
 
         conn.commit()
+        return True
     except Exception as e:
         conn.rollback()
         logging.error(f"Error add/update user: {e}")

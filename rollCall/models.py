@@ -304,7 +304,7 @@ class RollCall:
     def allList(self):
         try:
             _datetime = self.finalizeDate.strftime('%d-%m-%Y %H:%M')
-        except:
+        except Exception:
             _datetime = 'Yet to decide'
         txt = "Title: " + self.title + '\nID: ' + "__RCID__" + f"\nEvent time: {_datetime} {self.timezone if _datetime != 'Yet to decide' else ''}\nLocation: {self.location if self.location != None else 'Yet to decide'}\n\n" + (self.inListText() if self.inListText() != 'In:\nNobody\n\n' else '') + (self.outListText() if self.outListText() != 'Out:\nNobody\n\n' else '') + (self.maybeListText() if self.maybeListText() != 'Maybe:\nNobody\n\n' else '') + (self.waitListText() if self.waitListText() != 'Waiting:\nNobody' else '') + 'Max limit: ' + ('∞' if self.inListLimit == None else str(self.inListLimit))
         return txt
@@ -313,7 +313,7 @@ class RollCall:
     def finishList(self):
         try:
             _datetime = self.finalizeDate.strftime('%d-%m-%Y %H:%M')
-        except:
+        except Exception:
             _datetime = ''
         backslash = '\n'
         txt = "Title: " + self.title + '\nID: ' + '__RCID__' + f"{(backslash + 'Event time: ' + _datetime + ' ' + self.timezone) if _datetime != '' else ''}{(backslash + 'Location:' + self.location) if self.location != None else ''}{(backslash + 'Event Fee: ' + str(self.event_fee)) if self.event_fee != None else backslash * 2 + 'In case of paid event - reach out to organiser for payment contribution'}{(backslash + 'Individual Fee: ' + str((round(int(re.sub(r'[^0-9]', '', self.event_fee)) / len(self.inList), 2)) if len(self.inList) > 0 else '0')) if self.event_fee != None else ''}\n\n" + ("Additional unknown/penalty fees are not included and needs to be handled separately.\n\n" if self.event_fee != None else '') + (self.inListText() if self.inListText() != 'In:\nNobody\n\n' else 'In:\nNobody\n\n') + (self.outListText() if self.outListText() != 'Out:\nNobody\n\n' else 'Out:\nNobody\n\n') + (self.maybeListText() if self.maybeListText() != 'Maybe:\nNobody\n\n' else 'Maybe:\nNobody\n\n') + (self.waitListText() if self.waitListText() != 'Waiting:\nNobody' else '') + 'Max limit: ' + ('∞' if self.inListLimit == None else str(self.inListLimit))
@@ -375,7 +375,7 @@ class RollCall:
                 elif us.user_id == user.user_id and us.comment != user.comment:
                     us.comment = user.comment
                     self._save_user_to_db(user, 'in')
-                    return
+                    return 'AU'
         else:
             for us in self.inList:
                 if us.user_id == user.user_id and us.comment == user.comment:
@@ -383,14 +383,14 @@ class RollCall:
                 elif us.user_id == user.user_id and us.comment != user.comment:
                     us.comment = user.comment
                     self._save_user_to_db(user, 'in')
-                    return
+                    return 'AU'
             for us in self.waitList:
                 if us.user_id == user.user_id and us.comment == user.comment:
                     return "AB"
                 elif us.user_id == user.user_id and us.comment != user.comment:
                     us.comment = user.comment
                     self._save_user_to_db(user, 'waitlist')
-                    return
+                    return 'AU'
 
         for us in self.outList[:]:
             if us.user_id == user.user_id:
@@ -454,7 +454,7 @@ class RollCall:
             elif us.user_id == user.user_id and us.comment != user.comment:
                 us.comment = user.comment
                 self._save_user_to_db(user, 'out')
-                return
+                return 'AU'
 
         for us in self.inList[:]:
             if us.user_id == user.user_id:
@@ -520,7 +520,7 @@ class RollCall:
             elif us.user_id == user.user_id and us.comment != user.comment:
                 us.comment = user.comment
                 self._save_user_to_db(user, 'maybe')
-                return
+                return 'AU'
 
         for us in self.outList[:]:
             if us.user_id == user.user_id:

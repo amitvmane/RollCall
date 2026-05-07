@@ -1483,7 +1483,7 @@ async def in_user(message):
 
         # --- Stats: record IN only if user actually joined inList (not duplicate or waitlisted) ---
         rc_db_id = get_rc_db_id(rc)
-        if result not in ('AB', 'AC') and rc_db_id is not None and isinstance(user.user_id, int):
+        if result not in ('AB', 'AC', 'AU') and rc_db_id is not None and isinstance(user.user_id, int):
             increment_user_stat(cid, user.user_id, "total_in")
             increment_rollcall_stat(rc_db_id, "total_in")
 
@@ -1549,7 +1549,7 @@ async def out_user(message):
 
         # --- Stats: record OUT only if state actually changed (not duplicate) ---
         rc_db_id = get_rc_db_id(rc)
-        if result != 'AB' and rc_db_id is not None and isinstance(user.user_id, int):
+        if result not in ('AB', 'AU') and rc_db_id is not None and isinstance(user.user_id, int):
             increment_user_stat(cid, user.user_id, "total_out")
             increment_rollcall_stat(rc_db_id, "total_out")
 
@@ -1632,7 +1632,7 @@ async def maybe_user(message):
 
         # --- Stats: record MAYBE only if state actually changed (not duplicate) ---
         rc_db_id = get_rc_db_id(rc)
-        if result != 'AB' and rc_db_id is not None and isinstance(user.user_id, int):
+        if result not in ('AB', 'AU') and rc_db_id is not None and isinstance(user.user_id, int):
             increment_user_stat(cid, user.user_id, "total_maybe")
             increment_rollcall_stat(rc_db_id, "total_maybe")
 
@@ -3560,15 +3560,15 @@ async def callback_handler(call):
             # Record stats only for real state changes
             if rc_db_id is not None and isinstance(user.user_id, int):
                 if action == "in":
-                    if result not in ("AB", "AC", "AA"):
+                    if result not in ("AB", "AC", "AA", "AU"):
                         increment_user_stat(cid, user.user_id, "total_in")
                         increment_rollcall_stat(rc_db_id, "total_in")
                 elif action == "out":
-                    if result != "AB":
+                    if result not in ("AB", "AU"):
                         increment_user_stat(cid, user.user_id, "total_out")
                         increment_rollcall_stat(rc_db_id, "total_out")
                 else:  # maybe
-                    if result != "AB":
+                    if result not in ("AB", "AU"):
                         increment_user_stat(cid, user.user_id, "total_maybe")
                         increment_rollcall_stat(rc_db_id, "total_maybe")
 

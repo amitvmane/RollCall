@@ -22,6 +22,7 @@ _active_loops = set()
 
 
 async def check(rollcalls, timezone, chat_id):
+    from rollcall_manager import manager
     current_sec = int(datetime.now().strftime("%S"))
     delay = 0
     if current_sec != 0:
@@ -88,7 +89,6 @@ async def check(rollcalls, timezone, chat_id):
 
                             # Fire ghost prompt if tracking is enabled and rollcall had IN users
                             try:
-                                from rollcall_manager import manager
                                 from db import get_rollcall_in_users
                                 ghost_tracking_on = manager.get_ghost_tracking_enabled(chat_id)
                                 has_users = bool(get_rollcall_in_users(rc_db_id))

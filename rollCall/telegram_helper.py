@@ -788,6 +788,10 @@ async def start_template(message):
     rc_number = len(rollcalls)  # 1-based
     await show_panel_for_rollcall(cid, rc_number)
 
+    # Ensure reminder/auto-close loop is running
+    if rc.finalizeDate:
+        asyncio.create_task(start(rollcalls, rc.timezone, cid)).add_done_callback(_log_task_exc)
+
 
 # SET / UPDATE A TEMPLATE
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/set_template")
@@ -973,32 +977,21 @@ async def set_rollcall_time(message):
         # ERROR FOR INVALID DATETIME
         if now_date > date:
             raise timeError("Please provide valid future datetime.")
-        if rc.finalizeDate == None:
-            rc.finalizeDate = date
-            changed = False
-            if rc.reminder != None:
-                rc.reminder = None
-                changed = True
-            
-            rc.save()
+        
+        rc.finalizeDate = date
+        changed = False
+        if rc.reminder != None:
+            rc.reminder = None
+            changed = True
+        
+        rc.save()
+        if not manager.get_shh_mode(cid):
             backslash = '\n'
             await bot.send_message(cid, f"Event notification time is set to {rc.finalizeDate.strftime('%d-%m-%Y %H:%M')} {rc.timezone} for '{rc.title}' (ID: {rc_number + 1}).{backslash*2+'Reminder has been reset!' if changed else ''}")
-            
-            rollcalls = manager.get_rollcalls(cid)
-            asyncio.create_task(start(rollcalls, rc.timezone, cid)).add_done_callback(_log_task_exc)
-        else:
-            rc.finalizeDate = date
-            changed = False
-            if rc.reminder != None:
-                rc.reminder = None
-                changed = True
-            
-            rc.save()
-            backslash = '\n'
-            await bot.send_message(cid, f"Event notification time is set to {date.strftime('%d-%m-%Y %H:%M')} {rc.timezone} for '{rc.title}' (ID: {rc_number + 1}).{backslash*2+'Reminder has been reset!' if changed else ''}")
-
-            rollcalls = manager.get_rollcalls(cid)
-            asyncio.create_task(start(rollcalls, rc.timezone, cid)).add_done_callback(_log_task_exc)
+        
+        await _update_panel(cid, rc_number + 1, rc)
+        rollcalls = manager.get_rollcalls(cid)
+        asyncio.create_task(start(rollcalls, rc.timezone, cid)).add_done_callback(_log_task_exc)
 
     except Exception as e:
         print(traceback.format_exc())
@@ -1046,7 +1039,9 @@ async def reminder(message):
         if len(pmts) > 0 and pmts[0].lower() == 'cancel':
             rc.reminder = None
             rc.save()
-            await bot.send_message(message.chat.id, "Reminder Notification is canceled.")
+            if not manager.get_shh_mode(cid):
+                await bot.send_message(message.chat.id, "Reminder Notification is canceled.")
+            await _update_panel(cid, rc_number + 1, rc)
             return
 
         # IF THERE ARE NOT PARAMETERS RAISE ERROR
@@ -1064,7 +1059,10 @@ async def reminder(message):
 
         rc.reminder = int(hour) if hour != 0 else None
         rc.save()
-        await bot.send_message(cid, f'I will remind {hour}hour/s before the event! Thank you!')
+        if not manager.get_shh_mode(cid):
+            await bot.send_message(cid, f'I will remind {hour}hour/s before the event! Thank you!')
+        
+        await _update_panel(cid, rc_number + 1, rc)
         
     except ValueError as e:
         print(traceback.format_exc())
@@ -1108,7 +1106,10 @@ async def event_fee(message):
         rc.event_fee = event_price
         rc.save()
 
-        await bot.send_message(cid, f"Event Fee set to {event_price}\n\nAdditional unknown/penalty fees are not included and needs to be handled separately.")
+        if not manager.get_shh_mode(cid):
+            await bot.send_message(cid, f"Event Fee set to {event_price}\n\nAdditional unknown/penalty fees are not included and needs to be handled separately.")
+        
+        await _update_panel(cid, rc_number + 1, rc)
 
     except Exception as e:
         await bot.send_message(cid, e)
@@ -1215,10 +1216,14 @@ async def set_location(message):
         rc.save()
         
         # NEW: Location update notification
-        await bot.send_message(
-            cid,
-            f"Location updated for '{rc.title}' (ID: {rc_number + 1}) → {place}."
-        )
+        if not manager.get_shh_mode(cid):
+            await bot.send_message(
+                cid,
+                f"Location updated for '{rc.title}' (ID: {rc_number + 1}) → {place}."
+            )
+        
+        # Always update panel (silently edits if shh mode is on)
+        await _update_panel(cid, rc_number + 1, rc)
     except Exception as e:
         await bot.send_message(cid, e)
 
@@ -1262,7 +1267,8 @@ async def wait_limit(message):
         rc.inListLimit = limit
         rc.save()
         logging.info(f"[{_ts()}] Max limit of attendees is set to {limit}")
-        await bot.send_message(cid, f"Max limit of attendees is set to {limit}")
+        if not manager.get_shh_mode(cid):
+            await bot.send_message(cid, f"Max limit of attendees is set to {limit}")
 
         moved_from_in_to_wait = []
         moved_from_wait_to_in = []
@@ -1285,27 +1291,30 @@ async def wait_limit(message):
             rc.save()
 
         if moved_from_in_to_wait:
-            names = ", ".join(u.name for u in moved_from_in_to_wait)
-            await bot.send_message(
-                cid,
-                f"{names} moved from IN to WAITING because limit was set to {limit} for '{rc.title}' (ID: {rc_number + 1})."
-            )
+            if not manager.get_shh_mode(cid):
+                names = ", ".join(u.name for u in moved_from_in_to_wait)
+                await bot.send_message(
+                    cid,
+                    f"{names} moved from IN to WAITING because limit was set to {limit} for '{rc.title}' (ID: {rc_number + 1})."
+                )
 
         if moved_from_wait_to_in:
+            if not manager.get_shh_mode(cid):
+                for u in moved_from_wait_to_in:
+                    if isinstance(u.user_id, int):
+                        await bot.send_message(
+                            cid,
+                            f"{format_mention_with_name(u)} → IN (from WAITING) for '{rc.title}' (#{rc_number + 1})",
+                            parse_mode="Markdown",
+                        )
+                    else:
+                        await bot.send_message(
+                            cid,
+                            f"{u.name} → IN (from WAITING) for '{rc.title}' (#{rc_number + 1})",
+                        )
+            
             for u in moved_from_wait_to_in:
-                if isinstance(u.user_id, int):
-                    await bot.send_message(
-                        cid,
-                        f"{format_mention_with_name(u)} → IN (from WAITING) for '{rc.title}' (#{rc_number + 1})",
-                        parse_mode="Markdown",
-                    )
-                    asyncio.create_task(_dm_promoted_real_user(u.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
-                else:
-                    await bot.send_message(
-                        cid,
-                        f"{u.name} → IN (from WAITING) for '{rc.title}' (#{rc_number + 1})",
-                    )
-
+                asyncio.create_task(_dm_promoted_real_user(u.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
                 await notify_proxy_owner_wait_to_in(rc, u, cid, rc.title, rc_number + 1)
 
                 rc_db_id = get_rc_db_id(rc)
@@ -1315,10 +1324,14 @@ async def wait_limit(message):
                     increment_rollcall_stat(rc_db_id, "total_in")
 
         if len(rc.inList) == limit and not was_full:
-            await bot.send_message(
-                cid,
-                f"Rollcall '{rc.title}' (ID: {rc_number + 1}) has reached its max limit ({limit}). New IN will go to WAITING."
-            )
+            if not manager.get_shh_mode(cid):
+                await bot.send_message(
+                    cid,
+                    f"Rollcall '{rc.title}' (ID: {rc_number + 1}) has reached its max limit ({limit}). New IN will go to WAITING."
+                )
+        
+        # Always update panel (silently edits if shh mode is on)
+        await _update_panel(cid, rc_number + 1, rc)
 
     except parameterMissing as e:
         print(traceback.format_exc())
@@ -1490,10 +1503,11 @@ async def in_user(message):
         if result == 'AB':
             raise duplicateProxy("No duplicate proxy please :-), Thanks!")
         elif result == 'AC':
-            await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
+            if not manager.get_shh_mode(cid):
+                await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
 
-        if send_list(message, manager):
-            await _update_panel(cid, rc_number + 1, rc)
+        # Always update panel (silently edits if shh mode is on)
+        await _update_panel(cid, rc_number + 1, rc)
 
     except Exception as e:
         await bot.send_message(message.chat.id, e)
@@ -1557,29 +1571,32 @@ async def out_user(message):
             raise duplicateProxy("No duplicate proxy please :-), Thanks!")
         elif isinstance(result, User):
             # Someone moved from WAITING to IN
-            if isinstance(result.user_id, int):
-                await bot.send_message(
-                    cid,
-                    f"{format_mention_with_name(result)} → IN",
-                    parse_mode="Markdown",
-                )
-                asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
-            else:
-                await bot.send_message(cid, f"{result.name} → IN")
+            if not manager.get_shh_mode(cid):
+                if isinstance(result.user_id, int):
+                    await bot.send_message(
+                        cid,
+                        f"{format_mention_with_name(result)} → IN",
+                        parse_mode="Markdown",
+                    )
+                else:
+                    await bot.send_message(cid, f"{result.name} → IN")
+            
+            asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
 
             # Notify proxy creator if this is a proxy
             await notify_proxy_owner_wait_to_in(rc, result, cid, rc.title, rc_number + 1)
 
         # IN → OUT notification
         if was_in and any(u.user_id == user.user_id for u in rc.outList):
-            await bot.send_message(
-                cid,
-                f"{format_mention_with_name(user)} → OUT for '{rc.title}' (#{rc_number + 1})",
-                parse_mode="Markdown",
-            )
+            if not manager.get_shh_mode(cid):
+                await bot.send_message(
+                    cid,
+                    f"{format_mention_with_name(user)} → OUT for '{rc.title}' (#{rc_number + 1})",
+                    parse_mode="Markdown",
+                )
 
-        if send_list(message, manager):
-            await _update_panel(cid, rc_number + 1, rc)
+        # Always update panel (silently edits if shh mode is on)
+        await _update_panel(cid, rc_number + 1, rc)
 
     except Exception as e:
         await bot.send_message(message.chat.id, e)
@@ -1640,18 +1657,20 @@ async def maybe_user(message):
             raise duplicateProxy("No duplicate proxy please :-), Thanks!")
         elif isinstance(result, User):
             # Someone moved from WAITING to IN (when user moved from IN to MAYBE, freeing a slot)
-            if type(result.user_id) == int:
-                await bot.send_message(
-                    cid,
-                    f"{'@'+result.username if result.username != None else f'[{result.name}](tg://user?id={result.user_id})'} now you are in!",
-                    parse_mode="Markdown"
-                )
-                asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
-            else:
-                await bot.send_message(cid, f"{result.name} now you are in!")
+            if not manager.get_shh_mode(cid):
+                if type(result.user_id) == int:
+                    await bot.send_message(
+                        cid,
+                        f"{'@'+result.username if result.username != None else f'[{result.name}](tg://user?id={result.user_id})'} now you are in!",
+                        parse_mode="Markdown"
+                    )
+                else:
+                    await bot.send_message(cid, f"{result.name} now you are in!")
+            
+            asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
 
-        if send_list(message, manager):
-            await _update_panel(cid, rc_number + 1, rc)
+        # Always update panel (silently edits if shh mode is on)
+        await _update_panel(cid, rc_number + 1, rc)
 
     except Exception as e:
         await bot.send_message(message.chat.id, e)
@@ -1755,17 +1774,15 @@ async def set_in_for(message):
                 raise repeatlyName("That name already exists!")
             elif isinstance(result, User):
                 # Just a simple confirmation; list is printed by send_list
-                if isinstance(result.user_id, int):
-                    await bot.send_message(
-                        cid,
-                        f"{format_mention_with_name(result)} now you are in!",
-                        parse_mode="Markdown",
-                    )
-                else:
-                    await bot.send_message(cid, f"{result.name} now you are in!")
-
-            #if send_list(message, manager):
-            #    await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number + 1)))
+                if not manager.get_shh_mode(cid):
+                    if isinstance(result.user_id, int):
+                        await bot.send_message(
+                            cid,
+                            f"{format_mention_with_name(result)} now you are in!",
+                            parse_mode="Markdown",
+                        )
+                    else:
+                        await bot.send_message(cid, f"{result.name} now you are in!")
             
             # Always show updated panel for this rollcall
             await show_panel_for_rollcall(cid, rc_number + 1)
@@ -2062,7 +2079,11 @@ async def set_title(message):
         rc.title = title
         rc.save()
         
-        await bot.send_message(cid, 'The roll call title is set to: ' + title)
+        if not manager.get_shh_mode(cid):
+            await bot.send_message(cid, 'The roll call title is set to: ' + title)
+        
+        # Always update panel (silently edits if shh mode is on)
+        await _update_panel(cid, rc_number + 1, rc)
         logging.info(f"[{_ts()}] Title changed: {user} -> {title}")
 
     except Exception as e:
@@ -2928,32 +2949,32 @@ def _build_mention_list(users: list) -> str:
     return " ".join(parts)
 
 
-async def _update_panel(cid: int, rc_number: int, rc) -> None:
-    """Edit the existing panel message in-place; fall back to a new send if needed.
-
-    ``rc_number`` is 1-based (the public rollcall number shown to users).
-    Stores/updates ``_panel_msg_ids[(cid, rc_number)]`` so future calls always
-    target the right message.
+async def _update_panel(cid: int, rc_number: int, rc, force_new: bool = False) -> None:
+    """Update the status panel for a rollcall.
+    
+    If force_new is True, always sends a new message.
+    Otherwise, tries to edit the existing panel in-place to avoid pings.
     """
     text = rc.allList().replace("__RCID__", str(rc_number))
     markup = await get_status_keyboard(rc_number)
     key = (cid, rc_number)
+    
+    if not force_new:
+        existing_msg_id = _panel_msg_ids.get(key)
+        if existing_msg_id:
+            try:
+                await bot.edit_message_text(
+                    text, cid, existing_msg_id, reply_markup=markup
+                )
+                return  # success — panel updated in-place (no ping)
+            except Exception as e:
+                err = str(e).lower()
+                if "message is not modified" in err:
+                    return
+                # Fall through to send a new message if edit fails
+                logging.debug(f"Panel edit failed for ({cid}, {rc_number}): {e}")
 
-    existing_msg_id = _panel_msg_ids.get(key)
-    if existing_msg_id:
-        try:
-            await bot.edit_message_text(
-                text, cid, existing_msg_id, reply_markup=markup
-            )
-            return  # success — panel updated in-place
-        except Exception as e:
-            err = str(e).lower()
-            if "message is not modified" in err:
-                return  # content unchanged — fine, nothing to do
-            # Message was deleted, too old, or otherwise unreachable — fall through
-            logging.debug(f"Panel edit failed for ({cid}, {rc_number}): {e}")
-
-    # No stored panel or edit failed — send a fresh panel and remember its id
+    # Send a fresh panel and remember its ID
     sent = await bot.send_message(cid, text, reply_markup=markup)
     _panel_msg_ids[key] = sent.message_id
 
@@ -3406,7 +3427,7 @@ async def ghost_callback_handler(call):
                 return
 
             user = pending['user']
-            new_status = pending['new_status']
+            status = pending['new_status']
             rc_number = pending['rc_number']
             rc = manager.get_rollcall(cid, rc_number)
             if not rc:
@@ -3415,21 +3436,22 @@ async def ghost_callback_handler(call):
                 return
 
             rc.delete_user(user.name)
-            if new_status == 'in':
+            if status == 'in':
                 result = rc.addIn(user)
-            elif new_status == 'out':
+            elif status == 'out':
                 result = rc.addOut(user)
             else:
                 result = rc.addMaybe(user)
             rc.save()
-
-            status_label = new_status.upper()
-            if result == 'AC':
-                status_label = "WAITING (limit reached)"
-            log_admin_action(cid, admin_id, call.from_user.first_name, "set_status", target_name=user.name, rollcall_id=getattr(rc, 'db_id', None) or getattr(rc, 'id', None), details=f"status={new_status}")
-            await bot.answer_callback_query(call.id, f"✅ Moved to {status_label}")
+            if not manager.get_shh_mode(cid):
+                await bot.send_message(cid, f"✅ Done! {user.name}'s status for '{rc.title}' updated to {status.upper()}.")
+            
+            # Always update panel (silently edits if shh mode is on)
+            await _update_panel(cid, rc_number + 1, rc)
+            log_admin_action(cid, admin_id, call.from_user.first_name, "set_status", target_name=user.name, rollcall_id=getattr(rc, 'db_id', None) or getattr(rc, 'id', None), details=f"status={status}")
+            await bot.answer_callback_query(call.id, f"✅ Moved to {status.upper()}")
             await bot.edit_message_text(
-                f"✅ *{user.name}* → *{status_label}* in rollcall #{rc_number + 1}.",
+                f"✅ *{user.name}* → *{status.upper()}* in rollcall #{rc_number + 1}.",
                 cid, call.message.message_id, parse_mode="Markdown"
             )
             return
@@ -3582,74 +3604,79 @@ async def callback_handler(call):
 
             elif result == "AC":
                 await bot.answer_callback_query(call.id, "Event max limit reached, added to waitlist")
-                if isinstance(user.user_id, int):
-                    await bot.send_message(
-                        cid,
-                        f"{format_mention_with_name(user)} → WAITING for '{rc.title}' (#{rc_number})",
-                        parse_mode="Markdown",
-                    )
-                else:
-                    await bot.send_message(
-                        cid,
-                        f"{user.name} → WAITING for '{rc.title}' (#{rc_number})",
-                    )
+                if not manager.get_shh_mode(cid):
+                    if isinstance(user.user_id, int):
+                        await bot.send_message(
+                            cid,
+                            f"{format_mention_with_name(user)} → WAITING for '{rc.title}' (#{rc_number})",
+                            parse_mode="Markdown",
+                        )
+                    else:
+                        await bot.send_message(
+                            cid,
+                            f"{user.name} → WAITING for '{rc.title}' (#{rc_number})",
+                        )
 
             else:
                 await bot.answer_callback_query(call.id, "Status updated")
 
-                if action == "in":
-                    if isinstance(user.user_id, int):
-                        await bot.send_message(
-                            cid,
-                            f"{format_mention_with_name(user)} → IN for '{rc.title}' (#{rc_number})",
-                            parse_mode="Markdown",
-                        )
-                    else:
-                        await bot.send_message(
-                            cid,
-                            f"{user.name} → IN for '{rc.title}' (#{rc_number})",
-                        )
+                if not manager.get_shh_mode(cid):
+                    if action == "in":
+                        if isinstance(user.user_id, int):
+                            await bot.send_message(
+                                cid,
+                                f"{format_mention_with_name(user)} → IN for '{rc.title}' (#{rc_number})",
+                                parse_mode="Markdown",
+                            )
+                        else:
+                            await bot.send_message(
+                                cid,
+                                f"{user.name} → IN for '{rc.title}' (#{rc_number})",
+                            )
 
-                elif action == "out":
-                    if isinstance(user.user_id, int):
-                        await bot.send_message(
-                            cid,
-                            f"{format_mention_with_name(user)} → OUT for '{rc.title}' (#{rc_number})",
-                            parse_mode="Markdown",
-                        )
-                    else:
-                        await bot.send_message(
-                            cid,
-                            f"{user.name} → OUT for '{rc.title}' (#{rc_number})",
-                        )
+                    elif action == "out":
+                        if isinstance(user.user_id, int):
+                            await bot.send_message(
+                                cid,
+                                f"{format_mention_with_name(user)} → OUT for '{rc.title}' (#{rc_number})",
+                                parse_mode="Markdown",
+                            )
+                        else:
+                            await bot.send_message(
+                                cid,
+                                f"{user.name} → OUT for '{rc.title}' (#{rc_number})",
+                            )
 
-                else:
-                    if isinstance(user.user_id, int):
-                        await bot.send_message(
-                            cid,
-                            f"{format_mention_with_name(user)} → MAYBE for '{rc.title}' (#{rc_number})",
-                            parse_mode="Markdown",
-                        )
                     else:
-                        await bot.send_message(
-                            cid,
-                            f"{user.name} → MAYBE for '{rc.title}' (#{rc_number})",
-                        )
+                        if isinstance(user.user_id, int):
+                            await bot.send_message(
+                                cid,
+                                f"{format_mention_with_name(user)} → MAYBE for '{rc.title}' (#{rc_number})",
+                                parse_mode="Markdown",
+                            )
+                        else:
+                            await bot.send_message(
+                                cid,
+                                f"{user.name} → MAYBE for '{rc.title}' (#{rc_number})",
+                            )
 
             # Promotion from WAITING -> IN can happen after OUT or MAYBE in latest models.py
             if action in ("out", "maybe") and isinstance(result, User):
+                if not manager.get_shh_mode(cid):
+                    if isinstance(result.user_id, int):
+                        await bot.send_message(
+                            cid,
+                            f"{format_mention_with_name(result)} → IN (from WAITING) for '{rc.title}' (#{rc_number})",
+                            parse_mode="Markdown",
+                        )
+                    else:
+                        await bot.send_message(
+                            cid,
+                            f"{result.name} → IN (from WAITING) for '{rc.title}' (#{rc_number})",
+                        )
+                
                 if isinstance(result.user_id, int):
-                    await bot.send_message(
-                        cid,
-                        f"{format_mention_with_name(result)} → IN (from WAITING) for '{rc.title}' (#{rc_number})",
-                        parse_mode="Markdown",
-                    )
                     asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number)).add_done_callback(_log_task_exc)
-                else:
-                    await bot.send_message(
-                        cid,
-                        f"{result.name} → IN (from WAITING) for '{rc.title}' (#{rc_number})",
-                    )
 
                 await notify_proxy_owner_wait_to_in(rc, result, cid, rc.title, rc_number)
 
@@ -3887,10 +3914,10 @@ async def callback_handler(call):
             pass
 
 
-async def show_panel_for_rollcall(chat_id: int, rc_number: int):
+async def show_panel_for_rollcall(chat_id: int, rc_number: int, force_new: bool = False):
     """
-    Send the main status panel for rollcall #rc_number (1-based).
-    Used after commands like /sif, /sof, /smf so user sees updated state.
+    Send or update the main status panel for rollcall #rc_number (1-based).
+    Now uses _update_panel to support silent edits when possible.
     """
     rollcalls = manager.get_rollcalls(chat_id)
     index = rc_number - 1
@@ -3898,9 +3925,7 @@ async def show_panel_for_rollcall(chat_id: int, rc_number: int):
         return
 
     rc = rollcalls[index]
-    text = rc.allList().replace("__RCID__", str(rc_number))
-    markup = await get_status_keyboard(rc_number)
-    await bot.send_message(chat_id, text, reply_markup=markup)
+    await _update_panel(chat_id, rc_number, rc, force_new=force_new)
 
 
 # ===== Proxy owner notification helper =====
@@ -3966,18 +3991,17 @@ async def toggle_ghost_tracking(message):
             new_state = not manager.get_ghost_tracking_enabled(cid)
         manager.set_ghost_tracking_enabled(cid, new_state)
         log_admin_action(cid, message.from_user.id, message.from_user.first_name, "toggle_ghost_tracking", details=f"enabled={new_state}")
-        if new_state:
+        if not manager.get_shh_mode(cid):
             await bot.send_message(
-                cid,
-                "👻 Ghost tracking enabled for this group.\n"
-                "Users will be asked after /erc if anyone ghosted."
+                cid, 
+                f"👻 Ghost tracking is now {'ENABLED' if new_state else 'DISABLED'}."
             )
-        else:
-            await bot.send_message(
-                cid,
-                "🔕 Ghost tracking disabled for this group.\n"
-                "/erc will end sessions without ghost prompts."
-            )
+        
+        # If there's an active rollcall, update the panel to reflect ghost warning capability change
+        rollcalls = manager.get_rollcalls(cid)
+        if rollcalls:
+            for i, rc in enumerate(rollcalls):
+                await _update_panel(cid, i + 1, rc)
     except Exception as e:
         await bot.send_message(message.chat.id, e)
 
@@ -4001,11 +4025,12 @@ async def set_absent_limit(message):
             await bot.send_message(cid, "⚠️ Please provide a positive integer. Example: /set_absent_limit 3")
             return
         manager.set_absent_limit(cid, limit)
-        await bot.send_message(
-            cid,
-            f"✅ Ghost limit set to {limit}.\n"
-            f"Users who ghost {limit}+ session(s) will be asked to reconfirm their IN vote. 👻"
-        )
+        if not manager.get_shh_mode(cid):
+            await bot.send_message(
+                cid,
+                f"✅ Ghost limit set to {limit}.\n"
+                f"Users who ghost {limit}+ session(s) will be asked to reconfirm their IN vote. 👻"
+            )
     except Exception as e:
         await bot.send_message(message.chat.id, e)
 

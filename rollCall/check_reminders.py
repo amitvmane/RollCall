@@ -17,6 +17,9 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 
+# Registry to track active reminder loops per chat_id to prevent duplicates
+_active_loops = set()
+
 
 async def check(rollcalls, timezone, chat_id):
     current_sec = int(datetime.now().strftime("%S"))
@@ -111,7 +114,16 @@ async def check(rollcalls, timezone, chat_id):
 
 
 async def start(rollcalls, timezone, chat_id):
+    """
+    Start the reminder/auto-close loop for a specific chat.
+    Safe to call multiple times; will not start duplicate loops.
+    """
+    if chat_id in _active_loops:
+        logging.debug(f"Reminder loop already active for chat {chat_id}")
+        return
+
     try:
+        _active_loops.add(chat_id)
         current_sec = int(datetime.now().strftime("%S"))
         delay = 60 - current_sec
         if delay == 60:
@@ -119,8 +131,11 @@ async def start(rollcalls, timezone, chat_id):
         await asyncio.sleep(delay)
         logging.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Starting reminder check for chat {chat_id}")
         await check(rollcalls, timezone, chat_id)
-    except Exception as e:
+    except Exception:
         logging.error(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Unexpected error in reminder loop: {traceback.format_exc()}")
+    finally:
+        _active_loops.discard(chat_id)
+        logging.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Reminder loop finished for chat {chat_id}")
 
 
 async def _auto_start_from_template(chat_id: int, tmpl: dict):
@@ -179,6 +194,10 @@ async def _auto_start_from_template(chat_id: int, tmpl: dict):
         f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
         f"Auto-started template '{tmpl['name']}' for chat {chat_id}"
     )
+
+    # Ensure the reminder/auto-close loop is running for this new rollcall
+    if rc.finalizeDate:
+        asyncio.create_task(start(rollcalls, tzname, chat_id))
 
 
 async def check_template_schedules():

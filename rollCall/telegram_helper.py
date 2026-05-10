@@ -2150,11 +2150,12 @@ async def end_roll_call(message):
                     old_id = new_id if new_id < ended_number else new_id + 1
                     if old_id != new_id:
                         lines.append(f"  #{old_id} '{rollcall.title}' → #{new_id}")
-                await bot.send_message(cid, "\n".join(lines))
-                for idx, rollcall in enumerate(updated_rollcalls):
-                    new_id = idx + 1
-                    text = f"Rollcall number {new_id}\n\n" + rollcall.allList().replace("__RCID__", str(new_id))
-                    await bot.send_message(cid, text)
+                if not manager.get_shh_mode(cid):
+                    await bot.send_message(cid, "\n".join(lines))
+                    for idx, rollcall in enumerate(updated_rollcalls):
+                        new_id = idx + 1
+                        text = f"Rollcall number {new_id}\n\n" + rollcall.allList().replace("__RCID__", str(new_id))
+                        await bot.send_message(cid, text)
     except Exception as e:
         await bot.send_message(message.chat.id, e)
 

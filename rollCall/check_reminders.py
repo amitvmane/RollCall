@@ -34,14 +34,18 @@ async def check(rollcalls, timezone, chat_id):
 
         no_reminder_rollcalls = 0
 
+        # Pre-calculate IDs based on current state before any removals occur in this pass
+        rc_id_map = {id(rc): i + 1 for i, rc in enumerate(rollcalls)}
+
         for rollcall in list(rollcalls):
             try:
                 if rollcall.finalizeDate is None:
                     no_reminder_rollcalls += 1
                     continue
 
-                # Store rc_number before any modifications (safer than using index later)
-                rc_number = rollcalls.index(rollcall) + 1
+                rc_number = rc_id_map.get(id(rollcall))
+                if rc_number is None:
+                    continue
 
                 tz = pytz.timezone(timezone)
                 now_date_string = datetime.now(tz).strftime("%d-%m-%Y %H:%M")
@@ -62,11 +66,12 @@ async def check(rollcalls, timezone, chat_id):
                 if rollcall.finalizeDate is not None and rollcall.reminder is None:
                     if now_date >= rollcall.finalizeDate:
                         logging.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Rollcall #{rc_number} started: {rollcall.title}")
-                        await bot.send_message(
-                            chat_id,
-                            f"Event with title - {rollcall.title} is started ! Have a good time. Cheers!\n\n"
-                            f"{rollcall.finishList().replace('__RCID__', str(rc_number))}"
-                        )
+                        if not manager.get_shh_mode(chat_id):
+                            await bot.send_message(
+                                chat_id,
+                                f"Event with title - {rollcall.title} is started ! Have a good time. Cheers!\n\n"
+                                f"{rollcall.finishList().replace('__RCID__', str(rc_number))}"
+                            )
 
                         rc_db_id = getattr(rollcall, "db_id", None) or getattr(rollcall, "id", None)
 

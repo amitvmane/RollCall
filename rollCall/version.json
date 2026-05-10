@@ -158,7 +158,7 @@
     {
         "Version": 6.2,
         "Description": "Bug fixes M1/L1-L4: bare except replaced with logged Exception throughout; roll_call_not_started errors now surface in logs; user IN-position reset on OUT/MAYBE vote so re-joining IN gets correct order; status validation added to add_or_update_user/proxy; template auto-start failures logged per-template without blocking other templates.",
-        "DeployedOnProd": "Y",
+        "DeployedOnProd": "N",
         "DeployedDatetime": "04-05-2026 00:00 UTC"
     },
     {
@@ -166,5 +166,11 @@
         "Description": "6 new features: (1) Waitlist auto-promotion DM — real users and proxy owners get a private DM when promoted from WAITING→IN; (2) Admin audit log — new admin_actions table records every admin action; /audit_log command to view history; (3) /buzz rate limiting — 30s per-chat cooldown with remaining-time feedback; (4) /history pagination — /history [count] [page] with see-more hint; (5) Custom template recurrence — biweekly and monthly auto-start options in /schedule_template; (6) Manual status override — /set_status <name> <in|out|maybe> [::N] with inline confirmation.",
         "DeployedOnProd": "N",
         "DeployedDatetime": "06-05-2026 00:00 UTC"
+    },
+    {
+        "Version": 7.1,
+        "Description": "Silent Mode & Stability Hardening: (1) Truly Silent Mode — /shh now suppresses all confirmation 'ack' messages and prioritizes silent in-place panel edits to eliminate pings; (2) Silenced Settings — title, limit, location, and fee updates are now silent in shh mode; (3) Reminder Loop Fix — resolved bug where auto-started templates failed to auto-close/remind; (4) ID Snapshot Fix — corrected shifting indices in auto-close messages to ensure accurate RC IDs; (5) Silence Noise Reduction — suppressed noisy ID re-mapping and auto-start pings in Silent Mode.",
+        "DeployedOnProd": "Y",
+        "DeployedDatetime": "10-05-2026 12:00 UTC"
     }
 ]

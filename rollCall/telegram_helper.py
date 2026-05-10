@@ -915,16 +915,17 @@ async def set_template(message):
         )
 
         if ok:
-            await bot.send_message(
-                cid,
-                f"Template '{name}' saved for this chat.\n"
-                f"Title: {title or 'none'}\n"
-                f"Limit: {inlistlimit if inlistlimit is not None else 'none'}\n"
-                f"Location: {location or 'none'}\n"
-                f"Fee: {eventfee or 'none'}\n"
-                f"Offsets: days={offsetdays}, hours={offsethours}, minutes={offsetminutes}\n"
-                f"Event_Day={event_day}, Event_Time={event_time}"
-            )
+            if not manager.get_shh_mode(cid):
+                await bot.send_message(
+                    cid,
+                    f"Template '{name}' saved for this chat.\n"
+                    f"Title: {title or 'none'}\n"
+                    f"Limit: {inlistlimit if inlistlimit is not None else 'none'}\n"
+                    f"Location: {location or 'none'}\n"
+                    f"Fee: {eventfee or 'none'}\n"
+                    f"Offsets: days={offsetdays}, hours={offsethours}, minutes={offsetminutes}\n"
+                    f"Event_Day={event_day}, Event_Time={event_time}"
+                )
         else:
             await bot.send_message(cid, "Failed to save template. Please try again.")
 
@@ -964,7 +965,8 @@ async def set_rollcall_time(message):
             rc.finalizeDate = None
             rc.reminder = None
             rc.save()
-            await bot.send_message(message.chat.id, "Reminder time is canceled.")
+            if not manager.get_shh_mode(cid):
+                await bot.send_message(message.chat.id, "Reminder time is canceled.")
             return
         # PARSING INPUT DATETIME
         input_datetime = " ".join(pmts).strip()
@@ -1411,7 +1413,8 @@ async def delete_template_command(message):
     ok = delete_template(cid, name)
     if ok:
         log_admin_action(cid, message.from_user.id, message.from_user.first_name, "delete_template", target_name=name)
-        await bot.send_message(cid, f"Template '{name}' deleted.")
+        if not manager.get_shh_mode(cid):
+            await bot.send_message(cid, f"Template '{name}' deleted.")
     else:
         await bot.send_message(cid, f"Template '{name}' not found or could not be deleted.")
 

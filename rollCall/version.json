@@ -170,7 +170,13 @@
     {
         "Version": 7.1,
         "Description": "Silent Mode & Stability Hardening: (1) Truly Silent Mode — /shh now suppresses all confirmation 'ack' messages and prioritizes silent in-place panel edits to eliminate pings; (2) Silenced Settings — title, limit, location, and fee updates are now silent in shh mode; (3) Reminder Loop Fix — resolved bug where auto-started templates failed to auto-close/remind; (4) ID Snapshot Fix — corrected shifting indices in auto-close messages to ensure accurate RC IDs; (5) Silence Noise Reduction — suppressed noisy ID re-mapping and auto-start pings in Silent Mode.",
-        "DeployedOnProd": "Y",
+        "DeployedOnProd": "N",
         "DeployedDatetime": "10-05-2026 12:00 UTC"
+    },
+    {
+        "Version": 7.2,
+        "Description": "🔧 Bot Freeze Fix — bot no longer freezes at night or mid-day; silently-dead TCP connections now cleared every 5 min, poll timeout reduced to 35 s for faster recovery, expired button-tap errors quietly suppressed. 📋 Audit Log 2.0 — /audit_log rebuilt with paginated ← page → navigation (15/page default), compact one-liner entries showing rollcall name instead of shifting ID, 6 new tracked actions (new rollcall, end rollcall, buzz, quiet mode on/off, timezone change, panel end), panel end-rollcall was completely unlogged before. 🕐 Auto-Close Fix — scheduled template rollcalls now correctly close at event time even after a bot restart; reminder loops resume on startup so nothing is silently skipped. 🐛 Edge-case fix: get_next_weekday_datetime returned next-week date when schedule and event time were identical; double minute-alignment delay in reminder loop removed.",
+        "DeployedOnProd": "Y",
+        "DeployedDatetime": "16-05-2026 00:00 UTC"
     }
 ]

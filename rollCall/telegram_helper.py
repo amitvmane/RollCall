@@ -86,7 +86,7 @@ def _is_buzz_rate_limited(chat_id: int) -> bool:
     last = _buzz_cooldowns.get(chat_id, 0)
     if now - last < _BUZZ_COOLDOWN_SECONDS:
         return True
-    _buzz_cooldowns[chat_id] = now
+    _buzz_cooldowns[chat_id] = now  # only stamp when not rate-limited
     return False
 
 
@@ -409,7 +409,7 @@ async def config_timezone(message):
 
     except Exception as e:
         print(traceback.format_exc())
-        await bot.send_message(cid, e)
+        await bot.send_message(cid, str(e))
 
 # Version command
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/version")
@@ -779,7 +779,7 @@ async def schedule_template_cmd(message):
             await bot.send_message(cid, f"Failed to save schedule for '{name}'.")
 
     except Exception as e:
-        await bot.send_message(message.chat.id, e)
+        await bot.send_message(message.chat.id, str(e))
 
 
 # START A ROLL CALL
@@ -819,7 +819,7 @@ async def start_roll_call(message):
         #await bot.send_message(message.chat.id, f"Roll call with title: {title} started!\nRollcall id is set to {rc_index + 1}\nTo vote for this RollCall, please use ::RollCallID eg. /in ::{rc_index + 1}")
 
     except Exception as e:
-        await bot.send_message(cid, e)
+        await bot.send_message(cid, str(e))
 
 @bot.message_handler(func=lambda message: message.text.split(" ")[0].split("@")[0].lower() == "/start_template")
 async def start_template(message):
@@ -1053,7 +1053,7 @@ async def set_template(message):
 
     except Exception as e:
         print(traceback.format_exc())
-        await bot.send_message(message.chat.id, e)
+        await bot.send_message(message.chat.id, str(e))
 
 
 # SET A ROLLCALL START TIME
@@ -1119,7 +1119,7 @@ async def set_rollcall_time(message):
 
     except Exception as e:
         print(traceback.format_exc())
-        await bot.send_message(message.chat.id, e)
+        await bot.send_message(message.chat.id, str(e))
 
 # SET A ROLLCALL REMINDER
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/set_rollcall_reminder")
@@ -1192,7 +1192,7 @@ async def reminder(message):
         print(traceback.format_exc())
         await bot.send_message(cid, 'The correct format is /set_rollcall_reminder HH')
     except Exception as e:
-        await bot.send_message(cid, e)
+        await bot.send_message(cid, str(e))
 
 # SET AN EVENT_FEE
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/event_fee")
@@ -1236,7 +1236,7 @@ async def event_fee(message):
         await _update_panel(cid, rc_number + 1, rc)
 
     except Exception as e:
-        await bot.send_message(cid, e)
+        await bot.send_message(cid, str(e))
 
 # CHECK HOW MUCH IS INDIVIDUAL FEE
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/individual_fee")
@@ -1276,7 +1276,7 @@ async def individual_fee(message):
         await bot.send_message(cid, f'Individual fee is {individual_fee}')
           
     except Exception as e:
-        await bot.send_message(cid, e)
+        await bot.send_message(cid, str(e))
 
 # CHECK WHEN A ROLLCALL WILL START
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/when")
@@ -1310,7 +1310,7 @@ async def when(message):
         await bot.send_message(cid, f"The event with title {rc.title} will start at {rc.finalizeDate.strftime('%d-%m-%Y %H:%M')}!")
 
     except Exception as e:
-        await bot.send_message(cid, e)
+        await bot.send_message(cid, str(e))
 
 # SET A LOCATION FOR A ROLLCALL
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/location")
@@ -1349,7 +1349,7 @@ async def set_location(message):
         # Always update panel (silently edits if shh mode is on)
         await _update_panel(cid, rc_number + 1, rc)
     except Exception as e:
-        await bot.send_message(cid, e)
+        await bot.send_message(cid, str(e))
 
 # SET A LIMIT FOR IN LIST
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/set_limit")
@@ -1459,10 +1459,10 @@ async def wait_limit(message):
 
     except parameterMissing as e:
         print(traceback.format_exc())
-        await bot.send_message(message.chat.id, e)
+        await bot.send_message(message.chat.id, str(e))
     except rollCallNotStarted as e:
         print(traceback.format_exc())
-        await bot.send_message(message.chat.id, e)
+        await bot.send_message(message.chat.id, str(e))
 
 # DELETE AN USER OF A ROLLCALL
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/delete_user")
@@ -1509,7 +1509,7 @@ async def delete_user(message):
         )
 
     except Exception as e:
-        await bot.send_message(message.chat.id, e)
+        await bot.send_message(message.chat.id, str(e))
 
 @bot.message_handler(func=lambda message: message.text.split(" ")[0].split("@")[0].lower() == "/delete_template")
 async def delete_template_command(message):
@@ -1637,7 +1637,7 @@ async def in_user(message):
         await _update_panel(cid, rc_number + 1, rc)
 
     except Exception as e:
-        await bot.send_message(message.chat.id, e)
+        await bot.send_message(message.chat.id, str(e))
 
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/out")
@@ -1726,7 +1726,7 @@ async def out_user(message):
         await _update_panel(cid, rc_number + 1, rc)
 
     except Exception as e:
-        await bot.send_message(message.chat.id, e)
+        await bot.send_message(message.chat.id, str(e))
 
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/maybe")
@@ -1800,7 +1800,7 @@ async def maybe_user(message):
         await _update_panel(cid, rc_number + 1, rc)
 
     except Exception as e:
-        await bot.send_message(message.chat.id, e)
+        await bot.send_message(message.chat.id, str(e))
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/set_in_for")
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/sif")
@@ -1915,7 +1915,7 @@ async def set_in_for(message):
             await show_panel_for_rollcall(cid, rc_number + 1)
     
     except Exception as e:
-        await bot.send_message(message.chat.id, e)
+        await bot.send_message(message.chat.id, str(e))
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/set_out_for")
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/sof")
@@ -1995,7 +1995,7 @@ async def set_out_for(message):
             await show_panel_for_rollcall(cid, rc_number + 1)
 
     except Exception as e:
-        await bot.send_message(message.chat.id, e)
+        await bot.send_message(message.chat.id, str(e))
 
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/set_maybe_for")
@@ -2054,7 +2054,7 @@ async def set_maybe_for(message):
             await show_panel_for_rollcall(cid, rc_number + 1)
 
     except Exception as e:
-        await bot.send_message(message.chat.id, e)
+        await bot.send_message(message.chat.id, str(e))
 
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/whos_in")
 async def whos_in(message):
@@ -2082,7 +2082,7 @@ async def whos_in(message):
         await bot.send_message(cid, f"{rc.title if len(rollcalls) > 1 else ''} {rc.inListText()}")
 
     except Exception as e:
-        await bot.send_message(message.chat.id, e)
+        await bot.send_message(message.chat.id, str(e))
 
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/whos_out")
 async def whos_out(message):
@@ -2110,7 +2110,7 @@ async def whos_out(message):
         await bot.send_message(cid, f"{rc.title if len(rollcalls) > 1 else ''} {rc.outListText()}")
 
     except Exception as e:
-        await bot.send_message(message.chat.id, e)
+        await bot.send_message(message.chat.id, str(e))
 
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/whos_maybe")
 async def whos_maybe(message):
@@ -2138,7 +2138,7 @@ async def whos_maybe(message):
         await bot.send_message(cid, f"{rc.title if len(rollcalls) > 1 else ''} {rc.maybeListText()}")
 
     except Exception as e:
-        await bot.send_message(message.chat.id, e)
+        await bot.send_message(message.chat.id, str(e))
 
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/whos_waiting")
 async def whos_waiting(message):
@@ -2166,7 +2166,7 @@ async def whos_waiting(message):
         await bot.send_message(cid, f"{rc.title if len(rollcalls) > 1 else ''} {rc.waitListText()}")
 
     except Exception as e:
-        await bot.send_message(message.chat.id, e)
+        await bot.send_message(message.chat.id, str(e))
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/set_title")
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/st")
@@ -2214,7 +2214,7 @@ async def set_title(message):
         logging.info(f"[{_ts()}] Title changed: {user} -> {title}")
 
     except Exception as e:
-        await bot.send_message(message.chat.id, e)
+        await bot.send_message(message.chat.id, str(e))
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/end_roll_call")
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/erc")
@@ -2259,6 +2259,9 @@ async def end_roll_call(message):
             logging.info(f"[{_ts()}] Rollcall ended: '{rc.title}' (RC #{rc_number+1})")
             _panel_msg_ids.pop((cid, rc_number + 1), None)
             manager.remove_rollcall(cid, rc_number)
+            # Shift panel IDs for rollcalls that moved down after the removal
+            for num in sorted(n for (c, n) in list(_panel_msg_ids) if c == cid and n > rc_number + 1):
+                _panel_msg_ids[(cid, num - 1)] = _panel_msg_ids.pop((cid, num))
             logging.info(f"[{_ts()}] [CHAT {cid}] Rollcall ended: '{rc.title}' by {message.from_user.first_name} (@{message.from_user.username})")
             log_admin_action(cid, message.from_user.id, message.from_user.first_name, "end_rollcall", target_name=rc.title)
             # Ghost tracking prompt - ask if ANY users were in rollcall (real OR proxy)
@@ -2285,7 +2288,7 @@ async def end_roll_call(message):
                         text = f"Rollcall number {new_id}\n\n" + rollcall.allList().replace("__RCID__", str(new_id))
                         await bot.send_message(cid, text)
     except Exception as e:
-        await bot.send_message(message.chat.id, e)
+        await bot.send_message(message.chat.id, str(e))
 
 
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] in ["/stats", "/s"])
@@ -2799,7 +2802,7 @@ async def build_user_stats_text(chat_id: int, user_id: int, first_name: str) -> 
         cur_streak     = data.get("current_streak", 0) or 0
         best_streak    = data.get("best_streak", 0) or 0
 
-        attendance_pct = f"{round(total_in / total_rc * 100)}%" if total_rc > 0 else "—"
+        attendance_pct = f"{min(100, round(total_in / total_rc * 100))}%" if total_rc > 0 else "—"
 
         lines = [
             f"*Stats for {first_name}:*",
@@ -3144,7 +3147,7 @@ async def show_panel(message):
         _panel_msg_ids[(cid, rc_number + 1)] = sent.message_id
 
     except Exception as e:
-        await bot.send_message(message.chat.id, e)
+        await bot.send_message(message.chat.id, str(e))
 
 
 
@@ -3709,7 +3712,7 @@ async def ghost_callback_handler(call):
             pass
 
 
-@bot.callback_query_handler(func=lambda call: True)
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("btn_"))
 async def callback_handler(call):
     """
     Handle button clicks from inline rollcall keyboards.
@@ -4044,10 +4047,12 @@ async def callback_handler(call):
         # --------------------------------------------------------------
         if action == "endconfirm":
 
-            member = await bot.get_chat_member(cid, call.from_user.id)
-            if member.status not in ["administrator", "creator"]:
-                await bot.send_message(cid, "⛔ Insufficient permissions to end rollcall.")
-                return
+            admin_mode = manager.get_admin_rights(cid)
+            if admin_mode:
+                member = await bot.get_chat_member(cid, call.from_user.id)
+                if member.status not in ["administrator", "creator"]:
+                    await bot.answer_callback_query(call.id, "⛔ Only admins can end rollcalls", show_alert=True)
+                    return
 
             async with manager.get_erc_lock(cid):
                 # Re-fetch rc inside the lock — it may have been removed by a concurrent /erc
@@ -4082,6 +4087,9 @@ async def callback_handler(call):
                 logging.info(f"[{_ts()}] [CHAT {cid}] Rollcall ended: '{rc.title}' by {ended_by} (panel)")
                 _panel_msg_ids.pop((cid, rc_number), None)
                 manager.remove_rollcall(cid, rc_number - 1)
+                # Shift panel IDs for rollcalls that moved down after the removal
+                for num in sorted(n for (c, n) in list(_panel_msg_ids) if c == cid and n > rc_number):
+                    _panel_msg_ids[(cid, num - 1)] = _panel_msg_ids.pop((cid, num))
 
                 # Ghost tracking prompt — mirrors /erc command behaviour
                 if ghost_tracking_on and has_any_users and rc_db_id and not absent_already_marked:
@@ -4232,7 +4240,7 @@ async def toggle_ghost_tracking(message):
             for i, rc in enumerate(rollcalls):
                 await _update_panel(cid, i + 1, rc)
     except Exception as e:
-        await bot.send_message(message.chat.id, e)
+        await bot.send_message(message.chat.id, str(e))
 
 
 @bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/set_absent_limit")
@@ -4261,7 +4269,7 @@ async def set_absent_limit(message):
                 f"Users who ghost {limit}+ session(s) will be asked to reconfirm their IN vote. 👻"
             )
     except Exception as e:
-        await bot.send_message(message.chat.id, e)
+        await bot.send_message(message.chat.id, str(e))
 
 
 @bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/clear_absent")
@@ -4307,7 +4315,7 @@ async def clear_absent(message):
         name = record.get('user_name') or proxy_name or target_name
         await bot.send_message(cid, f"✅ {name}'s ghost record has been cleared. Fresh start! 👻➡️✅")
     except Exception as e:
-        await bot.send_message(message.chat.id, e)
+        await bot.send_message(message.chat.id, str(e))
 
 
 @bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/mark_absent")
@@ -4340,7 +4348,7 @@ async def mark_absent(message):
 
         await bot.send_message(cid, "Which session do you want to review?", reply_markup=markup)
     except Exception as e:
-        await bot.send_message(message.chat.id, e)
+        await bot.send_message(message.chat.id, str(e))
 
 
 _AUDIT_PER_PAGE = 15

@@ -50,7 +50,12 @@ class RollCallManager:
 
             # Load active rollcalls from database
             rollcalls_data = db.get_active_rollcalls(chat_id)
-            rollcalls = [RollCall(title="", db_id=rc['id']) for rc in rollcalls_data]
+            rollcalls = []
+            for rc in rollcalls_data:
+                try:
+                    rollcalls.append(RollCall(title="", db_id=rc['id']))
+                except Exception as e:
+                    logging.warning(f"Skipping rollcall id={rc['id']} for chat {chat_id} — failed to load: {e}")
 
             self._cache[chat_id] = {
                 'rollCalls': rollcalls,

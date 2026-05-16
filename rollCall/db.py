@@ -955,26 +955,40 @@ def create_or_update_template(
                 ),
             )
         else:
-            # SQLite: emulate upsert with INSERT OR REPLACE on id
+            # SQLite: preserve existing schedule columns (INSERT OR REPLACE would reset them to NULL)
+            cursor.execute(
+                "SELECT id, schedule_day, schedule_time, schedule_enabled, last_scheduled_date, recurrence_type "
+                "FROM templates WHERE chatid = ? AND name = ?",
+                (chatid, name)
+            )
+            existing_row = cursor.fetchone()
+            if existing_row:
+                existing_row = dict(existing_row)
+                row_id        = existing_row['id']
+                sched_day     = existing_row['schedule_day']
+                sched_time    = existing_row['schedule_time']
+                sched_enabled = existing_row['schedule_enabled']
+                sched_last    = existing_row['last_scheduled_date']
+                sched_recur   = existing_row['recurrence_type'] or 'weekly'
+            else:
+                row_id = sched_day = sched_time = sched_last = None
+                sched_enabled = 0
+                sched_recur = 'weekly'
             cursor.execute(
                 """
                 INSERT OR REPLACE INTO templates
                 (
                     id, chatid, name, title, inlistlimit, location, eventfee,
-                    offsetdays, offsethours, offsetminutes, event_day, event_time
+                    offsetdays, offsethours, offsetminutes, event_day, event_time,
+                    schedule_day, schedule_time, schedule_enabled, last_scheduled_date, recurrence_type
                 )
-                VALUES (
-                    COALESCE(
-                        (SELECT id FROM templates WHERE chatid = ? AND name = ?),
-                        NULL
-                    ),
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    chatid, name,
+                    row_id,
                     chatid, name, title, inlistlimit, location, eventfee,
-                    offsetdays, offsethours, offsetminutes, event_day, event_time
+                    offsetdays, offsethours, offsetminutes, event_day, event_time,
+                    sched_day, sched_time, sched_enabled, sched_last, sched_recur
                 ),
             )
         
@@ -1794,7 +1808,7 @@ def get_ghost_count_by_proxy_name(chat_id: int, proxy_name: str) -> int:
     finally:
         if db_type == 'postgresql':
             cursor.close()
-        release_connection(conn)
+            release_connection(conn)
 
 
 def increment_ghost_count(chat_id: int, user_id: int, user_name: str, proxy_name: str = None) -> bool:
@@ -1868,7 +1882,7 @@ def increment_ghost_count(chat_id: int, user_id: int, user_name: str, proxy_name
     finally:
         if db_type == 'postgresql':
             cursor.close()
-        release_connection(conn)
+            release_connection(conn)
 
 
 def reset_ghost_count(chat_id: int, user_id: int, proxy_name: str = None) -> bool:
@@ -1900,7 +1914,7 @@ def reset_ghost_count(chat_id: int, user_id: int, proxy_name: str = None) -> boo
     finally:
         if db_type == 'postgresql':
             cursor.close()
-        release_connection(conn)
+            release_connection(conn)
 
 
 def get_ghost_leaderboard(chat_id: int) -> List[Dict]:
@@ -1944,7 +1958,7 @@ def get_user_ghost_count_by_name(chat_id: int, user_name: str) -> Optional[Dict]
     finally:
         if db_type == 'postgresql':
             cursor.close()
-        release_connection(conn)
+            release_connection(conn)
 
 
 def mark_rollcall_absent_done(rollcall_id: int) -> bool:
@@ -1989,7 +2003,7 @@ def get_unprocessed_rollcalls(chat_id: int, days: int = 30) -> List[Dict]:
                    WHERE r.chat_id = %s
                      AND r.is_active = FALSE
                      AND r.absent_marked = FALSE
-                     AND r.ended_at >= NOW() - INTERVAL '%s days'
+                     AND r.ended_at >= NOW() - (%s * INTERVAL '1 day')
                      AND EXISTS (
                          SELECT 1 FROM users u
                          WHERE u.rollcall_id = r.id AND u.status = 'in'
@@ -2042,7 +2056,7 @@ def add_ghost_event(rollcall_id: int, chat_id: int, user_id: int = None, user_na
     finally:
         if db_type == 'postgresql':
             cursor.close()
-        release_connection(conn)
+            release_connection(conn)
 
 
 def get_rollcall_in_users(rollcall_id: int) -> List[Dict]:

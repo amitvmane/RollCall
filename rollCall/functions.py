@@ -55,6 +55,9 @@ async def admin_rights(message, manager):
         if not manager.get_admin_rights(chat_id):
             return True
 
+        if message.from_user is None:
+            return False
+
         member = await bot.get_chat_member(chat_id, message.from_user.id)
         if member.status not in ['administrator', 'creator']:
             logging.error(f"[{_ts()}] Error - user does not have sufficient permissions for this operation")
@@ -148,7 +151,11 @@ def get_next_weekday_datetime(tz, target_day: str, target_time: str):
         hour, minute = map(int, target_time.split(":"))
     except ValueError:
         return None
-    candidate = tz.localize(datetime(now.year, now.month, now.day, hour, minute))
+    try:
+        candidate = tz.localize(datetime(now.year, now.month, now.day, hour, minute), is_dst=None)
+    except Exception:
+        # DST gap — clocks spring forward past this time; use is_dst=False to land after the gap
+        candidate = tz.localize(datetime(now.year, now.month, now.day, hour, minute), is_dst=False)
     days_ahead = (target_idx - candidate.weekday()) % 7
     candidate = candidate + timedelta(days=days_ahead)
     if candidate < now:

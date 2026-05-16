@@ -941,6 +941,12 @@ async def set_template(message):
             return
 
         name = parts[1]
+
+        # Guard: reject template names that would exceed Telegram's 64-byte callback_data limit
+        if len(name) > 50:
+            await bot.send_message(cid, f"⚠️ Template name is too long (max 50 characters). Got {len(name)}.")
+            return
+
         title = None
         tail = ""
 
@@ -1178,7 +1184,10 @@ async def reminder(message):
 
         hour = pmts[0]
         
-        if rc.finalizeDate - timedelta(hours=int(hour)) < datetime.now(pytz.timezone(rc.timezone)):
+        finalize = rc.finalizeDate
+        if finalize.tzinfo is None:
+            finalize = pytz.timezone(rc.timezone).localize(finalize)
+        if finalize - timedelta(hours=int(hour)) < datetime.now(pytz.timezone(rc.timezone)):
             raise incorrectParameter("Reminder notification time is less than current time, please set it correctly.")
 
         rc.reminder = int(hour) if hour != 0 else None
@@ -1836,6 +1845,11 @@ async def set_in_for(message):
         if len(arr) > 1:
             # Proxy user: name as user_id (string)
             proxy_name = arr[1]
+
+            # Guard: reject names that would exceed Telegram's 64-byte callback_data limit
+            if len(proxy_name) > 40:
+                await bot.send_message(cid, f"⚠️ Proxy name is too long (max 40 characters). Got {len(proxy_name)}.")
+                return
 
             # Guard: reject if this proxy is already IN or WAITING (prevents duplicate DB write)
             already_present = any(
@@ -3377,6 +3391,9 @@ async def ghost_callback_handler(call):
         # ----------------------------------------------------------------
         if data.startswith("ghost_tog_"):
             parts = data.split("_")
+            if len(parts) < 4:
+                await bot.answer_callback_query(call.id)
+                return
             rc_db_id = int(parts[2])
             user_id = int(parts[3])
             key = (cid, rc_db_id)
@@ -3605,7 +3622,11 @@ async def ghost_callback_handler(call):
         # ----------------------------------------------------------------
         if data.startswith("delconf_yes_") or data.startswith("delconf_no_"):
             parts = data.split("_", 3)   # ["delconf", "yes"/"no", rc_number, admin_id]
+            if len(parts) < 4:
+                await bot.answer_callback_query(call.id)
+                return
             confirmed = parts[1] == "yes"
+            cb_rc_number = int(parts[2])
             admin_id = int(parts[3])
 
             if call.from_user.id != admin_id:
@@ -3613,6 +3634,11 @@ async def ghost_callback_handler(call):
                 return
 
             pending = _pending_deletes.pop((cid, admin_id), None)
+            # Extra guard: confirm the pending action is for the same rollcall the button was for
+            if pending and pending.get('rc_number') != cb_rc_number:
+                _pending_deletes[(cid, admin_id)] = pending  # put it back
+                await bot.answer_callback_query(call.id, "Rollcall mismatch — please retry.", show_alert=True)
+                return
             if not confirmed or pending is None:
                 await bot.answer_callback_query(call.id, "❌ Cancelled")
                 await bot.edit_message_text("❌ Delete cancelled.", cid, call.message.message_id)

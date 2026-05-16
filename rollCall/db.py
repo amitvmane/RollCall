@@ -505,6 +505,14 @@ def create_tables():
 def _migrate_schema(conn):
     """Add new columns to existing tables for databases created before ghost tracking."""
     cursor = conn.cursor()
+    try:
+        _run_migrations(conn, cursor)
+    finally:
+        if db_type == 'postgresql':
+            cursor.close()
+
+
+def _run_migrations(conn, cursor):
 
     # Add ghost_tracking_enabled to chats (may not exist in older deployments)
     if db_type == 'postgresql':
@@ -639,9 +647,6 @@ def _migrate_schema(conn):
             conn.commit()
         except Exception:
             conn.rollback()
-
-    if db_type == 'postgresql':
-        cursor.close()
 
 
 def get_or_create_chat(chat_id: int) -> Dict:

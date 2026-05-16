@@ -21,18 +21,31 @@ logging.basicConfig(
 _active_loops = set()
 
 
+def _ensure_aware(dt, tz):
+    """Return dt as tz-aware; localize naive datetimes using the given tz."""
+    if dt is None or dt.tzinfo is not None:
+        return dt
+    try:
+        return tz.localize(dt, is_dst=None)
+    except Exception:
+        return tz.localize(dt, is_dst=False)
+
+
 async def check(rollcalls, timezone, chat_id):
     from rollcall_manager import manager
     while True:
+        # BUG13: always refresh from manager so additions/removals by /erc are visible
+        rollcalls = manager.get_rollcalls(chat_id)
         if len(rollcalls) == 0:
             break
 
         no_reminder_rollcalls = 0
 
-        # Pre-calculate IDs based on current state before any removals occur in this pass
-        rc_id_map = {id(rc): i + 1 for i, rc in enumerate(rollcalls)}
+        # Snapshot the current list and build rc_id_map from it for this pass
+        current_rollcalls = list(rollcalls)
+        rc_id_map = {id(rc): i + 1 for i, rc in enumerate(current_rollcalls)}
 
-        for rollcall in list(rollcalls):
+        for rollcall in current_rollcalls:
             try:
                 if rollcall.finalizeDate is None:
                     no_reminder_rollcalls += 1
@@ -47,8 +60,11 @@ async def check(rollcalls, timezone, chat_id):
                 now_date = datetime.strptime(now_date_string, "%d-%m-%Y %H:%M")
                 now_date = tz.localize(now_date)
 
+                # BUG12: ensure finalizeDate is tz-aware before any comparison
+                finalize_dt = _ensure_aware(rollcall.finalizeDate, tz)
+
                 if rollcall.reminder is not None:
-                    reminder_time = rollcall.finalizeDate - timedelta(hours=int(rollcall.reminder))
+                    reminder_time = finalize_dt - timedelta(hours=int(rollcall.reminder))
                     if now_date >= reminder_time:
                         logging.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Sending reminder for rollcall #{rc_number}: {rollcall.title}")
                         await bot.send_message(
@@ -59,7 +75,7 @@ async def check(rollcalls, timezone, chat_id):
                         continue
 
                 if rollcall.finalizeDate is not None and rollcall.reminder is None:
-                    if now_date >= rollcall.finalizeDate:
+                    if now_date >= finalize_dt:
                         logging.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Rollcall #{rc_number} started: {rollcall.title}")
                         if not manager.get_shh_mode(chat_id):
                             await bot.send_message(

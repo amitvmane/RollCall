@@ -52,6 +52,9 @@ _ghost_selections: dict = {}
 # (chat_id, user_id) -> {'rc_number': int, 'comment': str} for pending reconfirmation
 _pending_reconf: dict = {}
 
+# /schedules multi-select state: chat_id -> set of template names currently checked
+_sched_selection: dict = {}
+
 # Rate limiting: (chat_id, user_id) -> last action timestamp
 _rate_limits: dict = {}
 _RATE_LIMIT_SECONDS = 2
@@ -524,15 +527,35 @@ def _fmt_schedule_entry(t: dict) -> str:
     )
 
 
-def _build_schedules_keyboard(templates: list) -> InlineKeyboardMarkup:
+def _build_schedules_keyboard(templates: list, cid: int) -> InlineKeyboardMarkup:
+    """Checkbox-style multi-select keyboard. Tap a row to check/uncheck; action buttons apply to selection."""
     markup = InlineKeyboardMarkup(row_width=1)
+    selected = _sched_selection.get(cid, set())
+
     for t in templates:
         name = t.get("name", "")
         title = t.get("title") or name
-        if bool(t.get("schedule_enabled")):
-            markup.add(InlineKeyboardButton(f"⏸ Pause  {title}", callback_data=f"sched_off_{name}"))
-        else:
-            markup.add(InlineKeyboardButton(f"▶️ Resume  {title}", callback_data=f"sched_on_{name}"))
+        status = "🟢" if t.get("schedule_enabled") else "🔴"
+        check = "☑️" if name in selected else "⬜"
+        markup.add(InlineKeyboardButton(
+            f"{check} {status}  {title}",
+            callback_data=f"sched_sel_{name}"
+        ))
+
+    # Action row — only shown when at least one item is selected
+    if selected:
+        markup.row(
+            InlineKeyboardButton("⏸ Pause Selected", callback_data="sched_apply_off"),
+            InlineKeyboardButton("▶️ Resume Selected", callback_data="sched_apply_on"),
+        )
+
+    # Select-all / clear row
+    all_names = {t.get("name", "") for t in templates}
+    if selected >= all_names:
+        markup.row(InlineKeyboardButton("☐ Clear selection", callback_data="sched_selclear"))
+    else:
+        markup.row(InlineKeyboardButton("✅ Select all", callback_data="sched_selall"))
+
     return markup
 
 
@@ -553,10 +576,12 @@ async def _send_schedules(cid: int, edit_msg_id: int = None):
         return
 
     active = sum(1 for t in scheduled if t.get("schedule_enabled"))
-    header = f"<b>📅 Scheduled Templates</b>  ({active} active / {len(scheduled)} total)\n"
+    selected_count = len(_sched_selection.get(cid, set()))
+    sel_hint = f"  ·  <i>{selected_count} selected</i>" if selected_count else ""
+    header = f"<b>📅 Scheduled Templates</b>  ({active} active / {len(scheduled)} total{sel_hint})\n"
     body = "\n\n".join([_fmt_schedule_entry(t) for t in scheduled])
     text = f"{header}\n{body}"
-    markup = _build_schedules_keyboard(scheduled)
+    markup = _build_schedules_keyboard(scheduled, cid)
 
     if edit_msg_id:
         try:
@@ -3195,23 +3220,56 @@ async def audit_pagination_callback(call):
 
 
 @bot.callback_query_handler(func=lambda call: call.data and (
-    call.data.startswith("sched_on_") or call.data.startswith("sched_off_")
+    call.data.startswith("sched_sel_")
+    or call.data.startswith("sched_apply_")
+    or call.data in ("sched_selall", "sched_selclear")
 ))
 async def schedules_toggle_callback(call):
     try:
         cid = call.message.chat.id
         data = call.data
-        if data.startswith("sched_on_"):
-            name = data[len("sched_on_"):]
-            ok = enable_template_schedule(cid, name)
-            label = "▶️ Resumed" if ok else "⚠️ Not found"
-        else:
-            name = data[len("sched_off_"):]
-            ok = disable_template_schedule(cid, name)
-            label = "⏸ Paused" if ok else "⚠️ Not found"
-        await bot.answer_callback_query(call.id, label)
-        if ok:
+
+        # ── checkbox tap: toggle one template in/out of selection ──────────
+        if data.startswith("sched_sel_"):
+            name = data[len("sched_sel_"):]
+            sel = _sched_selection.setdefault(cid, set())
+            if name in sel:
+                sel.discard(name)
+                await bot.answer_callback_query(call.id, "⬜ Deselected")
+            else:
+                sel.add(name)
+                await bot.answer_callback_query(call.id, "☑️ Selected")
             await _send_schedules(cid, edit_msg_id=call.message.message_id)
+            return
+
+        # ── select all / clear ──────────────────────────────────────────────
+        if data == "sched_selall":
+            templates = get_templates(cid)
+            scheduled = [t for t in templates if t.get("schedule_day") and t.get("schedule_time")]
+            _sched_selection[cid] = {t.get("name", "") for t in scheduled}
+            await bot.answer_callback_query(call.id, "✅ All selected")
+            await _send_schedules(cid, edit_msg_id=call.message.message_id)
+            return
+
+        if data == "sched_selclear":
+            _sched_selection.pop(cid, None)
+            await bot.answer_callback_query(call.id, "☐ Selection cleared")
+            await _send_schedules(cid, edit_msg_id=call.message.message_id)
+            return
+
+        # ── bulk apply: pause or resume all selected ────────────────────────
+        if data in ("sched_apply_on", "sched_apply_off"):
+            sel = _sched_selection.pop(cid, set())
+            if not sel:
+                await bot.answer_callback_query(call.id, "Nothing selected")
+                return
+            action = enable_template_schedule if data == "sched_apply_on" else disable_template_schedule
+            done = sum(1 for name in sel if action(cid, name))
+            verb = "▶️ Resumed" if data == "sched_apply_on" else "⏸ Paused"
+            await bot.answer_callback_query(call.id, f"{verb} {done} template(s)")
+            await _send_schedules(cid, edit_msg_id=call.message.message_id)
+            return
+
     except Exception as e:
         err_str = str(e)
         if "query is too old" in err_str or "query ID is invalid" in err_str:

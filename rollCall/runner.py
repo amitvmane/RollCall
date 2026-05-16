@@ -39,6 +39,15 @@ except ImportError as e:
     logger.error(f"Failed to import required modules: {e}")
     sys.exit(1)
 
+# Recreate the aiohttp session every 5 minutes so silently-dead TCP connections
+# (dropped by NAT/firewall without RST) can't keep the bot frozen indefinitely.
+try:
+    import telebot.asyncio_helper as _asyncio_helper
+    _asyncio_helper.SESSION_TIME_TO_LIVE = 300
+    logger.info("aiohttp session TTL set to 300s")
+except Exception:
+    pass
+
 
 def validate_environment():
     """Validate required environment variables"""
@@ -198,9 +207,10 @@ async def main():
             logger.info("Press Ctrl+C to stop")
             logger.info("=" * 60)
             await bot.infinity_polling(
-                timeout=20,
-                request_timeout=60,
-                skip_pending=True
+                timeout=10,        # long-poll: Telegram responds in ≤10s
+                request_timeout=35, # aiohttp HTTP timeout: 25s headroom over long-poll
+                skip_pending=True,
+                interval=1,        # 1s backoff between retries to avoid hammering
             )
     except KeyboardInterrupt:
         logger.info("\n" + "=" * 60)

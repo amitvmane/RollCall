@@ -3482,6 +3482,10 @@ async def ghost_callback_handler(call):
         await bot.answer_callback_query(call.id, "Unknown ghost action")
 
     except Exception as e:
+        err_str = str(e)
+        if "query is too old" in err_str or "query ID is invalid" in err_str:
+            logging.warning(f"[{_ts()}] Stale ghost callback ignored ({call.data[:50]}): {err_str[:80]}")
+            return
         logging.exception("Error in ghost_callback_handler")
         try:
             await bot.answer_callback_query(call.id, str(e)[:200])
@@ -3911,6 +3915,10 @@ async def callback_handler(call):
         await bot.answer_callback_query(call.id, "Unknown action")
 
     except Exception as e:
+        err_str = str(e)
+        if "query is too old" in err_str or "query ID is invalid" in err_str:
+            logging.warning(f"[{_ts()}] Stale callback ignored ({call.data[:50]}): {err_str[:80]}")
+            return
         logging.exception("Error in callback_handler")
         try:
             await bot.answer_callback_query(call.id, str(e)[:200])

@@ -1415,6 +1415,29 @@ def disable_template_schedule(chatid: int, name: str) -> bool:
             release_connection(conn)
 
 
+def enable_template_schedule(chatid: int, name: str) -> bool:
+    """Re-enable scheduling for a template using its previously saved schedule parameters."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        enabled = True if db_type == "postgresql" else 1
+        cursor.execute(
+            f"UPDATE templates SET schedule_enabled = {ph} WHERE chatid = {ph} AND name = {ph}",
+            (enabled, chatid, name),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"Error enabling template schedule: {e}")
+        return False
+    finally:
+        if db_type == "postgresql":
+            cursor.close()
+            release_connection(conn)
+
+
 def update_template_last_scheduled_date(chatid: int, name: str, date_str: str) -> bool:
     """Record the date (YYYY-MM-DD) when a template was last auto-started."""
     conn = get_connection()

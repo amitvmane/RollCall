@@ -31,7 +31,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from db import add_or_update_proxy_user
 from db import increment_user_stat, increment_rollcall_stat
 from db import create_or_update_template, get_templates, get_template, delete_template
-from db import set_template_schedule, disable_template_schedule
+from db import set_template_schedule, disable_template_schedule, enable_template_schedule
 from db import get_all_chat_ids
 from db import (
     get_ghost_count, increment_ghost_count, reset_ghost_count,
@@ -289,6 +289,7 @@ Templates (admin only):
 /schedule_template name <weekday> <HH:MM> biweekly — Every 2 weeks
 /schedule_template name monthly <day> <HH:MM> — Monthly on day N
 /schedule_template name off — Disable schedule
+/schedules — View all scheduled templates + pause/resume toggles
 
 Ghost tracking (admin only):
 /toggle_ghost_tracking — Enable/disable no-show tracking
@@ -487,6 +488,99 @@ async def list_templates(message):
         lines.append(f"- {t['name']}: {t_title}{sched_info}")
 
     await bot.send_message(cid, "Templates:\n" + "\n".join(lines))
+
+
+# ── /schedules helpers ────────────────────────────────────────────────────────
+
+def _fmt_schedule_entry(t: dict) -> str:
+    """Format one template's schedule as a compact HTML block."""
+    name = t.get("name", "?")
+    title = t.get("title") or name
+    enabled = bool(t.get("schedule_enabled"))
+    sched_day = t.get("schedule_day") or ""
+    sched_time = t.get("schedule_time") or ""
+    event_day = t.get("event_day") or ""
+    event_time = t.get("event_time") or ""
+    recurrence = t.get("recurrence_type") or "weekly"
+    last_run = t.get("last_scheduled_date")
+
+    status = "🟢" if enabled else "🔴"
+    paused_tag = "" if enabled else "  <i>(paused)</i>"
+
+    rec_label = {"weekly": "weekly", "biweekly": "every 2 weeks", "monthly": "monthly"}.get(recurrence, recurrence)
+    if recurrence == "monthly":
+        timing = f"day {html.escape(sched_day)} at {html.escape(sched_time)}"
+        if event_day and event_time:
+            timing += f" → closes day {html.escape(event_day)} at {html.escape(event_time)}"
+    else:
+        timing = f"{html.escape(sched_day.capitalize())} {html.escape(sched_time)}"
+        if event_day and event_time:
+            timing += f" → {html.escape(event_day.capitalize())} {html.escape(event_time)}"
+
+    last = f"last run: {html.escape(last_run)}" if last_run else "never run"
+    return (
+        f"{status} <b>{html.escape(title)}</b> <code>[{html.escape(name)}]</code>{paused_tag}\n"
+        f"   {timing}  ·  {rec_label}  ·  {last}"
+    )
+
+
+def _build_schedules_keyboard(templates: list) -> InlineKeyboardMarkup:
+    markup = InlineKeyboardMarkup(row_width=1)
+    for t in templates:
+        name = t.get("name", "")
+        title = t.get("title") or name
+        if bool(t.get("schedule_enabled")):
+            markup.add(InlineKeyboardButton(f"⏸ Pause  {title}", callback_data=f"sched_off_{name}"))
+        else:
+            markup.add(InlineKeyboardButton(f"▶️ Resume  {title}", callback_data=f"sched_on_{name}"))
+    return markup
+
+
+async def _send_schedules(cid: int, edit_msg_id: int = None):
+    """Send or refresh the /schedules panel for a chat."""
+    templates = get_templates(cid)
+    scheduled = [t for t in templates if t.get("schedule_day") and t.get("schedule_time")]
+
+    if not scheduled:
+        text = "📅 No scheduled templates yet.\nUse /schedule_template to set up auto-start."
+        if edit_msg_id:
+            try:
+                await bot.edit_message_text(text, cid, edit_msg_id)
+            except Exception:
+                pass
+        else:
+            await bot.send_message(cid, text)
+        return
+
+    active = sum(1 for t in scheduled if t.get("schedule_enabled"))
+    header = f"<b>📅 Scheduled Templates</b>  ({active} active / {len(scheduled)} total)\n"
+    body = "\n\n".join([_fmt_schedule_entry(t) for t in scheduled])
+    text = f"{header}\n{body}"
+    markup = _build_schedules_keyboard(scheduled)
+
+    if edit_msg_id:
+        try:
+            await bot.edit_message_text(text, cid, edit_msg_id, parse_mode="HTML", reply_markup=markup)
+        except Exception as e:
+            if "message is not modified" not in str(e):
+                raise
+    else:
+        await bot.send_message(cid, text, parse_mode="HTML", reply_markup=markup)
+
+
+@bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/schedules")
+async def schedules_command(message):
+    """Admin only: view all scheduled templates with inline pause/resume toggles."""
+    cid = message.chat.id
+    try:
+        if await admin_rights(message, manager) is False:
+            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
+        await _send_schedules(cid)
+    except (insufficientPermissions,) as e:
+        await bot.send_message(cid, str(e))
+    except Exception:
+        logging.exception("Error in /schedules")
+        await bot.send_message(cid, "Error fetching schedule info.")
 
 
 @bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/schedule_template")
@@ -3096,6 +3190,36 @@ async def audit_pagination_callback(call):
         logging.exception("Error in audit_pagination_callback")
         try:
             await bot.answer_callback_query(call.id, "Error loading page")
+        except Exception:
+            pass
+
+
+@bot.callback_query_handler(func=lambda call: call.data and (
+    call.data.startswith("sched_on_") or call.data.startswith("sched_off_")
+))
+async def schedules_toggle_callback(call):
+    try:
+        cid = call.message.chat.id
+        data = call.data
+        if data.startswith("sched_on_"):
+            name = data[len("sched_on_"):]
+            ok = enable_template_schedule(cid, name)
+            label = "▶️ Resumed" if ok else "⚠️ Not found"
+        else:
+            name = data[len("sched_off_"):]
+            ok = disable_template_schedule(cid, name)
+            label = "⏸ Paused" if ok else "⚠️ Not found"
+        await bot.answer_callback_query(call.id, label)
+        if ok:
+            await _send_schedules(cid, edit_msg_id=call.message.message_id)
+    except Exception as e:
+        err_str = str(e)
+        if "query is too old" in err_str or "query ID is invalid" in err_str:
+            logging.warning(f"[{_ts()}] Stale schedule toggle callback ignored")
+            return
+        logging.exception("Error in schedules_toggle_callback")
+        try:
+            await bot.answer_callback_query(call.id, "Error updating schedule")
         except Exception:
             pass
 

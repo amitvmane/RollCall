@@ -8,7 +8,7 @@ from telebot.async_telebot import AsyncTeleBot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import TELEGRAM_TOKEN
-from db import end_rollcall, update_streak_on_checkin, get_all_scheduled_templates, update_template_last_scheduled_date
+from db import end_rollcall, update_streak_on_checkin, get_all_scheduled_templates, update_template_last_scheduled_date, get_all_chat_ids
 
 bot = AsyncTeleBot(token=TELEGRAM_TOKEN)
 
@@ -23,12 +23,6 @@ _active_loops = set()
 
 async def check(rollcalls, timezone, chat_id):
     from rollcall_manager import manager
-    current_sec = int(datetime.now().strftime("%S"))
-    delay = 0
-    if current_sec != 0:
-        delay = 60 - current_sec
-    await asyncio.sleep(delay)
-
     while True:
         if len(rollcalls) == 0:
             break
@@ -141,6 +135,37 @@ async def start(rollcalls, timezone, chat_id):
     finally:
         _active_loops.discard(chat_id)
         logging.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Reminder loop finished for chat {chat_id}")
+
+
+async def resume_reminder_loops():
+    """On startup, restart reminder loops for all chats that have active rollcalls with a finalizeDate.
+    Called once from runner.py to recover state after a bot restart.
+    """
+    from rollcall_manager import manager
+
+    chat_ids = get_all_chat_ids()
+    resumed = 0
+    for chat_id in chat_ids:
+        try:
+            chat = manager.get_chat(chat_id)
+            rollcalls = manager.get_rollcalls(chat_id)
+            if any(rc.finalizeDate is not None for rc in rollcalls):
+                tzname = chat.get("timezone", "Asia/Calcutta")
+                asyncio.create_task(start(rollcalls, tzname, chat_id))
+                resumed += 1
+                logging.info(
+                    f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+                    f"Resumed reminder loop for chat {chat_id} ({len(rollcalls)} active rollcall(s))"
+                )
+        except Exception:
+            logging.error(
+                f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+                f"Error resuming reminder loop for chat {chat_id}: {traceback.format_exc()}"
+            )
+    logging.info(
+        f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+        f"Startup: resumed {resumed} reminder loop(s) across {len(chat_ids)} chat(s)"
+    )
 
 
 async def _auto_start_from_template(chat_id: int, tmpl: dict):

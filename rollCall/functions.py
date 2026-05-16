@@ -151,7 +151,7 @@ def get_next_weekday_datetime(tz, target_day: str, target_time: str):
     candidate = tz.localize(datetime(now.year, now.month, now.day, hour, minute))
     days_ahead = (target_idx - candidate.weekday()) % 7
     candidate = candidate + timedelta(days=days_ahead)
-    if candidate <= now:
+    if candidate < now:
         candidate = candidate + timedelta(days=7)
     return candidate
 

@@ -34,7 +34,7 @@ try:
     from config import TELEGRAM_TOKEN, DATABASE_URL, ADMINS, WEBHOOK_URL
     from telegram_helper import bot
     from rollcall_manager import manager
-    from check_reminders import check_template_schedules
+    from check_reminders import check_template_schedules, resume_reminder_loops
 except ImportError as e:
     logger.error(f"Failed to import required modules: {e}")
     sys.exit(1)
@@ -190,6 +190,11 @@ async def main():
     # Start template auto-scheduler (persistent background task)
     asyncio.create_task(check_template_schedules())
     logger.info("✅ Template scheduler started")
+
+    # Resume reminder/auto-close loops for rollcalls already in DB with a finalizeDate.
+    # Without this, any rollcall created before a bot restart would never auto-close.
+    await resume_reminder_loops()
+    logger.info("✅ Reminder loop resumption complete")
 
     # Start bot — webhook or polling
     try:

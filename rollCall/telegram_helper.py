@@ -1772,7 +1772,7 @@ async def set_in_for(message):
             result = rc.addIn(user)
             rc.save()
 
-            log_admin_action(cid, message.from_user.id, message.from_user.first_name, "sif", target_name=proxy_name, rollcall_id=rc.id, details=f"rc_number={rc_number + 1}")
+            log_admin_action(cid, message.from_user.id, message.from_user.first_name, "sif", target_name=proxy_name, rollcall_id=rc.id, details=rc.title)
 
             if result == 'AB':
                 raise duplicateProxy("No duplicate proxy please :-), Thanks!")
@@ -1839,7 +1839,7 @@ async def set_out_for(message):
             result = rc.addOut(user)
             rc.save()
 
-            log_admin_action(cid, message.from_user.id, message.from_user.first_name, "sof", target_name=arr[1], rollcall_id=rc.id, details=f"rc_number={rc_number + 1}")
+            log_admin_action(cid, message.from_user.id, message.from_user.first_name, "sof", target_name=arr[1], rollcall_id=rc.id, details=rc.title)
 
             if result == 'AB':
                 raise duplicateProxy("No duplicate proxy please :-), Thanks!")
@@ -1917,7 +1917,7 @@ async def set_maybe_for(message):
             result = rc.addMaybe(user)
             rc.save()
 
-            log_admin_action(cid, message.from_user.id, message.from_user.first_name, "smf", target_name=arr[1], rollcall_id=rc.id, details=f"rc_number={rc_number + 1}")
+            log_admin_action(cid, message.from_user.id, message.from_user.first_name, "smf", target_name=arr[1], rollcall_id=rc.id, details=rc.title)
 
             if result == 'AB':
                 raise duplicateProxy("No duplicate proxy please :-), Thanks!")
@@ -3438,7 +3438,7 @@ async def ghost_callback_handler(call):
             rc = manager.get_rollcall(cid, rc_number)
             if rc and rc.delete_user(name):
                 rc.save()
-                log_admin_action(cid, admin_id, call.from_user.first_name, "delete_user", target_name=name, rollcall_id=getattr(rc, 'db_id', None) or getattr(rc, 'id', None), details=f"rc_number={rc_number + 1}")
+                log_admin_action(cid, admin_id, call.from_user.first_name, "delete_user", target_name=name, rollcall_id=getattr(rc, 'db_id', None) or getattr(rc, 'id', None), details=rc.title)
                 await bot.answer_callback_query(call.id, f"✅ Deleted {name}")
                 await bot.edit_message_text(f"✅ *{name}* removed from rollcall #{rc_number + 1}.", cid, call.message.message_id, parse_mode="Markdown")
             else:
@@ -3486,7 +3486,7 @@ async def ghost_callback_handler(call):
             
             # Always update panel (silently edits if shh mode is on)
             await _update_panel(cid, rc_number + 1, rc)
-            log_admin_action(cid, admin_id, call.from_user.first_name, "set_status", target_name=user.name, rollcall_id=getattr(rc, 'db_id', None) or getattr(rc, 'id', None), details=f"status={status}")
+            log_admin_action(cid, admin_id, call.from_user.first_name, "set_status", target_name=f"{user.name} → {status}", rollcall_id=getattr(rc, 'db_id', None) or getattr(rc, 'id', None), details=rc.title)
             await bot.answer_callback_query(call.id, f"✅ Moved to {status.upper()}")
             await bot.edit_message_text(
                 f"✅ *{user.name}* → *{status.upper()}* in rollcall #{rc_number + 1}.",
@@ -3888,6 +3888,7 @@ async def callback_handler(call):
 
                 await bot.answer_callback_query(call.id, "Rollcall ended")
                 ended_by = call.from_user.first_name or call.from_user.username or "someone"
+                log_admin_action(cid, call.from_user.id, ended_by, "end_rollcall", target_name=rc.title, rollcall_id=rc_db_id, details="via panel")
 
                 try:
                     final_text = rc.finishList().replace("__RCID__", str(rc_number))
@@ -4186,18 +4187,16 @@ _AUDIT_LABELS = {
 
 
 def _fmt_audit_entry(r: dict) -> str:
-    ts = html.escape(str(r.get("created_at", ""))[:16])
-    admin = html.escape(r.get("admin_name") or "Admin")
-    raw_action = r.get("action_type", "")
-    action = html.escape(_AUDIT_LABELS.get(raw_action, raw_action))
-    target = r.get("target_name")
-    details = r.get("details")
-    entry = f"• <code>{ts}</code> <b>{admin}</b> — {action}"
-    if target:
-        entry += f" → {html.escape(str(target))}"
-    if details:
-        entry += f" <i>{html.escape(str(details))}</i>"
-    return entry
+    ts = html.escape(str(r.get("created_at", ""))[:16].replace("T", " "))
+    admin = html.escape(r.get("admin_name") or "—")
+    label = html.escape(_AUDIT_LABELS.get(r.get("action_type", ""), r.get("action_type", "")))
+    target = html.escape(str(r["target_name"])) if r.get("target_name") else ""
+    details = html.escape(str(r["details"])) if r.get("details") else ""
+    suffix = (f"  {target}  ·  {details}" if target and details
+              else f"  {target}" if target
+              else f"  {details}" if details
+              else "")
+    return f"• <code>{ts}</code>  <b>{admin}</b>  {label}{suffix}"
 
 
 def _build_audit_keyboard(page: int, total_pages: int, per_page: int) -> InlineKeyboardMarkup:

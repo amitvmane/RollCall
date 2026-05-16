@@ -3,6 +3,7 @@ import logging
 import re
 import asyncio
 import json
+import html
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -39,7 +40,7 @@ from db import (
     add_ghost_event, get_rollcall_in_users, save_ghost_selections,
     update_streak_on_checkin, reset_streak_on_ghost, get_rollcall_history,
     upsert_chat_member, mark_member_inactive, get_active_members,
-    log_admin_action, get_admin_audit_log,
+    log_admin_action, get_admin_audit_log, count_admin_audit_log,
 )
 
 bot = AsyncTeleBot(token=TELEGRAM_TOKEN)
@@ -398,6 +399,7 @@ async def config_timezone(message):
         if response != None:
             await bot.send_message(message.chat.id, f"Your timezone has been set to {response}")
             manager.set_timezone(cid, response)
+            log_admin_action(cid, message.from_user.id, message.from_user.first_name, "timezone", details=response)
         else:
             await bot.send_message(message.chat.id, f"Given timezone is invalid , check this <a href='https://gist.github.com/heyalexej/8bf688fd67d7199be4a1682b3eec7568'>website</a>", parse_mode='HTML')
 
@@ -691,6 +693,7 @@ async def start_roll_call(message):
         # Create new rollcall using manager
         rc = manager.add_rollcall(cid, title)
         logging.info(f"[{_ts()}] [CHAT {cid}] Rollcall started: '{title}' (RC #{rc_index+1}) by {message.from_user.first_name} (@{message.from_user.username})")
+        log_admin_action(cid, message.from_user.id, message.from_user.first_name, "new_rollcall", target_name=title)
         markup = await get_status_keyboard(rc_index+1)
         sent = await bot.send_message(message.chat.id, f"Roll call '{title}' started! ID: {rc_index+1}\nUse buttons below:", reply_markup=markup)
         _panel_msg_ids[(cid, rc_index + 1)] = sent.message_id
@@ -1423,12 +1426,14 @@ async def delete_template_command(message):
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/shh")
 async def shh(message):
     manager.set_shh_mode(message.chat.id, True)
+    log_admin_action(message.chat.id, message.from_user.id, message.from_user.first_name, "shh_on")
     await bot.send_message(message.chat.id, "Ok, i will keep quiet!")
 
 # NON RESUME NOTIFICATIONS
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/louder")
 async def louder(message):
     manager.set_shh_mode(message.chat.id, False)
+    log_admin_action(message.chat.id, message.from_user.id, message.from_user.first_name, "shh_off")
     await bot.send_message(message.chat.id, "Ok, i can hear you!")
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/in")
@@ -2136,6 +2141,7 @@ async def end_roll_call(message):
             _panel_msg_ids.pop((cid, rc_number + 1), None)
             manager.remove_rollcall(cid, rc_number)
             logging.info(f"[{_ts()}] [CHAT {cid}] Rollcall ended: '{rc.title}' by {message.from_user.first_name} (@{message.from_user.username})")
+            log_admin_action(cid, message.from_user.id, message.from_user.first_name, "end_rollcall", target_name=rc.title)
             # Ghost tracking prompt - ask if ANY users were in rollcall (real OR proxy)
             if ghost_tracking_on and has_any_users and rc_db_id and not rc.absent_marked:
                 markup = InlineKeyboardMarkup(row_width=2)
@@ -2922,6 +2928,8 @@ async def buzz_command(message):
         else:
             note = custom_msg or f"rollcall *{rc.title}* is open — have you voted?"
             await bot.send_message(cid, f"👋 Hey {mentions}\n\n{note}", parse_mode="Markdown")
+        log_admin_action(cid, message.from_user.id, message.from_user.first_name, "buzz",
+                         details=f"pinged {len(to_ping)} member(s)")
 
     except (rollCallNotStarted, incorrectParameter, insufficientPermissions,
             parameterMissing) as e:
@@ -3064,6 +3072,32 @@ async def get_end_confirm_keyboard(rc_number: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton("❌ Cancel", callback_data=f"btn_endcancel_{rc_number}"),
     )
     return markup
+
+
+@bot.callback_query_handler(func=lambda call: call.data and (
+    call.data.startswith("audit_pg_") or call.data == "audit_noop"
+))
+async def audit_pagination_callback(call):
+    try:
+        if call.data == "audit_noop":
+            await bot.answer_callback_query(call.id)
+            return
+        parts = call.data.split("_")  # audit_pg_<page>_<per_page>
+        page = int(parts[2])
+        per_page = int(parts[3])
+        cid = call.message.chat.id
+        await bot.answer_callback_query(call.id)
+        await _send_audit_page(cid, page=page, per_page=per_page, edit_msg_id=call.message.message_id)
+    except Exception as e:
+        err_str = str(e)
+        if "query is too old" in err_str or "query ID is invalid" in err_str:
+            logging.warning(f"[{_ts()}] Stale audit callback ignored")
+            return
+        logging.exception("Error in audit_pagination_callback")
+        try:
+            await bot.answer_callback_query(call.id, "Error loading page")
+        except Exception:
+            pass
 
 
 @bot.callback_query_handler(func=lambda call: call.data and (
@@ -4126,44 +4160,104 @@ async def mark_absent(message):
         await bot.send_message(message.chat.id, e)
 
 
+_AUDIT_PER_PAGE = 15
+
+# Human-readable labels for each action type
+_AUDIT_LABELS = {
+    "new_rollcall": "📋 New Rollcall",
+    "end_rollcall": "🏁 End Rollcall",
+    "set_admins": "🔧 Admin Mode ON",
+    "unset_admins": "🔧 Admin Mode OFF",
+    "delete_template": "🗑️ Delete Template",
+    "create_template": "📝 Create/Update Template",
+    "schedule_template": "📅 Schedule Template",
+    "start_template": "▶️ Start Template",
+    "sif": "➡️ Set IN For",
+    "sof": "➡️ Set OUT For",
+    "smf": "➡️ Set MAYBE For",
+    "delete_user": "🗑️ Delete User",
+    "set_status": "🔄 Set Status",
+    "toggle_ghost_tracking": "👻 Ghost Tracking",
+    "buzz": "📢 Buzz",
+    "shh_on": "🤫 Quiet Mode ON",
+    "shh_off": "🔊 Quiet Mode OFF",
+    "timezone": "🕐 Timezone",
+}
+
+
+def _fmt_audit_entry(r: dict) -> str:
+    ts = html.escape(str(r.get("created_at", ""))[:16])
+    admin = html.escape(r.get("admin_name") or "Admin")
+    raw_action = r.get("action_type", "")
+    action = html.escape(_AUDIT_LABELS.get(raw_action, raw_action))
+    target = r.get("target_name")
+    details = r.get("details")
+    entry = f"• <code>{ts}</code> <b>{admin}</b> — {action}"
+    if target:
+        entry += f" → {html.escape(str(target))}"
+    if details:
+        entry += f" <i>{html.escape(str(details))}</i>"
+    return entry
+
+
+def _build_audit_keyboard(page: int, total_pages: int, per_page: int) -> InlineKeyboardMarkup:
+    markup = InlineKeyboardMarkup(row_width=3)
+    prev = InlineKeyboardButton("← Prev", callback_data=f"audit_pg_{page-1}_{per_page}") \
+        if page > 1 else InlineKeyboardButton("·", callback_data="audit_noop")
+    label = InlineKeyboardButton(f"{page}/{total_pages}", callback_data="audit_noop")
+    nxt = InlineKeyboardButton("Next →", callback_data=f"audit_pg_{page+1}_{per_page}") \
+        if page < total_pages else InlineKeyboardButton("·", callback_data="audit_noop")
+    markup.add(prev, label, nxt)
+    return markup
+
+
+async def _send_audit_page(cid: int, page: int, per_page: int, edit_msg_id: int = None):
+    total = count_admin_audit_log(cid)
+    if total == 0:
+        text = "No commands recorded yet."
+        if edit_msg_id:
+            await bot.edit_message_text(text, cid, edit_msg_id)
+        else:
+            await bot.send_message(cid, text)
+        return
+
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    page = max(1, min(page, total_pages))
+    offset = (page - 1) * per_page
+    records = get_admin_audit_log(cid, limit=per_page, offset=offset)
+
+    lines = [f"<b>🔍 Audit Log — Page {page}/{total_pages}  ({total} total)</b>", ""]
+    lines += [_fmt_audit_entry(r) for r in records]
+    text = "\n".join(lines)
+    markup = _build_audit_keyboard(page, total_pages, per_page) if total_pages > 1 else None
+
+    if edit_msg_id:
+        try:
+            await bot.edit_message_text(text, cid, edit_msg_id, parse_mode="HTML", reply_markup=markup)
+        except Exception as e:
+            if "message is not modified" not in str(e):
+                raise
+    else:
+        await bot.send_message(cid, text, parse_mode="HTML", reply_markup=markup)
+
+
 @bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/audit_log")
 async def audit_log_command(message):
-    """Admin only: show recent admin actions for this chat.
-    Usage: /audit_log [N]  (default 20, max 50)
+    """Admin only: show paginated bot commands for this chat.
+    Usage: /audit_log [per_page]  (default 15)
     """
     try:
         if await admin_rights(message, manager) == False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
-
         cid = message.chat.id
         parts = message.text.strip().split()
-        limit = 20
+        per_page = _AUDIT_PER_PAGE
         if len(parts) > 1:
             try:
-                limit = max(1, min(50, int(parts[1])))
+                per_page = max(5, min(50, int(parts[1])))
             except ValueError:
                 pass
-
-        records = get_admin_audit_log(cid, limit)
-        if not records:
-            await bot.send_message(cid, "No admin actions recorded yet.")
-            return
-
-        lines = [f"*🔍 Last {len(records)} admin action(s):*", ""]
-        for r in records:
-            ts = str(r.get("created_at", ""))[:16]
-            admin = r.get("admin_name") or "Admin"
-            action = r.get("action_type", "")
-            target = r.get("target_name")
-            details = r.get("details")
-            entry = f"• `{ts}` *{admin}* — {action}"
-            if target:
-                entry += f" → {target}"
-            if details:
-                entry += f" _{details}_"
-            lines.append(entry)
-
-        await bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
+        await _send_audit_page(cid, page=1, per_page=per_page)
     except (insufficientPermissions,) as e:
         await bot.send_message(message.chat.id, str(e))
     except Exception:

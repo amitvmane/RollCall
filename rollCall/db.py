@@ -2276,21 +2276,42 @@ def log_admin_action(
             release_connection(conn)
 
 
-def get_admin_audit_log(chat_id: int, limit: int = 20) -> List[Dict]:
-    """Return the most recent admin actions for a chat."""
+def get_admin_audit_log(chat_id: int, limit: int = 15, offset: int = 0) -> List[Dict]:
+    """Return admin/command actions for a chat with pagination support."""
     conn = get_connection()
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
         cursor.execute(
             f"SELECT id, admin_name, action_type, target_name, rollcall_id, details, created_at "
-            f"FROM admin_actions WHERE chat_id = {ph} ORDER BY created_at DESC LIMIT {ph}",
-            (chat_id, limit),
+            f"FROM admin_actions WHERE chat_id = {ph} ORDER BY created_at DESC LIMIT {ph} OFFSET {ph}",
+            (chat_id, limit, offset),
         )
         return [dict(row) for row in cursor.fetchall()]
     except Exception as e:
         logging.error(f"Error fetching admin audit log: {e}")
         return []
+    finally:
+        if db_type == 'postgresql':
+            cursor.close()
+            release_connection(conn)
+
+
+def count_admin_audit_log(chat_id: int) -> int:
+    """Return total number of recorded actions for a chat."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(
+            f"SELECT COUNT(*) FROM admin_actions WHERE chat_id = {ph}",
+            (chat_id,),
+        )
+        row = cursor.fetchone()
+        return row[0] if row else 0
+    except Exception as e:
+        logging.error(f"Error counting admin audit log: {e}")
+        return 0
     finally:
         if db_type == 'postgresql':
             cursor.close()

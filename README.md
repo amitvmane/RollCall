@@ -5,7 +5,7 @@ A feature-rich Telegram bot for tracking event attendance in group chats. Member
 [![CI](https://github.com/amitvmane/RollCall/actions/workflows/ci.yml/badge.svg)](https://github.com/amitvmane/RollCall/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-7.0-green)](rollCall/version.json)
+[![Version](https://img.shields.io/badge/version-7.2-green)](rollCall/version.json)
 
 ---
 
@@ -137,7 +137,7 @@ Append `::N` to most commands to target a specific rollcall when multiple are ac
 
 ### Proxy Voting (admin only)
 
-For adding non-Telegram members to a rollcall:
+For adding non-Telegram members to a rollcall. Proxy names are limited to **40 characters**.
 
 | Command | Alias | Description |
 |---|---|---|
@@ -149,7 +149,7 @@ For adding non-Telegram members to a rollcall:
 
 | Command | Description |
 |---|---|
-| `/set_template name "Title" [limit=N] [location=X] [fee=X] [offset_days=D] [event_day=weekday] [event_time=HH:MM]` | Save a template (`event_day`/`event_time` set when the rollcall auto-closes) |
+| `/set_template name "Title" [limit=N] [location=X] [fee=X] [offset_days=D] [event_day=weekday] [event_time=HH:MM]` | Save a template (`event_day`/`event_time` set when the rollcall auto-closes). Name max 50 chars. |
 | `/templates` | List saved templates (shows schedule status) |
 | `/start_template name [extra title]` | Start a rollcall from a template |
 | `/delete_template name` | Delete a template |
@@ -158,6 +158,7 @@ For adding non-Telegram members to a rollcall:
 | `/schedule_template name monthly <day> <HH:MM>` | Monthly auto-start on day N of the month |
 | `/schedule_template name off` | Disable auto-start for a template |
 | `/schedule_template name` | Show current schedule for a template |
+| `/schedules` | View all scheduled templates with inline ☑️ multi-select; tap to check/uncheck, then bulk ⏸ Pause or ▶️ Resume selected |
 
 ### Ghost Tracking (admin only)
 
@@ -190,11 +191,11 @@ For adding non-Telegram members to a rollcall:
 
 ### Chat Settings
 
-| Command | Description |
-|---|---|
-| `/shh` | Silent mode — no panel update after each vote |
-| `/louder` | Resume full panel output after votes |
-| `/timezone Region/City` | Set timezone (e.g. `Asia/Kolkata`) |
+| Command | Alias | Description |
+|---|---|---|
+| `/shh` | | Silent mode — suppresses confirmations and list output after each vote |
+| `/louder` | | Resume full panel output after votes |
+| `/timezone Region/City` | `/tz` | Set timezone (e.g. `Asia/Kolkata`) |
 
 ### Super Admin
 
@@ -302,11 +303,13 @@ See [version.json](rollCall/version.json) for the full version history.
 
 | Version | Highlights |
 |---|---|
+| **7.2** | Bot freeze fix (TCP session TTL), audit log 2.0 (pagination, 6 new tracked actions, RC name instead of ID), auto-close fix after restart, 12-bug final audit (naive datetime, release_connection on SQLite, schedule columns preserved on template update, panel ID shift after end, and more), `/schedules` multi-select panel |
+| **7.1** | Silent Mode hardening — `/shh` suppresses all confirmations and in-place panel edits; reminder loop and auto-close restored after bot restart; ID snapshot fix in auto-close messages |
 | **7.0** | Waitlist DMs, admin audit log (`/audit_log`), `/buzz` rate limiting, `/history` pagination, biweekly/monthly template schedules, `/set_status` manual override |
 | **6.2** | Bug fixes — bare except cleanup, IN-position reset on re-vote, status validation, per-template auto-start error handling |
-| **6.1** | Bug fixes — concurrent /erc lock, proxy delete cleans ghost record, proxy ghost events audit trail |
+| **6.1** | Bug fixes — concurrent `/erc` lock, proxy delete cleans ghost record, proxy ghost events audit trail |
 | **6.0** | Code review hardening — background task exceptions surfaced, buzz timeout, duplicate proxy guard, partial template update, improved renumber message |
-| **5.9** | Scheduled templates — weekly auto-start per template via `/schedule_template` |
+| **5.9** | Scheduled templates — weekly/biweekly/monthly auto-start per template via `/schedule_template` |
 | **5.8** | `/buzz` rework — DB-persisted member list, concurrent membership check, auto-remove leavers |
 | **5.7** | In-place panel editing — votes update the panel instead of flooding the chat |
 | **5.6** | `/buzz` command — ping unvoted members or all known members |

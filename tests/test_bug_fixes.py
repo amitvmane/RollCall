@@ -515,7 +515,8 @@ class TestCheckRemindersLogging(unittest.TestCase):
 
         with patch.object(logging, 'error') as mock_log, \
              patch.object(real_mod.pytz, 'timezone', side_effect=RuntimeError("tz boom")), \
-             patch.object(real_mod.asyncio, 'sleep', side_effect=controlled_sleep):
+             patch.object(real_mod.asyncio, 'sleep', side_effect=controlled_sleep), \
+             patch.object(sys.modules['rollcall_manager'].manager, 'get_rollcalls', return_value=rollcalls):
             loop = asyncio.new_event_loop()
             try:
                 loop.run_until_complete(real_mod.check(rollcalls, "UTC", 1))

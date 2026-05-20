@@ -460,6 +460,9 @@ async def show_reminders(message):
 async def list_templates(message):
     """List templates defined for this chat."""
     cid = message.chat.id
+    if not await admin_rights(message, manager):
+        await bot.send_message(cid, "You don't have permission to use this command.")
+        return
     templates = get_templates(cid)
 
     if not templates:
@@ -830,6 +833,9 @@ async def start_template(message):
       /start_template template_name "Extra title"
     """
     cid = message.chat.id
+    if not await admin_rights(message, manager):
+        await bot.send_message(cid, "You don't have permission to use this command.")
+        return
     parts = message.text.split(" ", 2)
 
     if len(parts) < 2:
@@ -1257,7 +1263,10 @@ async def individual_fee(message):
     try:
         if roll_call_not_started(message, manager) == False:
             raise rollCallNotStarted("Roll call is not active")
-        
+
+        if await admin_rights(message, manager) == False:
+            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
+
         # IF RC_NUMBER IS SPECIFIED, STORE IT
         if len(pmts) > 0 and "::" in pmts[-1]:
             try:
@@ -1269,7 +1278,7 @@ async def individual_fee(message):
             rollcalls = manager.get_rollcalls(cid)
             if len(rollcalls) < rc_number + 1:
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
-        
+
         rc = manager.get_rollcall(cid, rc_number)
         if rc.event_fee is None:
             raise parameterMissing("No event fee set. Use /event_fee to set one first.")
@@ -1297,6 +1306,9 @@ async def when(message):
     try:
         if roll_call_not_started(message, manager) == False:
             raise rollCallNotStarted("Roll call is not active")
+
+        if await admin_rights(message, manager) == False:
+            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
 
         # IF RC_NUMBER IS SPECIFIED, STORE IT
         if len(pmts) > 0 and "::" in pmts[-1]:
@@ -1328,6 +1340,10 @@ async def set_location(message):
     try:
         if roll_call_not_started(message, manager) == False:
             raise rollCallNotStarted("Roll call is not active")
+
+        if await admin_rights(message, manager) == False:
+            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
+
         if len(message.text.split(" ")) < 2:
             raise incorrectParameter("The correct format is /location <place>")
         msg = message.text
@@ -1363,6 +1379,9 @@ async def set_location(message):
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/set_limit")
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/sl")
 async def wait_limit(message):
+    if not await admin_rights(message, manager):
+        await bot.send_message(message.chat.id, "You don't have permission to use this command.")
+        return
     try:
         if roll_call_not_started(message, manager) == False:
             raise rollCallNotStarted("Roll call is not active")
@@ -1552,6 +1571,9 @@ async def delete_template_command(message):
 # RESUME NOTIFICATIONS
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/shh")
 async def shh(message):
+    if not await admin_rights(message, manager):
+        await bot.send_message(message.chat.id, "You don't have permission to use this command.")
+        return
     manager.set_shh_mode(message.chat.id, True)
     log_admin_action(message.chat.id, message.from_user.id, message.from_user.first_name, "shh_on")
     await bot.send_message(message.chat.id, "Ok, i will keep quiet!")
@@ -1559,6 +1581,9 @@ async def shh(message):
 # NON RESUME NOTIFICATIONS
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/louder")
 async def louder(message):
+    if not await admin_rights(message, manager):
+        await bot.send_message(message.chat.id, "You don't have permission to use this command.")
+        return
     manager.set_shh_mode(message.chat.id, False)
     log_admin_action(message.chat.id, message.from_user.id, message.from_user.first_name, "shh_off")
     await bot.send_message(message.chat.id, "Ok, i can hear you!")
@@ -1816,7 +1841,11 @@ async def set_in_for(message):
     try:
         if roll_call_not_started(message, manager) == False:
             raise rollCallNotStarted("Roll call is not active")
-        elif len(message.text.split(" ")) <= 1:
+
+        if await admin_rights(message, manager) == False:
+            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
+
+        if len(message.text.split(" ")) <= 1:
             raise parameterMissing("Input username is missing")
 
         msg = message.text
@@ -1936,6 +1965,10 @@ async def set_out_for(message):
     try:
         if roll_call_not_started(message, manager) == False:
             raise rollCallNotStarted("Roll call is not active")
+
+        if await admin_rights(message, manager) == False:
+            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
+
         if len(message.text.split(" ")) <= 1:
             raise parameterMissing("Input username is missing")
 
@@ -2017,7 +2050,11 @@ async def set_maybe_for(message):
     try:
         if roll_call_not_started(message, manager) == False:
             raise rollCallNotStarted("Roll call is not active")
-        elif len(message.text.split(" ")) <= 1:
+
+        if await admin_rights(message, manager) == False:
+            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
+
+        if len(message.text.split(" ")) <= 1:
             raise parameterMissing("Input username is missing")
 
         msg = message.text
@@ -3136,6 +3173,10 @@ async def show_panel(message):
     """
     try:
         cid = message.chat.id
+
+        if await admin_rights(message, manager) == False:
+            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
+
         pmts = message.text.split(" ")[1:]
         rc_number = 0
 

@@ -201,9 +201,8 @@ async def register_commands():
         ttypes.BotCommand("louder",                  "Disable silent mode"),
     ]
 
-    await bot.set_my_commands(user_commands,  scope=ttypes.BotCommandScopeDefault())
-    await bot.set_my_commands(admin_commands, scope=ttypes.BotCommandScopeAllChatAdministrators())
-    logger.info(f"✅ Bot commands registered ({len(user_commands)} user, {len(admin_commands)} admin)")
+    await bot.set_my_commands(admin_commands, scope=ttypes.BotCommandScopeDefault())
+    logger.info(f"✅ Bot commands registered ({len(admin_commands)} commands visible to all users)")
 
 
 async def main():

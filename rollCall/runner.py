@@ -146,12 +146,72 @@ async def start_health_server():
         logger.info(f"   - Webhook: POST http://localhost:{port}/webhook  →  {WEBHOOK_URL}")
 
 
+async def register_commands():
+    """Register bot commands so the Telegram / menu is always up-to-date."""
+    import telebot.types as ttypes
+
+    user_commands = [
+        ttypes.BotCommand("in",            "Mark yourself as attending"),
+        ttypes.BotCommand("out",           "Mark yourself as not attending"),
+        ttypes.BotCommand("maybe",         "Mark yourself as undecided"),
+        ttypes.BotCommand("rollcalls",     "List all active rollcalls"),
+        ttypes.BotCommand("whos_in",       "Show who's attending"),
+        ttypes.BotCommand("whos_out",      "Show who's not attending"),
+        ttypes.BotCommand("whos_maybe",    "Show who's undecided"),
+        ttypes.BotCommand("whos_waiting",  "Show waitlist"),
+        ttypes.BotCommand("stats",         "Attendance stats and leaderboard"),
+        ttypes.BotCommand("history",       "Past rollcall history"),
+        ttypes.BotCommand("timezone",      "Set your timezone (e.g. Asia/Kolkata)"),
+        ttypes.BotCommand("help",          "Show all commands"),
+        ttypes.BotCommand("version",       "Show bot version"),
+    ]
+
+    admin_commands = user_commands + [
+        ttypes.BotCommand("start_roll_call",        "Start a new rollcall"),
+        ttypes.BotCommand("end_roll_call",           "End the active rollcall"),
+        ttypes.BotCommand("panel",                   "Show inline control panel"),
+        ttypes.BotCommand("set_title",               "Set rollcall title"),
+        ttypes.BotCommand("set_limit",               "Set max attendance limit"),
+        ttypes.BotCommand("set_rollcall_time",       "Set rollcall end date/time"),
+        ttypes.BotCommand("set_rollcall_reminder",   "Set reminder hours before close"),
+        ttypes.BotCommand("event_fee",               "Set total event fee"),
+        ttypes.BotCommand("individual_fee",          "Per-person fee split"),
+        ttypes.BotCommand("location",                "Set event location"),
+        ttypes.BotCommand("when",                    "Show rollcall scheduled time"),
+        ttypes.BotCommand("buzz",                    "Notify members who haven't voted"),
+        ttypes.BotCommand("set_in_for",              "Mark another user as IN"),
+        ttypes.BotCommand("set_out_for",             "Mark another user as OUT"),
+        ttypes.BotCommand("set_maybe_for",           "Mark another user as MAYBE"),
+        ttypes.BotCommand("delete_user",             "Remove a user from rollcall"),
+        ttypes.BotCommand("set_status",              "Move user between IN/OUT/MAYBE"),
+        ttypes.BotCommand("set_admins",              "Enable admin-only mode"),
+        ttypes.BotCommand("unset_admins",            "Disable admin-only mode"),
+        ttypes.BotCommand("templates",               "List saved templates"),
+        ttypes.BotCommand("set_template",            "Create or update a template"),
+        ttypes.BotCommand("start_template",          "Start rollcall from a template"),
+        ttypes.BotCommand("delete_template",         "Delete a template"),
+        ttypes.BotCommand("schedule_template",       "Schedule auto-start (weekly etc.)"),
+        ttypes.BotCommand("schedules",               "View and manage schedules"),
+        ttypes.BotCommand("toggle_ghost_tracking",   "Enable/disable ghost tracking"),
+        ttypes.BotCommand("set_absent_limit",        "Set reconfirmation threshold"),
+        ttypes.BotCommand("clear_absent",            "Clear ghost count for a user"),
+        ttypes.BotCommand("mark_absent",             "Mark users as absent"),
+        ttypes.BotCommand("audit_log",               "View admin audit log"),
+        ttypes.BotCommand("shh",                     "Enable silent mode"),
+        ttypes.BotCommand("louder",                  "Disable silent mode"),
+    ]
+
+    await bot.set_my_commands(user_commands,  scope=ttypes.BotCommandScopeDefault())
+    await bot.set_my_commands(admin_commands, scope=ttypes.BotCommandScopeAllChatAdministrators())
+    logger.info(f"✅ Bot commands registered ({len(user_commands)} user, {len(admin_commands)} admin)")
+
+
 async def main():
     """Main bot execution with graceful shutdown"""
     logger.info("=" * 60)
     logger.info("🤖 Starting RollCall Telegram Bot")
     logger.info("=" * 60)
-    
+
     # Validate environment
     validate_environment()
     
@@ -179,7 +239,13 @@ async def main():
         logger.error(f"❌ Failed to authenticate with Telegram: {e}")
         logger.error("Please check your TELEGRAM_TOKEN")
         sys.exit(1)
-    
+
+    # Register bot command menu
+    try:
+        await register_commands()
+    except Exception as e:
+        logger.warning(f"⚠️  Failed to register bot commands: {e}")
+
     # Start health check server
     try:
         await start_health_server()

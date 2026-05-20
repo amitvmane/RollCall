@@ -297,7 +297,6 @@ Templates (admin only):
 Ghost tracking (admin only):
 /toggle_ghost_tracking — Enable/disable no-show tracking
 /set_absent_limit N — Reconfirmation threshold
-/absent_stats — Ghost leaderboard
 /mark_absent — Mark no-shows from a past session
 /clear_absent name — Clear ghost count
 

@@ -73,6 +73,11 @@ _BUZZ_COOLDOWN_SECONDS = 30
 # Used by _update_panel() to edit the panel in-place instead of posting a new message.
 _panel_msg_ids: dict = {}
 
+# Louder mode: pending debounced panel sends. In louder mode, rapid votes are coalesced
+# into a single new panel message sent 5 minutes after the last vote.
+_pending_panel_updates: dict = {}
+_LOUDER_PANEL_DEBOUNCE_SECS = 300
+
 
 def _log_task_exc(task: asyncio.Task):
     """Done-callback for fire-and-forget tasks — logs any unhandled exception."""
@@ -1665,6 +1670,16 @@ async def in_user(message):
         elif result == 'AC':
             if not manager.get_shh_mode(cid):
                 await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
+        elif result is None:
+            if not manager.get_shh_mode(cid):
+                if isinstance(user.user_id, int):
+                    await bot.send_message(
+                        cid,
+                        f"{format_mention_with_name(user)} is now IN!",
+                        parse_mode="Markdown",
+                    )
+                else:
+                    await bot.send_message(cid, f"{user.name} is now IN!")
 
         # Always update panel (silently edits if shh mode is on)
         await _update_panel(cid, rc_number + 1, rc)
@@ -1826,8 +1841,18 @@ async def maybe_user(message):
                     )
                 else:
                     await bot.send_message(cid, f"{result.name} now you are in!")
-            
+
             asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
+        elif result is None:
+            if not manager.get_shh_mode(cid):
+                if isinstance(user.user_id, int):
+                    await bot.send_message(
+                        cid,
+                        f"{format_mention_with_name(user)} is now MAYBE!",
+                        parse_mode="Markdown",
+                    )
+                else:
+                    await bot.send_message(cid, f"{user.name} is now MAYBE!")
 
         # Always update panel (silently edits if shh mode is on)
         await _update_panel(cid, rc_number + 1, rc)
@@ -1938,20 +1963,13 @@ async def set_in_for(message):
             if result == 'AB':
                 raise duplicateProxy("No duplicate proxy please :-), Thanks!")
             elif result == 'AC':
-                await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
+                if not manager.get_shh_mode(cid):
+                    await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
             elif result == 'AA':
                 raise repeatlyName("That name already exists!")
-            elif isinstance(result, User):
-                # Just a simple confirmation; list is printed by send_list
+            elif result is None:
                 if not manager.get_shh_mode(cid):
-                    if isinstance(result.user_id, int):
-                        await bot.send_message(
-                            cid,
-                            f"{format_mention_with_name(result)} now you are in!",
-                            parse_mode="Markdown",
-                        )
-                    else:
-                        await bot.send_message(cid, f"{result.name} now you are in!")
+                    await bot.send_message(cid, f"{user.name} is now IN!")
             
             # Always show updated panel for this rollcall
             await show_panel_for_rollcall(cid, rc_number + 1)
@@ -2009,33 +2027,31 @@ async def set_out_for(message):
             if result == 'AB':
                 raise duplicateProxy("No duplicate proxy please :-), Thanks!")
             elif result == 'AC':
-                await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
+                if not manager.get_shh_mode(cid):
+                    await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
             elif result == 'AA':
                 raise repeatlyName("That name already exists!")
             elif isinstance(result, User):
                 # Someone moved from WAITING to IN
-                if isinstance(result.user_id, int):
-                    await bot.send_message(
-                        cid,
-                        f"{format_mention_with_name(result)} → IN",
-                        parse_mode="Markdown",
-                    )
-                    asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
-                else:
-                    await bot.send_message(cid, f"{result.name} → IN")
+                if not manager.get_shh_mode(cid):
+                    if isinstance(result.user_id, int):
+                        await bot.send_message(
+                            cid,
+                            f"{format_mention_with_name(result)} → IN",
+                            parse_mode="Markdown",
+                        )
+                    else:
+                        await bot.send_message(cid, f"{result.name} → IN")
+                asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
 
                 # Notify proxy creator if this is a proxy
                 await notify_proxy_owner_wait_to_in(rc, result, cid, rc.title, rc_number + 1)
-
-            # IN → OUT notification (short, proxies by name)
-            if was_in and any((u.user_id == user.user_id or u.name == user.name) for u in rc.outList):
-                await bot.send_message(
-                    cid,
-                    f"{user.name} → OUT for '{rc.title}' (#{rc_number + 1})",
-                )
-
-            #if send_list(message, manager):
-            #    await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number + 1)))
+            elif result is None:
+                if not manager.get_shh_mode(cid):
+                    if was_in:
+                        await bot.send_message(cid, f"{user.name} → OUT for '{rc.title}' (#{rc_number + 1})")
+                    else:
+                        await bot.send_message(cid, f"{user.name} is now OUT!")
 
             # Always show updated panel for this rollcall
             await show_panel_for_rollcall(cid, rc_number + 1)
@@ -2091,14 +2107,20 @@ async def set_maybe_for(message):
             if result == 'AB':
                 raise duplicateProxy("No duplicate proxy please :-), Thanks!")
             elif result == 'AC':
-                await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
+                if not manager.get_shh_mode(cid):
+                    await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
             elif result == 'AA':
                 raise repeatlyName("That name already exists!")
             elif isinstance(result, User):
-                if type(result.user_id) == int:
-                    await bot.send_message(cid, f"{'@'+result.username if result.username!=None else f'[{result.name}](tg://user?id={result.user_id})'} now you are in!", parse_mode="Markdown")
-                else:
-                    await bot.send_message(cid, f"{result.name} now you are in!")
+                # Someone moved from WAITING to IN
+                if not manager.get_shh_mode(cid):
+                    if type(result.user_id) == int:
+                        await bot.send_message(cid, f"{'@'+result.username if result.username!=None else f'[{result.name}](tg://user?id={result.user_id})'} now you are in!", parse_mode="Markdown")
+                    else:
+                        await bot.send_message(cid, f"{result.name} now you are in!")
+            elif result is None:
+                if not manager.get_shh_mode(cid):
+                    await bot.send_message(cid, f"{user.name} is now MAYBE!")
 
             # Always show updated panel for this rollcall
             await show_panel_for_rollcall(cid, rc_number + 1)
@@ -3135,14 +3157,48 @@ def _build_mention_list(users: list) -> str:
 
 async def _update_panel(cid: int, rc_number: int, rc, force_new: bool = False) -> None:
     """Update the status panel for a rollcall.
-    
-    If force_new is True, always sends a new message.
-    Otherwise, tries to edit the existing panel in-place to avoid pings.
+
+    shh mode    — edits the existing panel in-place (silent, no ping).
+    louder mode — debounces new panel messages: resets a 5-minute timer on every
+                  vote; one fresh panel is posted 5 minutes after the last vote.
+    force_new   — skips debounce and sends immediately (used by /panel command).
     """
+    key = (cid, rc_number)
+
+    # Lazily restore panel message ID from DB after a restart
+    if key not in _panel_msg_ids and getattr(rc, 'panel_msg_id', None):
+        _panel_msg_ids[key] = rc.panel_msg_id
+
+    if not force_new and not manager.get_shh_mode(cid):
+        # Louder mode: cancel any pending send and reschedule 5 minutes out.
+        existing = _pending_panel_updates.get(key)
+        if existing and not existing.done():
+            existing.cancel()
+
+        async def _delayed_send():
+            try:
+                await asyncio.sleep(_LOUDER_PANEL_DEBOUNCE_SECS)
+                _text = rc.allList().replace("__RCID__", str(rc_number))
+                _markup = await get_status_keyboard(rc_number)
+                sent = await bot.send_message(cid, _text, reply_markup=_markup)
+                _panel_msg_ids[key] = sent.message_id
+                _persist_panel_msg_id(rc, sent.message_id)
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logging.error(f"Debounced panel send failed for ({cid}, {rc_number}): {e}")
+            finally:
+                _pending_panel_updates.pop(key, None)
+
+        task = asyncio.create_task(_delayed_send())
+        task.add_done_callback(_log_task_exc)
+        _pending_panel_updates[key] = task
+        return
+
+    # shh mode or force_new: act immediately
     text = rc.allList().replace("__RCID__", str(rc_number))
     markup = await get_status_keyboard(rc_number)
-    key = (cid, rc_number)
-    
+
     if not force_new:
         existing_msg_id = _panel_msg_ids.get(key)
         if existing_msg_id:
@@ -3155,12 +3211,20 @@ async def _update_panel(cid: int, rc_number: int, rc, force_new: bool = False) -
                 err = str(e).lower()
                 if "message is not modified" in err:
                     return
-                # Fall through to send a new message if edit fails
                 logging.debug(f"Panel edit failed for ({cid}, {rc_number}): {e}")
 
     # Send a fresh panel and remember its ID
     sent = await bot.send_message(cid, text, reply_markup=markup)
     _panel_msg_ids[key] = sent.message_id
+    _persist_panel_msg_id(rc, sent.message_id)
+
+
+def _persist_panel_msg_id(rc, msg_id: int) -> None:
+    """Save panel message ID to DB so it survives bot restarts."""
+    rc_db_id = getattr(rc, 'db_id', None) or getattr(rc, 'id', None)
+    if rc_db_id:
+        rc.panel_msg_id = msg_id
+        db.update_rollcall(rc_db_id, panel_msg_id=msg_id)
 
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/panel")

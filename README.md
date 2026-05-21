@@ -5,7 +5,7 @@ A feature-rich Telegram bot for tracking event attendance in group chats. Member
 [![CI](https://github.com/amitvmane/RollCall/actions/workflows/ci.yml/badge.svg)](https://github.com/amitvmane/RollCall/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-7.2-green)](rollCall/version.json)
+[![Version](https://img.shields.io/badge/version-7.3-green)](rollCall/version.json)
 
 ---
 
@@ -303,6 +303,7 @@ See [version.json](rollCall/version.json) for the full version history.
 
 | Version | Highlights |
 |---|---|
+| **7.3** | Louder mode fixes — `/sif`/`/sof`/`/smf` acks restored, `/in`/`/maybe` acks added, shh gating for all proxy commands; panel debounce (5 min, non-blocking) in louder mode; panel message ID persisted across restarts; SQLite cursor leak fix |
 | **7.2** | Bot freeze fix (TCP session TTL), audit log 2.0 (pagination, 6 new tracked actions, RC name instead of ID), auto-close fix after restart, 12-bug final audit (naive datetime, release_connection on SQLite, schedule columns preserved on template update, panel ID shift after end, and more), `/schedules` multi-select panel |
 | **7.1** | Silent Mode hardening — `/shh` suppresses all confirmations and in-place panel edits; reminder loop and auto-close restored after bot restart; ID snapshot fix in auto-close messages |
 | **7.0** | Waitlist DMs, admin audit log (`/audit_log`), `/buzz` rate limiting, `/history` pagination, biweekly/monthly template schedules, `/set_status` manual override |

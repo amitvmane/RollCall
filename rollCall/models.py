@@ -96,6 +96,7 @@ class RollCall:
             raise Exception(f"RollCall with ID {db_id} not found")
         
         self.id = db_id
+        self.panel_msg_id = data.get('panel_msg_id')
         self.chat_id = data['chat_id']
         self.title = data['title']
         self.timezone = data['timezone']

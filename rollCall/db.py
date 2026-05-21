@@ -610,6 +610,20 @@ def _run_migrations(conn, cursor):
         except Exception:
             conn.rollback()
 
+    # Add panel_msg_id to rollcalls for cross-restart panel recovery
+    if db_type == 'postgresql':
+        try:
+            cursor.execute("ALTER TABLE rollcalls ADD COLUMN IF NOT EXISTS panel_msg_id BIGINT DEFAULT NULL")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    else:
+        try:
+            cursor.execute("ALTER TABLE rollcalls ADD COLUMN panel_msg_id INTEGER DEFAULT NULL")
+            conn.commit()
+        except Exception:
+            conn.rollback()  # column already exists — safe to ignore
+
     # Ensure admin_actions table exists (for databases created before this feature)
     if db_type == 'postgresql':
         try:
@@ -1051,17 +1065,15 @@ def get_all_chat_ids() -> List[int]:
     cursor = None
     try:
         cursor = conn.cursor()
-        if db_type == 'postgresql':
-            cursor.execute("SELECT chat_id FROM chats")
-        else:
-            cursor.execute("SELECT chat_id FROM chats")
+        cursor.execute("SELECT chat_id FROM chats")
         return [row['chat_id'] for row in cursor.fetchall()]
     except Exception as e:
         logging.error(f"Error fetching all chat IDs: {e}")
         return []
     finally:
-        if cursor is not None and db_type == 'postgresql':
+        if cursor is not None:
             cursor.close()
+        if db_type == 'postgresql' and conn:
             release_connection(conn)
 
 

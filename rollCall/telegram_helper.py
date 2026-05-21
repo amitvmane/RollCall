@@ -1478,7 +1478,8 @@ async def wait_limit(message):
                         )
             
             for u in moved_from_wait_to_in:
-                asyncio.create_task(_dm_promoted_real_user(u.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
+                if isinstance(u.user_id, int):
+                    asyncio.create_task(_dm_promoted_real_user(u.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
                 await notify_proxy_owner_wait_to_in(rc, u, cid, rc.title, rc_number + 1)
 
                 rc_db_id = get_rc_db_id(rc)
@@ -1764,7 +1765,8 @@ async def out_user(message):
                 else:
                     await bot.send_message(cid, f"{result.name} → IN")
             
-            asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
+            if isinstance(result.user_id, int):
+                asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
 
             # Notify proxy creator if this is a proxy
             await notify_proxy_owner_wait_to_in(rc, result, cid, rc.title, rc_number + 1)
@@ -1855,7 +1857,8 @@ async def maybe_user(message):
                 else:
                     await bot.send_message(cid, f"{result.name} now you are in!")
 
-            asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
+            if isinstance(result.user_id, int):
+                asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
 
             if rc_db_id is not None and isinstance(result.user_id, int):
                 increment_user_stat(cid, result.user_id, "total_waiting_to_in")
@@ -2061,7 +2064,8 @@ async def set_out_for(message):
                         )
                     else:
                         await bot.send_message(cid, f"{result.name} → IN")
-                asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
+                if isinstance(result.user_id, int):
+                    asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
 
                 # Notify proxy creator if this is a proxy
                 await notify_proxy_owner_wait_to_in(rc, result, cid, rc.title, rc_number + 1)

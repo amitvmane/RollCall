@@ -184,5 +184,11 @@
         "Description": "🔊 Louder Mode Fixes — /sif, /sof, /smf proxy commands now send correct ack messages in louder mode (dead code path fixed: addIn() returns None on success, not a User object); /in and /maybe also show 'X is now IN/MAYBE!' acks; all proxy command messages properly gated by shh mode. 📌 Panel Debounce — in louder mode, panel sends are debounced 5 minutes so rapid votes produce one panel update instead of flooding the chat; implemented with non-blocking asyncio.sleep. 💾 Panel Persistence — panel_msg_id column added to rollcalls table and lazily restored on restart so in-place edits continue working after a bot reboot. 🐛 SQLite cursor leak fix in get_all_chat_ids().",
         "DeployedOnProd": "N",
         "DeployedDatetime": "21-05-2026 00:00 UTC"
+    },
+    {
+        "Version": 7.4,
+        "Description": "🚀 Auto Panel on Start — /src and scheduled template auto-starts now immediately send the full inline vote panel (instead of plain text), so members can vote without any extra steps. 🎉 Ended-by Attribution — /erc and panel end now append 'Ended by <name>' to the finish message. 🐛 Production fix: panel_msg_id was never actually persisted (name 'db' is not defined error in _persist_panel_msg_id — update_rollcall was not imported as a function); panel persistence now works correctly across restarts. 🛡️ Guard: _dm_promoted_real_user is now only called when user_id is an int (all 5 call sites guarded), preventing silent errors for proxy users promoted from waitlist. 📌 Debounce cancel on end — pending panel debounce tasks are now cancelled when a rollcall ends (/erc or panel end) to prevent stale panel sends. ⚡ Rate limit on panel buttons — btn_in/out/maybe callbacks now apply the same rate-limit check as the equivalent commands.",
+        "DeployedOnProd": "N",
+        "DeployedDatetime": "21-05-2026 00:00 UTC"
     }
 ]

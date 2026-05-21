@@ -114,6 +114,18 @@ async def check(rollcalls, timezone, chat_id):
                         if rollcall in rollcalls:
                             rollcalls.remove(rollcall)
 
+                        # Cancel any pending debounce and clean up panel state
+                        try:
+                            from telegram_helper import _cancel_panel_debounce, _panel_msg_ids, _pending_panel_updates
+                            _cancel_panel_debounce(chat_id, rc_number)
+                            _panel_msg_ids.pop((chat_id, rc_number), None)
+                            for num in sorted(n for (c, n) in list(_panel_msg_ids) if c == chat_id and n > rc_number):
+                                _panel_msg_ids[(chat_id, num - 1)] = _panel_msg_ids.pop((chat_id, num))
+                            for num in sorted(n for (c, n) in list(_pending_panel_updates) if c == chat_id and n > rc_number):
+                                _pending_panel_updates[(chat_id, num - 1)] = _pending_panel_updates.pop((chat_id, num))
+                        except Exception:
+                            pass
+
                         rollcall.finalizeDate = None
                         continue
 
@@ -314,7 +326,7 @@ async def check_template_schedules():
                             if (now.date() - last_dt).days < 14:
                                 continue
                         except (ValueError, TypeError):
-                            pass
+                            continue
                 else:
                     # weekly (default)
                     if today_name != schedule_day.lower():

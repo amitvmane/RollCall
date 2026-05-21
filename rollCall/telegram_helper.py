@@ -2623,8 +2623,8 @@ async def build_bot_stats_text() -> str:
         return "\n".join(lines)
         
     finally:
+        cursor.close()
         if db_type == "postgresql":
-            cursor.close()
             from db import release_connection
             release_connection(conn)
 
@@ -2754,8 +2754,8 @@ async def build_leaderboard_text(chat_id: int, limit: int = 10) -> str:
 
         return "\n".join(lines)
     finally:
+        cursor.close()
         if db_type == "postgresql":
-            cursor.close()
             from db import release_connection
             release_connection(conn)
 
@@ -2849,8 +2849,8 @@ async def resolve_user_for_stats(chat_id: int, arg: str):
 
         return user_id, first_name or arg
     finally:
+        cursor.close()
         if db_type == "postgresql":
-            cursor.close()
             from db import release_connection
             release_connection(conn)
 
@@ -2919,8 +2919,8 @@ async def build_user_stats_text(chat_id: int, user_id: int, first_name: str) -> 
         ]
         return "\n".join(lines)
     finally:
+        cursor.close()
         if db_type == "postgresql":
-            cursor.close()
             from db import release_connection
             release_connection(conn)
 
@@ -2986,8 +2986,8 @@ async def build_group_stats_text(chat_id: int) -> str:
         ]
         return "\n".join(lines)
     finally:
+        cursor.close()
         if db_type == "postgresql":
-            cursor.close()
             from db import release_connection
             release_connection(conn)
 
@@ -3723,15 +3723,14 @@ async def ghost_callback_handler(call):
             proxy_owner_id = call.from_user.id
             rc.set_proxy_owner(proxy_name, proxy_owner_id)
             
+            result = rc.addIn(user)
             add_or_update_proxy_user(
                 rc.id,
                 proxy_name,
-                "in",
+                "waitlist" if result == 'AC' else "in",
                 "",
                 proxy_owner_id=proxy_owner_id,
             )
-            
-            result = rc.addIn(user)
             rc.save()
 
             await bot.answer_callback_query(call.id, f"✅ Added {proxy_name}")
@@ -4275,7 +4274,8 @@ async def callback_handler(call):
                         new_id = idx + 1
                         text = rollcall.allList().replace("__RCID__", str(new_id))
                         markup = await get_status_keyboard(new_id)
-                        await bot.send_message(cid, text, reply_markup=markup)
+                        sent = await bot.send_message(cid, text, reply_markup=markup)
+                        _panel_msg_ids[(cid, new_id)] = sent.message_id
             return
 
         # --------------------------------------------------------------

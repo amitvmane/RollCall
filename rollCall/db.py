@@ -413,9 +413,17 @@ def create_tables():
                     proxy_name TEXT,
                     user_name TEXT,
                     ghost_count INTEGER DEFAULT 0,
-                    last_ghosted_at TIMESTAMP,
-                    UNIQUE(chat_id, COALESCE(proxy_name, user_id::text))
+                    last_ghosted_at TIMESTAMP
                 )
+            """)
+            # Partial unique indexes so ON CONFLICT (col) WHERE ... works correctly
+            cursor.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS ghost_records_proxy_unique
+                ON ghost_records(chat_id, proxy_name) WHERE proxy_name IS NOT NULL
+            """)
+            cursor.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS ghost_records_user_unique
+                ON ghost_records(chat_id, user_id) WHERE proxy_name IS NULL
             """)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS ghost_events (
@@ -657,6 +665,40 @@ def _run_migrations(conn, cursor):
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+    # PostgreSQL: replace COALESCE expression constraint on ghost_records with partial unique indexes
+    # (the expression constraint caused ON CONFLICT clauses to fail at runtime)
+    if db_type == 'postgresql':
+        try:
+            cursor.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS ghost_records_proxy_unique
+                ON ghost_records(chat_id, proxy_name) WHERE proxy_name IS NOT NULL
+            """)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        try:
+            cursor.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS ghost_records_user_unique
+                ON ghost_records(chat_id, user_id) WHERE proxy_name IS NULL
+            """)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        # Drop old COALESCE expression constraint if it still exists
+        try:
+            cursor.execute("""
+                SELECT conname FROM pg_constraint
+                WHERE conrelid = 'ghost_records'::regclass AND contype = 'u'
+                AND conname LIKE '%coalesce%'
+            """)
+            rows = cursor.fetchall()
+            for row in rows:
+                conname = row[0] if not isinstance(row, dict) else row["conname"]
+                cursor.execute(f"ALTER TABLE ghost_records DROP CONSTRAINT IF EXISTS {conname}")
             conn.commit()
         except Exception:
             conn.rollback()
@@ -1842,7 +1884,7 @@ def increment_ghost_count(chat_id: int, user_id: int, user_name: str, proxy_name
                 cursor.execute(
                     """INSERT INTO ghost_records (chat_id, user_id, proxy_name, user_name, ghost_count, last_ghosted_at)
                        VALUES (%s, %s, %s, %s, 1, CURRENT_TIMESTAMP)
-                       ON CONFLICT (chat_id, proxy_name) DO UPDATE
+                       ON CONFLICT (chat_id, proxy_name) WHERE proxy_name IS NOT NULL DO UPDATE
                        SET ghost_count = ghost_records.ghost_count + 1,
                            user_name = EXCLUDED.user_name,
                            last_ghosted_at = CURRENT_TIMESTAMP""",
@@ -1852,7 +1894,7 @@ def increment_ghost_count(chat_id: int, user_id: int, user_name: str, proxy_name
                 cursor.execute(
                     """INSERT INTO ghost_records (chat_id, user_id, user_name, ghost_count, last_ghosted_at)
                        VALUES (%s, %s, %s, 1, CURRENT_TIMESTAMP)
-                       ON CONFLICT (chat_id, user_id) DO UPDATE
+                       ON CONFLICT (chat_id, user_id) WHERE proxy_name IS NULL DO UPDATE
                        SET ghost_count = ghost_records.ghost_count + 1,
                            user_name = EXCLUDED.user_name,
                            last_ghosted_at = CURRENT_TIMESTAMP""",

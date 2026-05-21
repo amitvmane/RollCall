@@ -78,11 +78,9 @@ async def check(rollcalls, timezone, chat_id):
                     if now_date >= finalize_dt:
                         logging.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Rollcall #{rc_number} started: {rollcall.title}")
                         if not manager.get_shh_mode(chat_id):
-                            await bot.send_message(
-                                chat_id,
-                                f"Event with title - {rollcall.title} is started ! Have a good time. Cheers!\n\n"
-                                f"{rollcall.finishList().replace('__RCID__', str(rc_number))}"
-                            )
+                            finish_text = rollcall.finishList().replace('__RCID__', str(rc_number))
+                            finish_text = f"{finish_text}\n\n🕐 Auto-closed at scheduled time"
+                            await bot.send_message(chat_id, finish_text)
 
                         rc_db_id = getattr(rollcall, "db_id", None) or getattr(rollcall, "id", None)
 
@@ -227,15 +225,27 @@ async def _auto_start_from_template(chat_id: int, tmpl: dict):
 
     rc.save()
 
-    close_info = ""
-    if rc.finalizeDate:
-        close_info = f"\nCloses: {rc.finalizeDate.strftime('%A, %d %b at %H:%M')}"
+    rc_index = len(rollcalls) - 1  # 0-based; rc was just appended by add_rollcall
+    rc_number = rc_index + 1       # 1-based display number
 
-    await bot.send_message(
-        chat_id,
-        f"📋 *{title}* rollcall is now open!{close_info}\nVote with /in or /out.",
-        parse_mode="Markdown"
-    )
+    # Send the full rollcall panel with inline vote buttons
+    try:
+        from telegram_helper import get_status_keyboard, _panel_msg_ids
+        markup = await get_status_keyboard(rc_number)
+        text = rc.allList().replace("__RCID__", str(rc_number))
+        sent = await bot.send_message(chat_id, text, reply_markup=markup, parse_mode=None)
+        _panel_msg_ids[(chat_id, rc_number)] = sent.message_id
+    except Exception:
+        # Fallback: plain announcement if panel send fails
+        close_info = ""
+        if rc.finalizeDate:
+            close_info = f"\nCloses: {rc.finalizeDate.strftime('%A, %d %b at %H:%M')}"
+        await bot.send_message(
+            chat_id,
+            f"📋 *{title}* rollcall is now open!{close_info}\nVote with /in or /out.",
+            parse_mode="Markdown"
+        )
+
     logging.info(
         f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
         f"Auto-started template '{tmpl['name']}' for chat {chat_id}"

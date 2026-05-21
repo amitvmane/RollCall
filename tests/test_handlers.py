@@ -768,7 +768,7 @@ class TestEndRollCall(HandlerTestBase):
         with self._rc_started(), self._admin_ok(), self._patch_manager():
             await self.th.end_roll_call(msg)
         texts = [c[0][1] for c in self.th.bot.send_message.call_args_list]
-        self.assertTrue(any("Roll ended" in t for t in texts))
+        self.assertTrue(any("Ended by" in t for t in texts))
 
 
 # ===========================================================================

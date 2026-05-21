@@ -827,8 +827,9 @@ async def start_roll_call(message):
         rc = manager.add_rollcall(cid, title)
         logging.info(f"[{_ts()}] [CHAT {cid}] Rollcall started: '{title}' (RC #{rc_index+1}) by {message.from_user.first_name} (@{message.from_user.username})")
         log_admin_action(cid, message.from_user.id, message.from_user.first_name, "new_rollcall", target_name=title)
-        markup = await get_status_keyboard(rc_index+1)
-        sent = await bot.send_message(message.chat.id, f"Roll call '{title}' started! ID: {rc_index+1}\nUse buttons below:", reply_markup=markup)
+        markup = await get_status_keyboard(rc_index + 1)
+        text = rc.allList().replace("__RCID__", str(rc_index + 1))
+        sent = await bot.send_message(message.chat.id, text, reply_markup=markup)
         _panel_msg_ids[(cid, rc_index + 1)] = sent.message_id
         #await bot.send_message(message.chat.id, f"Roll call with title: {title} started!\nRollcall id is set to {rc_index + 1}\nTo vote for this RollCall, please use ::RollCallID eg. /in ::{rc_index + 1}")
 
@@ -1102,7 +1103,7 @@ async def set_rollcall_time(message):
             except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
         rollcalls = manager.get_rollcalls(cid)
-        if len(rollcalls) < rc_number + 1:
+        if rc_number < 0 or len(rollcalls) < rc_number + 1:
             raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
         rc = manager.get_rollcall(cid, rc_number)
         # CANCEL THE CURRENT REMINDER TIME
@@ -1173,7 +1174,7 @@ async def reminder(message):
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
             rollcalls = manager.get_rollcalls(cid)
-            if len(rollcalls) < rc_number + 1:
+            if rc_number < 0 or len(rollcalls) < rc_number + 1:
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
         
         rc = manager.get_rollcall(cid, rc_number)
@@ -1243,7 +1244,7 @@ async def event_fee(message):
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
             rollcalls = manager.get_rollcalls(cid)
-            if len(rollcalls) < rc_number + 1:
+            if rc_number < 0 or len(rollcalls) < rc_number + 1:
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         rc = manager.get_rollcall(cid, rc_number)
@@ -1288,7 +1289,7 @@ async def individual_fee(message):
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
             rollcalls = manager.get_rollcalls(cid)
-            if len(rollcalls) < rc_number + 1:
+            if rc_number < 0 or len(rollcalls) < rc_number + 1:
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         rc = manager.get_rollcall(cid, rc_number)
@@ -1331,7 +1332,7 @@ async def when(message):
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
             rollcalls = manager.get_rollcalls(cid)
-            if len(rollcalls) < rc_number + 1:
+            if rc_number < 0 or len(rollcalls) < rc_number + 1:
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         rc = manager.get_rollcall(cid, rc_number)
@@ -1368,7 +1369,7 @@ async def set_location(message):
             except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
         rollcalls = manager.get_rollcalls(cid)
-        if len(rollcalls) < rc_number + 1:
+        if rc_number < 0 or len(rollcalls) < rc_number + 1:
             raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
         place = " ".join(pmts)
         rc = manager.get_rollcall(cid, rc_number)
@@ -1419,7 +1420,7 @@ async def wait_limit(message):
         limit = int(pmts[0])
 
         rollcalls = manager.get_rollcalls(cid)
-        if len(rollcalls) < rc_number + 1:
+        if rc_number < 0 or len(rollcalls) < rc_number + 1:
             raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         rc = manager.get_rollcall(cid, rc_number)
@@ -1527,7 +1528,7 @@ async def delete_user(message):
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
             rollcalls = manager.get_rollcalls(cid)
-            if len(rollcalls) < rc_number + 1:
+            if rc_number < 0 or len(rollcalls) < rc_number + 1:
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         name = " ".join(arr[1:])
@@ -1622,7 +1623,7 @@ async def in_user(message):
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
         rollcalls = manager.get_rollcalls(cid)
-        if len(rollcalls) < rc_number + 1:
+        if rc_number < 0 or len(rollcalls) < rc_number + 1:
             raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         rc = manager.get_rollcall(cid, rc_number)
@@ -1717,7 +1718,7 @@ async def out_user(message):
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
         rollcalls = manager.get_rollcalls(cid)
-        if len(rollcalls) < rc_number + 1:
+        if rc_number < 0 or len(rollcalls) < rc_number + 1:
             raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         rc = manager.get_rollcall(cid, rc_number)
@@ -1768,6 +1769,11 @@ async def out_user(message):
             # Notify proxy creator if this is a proxy
             await notify_proxy_owner_wait_to_in(rc, result, cid, rc.title, rc_number + 1)
 
+            if rc_db_id is not None and isinstance(result.user_id, int):
+                increment_user_stat(cid, result.user_id, "total_waiting_to_in")
+                increment_user_stat(cid, result.user_id, "total_in")
+                increment_rollcall_stat(rc_db_id, "total_in")
+
         # IN → OUT notification
         if was_in and any(u.user_id == user.user_id for u in rc.outList):
             if not manager.get_shh_mode(cid):
@@ -1806,7 +1812,7 @@ async def maybe_user(message):
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
         rollcalls = manager.get_rollcalls(cid)
-        if len(rollcalls) < rc_number + 1:
+        if rc_number < 0 or len(rollcalls) < rc_number + 1:
             raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         rc = manager.get_rollcall(cid, rc_number)
@@ -1850,6 +1856,12 @@ async def maybe_user(message):
                     await bot.send_message(cid, f"{result.name} now you are in!")
 
             asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
+
+            if rc_db_id is not None and isinstance(result.user_id, int):
+                increment_user_stat(cid, result.user_id, "total_waiting_to_in")
+                increment_user_stat(cid, result.user_id, "total_in")
+                increment_rollcall_stat(rc_db_id, "total_in")
+
         elif result is None:
             if not manager.get_shh_mode(cid):
                 if isinstance(user.user_id, int):
@@ -1896,7 +1908,7 @@ async def set_in_for(message):
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
         rollcalls = manager.get_rollcalls(cid)
-        if len(rollcalls) < rc_number + 1:
+        if rc_number < 0 or len(rollcalls) < rc_number + 1:
             raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         rc = manager.get_rollcall(cid, rc_number)
@@ -2012,7 +2024,7 @@ async def set_out_for(message):
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
         rollcalls = manager.get_rollcalls(cid)
-        if len(rollcalls) < rc_number + 1:
+        if rc_number < 0 or len(rollcalls) < rc_number + 1:
             raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         rc = manager.get_rollcall(cid, rc_number)
@@ -2095,7 +2107,7 @@ async def set_maybe_for(message):
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
             rollcalls = manager.get_rollcalls(cid)
-            if len(rollcalls) < rc_number + 1:
+            if rc_number < 0 or len(rollcalls) < rc_number + 1:
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
         
         rc = manager.get_rollcall(cid, rc_number)
@@ -2153,7 +2165,7 @@ async def whos_in(message):
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
             rollcalls = manager.get_rollcalls(cid)
-            if len(rollcalls) < rc_number + 1:
+            if rc_number < 0 or len(rollcalls) < rc_number + 1:
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
         
         rc = manager.get_rollcall(cid, rc_number)
@@ -2181,7 +2193,7 @@ async def whos_out(message):
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
             rollcalls = manager.get_rollcalls(cid)
-            if len(rollcalls) < rc_number + 1:
+            if rc_number < 0 or len(rollcalls) < rc_number + 1:
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
         
         rc = manager.get_rollcall(cid, rc_number)
@@ -2209,7 +2221,7 @@ async def whos_maybe(message):
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
             rollcalls = manager.get_rollcalls(cid)
-            if len(rollcalls) < rc_number + 1:
+            if rc_number < 0 or len(rollcalls) < rc_number + 1:
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
         
         rc = manager.get_rollcall(cid, rc_number)
@@ -2237,7 +2249,7 @@ async def whos_waiting(message):
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
             rollcalls = manager.get_rollcalls(cid)
-            if len(rollcalls) < rc_number + 1:
+            if rc_number < 0 or len(rollcalls) < rc_number + 1:
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
         
         rc = manager.get_rollcall(cid, rc_number)
@@ -2272,7 +2284,7 @@ async def set_title(message):
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
             rollcalls = manager.get_rollcalls(cid)
-            if len(rollcalls) < rc_number + 1:
+            if rc_number < 0 or len(rollcalls) < rc_number + 1:
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
                 
         title = " ".join(pmts)
@@ -2315,7 +2327,7 @@ async def end_roll_call(message):
 
         async with manager.get_erc_lock(cid):
             rollcalls = manager.get_rollcalls(cid)
-            if len(rollcalls) < rc_number + 1:
+            if rc_number < 0 or len(rollcalls) < rc_number + 1:
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
             rc = manager.get_rollcall(cid, rc_number)
             # Capture info before removing from manager
@@ -2333,8 +2345,10 @@ async def end_roll_call(message):
                     update_streak_on_checkin(cid, u.user_id)
 
             # End current rollcall
-            await bot.send_message(message.chat.id, "🎉 Roll ended!")
-            await bot.send_message(cid, rc.finishList().replace("__RCID__", str(rc_number + 1)))
+            ended_by = message.from_user.first_name or message.from_user.username or "someone"
+            finish_text = rc.finishList().replace("__RCID__", str(rc_number + 1))
+            finish_text = f"{finish_text}\n\n🎉 Ended by {ended_by}"
+            await bot.send_message(cid, finish_text)
             logging.info(f"[{_ts()}] Rollcall ended: '{rc.title}' (RC #{rc_number+1})")
             _panel_msg_ids.pop((cid, rc_number + 1), None)
             _cancel_panel_debounce(cid, rc_number + 1)
@@ -3263,7 +3277,7 @@ async def show_panel(message):
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
         rollcalls = manager.get_rollcalls(cid)
-        if len(rollcalls) < rc_number + 1:
+        if rc_number < 0 or len(rollcalls) < rc_number + 1:
             raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         rc = manager.get_rollcall(cid, rc_number)
@@ -3715,12 +3729,10 @@ async def ghost_callback_handler(call):
             
             result = rc.addIn(user)
             rc.save()
-            
+
             await bot.answer_callback_query(call.id, f"✅ Added {proxy_name}")
             await bot.edit_message_text(f"✅ {proxy_name} added to IN list", cid, call.message.message_id)
-            
-            # Send updated list
-            await bot.send_message(cid, rc.allList().replace("__RCID__", str(rc_number + 1)))
+            await _update_panel(cid, rc_number + 1, rc, force_new=True)
             return
         
         # ----------------------------------------------------------------
@@ -3900,6 +3912,9 @@ async def callback_handler(call):
         # Status actions: IN / OUT / MAYBE
         # --------------------------------------------------------------
         if action in ("in", "out", "maybe"):
+            if _is_rate_limited(cid, call.from_user.id):
+                await bot.answer_callback_query(call.id, "You're voting too fast — please wait a moment.")
+                return
             _username = call.from_user.username or None
             if not _username:
                 asyncio.create_task(warn_no_username(cid, call.from_user.first_name)).add_done_callback(_log_task_exc)
@@ -4635,7 +4650,7 @@ async def set_status_override(message):
         name = " ".join(parts[1:-1])
 
         rollcalls = manager.get_rollcalls(cid)
-        if len(rollcalls) < rc_number + 1:
+        if rc_number < 0 or len(rollcalls) < rc_number + 1:
             raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         rc = manager.get_rollcall(cid, rc_number)

@@ -92,7 +92,7 @@ async def check(rollcalls, timezone, chat_id):
                                 try:
                                     update_streak_on_checkin(chat_id, u.user_id)
                                 except Exception:
-                                    pass
+                                    logging.warning(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to update streak for user {u.user_id} in chat {chat_id}: {traceback.format_exc()}")
 
                         if rc_db_id is not None:
                             end_rollcall(rc_db_id)

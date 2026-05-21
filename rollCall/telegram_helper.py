@@ -79,6 +79,13 @@ _pending_panel_updates: dict = {}
 _LOUDER_PANEL_DEBOUNCE_SECS = 300
 
 
+def _cancel_panel_debounce(cid: int, rc_number: int) -> None:
+    """Cancel a pending debounced panel send when a rollcall ends."""
+    task = _pending_panel_updates.pop((cid, rc_number), None)
+    if task and not task.done():
+        task.cancel()
+
+
 def _log_task_exc(task: asyncio.Task):
     """Done-callback for fire-and-forget tasks — logs any unhandled exception."""
     if not task.cancelled() and task.exception():
@@ -2330,10 +2337,13 @@ async def end_roll_call(message):
             await bot.send_message(cid, rc.finishList().replace("__RCID__", str(rc_number + 1)))
             logging.info(f"[{_ts()}] Rollcall ended: '{rc.title}' (RC #{rc_number+1})")
             _panel_msg_ids.pop((cid, rc_number + 1), None)
+            _cancel_panel_debounce(cid, rc_number + 1)
             manager.remove_rollcall(cid, rc_number)
-            # Shift panel IDs for rollcalls that moved down after the removal
+            # Shift panel IDs and pending debounce tasks for rollcalls that moved down
             for num in sorted(n for (c, n) in list(_panel_msg_ids) if c == cid and n > rc_number + 1):
                 _panel_msg_ids[(cid, num - 1)] = _panel_msg_ids.pop((cid, num))
+            for num in sorted(n for (c, n) in list(_pending_panel_updates) if c == cid and n > rc_number + 1):
+                _pending_panel_updates[(cid, num - 1)] = _pending_panel_updates.pop((cid, num))
             logging.info(f"[{_ts()}] [CHAT {cid}] Rollcall ended: '{rc.title}' by {message.from_user.first_name} (@{message.from_user.username})")
             log_admin_action(cid, message.from_user.id, message.from_user.first_name, "end_rollcall", target_name=rc.title)
             # Ghost tracking prompt - ask if ANY users were in rollcall (real OR proxy)
@@ -4216,10 +4226,13 @@ async def callback_handler(call):
 
                 logging.info(f"[{_ts()}] [CHAT {cid}] Rollcall ended: '{rc.title}' by {ended_by} (panel)")
                 _panel_msg_ids.pop((cid, rc_number), None)
+                _cancel_panel_debounce(cid, rc_number)
                 manager.remove_rollcall(cid, rc_number - 1)
-                # Shift panel IDs for rollcalls that moved down after the removal
+                # Shift panel IDs and pending debounce tasks for rollcalls that moved down
                 for num in sorted(n for (c, n) in list(_panel_msg_ids) if c == cid and n > rc_number):
                     _panel_msg_ids[(cid, num - 1)] = _panel_msg_ids.pop((cid, num))
+                for num in sorted(n for (c, n) in list(_pending_panel_updates) if c == cid and n > rc_number):
+                    _pending_panel_updates[(cid, num - 1)] = _pending_panel_updates.pop((cid, num))
 
                 # Ghost tracking prompt — mirrors /erc command behaviour
                 if ghost_tracking_on and has_any_users and rc_db_id and not absent_already_marked:

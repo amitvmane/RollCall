@@ -28,7 +28,7 @@ from check_reminders import start
 from rollcall_manager import manager
 import traceback
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from db import add_or_update_proxy_user
+from db import add_or_update_proxy_user, update_rollcall
 from db import increment_user_stat, increment_rollcall_stat
 from db import create_or_update_template, get_templates, get_template, delete_template
 from db import set_template_schedule, disable_template_schedule, enable_template_schedule
@@ -3224,7 +3224,7 @@ def _persist_panel_msg_id(rc, msg_id: int) -> None:
     rc_db_id = getattr(rc, 'db_id', None) or getattr(rc, 'id', None)
     if rc_db_id:
         rc.panel_msg_id = msg_id
-        db.update_rollcall(rc_db_id, panel_msg_id=msg_id)
+        update_rollcall(rc_db_id, panel_msg_id=msg_id)
 
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/panel")

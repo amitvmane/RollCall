@@ -3216,7 +3216,8 @@ async def _update_panel(cid: int, rc_number: int, rc, force_new: bool = False) -
             except Exception as e:
                 logging.error(f"Debounced panel send failed for ({cid}, {rc_number}): {e}")
             finally:
-                _pending_panel_updates.pop(key, None)
+                if _pending_panel_updates.get(key) is asyncio.current_task():
+                    _pending_panel_updates.pop(key, None)
 
         task = asyncio.create_task(_delayed_send())
         task.add_done_callback(_log_task_exc)

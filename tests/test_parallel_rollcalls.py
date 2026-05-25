@@ -13,11 +13,10 @@ Covers:
 import sys
 import os
 import unittest
+from contextlib import ExitStack
 from unittest.mock import MagicMock, AsyncMock, patch, mock_open
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "rollCall"))
-
-import telegram_helper as th
 
 
 class TestParallelRollcallsBase(unittest.IsolatedAsyncioTestCase):
@@ -25,12 +24,39 @@ class TestParallelRollcallsBase(unittest.IsolatedAsyncioTestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.th = th
+        import bot_state
+        from handlers.voting import in_user, out_user, maybe_user
+        from handlers.lifecycle import (
+            start_roll_call, end_roll_call, set_title, show_panel_for_rollcall,
+        )
+        from handlers.proxy import set_in_for
+        from handlers.lists import whos_in, whos_out, whos_maybe, whos_waiting
+        from handlers.admin import delete_user
+        from handlers.settings import wait_limit, event_fee, set_location
+
+        cls.bot_state = bot_state
+        cls.in_user = in_user
+        cls.out_user = out_user
+        cls.maybe_user = maybe_user
+        cls.start_roll_call = start_roll_call
+        cls.end_roll_call = end_roll_call
+        cls.set_title = set_title
+        cls.show_panel_for_rollcall = show_panel_for_rollcall
+        cls.set_in_for = set_in_for
+        cls.whos_in = whos_in
+        cls.whos_out = whos_out
+        cls.whos_maybe = whos_maybe
+        cls.whos_waiting = whos_waiting
+        cls.delete_user = delete_user
+        cls.wait_limit = wait_limit
+        cls.event_fee = event_fee
+        cls.set_location = set_location
 
     def setUp(self):
-        self.th.bot.send_message = AsyncMock()
-        self.th.bot.get_chat_member = AsyncMock()
-        self.th._rate_limits.clear()
+        self.bot_state.bot.send_message = AsyncMock()
+        self.bot_state.bot.get_chat_member = AsyncMock()
+        self.bot_state._rate_limits.clear()
+        self.bot_state._pending_deletes.clear()
         self.rc = self._make_rc()
         self.manager = self._make_manager([self.rc])
 
@@ -84,22 +110,65 @@ class TestParallelRollcallsBase(unittest.IsolatedAsyncioTestCase):
         return m
 
     def _sent_text(self, call_index=0):
-        return self.th.bot.send_message.call_args_list[call_index][0][1]
+        return self.bot_state.bot.send_message.call_args_list[call_index][0][1]
 
     def _sent_count(self):
-        return self.th.bot.send_message.call_count
+        return self.bot_state.bot.send_message.call_count
 
     def _rc_not_started(self):
-        return patch('telegram_helper.roll_call_not_started', return_value=False)
+        return _MultiPatch([
+            patch('handlers.voting.roll_call_not_started', return_value=False),
+            patch('handlers.lifecycle.roll_call_not_started', return_value=False),
+            patch('handlers.proxy.roll_call_not_started', return_value=False),
+            patch('handlers.lists.roll_call_not_started', return_value=False),
+            patch('handlers.admin.roll_call_not_started', return_value=False),
+            patch('handlers.settings.roll_call_not_started', return_value=False),
+        ])
 
     def _rc_started(self):
-        return patch('telegram_helper.roll_call_not_started', return_value=True)
+        return _MultiPatch([
+            patch('handlers.voting.roll_call_not_started', return_value=True),
+            patch('handlers.lifecycle.roll_call_not_started', return_value=True),
+            patch('handlers.proxy.roll_call_not_started', return_value=True),
+            patch('handlers.lists.roll_call_not_started', return_value=True),
+            patch('handlers.admin.roll_call_not_started', return_value=True),
+            patch('handlers.settings.roll_call_not_started', return_value=True),
+        ])
 
     def _admin_ok(self):
-        return patch('telegram_helper.admin_rights', new=AsyncMock(return_value=True))
+        return _MultiPatch([
+            patch('handlers.lifecycle.admin_rights', new=AsyncMock(return_value=True)),
+            patch('handlers.proxy.admin_rights', new=AsyncMock(return_value=True)),
+            patch('handlers.admin.admin_rights', new=AsyncMock(return_value=True)),
+            patch('handlers.settings.admin_rights', new=AsyncMock(return_value=True)),
+        ])
 
     def _patch_manager(self):
-        return patch('telegram_helper.manager', self.manager)
+        return _MultiPatch([
+            patch('handlers.voting.manager', self.manager),
+            patch('handlers.lifecycle.manager', self.manager),
+            patch('handlers.proxy.manager', self.manager),
+            patch('handlers.lists.manager', self.manager),
+            patch('handlers.admin.manager', self.manager),
+            patch('handlers.settings.manager', self.manager),
+        ])
+
+
+class _MultiPatch:
+    """Context manager that enters/exits multiple patches at once."""
+
+    def __init__(self, patches):
+        self._patches = patches
+        self._stack = None
+
+    def __enter__(self):
+        self._stack = ExitStack()
+        for p in self._patches:
+            self._stack.enter_context(p)
+        return self
+
+    def __exit__(self, *args):
+        self._stack.__exit__(*args)
 
 
 class TestMultipleRollcallCreation(TestParallelRollcallsBase):
@@ -113,14 +182,14 @@ class TestMultipleRollcallCreation(TestParallelRollcallsBase):
         rc1 = self._make_rc("Event 1", 1)
         rc2 = self._make_rc("Event 2", 2)
         mgr = self._make_manager([rc1, rc2])
-        
+
         # Already has 2 rollcalls, now add one more
         msg = self._make_message("/start_roll_call Event 3")
         with self._db_json_patch(), self._admin_ok(), \
-             patch('telegram_helper.manager', mgr), \
-             patch('telegram_helper.get_status_keyboard', new=AsyncMock(return_value=MagicMock())):
-            await self.th.start_roll_call(msg)
-        
+             patch('handlers.lifecycle.manager', mgr), \
+             patch('handlers.lifecycle.get_status_keyboard', new=AsyncMock(return_value=MagicMock())):
+            await self.start_roll_call(msg)
+
         # add_rollcall should have been called
         self.assertEqual(mgr.add_rollcall.call_count, 1)
 
@@ -140,12 +209,12 @@ class TestRollcallSelectionByIndex(TestParallelRollcallsBase):
         mgr.get_rollcall.return_value = rc2
 
         msg = self._make_message("/in ::2")
-        with self._rc_started(), patch('telegram_helper.manager', mgr), \
-             patch('telegram_helper.send_list', return_value=False), \
-             patch('telegram_helper.increment_user_stat'), \
-             patch('telegram_helper.increment_rollcall_stat'), \
-             patch('telegram_helper.get_rc_db_id', return_value=2):
-            await self.th.in_user(msg)
+        with self._rc_started(), patch('handlers.voting.manager', mgr), \
+             patch('handlers.lifecycle._update_panel', return_value=False), \
+             patch('handlers.voting.increment_user_stat'), \
+             patch('handlers.voting.increment_rollcall_stat'), \
+             patch('handlers.voting.get_rc_db_id', return_value=2):
+            await self.in_user(msg)
 
         mgr.get_rollcall.assert_called_with(100, 1)
         rc2.addIn.assert_called_once()
@@ -163,13 +232,13 @@ class TestRollcallSelectionByIndex(TestParallelRollcallsBase):
         mgr.get_rollcall.return_value = rc3
 
         msg = self._make_message("/out ::3")
-        with self._rc_started(), patch('telegram_helper.manager', mgr), \
-             patch('telegram_helper.send_list', return_value=False), \
-             patch('telegram_helper.increment_user_stat'), \
-             patch('telegram_helper.increment_rollcall_stat'), \
-             patch('telegram_helper.get_rc_db_id', return_value=3), \
-             patch('telegram_helper.notify_proxy_owner_wait_to_in', new=AsyncMock()):
-            await self.th.out_user(msg)
+        with self._rc_started(), patch('handlers.voting.manager', mgr), \
+             patch('handlers.lifecycle._update_panel', return_value=False), \
+             patch('handlers.voting.increment_user_stat'), \
+             patch('handlers.voting.increment_rollcall_stat'), \
+             patch('handlers.voting.get_rc_db_id', return_value=3), \
+             patch('handlers.lifecycle.notify_proxy_owner_wait_to_in', new=AsyncMock()):
+            await self.out_user(msg)
 
         mgr.get_rollcall.assert_called_with(100, 2)
         rc3.addOut.assert_called_once()
@@ -181,8 +250,8 @@ class TestRollcallSelectionByIndex(TestParallelRollcallsBase):
         mgr.get_rollcall.return_value = None
 
         msg = self._make_message("/in ::5")
-        with self._rc_started(), patch('telegram_helper.manager', mgr):
-            await self.th.in_user(msg)
+        with self._rc_started(), patch('handlers.voting.manager', mgr):
+            await self.in_user(msg)
 
         self.assertGreater(self._sent_count(), 0)
 
@@ -209,16 +278,16 @@ class TestStateIsolation(TestParallelRollcallsBase):
         mgr = self._make_manager([rc1, rc2])
 
         msg1 = self._make_message("/whos_in ::1")
-        with self._rc_started(), patch('telegram_helper.manager', mgr):
-            await self.th.whos_in(msg1)
+        with self._rc_started(), patch('handlers.lists.manager', mgr):
+            await self.whos_in(msg1)
         self.assertIn("Alice", self._sent_text())
 
-        self.th.bot.send_message.reset_mock()
+        self.bot_state.bot.send_message.reset_mock()
 
         msg2 = self._make_message("/whos_in ::2")
         mgr.get_rollcall.return_value = rc2
-        with self._rc_started(), patch('telegram_helper.manager', mgr):
-            await self.th.whos_in(msg2)
+        with self._rc_started(), patch('handlers.lists.manager', mgr):
+            await self.whos_in(msg2)
         self.assertIn("Nobody", self._sent_text())
 
     async def test_title_independence(self):
@@ -230,8 +299,8 @@ class TestStateIsolation(TestParallelRollcallsBase):
         mgr.get_rollcall.return_value = rc2
 
         msg = self._make_message("/set_title New Title ::2")
-        with self._rc_started(), patch('telegram_helper.manager', mgr):
-            await self.th.set_title(msg)
+        with self._rc_started(), patch('handlers.lifecycle.manager', mgr):
+            await self.set_title(msg)
 
         self.assertEqual(rc2.title, "New Title")
         self.assertEqual(rc1.title, "Event 1")
@@ -249,8 +318,8 @@ class TestEndRollcallWithParallel(TestParallelRollcallsBase):
         mgr.get_rollcall.return_value = rc2
 
         msg = self._make_message("/end_roll_call ::2")
-        with self._rc_started(), self._admin_ok(), patch('telegram_helper.manager', mgr):
-            await self.th.end_roll_call(msg)
+        with self._rc_started(), self._admin_ok(), patch('handlers.lifecycle.manager', mgr):
+            await self.end_roll_call(msg)
 
         mgr.remove_rollcall.assert_called_once_with(100, 1)
 
@@ -263,8 +332,8 @@ class TestEndRollcallWithParallel(TestParallelRollcallsBase):
         mgr = self._make_manager([rc1, rc2, rc3])
 
         msg = self._make_message("/end_roll_call ::1")
-        with self._rc_started(), self._admin_ok(), patch('telegram_helper.manager', mgr):
-            await self.th.end_roll_call(msg)
+        with self._rc_started(), self._admin_ok(), patch('handlers.lifecycle.manager', mgr):
+            await self.end_roll_call(msg)
 
         mgr.remove_rollcall.assert_called_once_with(100, 0)
 
@@ -282,10 +351,10 @@ class TestProxyUserWithParallel(TestParallelRollcallsBase):
         mgr.get_rollcall.return_value = rc2
 
         msg = self._make_message("/set_in_for Bob ::2")
-        with self._rc_started(), patch('telegram_helper.manager', mgr), \
-             patch('telegram_helper.show_panel_for_rollcall', new=AsyncMock()), \
-             patch('telegram_helper.add_or_update_proxy_user'):
-            await self.th.set_in_for(msg)
+        with self._rc_started(), patch('handlers.proxy.manager', mgr), \
+             patch('handlers.lifecycle.show_panel_for_rollcall', new=AsyncMock()), \
+             patch('handlers.proxy.add_or_update_proxy_user'):
+            await self.set_in_for(msg)
 
         mgr.get_rollcall.assert_called_with(100, 1)
         rc2.addIn.assert_called_once()
@@ -307,8 +376,8 @@ class TestQueriesWithParallel(TestParallelRollcallsBase):
         mgr.get_rollcall.return_value = rc1
 
         msg = self._make_message("/location New Location ::1")
-        with self._rc_started(), patch('telegram_helper.manager', mgr):
-            await self.th.set_location(msg)
+        with self._rc_started(), patch('handlers.settings.manager', mgr):
+            await self.set_location(msg)
 
         self.assertEqual(rc1.location, "New Location")
         self.assertEqual(rc2.location, "Park B")
@@ -325,8 +394,8 @@ class TestQueriesWithParallel(TestParallelRollcallsBase):
         mgr.get_rollcall.return_value = rc1
 
         msg = self._make_message("/event_fee 500 ::1")
-        with self._rc_started(), patch('telegram_helper.manager', mgr):
-            await self.th.event_fee(msg)
+        with self._rc_started(), patch('handlers.settings.manager', mgr):
+            await self.event_fee(msg)
 
         self.assertEqual(rc1.event_fee, "500")
         self.assertEqual(rc2.event_fee, "200")
@@ -347,8 +416,8 @@ class TestMaxRollcalls(TestParallelRollcallsBase):
 
         msg = self._make_message("/start_roll_call Event 4")
         with self._db_json_patch(), self._admin_ok(), \
-             patch('telegram_helper.manager', mgr):
-            await self.th.start_roll_call(msg)
+             patch('handlers.lifecycle.manager', mgr):
+            await self.start_roll_call(msg)
 
         # Should have called add_rollcall since it hasn't reached limit OR
         # should send error about max limit
@@ -368,15 +437,15 @@ class TestDeleteUserWithParallel(TestParallelRollcallsBase):
         mgr.get_rollcall.return_value = rc2
 
         msg = self._make_message("/delete_user Bob ::2")
-        with self._rc_started(), self._admin_ok(), patch('telegram_helper.manager', mgr):
-            await self.th.delete_user(msg)
+        with self._rc_started(), self._admin_ok(), patch('handlers.admin.manager', mgr):
+            await self.delete_user(msg)
 
         # delete_user now shows a confirmation prompt first
         rc1.delete_user.assert_not_called()
         rc2.delete_user.assert_not_called()
         # Pending delete for admin (user_id=1) in chat 100 should be stored
-        self.assertIn((100, 1), self.th._pending_deletes)
-        self.assertEqual(self.th._pending_deletes[(100, 1)]['name'], "Bob")
+        self.assertIn((100, 1), self.bot_state._pending_deletes)
+        self.assertEqual(self.bot_state._pending_deletes[(100, 1)]['name'], "Bob")
 
 
 class TestLimitWithParallel(TestParallelRollcallsBase):
@@ -391,13 +460,11 @@ class TestLimitWithParallel(TestParallelRollcallsBase):
         mgr.get_rollcall.return_value = rc2
 
         msg = self._make_message("/set_limit 5 ::2")
-        with self._rc_started(), patch('telegram_helper.manager', mgr), \
-             patch('telegram_helper.notify_proxy_owner_wait_to_in', new=AsyncMock()), \
-             patch('telegram_helper.increment_user_stat'), \
-             patch('telegram_helper.increment_rollcall_stat'), \
-             patch('telegram_helper.get_rc_db_id', return_value=2), \
-             patch('telegram_helper.format_mention_with_name', return_value="User"):
-            await self.th.wait_limit(msg)
+        with self._rc_started(), patch('handlers.settings.manager', mgr), \
+             patch('handlers.lifecycle.notify_proxy_owner_wait_to_in', new=AsyncMock()), \
+             patch('handlers.settings.get_rc_db_id', return_value=2), \
+             patch('handlers.settings.format_mention_with_name', return_value="User"):
+            await self.wait_limit(msg)
 
         self.assertEqual(rc2.inListLimit, 5)
         self.assertIsNone(rc1.inListLimit)

@@ -22,7 +22,7 @@ sys.modules["telebot.async_telebot"] = async_telebot_mock
 sys.modules["telebot.types"] = telebot_types_mock
 
 # Make @bot.message_handler(...) an identity decorator so the actual
-# async handler functions remain accessible on the telegram_helper module.
+# async handler functions remain accessible on their respective handler modules.
 def _message_handler_identity(*args, **kwargs):
     def decorator(func):
         return func

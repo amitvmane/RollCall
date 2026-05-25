@@ -1,11 +1,11 @@
 """
 tests/test_handlers.py
 
-Full handler-level test suite for all telegram_helper.py command handlers.
+Full handler-level test suite for all command handlers.
 
 Uses unittest.IsolatedAsyncioTestCase for native async support (Python 3.8+).
 Because conftest.py makes @bot.message_handler an identity decorator, all
-async def handlers are accessible directly on the telegram_helper module.
+async def handlers are accessible directly on their respective handler modules.
 
 Coverage: 37 command handlers across all command groups.
 Each handler gets at minimum:
@@ -17,6 +17,7 @@ import sys
 import os
 import json
 import unittest
+from contextlib import ExitStack
 from unittest.mock import MagicMock, AsyncMock, patch, mock_open
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "rollCall"))
@@ -31,16 +32,91 @@ class HandlerTestBase(unittest.IsolatedAsyncioTestCase):
 
     @classmethod
     def setUpClass(cls):
-        import telegram_helper as th
-        cls.th = th
+        import bot_state
+        from handlers.voting import in_user, out_user, maybe_user
+        from handlers.lifecycle import (
+            start_roll_call, end_roll_call, callback_handler,
+            get_status_keyboard, show_panel_for_rollcall,
+            notify_proxy_owner_wait_to_in, set_title, show_panel,
+        )
+        from handlers.proxy import set_in_for, set_out_for, set_maybe_for
+        from handlers.lists import whos_in, whos_out, whos_maybe, whos_waiting, buzz_command
+        from handlers.ghost import (
+            ghost_callback_handler, toggle_ghost_tracking, set_absent_limit,
+            clear_absent, mark_absent,
+        )
+        from handlers.admin import delete_user
+        from handlers.stats import stats_command
+        from handlers.templates import (
+            list_templates, set_template, start_template, delete_template_command,
+            schedules_command, schedule_template_cmd,
+        )
+        from handlers.core import (
+            welcome_and_explanation, help_commands, set_admins, unset_admins,
+            broadcast, config_timezone, version_command, show_reminders,
+        )
+        from handlers.settings import (
+            shh, louder, wait_limit, event_fee, individual_fee,
+            when, set_location,
+        )
+
+        # Attach everything to cls for test access
+        cls.bot_state = bot_state
+        cls.in_user = in_user
+        cls.out_user = out_user
+        cls.maybe_user = maybe_user
+        cls.start_roll_call = start_roll_call
+        cls.end_roll_call = end_roll_call
+        cls.callback_handler = callback_handler
+        cls.get_status_keyboard = get_status_keyboard
+        cls.show_panel_for_rollcall = show_panel_for_rollcall
+        cls.notify_proxy_owner_wait_to_in = notify_proxy_owner_wait_to_in
+        cls.set_in_for = set_in_for
+        cls.set_out_for = set_out_for
+        cls.set_maybe_for = set_maybe_for
+        cls.whos_in = whos_in
+        cls.whos_out = whos_out
+        cls.whos_maybe = whos_maybe
+        cls.whos_waiting = whos_waiting
+        cls.buzz_command = buzz_command
+        cls.ghost_callback_handler = ghost_callback_handler
+        cls.toggle_ghost_tracking = toggle_ghost_tracking
+        cls.set_absent_limit = set_absent_limit
+        cls.clear_absent = clear_absent
+        cls.mark_absent = mark_absent
+        cls.delete_user = delete_user
+        cls.stats_command = stats_command
+        cls.list_templates = list_templates
+        cls.set_template = set_template
+        cls.start_template = start_template
+        cls.delete_template_command = delete_template_command
+        cls.schedules_command = schedules_command
+        cls.schedule_template_cmd = schedule_template_cmd
+        cls.welcome_and_explanation = welcome_and_explanation
+        cls.help_commands = help_commands
+        cls.set_admins = set_admins
+        cls.unset_admins = unset_admins
+        cls.broadcast = broadcast
+        cls.config_timezone = config_timezone
+        cls.version_command = version_command
+        cls.show_reminders = show_reminders
+        cls.shh = shh
+        cls.louder = louder
+        cls.set_title = set_title
+        cls.show_panel = show_panel
+        cls.wait_limit = wait_limit
+        cls.event_fee = event_fee
+        cls.individual_fee = individual_fee
+        cls.when = when
+        cls.set_location = set_location
 
     def setUp(self):
         # Fresh AsyncMock for bot.send_message each test
-        self.th.bot.send_message = AsyncMock()
-        self.th.bot.get_chat_member = AsyncMock()
+        self.bot_state.bot.send_message = AsyncMock()
+        self.bot_state.bot.get_chat_member = AsyncMock()
         # Clear rate limit and pending state between tests
-        self.th._rate_limits.clear()
-        self.th._pending_deletes.clear()
+        self.bot_state._rate_limits.clear()
+        self.bot_state._pending_deletes.clear()
         # Shared manager and rollcall mocks
         self.rc = self._make_rc()
         self.manager = self._make_manager([self.rc])
@@ -100,30 +176,92 @@ class HandlerTestBase(unittest.IsolatedAsyncioTestCase):
 
     def _sent_text(self, call_index=0):
         """Return the text sent in the Nth bot.send_message call."""
-        return self.th.bot.send_message.call_args_list[call_index][0][1]
+        return self.bot_state.bot.send_message.call_args_list[call_index][0][1]
 
     def _sent_count(self):
-        return self.th.bot.send_message.call_count
+        return self.bot_state.bot.send_message.call_count
 
     def _rc_not_started(self):
-        """Patch roll_call_not_started to return False (no rollcall active)."""
-        return patch('telegram_helper.roll_call_not_started', return_value=False)
+        """Patch roll_call_not_started to return False (no rollcall active) in all handler modules."""
+        return _MultiPatch([
+            patch('handlers.voting.roll_call_not_started', return_value=False),
+            patch('handlers.lifecycle.roll_call_not_started', return_value=False),
+            patch('handlers.proxy.roll_call_not_started', return_value=False),
+            patch('handlers.ghost.roll_call_not_started', return_value=False),
+            patch('handlers.lists.roll_call_not_started', return_value=False),
+            patch('handlers.admin.roll_call_not_started', return_value=False),
+            patch('handlers.settings.roll_call_not_started', return_value=False),
+        ])
 
     def _rc_started(self):
-        """Patch roll_call_not_started to return True (rollcall active)."""
-        return patch('telegram_helper.roll_call_not_started', return_value=True)
+        """Patch roll_call_not_started to return True (rollcall active) in all handler modules."""
+        return _MultiPatch([
+            patch('handlers.voting.roll_call_not_started', return_value=True),
+            patch('handlers.lifecycle.roll_call_not_started', return_value=True),
+            patch('handlers.proxy.roll_call_not_started', return_value=True),
+            patch('handlers.ghost.roll_call_not_started', return_value=True),
+            patch('handlers.lists.roll_call_not_started', return_value=True),
+            patch('handlers.admin.roll_call_not_started', return_value=True),
+            patch('handlers.settings.roll_call_not_started', return_value=True),
+        ])
 
     def _admin_ok(self):
-        return patch('telegram_helper.admin_rights', new=AsyncMock(return_value=True))
+        return _MultiPatch([
+            patch('handlers.lifecycle.admin_rights', new=AsyncMock(return_value=True)),
+            patch('handlers.proxy.admin_rights', new=AsyncMock(return_value=True)),
+            patch('handlers.ghost.admin_rights', new=AsyncMock(return_value=True)),
+            patch('handlers.lists.admin_rights', new=AsyncMock(return_value=True)),
+            patch('handlers.admin.admin_rights', new=AsyncMock(return_value=True)),
+            patch('handlers.settings.admin_rights', new=AsyncMock(return_value=True)),
+            patch('handlers.core.admin_rights', new=AsyncMock(return_value=True)),
+            patch('handlers.templates.admin_rights', new=AsyncMock(return_value=True)),
+        ])
 
     def _admin_denied(self):
-        return patch('telegram_helper.admin_rights', new=AsyncMock(return_value=False))
+        return _MultiPatch([
+            patch('handlers.lifecycle.admin_rights', new=AsyncMock(return_value=False)),
+            patch('handlers.proxy.admin_rights', new=AsyncMock(return_value=False)),
+            patch('handlers.ghost.admin_rights', new=AsyncMock(return_value=False)),
+            patch('handlers.lists.admin_rights', new=AsyncMock(return_value=False)),
+            patch('handlers.admin.admin_rights', new=AsyncMock(return_value=False)),
+            patch('handlers.settings.admin_rights', new=AsyncMock(return_value=False)),
+            patch('handlers.core.admin_rights', new=AsyncMock(return_value=False)),
+            patch('handlers.templates.admin_rights', new=AsyncMock(return_value=False)),
+        ])
 
     def _panel(self):
-        return patch('telegram_helper.show_panel_for_rollcall', new=AsyncMock())
+        return patch('handlers.lifecycle.show_panel_for_rollcall', new=AsyncMock())
 
     def _patch_manager(self):
-        return patch('telegram_helper.manager', self.manager)
+        return _MultiPatch([
+            patch('handlers.voting.manager', self.manager),
+            patch('handlers.lifecycle.manager', self.manager),
+            patch('handlers.proxy.manager', self.manager),
+            patch('handlers.ghost.manager', self.manager),
+            patch('handlers.lists.manager', self.manager),
+            patch('handlers.admin.manager', self.manager),
+            patch('handlers.settings.manager', self.manager),
+            patch('handlers.core.manager', self.manager),
+            patch('handlers.templates.manager', self.manager),
+            patch('handlers.stats.manager', self.manager),
+        ])
+
+
+class _MultiPatch:
+    """Context manager that enters/exits multiple patches at once."""
+
+    def __init__(self, patches):
+        self._patches = patches
+        self._stack = None
+
+    def __enter__(self):
+        self._stack = ExitStack()
+        for p in self._patches:
+            self._stack.enter_context(p)
+        return self
+
+    def __exit__(self, *args):
+        self._stack.__exit__(*args)
 
 
 # ===========================================================================
@@ -135,14 +273,14 @@ class TestWelcomeAndExplanation(HandlerTestBase):
     async def test_sends_welcome_message(self):
         msg = self._make_message("/start")
         with self._admin_ok(), self._patch_manager():
-            await self.th.welcome_and_explanation(msg)
+            await self.welcome_and_explanation(msg)
         self.assertGreater(self._sent_count(), 0)
         self.assertIn("RollCall", self._sent_text())
 
     async def test_no_admin_rights_sends_error(self):
         msg = self._make_message("/start")
         with self._admin_denied(), self._patch_manager():
-            await self.th.welcome_and_explanation(msg)
+            await self.welcome_and_explanation(msg)
         self.assertIn("permission", self._sent_text().lower())
 
 
@@ -154,7 +292,7 @@ class TestHelpCommands(HandlerTestBase):
 
     async def test_sends_help_text(self):
         msg = self._make_message("/help")
-        await self.th.help_commands(msg)
+        await self.help_commands(msg)
         self.assertGreater(self._sent_count(), 0)
         # Help message should list key commands
         sent = self._sent_text()
@@ -171,19 +309,19 @@ class TestSetAdmins(HandlerTestBase):
     async def test_group_admin_can_enable_admin_mode(self):
         member = MagicMock()
         member.status = 'administrator'
-        self.th.bot.get_chat_member = AsyncMock(return_value=member)
+        self.bot_state.bot.get_chat_member = AsyncMock(return_value=member)
         msg = self._make_message("/set_admins")
         with self._patch_manager():
-            await self.th.set_admins(msg)
+            await self.set_admins(msg)
         self.manager.set_admin_rights.assert_called_once_with(100, True)
 
     async def test_non_admin_cannot_enable_admin_mode(self):
         member = MagicMock()
         member.status = 'member'
-        self.th.bot.get_chat_member = AsyncMock(return_value=member)
+        self.bot_state.bot.get_chat_member = AsyncMock(return_value=member)
         msg = self._make_message("/set_admins")
         with self._patch_manager():
-            await self.th.set_admins(msg)
+            await self.set_admins(msg)
         # send_message should tell user they lack permissions
         self.assertGreater(self._sent_count(), 0)
 
@@ -194,9 +332,9 @@ class TestUnsetAdmins(HandlerTestBase):
         msg = self._make_message("/unset_admins")
         member_mock = MagicMock()
         member_mock.status = 'administrator'
-        self.th.bot.get_chat_member = AsyncMock(return_value=member_mock)
+        self.bot_state.bot.get_chat_member = AsyncMock(return_value=member_mock)
         with self._patch_manager():
-            await self.th.unset_admins(msg)
+            await self.unset_admins(msg)
         self.manager.set_admin_rights.assert_called_once_with(100, False)
 
 
@@ -209,22 +347,22 @@ class TestConfigTimezone(HandlerTestBase):
     async def test_valid_timezone_is_set(self):
         msg = self._make_message("/timezone Asia/Kolkata")
         with self._patch_manager(), \
-             patch('telegram_helper.auto_complete_timezone', return_value='Asia/Calcutta'):
-            await self.th.config_timezone(msg)
+             patch('handlers.core.auto_complete_timezone', return_value='Asia/Calcutta'):
+            await self.config_timezone(msg)
         self.manager.set_timezone.assert_called_once_with(100, 'Asia/Calcutta')
         self.assertIn("Asia/Calcutta", self._sent_text())
 
     async def test_missing_parameter_sends_error(self):
         msg = self._make_message("/timezone")
         with self._patch_manager():
-            await self.th.config_timezone(msg)
+            await self.config_timezone(msg)
         self.assertGreater(self._sent_count(), 0)
 
     async def test_invalid_timezone_sends_link(self):
         msg = self._make_message("/timezone Fake/Place")
         with self._patch_manager(), \
-             patch('telegram_helper.auto_complete_timezone', return_value=None):
-            await self.th.config_timezone(msg)
+             patch('handlers.core.auto_complete_timezone', return_value=None):
+            await self.config_timezone(msg)
         sent = self._sent_text()
         self.assertIn("invalid", sent.lower())
 
@@ -240,7 +378,7 @@ class TestVersionCommandBasic(HandlerTestBase):
                      "DeployedDatetime": "23-04-2026"}]
         msg = self._make_message("/version")
         with patch("builtins.open", mock_open(read_data=json.dumps(versions))):
-            await self.th.version_command(msg)
+            await self.version_command(msg)
         self.assertIn("4.6", self._sent_text())
 
 
@@ -253,14 +391,14 @@ class TestShowRollcalls(HandlerTestBase):
     async def test_no_rollcalls_sends_empty_message(self):
         empty_manager = self._make_manager([])
         msg = self._make_message("/rollcalls")
-        with patch('telegram_helper.manager', empty_manager):
-            await self.th.show_reminders(msg)
+        with patch('handlers.core.manager', empty_manager):
+            await self.show_reminders(msg)
         self.assertIn("empty", self._sent_text().lower())
 
     async def test_with_rollcall_sends_list(self):
         msg = self._make_message("/rollcalls")
         with self._patch_manager():
-            await self.th.show_reminders(msg)
+            await self.show_reminders(msg)
         self.assertGreater(self._sent_count(), 0)
 
 
@@ -272,15 +410,15 @@ class TestListTemplates(HandlerTestBase):
 
     async def test_no_templates_sends_notice(self):
         msg = self._make_message("/templates")
-        with patch('telegram_helper.get_templates', return_value=[]):
-            await self.th.list_templates(msg)
+        with patch('handlers.templates.get_templates', return_value=[]):
+            await self.list_templates(msg)
         self.assertIn("no templates", self._sent_text().lower())
 
     async def test_with_templates_sends_list(self):
         templates = [MagicMock(name="t1")]
         msg = self._make_message("/templates")
-        with patch('telegram_helper.get_templates', return_value=templates):
-            await self.th.list_templates(msg)
+        with patch('handlers.templates.get_templates', return_value=templates):
+            await self.list_templates(msg)
         self.assertGreater(self._sent_count(), 0)
 
 
@@ -297,15 +435,15 @@ class TestStartRollCall(HandlerTestBase):
     async def test_starts_rollcall_with_title(self):
         msg = self._make_message("/start_roll_call Friday Game")
         with self._db_json_patch(), self._admin_ok(), self._patch_manager(), \
-             patch('telegram_helper.get_status_keyboard', new=AsyncMock(return_value=MagicMock())):
-            await self.th.start_roll_call(msg)
+             patch('handlers.lifecycle.get_status_keyboard', new=AsyncMock(return_value=MagicMock())):
+            await self.start_roll_call(msg)
         self.manager.add_rollcall.assert_called_once_with(100, "Friday Game")
 
     async def test_starts_rollcall_without_title_uses_empty(self):
         msg = self._make_message("/start_roll_call")
         with self._db_json_patch(), self._admin_ok(), self._patch_manager(), \
-             patch('telegram_helper.get_status_keyboard', new=AsyncMock(return_value=MagicMock())):
-            await self.th.start_roll_call(msg)
+             patch('handlers.lifecycle.get_status_keyboard', new=AsyncMock(return_value=MagicMock())):
+            await self.start_roll_call(msg)
         self.manager.add_rollcall.assert_called_once_with(100, "<Empty>")
 
     async def test_max_rollcalls_reached_sends_error(self):
@@ -313,15 +451,15 @@ class TestStartRollCall(HandlerTestBase):
         full_manager = self._make_manager(three_rcs)
         msg = self._make_message("/start_roll_call New Event")
         with self._db_json_patch(), self._admin_ok(), \
-             patch('telegram_helper.manager', full_manager):
-            await self.th.start_roll_call(msg)
+             patch('handlers.lifecycle.manager', full_manager):
+            await self.start_roll_call(msg)
         sent = self._sent_text()
         self.assertIn("3", str(sent))
 
     async def test_no_admin_rights_sends_error(self):
         msg = self._make_message("/start_roll_call Test")
         with self._db_json_patch(), self._admin_denied(), self._patch_manager():
-            await self.th.start_roll_call(msg)
+            await self.start_roll_call(msg)
         sent = self._sent_text()
         self.assertIn("permission", str(sent).lower())
 
@@ -335,13 +473,13 @@ class TestShh(HandlerTestBase):
     async def test_shh_enables_silent_mode(self):
         msg = self._make_message("/shh")
         with self._rc_started(), self._patch_manager():
-            await self.th.shh(msg)
+            await self.shh(msg)
         self.manager.set_shh_mode.assert_called_once_with(100, True)
 
     async def test_shh_no_rollcall_sends_error(self):
         msg = self._make_message("/shh")
         with self._rc_not_started(), self._patch_manager():
-            await self.th.shh(msg)
+            await self.shh(msg)
         self.assertGreater(self._sent_count(), 0)
 
 
@@ -350,13 +488,13 @@ class TestLouder(HandlerTestBase):
     async def test_louder_disables_silent_mode(self):
         msg = self._make_message("/louder")
         with self._rc_started(), self._patch_manager():
-            await self.th.louder(msg)
+            await self.louder(msg)
         self.manager.set_shh_mode.assert_called_once_with(100, False)
 
     async def test_louder_no_rollcall_sends_error(self):
         msg = self._make_message("/louder")
         with self._rc_not_started(), self._patch_manager():
-            await self.th.louder(msg)
+            await self.louder(msg)
         self.assertGreater(self._sent_count(), 0)
 
 
@@ -370,28 +508,28 @@ class TestInUser(HandlerTestBase):
         self.rc.addIn.return_value = None
         msg = self._make_message("/in")
         with self._rc_started(), self._patch_manager(), \
-             patch('telegram_helper.send_list', return_value=False), \
-             patch('telegram_helper.increment_user_stat'), \
-             patch('telegram_helper.increment_rollcall_stat'), \
-             patch('telegram_helper.get_rc_db_id', return_value=1):
-            await self.th.in_user(msg)
+             patch('handlers.lifecycle._update_panel', return_value=False), \
+             patch('handlers.voting.increment_user_stat'), \
+             patch('handlers.voting.increment_rollcall_stat'), \
+             patch('handlers.voting.get_rc_db_id', return_value=1):
+            await self.in_user(msg)
         self.rc.addIn.assert_called_once()
 
     async def test_in_no_rollcall_sends_error(self):
         msg = self._make_message("/in")
         with self._rc_not_started(), self._patch_manager():
-            await self.th.in_user(msg)
+            await self.in_user(msg)
         self.assertGreater(self._sent_count(), 0)
 
     async def test_in_with_comment(self):
         self.rc.addIn.return_value = None
         msg = self._make_message("/in running late")
         with self._rc_started(), self._patch_manager(), \
-             patch('telegram_helper.send_list', return_value=False), \
-             patch('telegram_helper.increment_user_stat'), \
-             patch('telegram_helper.increment_rollcall_stat'), \
-             patch('telegram_helper.get_rc_db_id', return_value=1):
-            await self.th.in_user(msg)
+             patch('handlers.lifecycle._update_panel', return_value=False), \
+             patch('handlers.voting.increment_user_stat'), \
+             patch('handlers.voting.increment_rollcall_stat'), \
+             patch('handlers.voting.get_rc_db_id', return_value=1):
+            await self.in_user(msg)
         # User object should have comment set
         self.rc.addIn.assert_called_once()
 
@@ -399,22 +537,22 @@ class TestInUser(HandlerTestBase):
         self.rc.addIn.return_value = 'AB'
         msg = self._make_message("/in")
         with self._rc_started(), self._patch_manager(), \
-             patch('telegram_helper.send_list', return_value=False), \
-             patch('telegram_helper.increment_user_stat'), \
-             patch('telegram_helper.increment_rollcall_stat'), \
-             patch('telegram_helper.get_rc_db_id', return_value=1):
-            await self.th.in_user(msg)
+             patch('handlers.lifecycle._update_panel', return_value=False), \
+             patch('handlers.voting.increment_user_stat'), \
+             patch('handlers.voting.increment_rollcall_stat'), \
+             patch('handlers.voting.get_rc_db_id', return_value=1):
+            await self.in_user(msg)
         self.assertGreater(self._sent_count(), 0)
 
     async def test_in_waitlist_sends_waitlist_message(self):
         self.rc.addIn.return_value = 'AC'
         msg = self._make_message("/in")
         with self._rc_started(), self._patch_manager(), \
-             patch('telegram_helper.send_list', return_value=False), \
-             patch('telegram_helper.increment_user_stat'), \
-             patch('telegram_helper.increment_rollcall_stat'), \
-             patch('telegram_helper.get_rc_db_id', return_value=1):
-            await self.th.in_user(msg)
+             patch('handlers.lifecycle._update_panel', return_value=False), \
+             patch('handlers.voting.increment_user_stat'), \
+             patch('handlers.voting.increment_rollcall_stat'), \
+             patch('handlers.voting.get_rc_db_id', return_value=1):
+            await self.in_user(msg)
         sent = self._sent_text()
         self.assertIn("waitlist", sent.lower())
 
@@ -423,18 +561,18 @@ class TestInUser(HandlerTestBase):
         multi_manager = self._make_manager([self.rc, rc2])
         multi_manager.get_rollcall.return_value = rc2
         msg = self._make_message("/in ::2")
-        with self._rc_started(), patch('telegram_helper.manager', multi_manager), \
-             patch('telegram_helper.send_list', return_value=False), \
-             patch('telegram_helper.increment_user_stat'), \
-             patch('telegram_helper.increment_rollcall_stat'), \
-             patch('telegram_helper.get_rc_db_id', return_value=2):
-            await self.th.in_user(msg)
+        with self._rc_started(), patch('handlers.voting.manager', multi_manager), \
+             patch('handlers.lifecycle._update_panel', return_value=False), \
+             patch('handlers.voting.increment_user_stat'), \
+             patch('handlers.voting.increment_rollcall_stat'), \
+             patch('handlers.voting.get_rc_db_id', return_value=2):
+            await self.in_user(msg)
         multi_manager.get_rollcall.assert_called_with(100, 1)  # index 1 = RC #2
 
     async def test_in_invalid_rc_number_sends_error(self):
         msg = self._make_message("/in ::99")
         with self._rc_started(), self._patch_manager():
-            await self.th.in_user(msg)
+            await self.in_user(msg)
         self.assertGreater(self._sent_count(), 0)
 
 
@@ -448,30 +586,30 @@ class TestOutUser(HandlerTestBase):
         self.rc.addOut.return_value = None
         msg = self._make_message("/out")
         with self._rc_started(), self._patch_manager(), \
-             patch('telegram_helper.send_list', return_value=False), \
-             patch('telegram_helper.increment_user_stat'), \
-             patch('telegram_helper.increment_rollcall_stat'), \
-             patch('telegram_helper.get_rc_db_id', return_value=1), \
-             patch('telegram_helper.notify_proxy_owner_wait_to_in', new=AsyncMock()):
-            await self.th.out_user(msg)
+             patch('handlers.lifecycle._update_panel', return_value=False), \
+             patch('handlers.voting.increment_user_stat'), \
+             patch('handlers.voting.increment_rollcall_stat'), \
+             patch('handlers.voting.get_rc_db_id', return_value=1), \
+             patch('handlers.lifecycle.notify_proxy_owner_wait_to_in', new=AsyncMock()):
+            await self.out_user(msg)
         self.rc.addOut.assert_called_once()
 
     async def test_out_no_rollcall_sends_error(self):
         msg = self._make_message("/out")
         with self._rc_not_started(), self._patch_manager():
-            await self.th.out_user(msg)
+            await self.out_user(msg)
         self.assertGreater(self._sent_count(), 0)
 
     async def test_out_duplicate_sends_error(self):
         self.rc.addOut.return_value = 'AB'
         msg = self._make_message("/out")
         with self._rc_started(), self._patch_manager(), \
-             patch('telegram_helper.send_list', return_value=False), \
-             patch('telegram_helper.increment_user_stat'), \
-             patch('telegram_helper.increment_rollcall_stat'), \
-             patch('telegram_helper.get_rc_db_id', return_value=1), \
-             patch('telegram_helper.notify_proxy_owner_wait_to_in', new=AsyncMock()):
-            await self.th.out_user(msg)
+             patch('handlers.lifecycle._update_panel', return_value=False), \
+             patch('handlers.voting.increment_user_stat'), \
+             patch('handlers.voting.increment_rollcall_stat'), \
+             patch('handlers.voting.get_rc_db_id', return_value=1), \
+             patch('handlers.lifecycle.notify_proxy_owner_wait_to_in', new=AsyncMock()):
+            await self.out_user(msg)
         self.assertGreater(self._sent_count(), 0)
 
     async def test_out_promotes_from_waitlist(self):
@@ -480,15 +618,15 @@ class TestOutUser(HandlerTestBase):
         self.rc.addOut.return_value = promoted
         msg = self._make_message("/out")
         with self._rc_started(), self._patch_manager(), \
-             patch('telegram_helper.send_list', return_value=False), \
-             patch('telegram_helper.increment_user_stat'), \
-             patch('telegram_helper.increment_rollcall_stat'), \
-             patch('telegram_helper.get_rc_db_id', return_value=1), \
-             patch('telegram_helper.notify_proxy_owner_wait_to_in', new=AsyncMock()), \
-             patch('telegram_helper.format_mention_with_name', return_value="Dave"):
-            await self.th.out_user(msg)
+             patch('handlers.lifecycle._update_panel', return_value=False), \
+             patch('handlers.voting.increment_user_stat'), \
+             patch('handlers.voting.increment_rollcall_stat'), \
+             patch('handlers.voting.get_rc_db_id', return_value=1), \
+             patch('handlers.lifecycle.notify_proxy_owner_wait_to_in', new=AsyncMock()), \
+             patch('handlers.voting.format_mention_with_name', return_value="Dave"):
+            await self.out_user(msg)
         # A "→ IN" message must have been sent for the promoted user
-        texts = [c[0][1] for c in self.th.bot.send_message.call_args_list]
+        texts = [c[0][1] for c in self.bot_state.bot.send_message.call_args_list]
         self.assertTrue(any("→ IN" in t for t in texts))
 
 
@@ -502,28 +640,28 @@ class TestMaybeUser(HandlerTestBase):
         self.rc.addMaybe.return_value = None
         msg = self._make_message("/maybe")
         with self._rc_started(), self._patch_manager(), \
-             patch('telegram_helper.send_list', return_value=False), \
-             patch('telegram_helper.increment_user_stat'), \
-             patch('telegram_helper.increment_rollcall_stat'), \
-             patch('telegram_helper.get_rc_db_id', return_value=1):
-            await self.th.maybe_user(msg)
+             patch('handlers.lifecycle._update_panel', return_value=False), \
+             patch('handlers.voting.increment_user_stat'), \
+             patch('handlers.voting.increment_rollcall_stat'), \
+             patch('handlers.voting.get_rc_db_id', return_value=1):
+            await self.maybe_user(msg)
         self.rc.addMaybe.assert_called_once()
 
     async def test_maybe_no_rollcall_sends_error(self):
         msg = self._make_message("/maybe")
         with self._rc_not_started(), self._patch_manager():
-            await self.th.maybe_user(msg)
+            await self.maybe_user(msg)
         self.assertGreater(self._sent_count(), 0)
 
     async def test_maybe_duplicate_sends_error(self):
         self.rc.addMaybe.return_value = 'AB'
         msg = self._make_message("/maybe")
         with self._rc_started(), self._patch_manager(), \
-             patch('telegram_helper.send_list', return_value=False), \
-             patch('telegram_helper.increment_user_stat'), \
-             patch('telegram_helper.increment_rollcall_stat'), \
-             patch('telegram_helper.get_rc_db_id', return_value=1):
-            await self.th.maybe_user(msg)
+             patch('handlers.lifecycle._update_panel', return_value=False), \
+             patch('handlers.voting.increment_user_stat'), \
+             patch('handlers.voting.increment_rollcall_stat'), \
+             patch('handlers.voting.get_rc_db_id', return_value=1):
+            await self.maybe_user(msg)
         self.assertGreater(self._sent_count(), 0)
 
 
@@ -537,36 +675,36 @@ class TestSetInFor(HandlerTestBase):
         self.rc.addIn.return_value = None
         msg = self._make_message("/set_in_for Bob")
         with self._rc_started(), self._patch_manager(), self._panel(), \
-             patch('telegram_helper.add_or_update_proxy_user'):
-            await self.th.set_in_for(msg)
+             patch('handlers.proxy.add_or_update_proxy_user'):
+            await self.set_in_for(msg)
         self.rc.addIn.assert_called_once()
 
     async def test_proxy_in_missing_name_sends_error(self):
         msg = self._make_message("/set_in_for")
         with self._rc_started(), self._patch_manager():
-            await self.th.set_in_for(msg)
+            await self.set_in_for(msg)
         self.assertGreater(self._sent_count(), 0)
 
     async def test_proxy_in_no_rollcall_sends_error(self):
         msg = self._make_message("/set_in_for Bob")
         with self._rc_not_started(), self._patch_manager():
-            await self.th.set_in_for(msg)
+            await self.set_in_for(msg)
         self.assertGreater(self._sent_count(), 0)
 
     async def test_proxy_in_duplicate_sends_error(self):
         self.rc.addIn.return_value = 'AB'
         msg = self._make_message("/set_in_for Bob")
         with self._rc_started(), self._patch_manager(), self._panel(), \
-             patch('telegram_helper.add_or_update_proxy_user'):
-            await self.th.set_in_for(msg)
+             patch('handlers.proxy.add_or_update_proxy_user'):
+            await self.set_in_for(msg)
         self.assertGreater(self._sent_count(), 0)
 
     async def test_proxy_in_waitlist_sends_message(self):
         self.rc.addIn.return_value = 'AC'
         msg = self._make_message("/set_in_for Bob")
         with self._rc_started(), self._patch_manager(), self._panel(), \
-             patch('telegram_helper.add_or_update_proxy_user'):
-            await self.th.set_in_for(msg)
+             patch('handlers.proxy.add_or_update_proxy_user'):
+            await self.set_in_for(msg)
         sent = self._sent_text()
         self.assertIn("waitlist", sent.lower())
 
@@ -581,21 +719,21 @@ class TestSetOutFor(HandlerTestBase):
         self.rc.addOut.return_value = None
         msg = self._make_message("/set_out_for Bob")
         with self._rc_started(), self._patch_manager(), self._panel(), \
-             patch('telegram_helper.add_or_update_proxy_user'), \
-             patch('telegram_helper.notify_proxy_owner_wait_to_in', new=AsyncMock()):
-            await self.th.set_out_for(msg)
+             patch('handlers.proxy.add_or_update_proxy_user'), \
+             patch('handlers.lifecycle.notify_proxy_owner_wait_to_in', new=AsyncMock()):
+            await self.set_out_for(msg)
         self.rc.addOut.assert_called_once()
 
     async def test_proxy_out_missing_name_sends_error(self):
         msg = self._make_message("/set_out_for")
         with self._rc_started(), self._patch_manager():
-            await self.th.set_out_for(msg)
+            await self.set_out_for(msg)
         self.assertGreater(self._sent_count(), 0)
 
     async def test_proxy_out_no_rollcall_sends_error(self):
         msg = self._make_message("/set_out_for Bob")
         with self._rc_not_started(), self._patch_manager():
-            await self.th.set_out_for(msg)
+            await self.set_out_for(msg)
         self.assertGreater(self._sent_count(), 0)
 
 
@@ -609,20 +747,20 @@ class TestSetMaybeFor(HandlerTestBase):
         self.rc.addMaybe.return_value = None
         msg = self._make_message("/set_maybe_for Bob")
         with self._rc_started(), self._patch_manager(), self._panel(), \
-             patch('telegram_helper.add_or_update_proxy_user'):
-            await self.th.set_maybe_for(msg)
+             patch('handlers.proxy.add_or_update_proxy_user'):
+            await self.set_maybe_for(msg)
         self.rc.addMaybe.assert_called_once()
 
     async def test_proxy_maybe_missing_name_sends_error(self):
         msg = self._make_message("/set_maybe_for")
         with self._rc_started(), self._patch_manager():
-            await self.th.set_maybe_for(msg)
+            await self.set_maybe_for(msg)
         self.assertGreater(self._sent_count(), 0)
 
     async def test_proxy_maybe_no_rollcall_sends_error(self):
         msg = self._make_message("/set_maybe_for Bob")
         with self._rc_not_started(), self._patch_manager():
-            await self.th.set_maybe_for(msg)
+            await self.set_maybe_for(msg)
         self.assertGreater(self._sent_count(), 0)
 
 
@@ -636,13 +774,13 @@ class TestWhosIn(HandlerTestBase):
         self.rc.inListText.return_value = "In:\n1. Alice\n\n"
         msg = self._make_message("/whos_in")
         with self._rc_started(), self._patch_manager():
-            await self.th.whos_in(msg)
+            await self.whos_in(msg)
         self.assertIn("Alice", self._sent_text())
 
     async def test_no_rollcall_sends_error(self):
         msg = self._make_message("/whos_in")
         with self._rc_not_started(), self._patch_manager():
-            await self.th.whos_in(msg)
+            await self.whos_in(msg)
         self.assertGreater(self._sent_count(), 0)
 
     async def test_rc_number_selection(self):
@@ -651,8 +789,8 @@ class TestWhosIn(HandlerTestBase):
         multi = self._make_manager([self.rc, rc2])
         multi.get_rollcall.return_value = rc2
         msg = self._make_message("/whos_in ::2")
-        with self._rc_started(), patch('telegram_helper.manager', multi):
-            await self.th.whos_in(msg)
+        with self._rc_started(), patch('handlers.lists.manager', multi):
+            await self.whos_in(msg)
         multi.get_rollcall.assert_called_with(100, 1)
 
 
@@ -662,13 +800,13 @@ class TestWhosOut(HandlerTestBase):
         self.rc.outListText.return_value = "Out:\n1. Bob\n\n"
         msg = self._make_message("/whos_out")
         with self._rc_started(), self._patch_manager():
-            await self.th.whos_out(msg)
+            await self.whos_out(msg)
         self.assertIn("Bob", self._sent_text())
 
     async def test_no_rollcall_sends_error(self):
         msg = self._make_message("/whos_out")
         with self._rc_not_started(), self._patch_manager():
-            await self.th.whos_out(msg)
+            await self.whos_out(msg)
         self.assertGreater(self._sent_count(), 0)
 
 
@@ -678,13 +816,13 @@ class TestWhosMaybe(HandlerTestBase):
         self.rc.maybeListText.return_value = "Maybe:\n1. Carol\n\n"
         msg = self._make_message("/whos_maybe")
         with self._rc_started(), self._patch_manager():
-            await self.th.whos_maybe(msg)
+            await self.whos_maybe(msg)
         self.assertIn("Carol", self._sent_text())
 
     async def test_no_rollcall_sends_error(self):
         msg = self._make_message("/whos_maybe")
         with self._rc_not_started(), self._patch_manager():
-            await self.th.whos_maybe(msg)
+            await self.whos_maybe(msg)
         self.assertGreater(self._sent_count(), 0)
 
 
@@ -694,13 +832,13 @@ class TestWhosWaiting(HandlerTestBase):
         self.rc.waitListText.return_value = "Waiting:\n1. Dave\n"
         msg = self._make_message("/whos_waiting")
         with self._rc_started(), self._patch_manager():
-            await self.th.whos_waiting(msg)
+            await self.whos_waiting(msg)
         self.assertIn("Dave", self._sent_text())
 
     async def test_no_rollcall_sends_error(self):
         msg = self._make_message("/whos_waiting")
         with self._rc_not_started(), self._patch_manager():
-            await self.th.whos_waiting(msg)
+            await self.whos_waiting(msg)
         self.assertGreater(self._sent_count(), 0)
 
 
@@ -713,27 +851,27 @@ class TestSetTitle(HandlerTestBase):
     async def test_sets_title(self):
         msg = self._make_message("/set_title Sunday Match")
         with self._rc_started(), self._patch_manager():
-            await self.th.set_title(msg)
+            await self.set_title(msg)
         self.assertEqual(self.rc.title, "Sunday Match")
         self.rc.save.assert_called()
 
     async def test_missing_title_sends_message(self):
         msg = self._make_message("/set_title")
         with self._rc_started(), self._patch_manager():
-            await self.th.set_title(msg)
+            await self.set_title(msg)
         self.assertGreater(self._sent_count(), 0)
 
     async def test_no_rollcall_sends_error(self):
         msg = self._make_message("/set_title New Title")
         with self._rc_not_started(), self._patch_manager():
-            await self.th.set_title(msg)
+            await self.set_title(msg)
         self.assertGreater(self._sent_count(), 0)
 
     async def test_empty_title_uses_placeholder(self):
         # After stripping the ::N, title becomes empty → <Empty>
         msg = self._make_message("/set_title ::1")
         with self._rc_started(), self._patch_manager():
-            await self.th.set_title(msg)
+            await self.set_title(msg)
         self.assertEqual(self.rc.title, "<Empty>")
 
 
@@ -746,19 +884,19 @@ class TestEndRollCall(HandlerTestBase):
     async def test_ends_rollcall(self):
         msg = self._make_message("/end_roll_call")
         with self._rc_started(), self._admin_ok(), self._patch_manager():
-            await self.th.end_roll_call(msg)
+            await self.end_roll_call(msg)
         self.manager.remove_rollcall.assert_called_once_with(100, 0)
 
     async def test_no_rollcall_sends_error(self):
         msg = self._make_message("/end_roll_call")
         with self._rc_not_started(), self._admin_ok(), self._patch_manager():
-            await self.th.end_roll_call(msg)
+            await self.end_roll_call(msg)
         self.assertGreater(self._sent_count(), 0)
 
     async def test_no_admin_rights_sends_error(self):
         msg = self._make_message("/end_roll_call")
         with self._rc_started(), self._admin_denied(), self._patch_manager():
-            await self.th.end_roll_call(msg)
+            await self.end_roll_call(msg)
         sent = self._sent_text()
         self.assertIn("permission", str(sent).lower())
 
@@ -766,8 +904,8 @@ class TestEndRollCall(HandlerTestBase):
         self.rc.finishList.return_value = "Title: Test\nID: __RCID__\nIn:\nNobody"
         msg = self._make_message("/end_roll_call")
         with self._rc_started(), self._admin_ok(), self._patch_manager():
-            await self.th.end_roll_call(msg)
-        texts = [c[0][1] for c in self.th.bot.send_message.call_args_list]
+            await self.end_roll_call(msg)
+        texts = [c[0][1] for c in self.bot_state.bot.send_message.call_args_list]
         self.assertTrue(any("Ended by" in t for t in texts))
 
 
@@ -780,25 +918,25 @@ class TestSetLimit(HandlerTestBase):
     async def test_sets_limit(self):
         msg = self._make_message("/set_limit 5")
         with self._rc_started(), self._patch_manager():
-            await self.th.wait_limit(msg)
+            await self.wait_limit(msg)
         self.assertEqual(self.rc.inListLimit, 5)
 
     async def test_missing_limit_sends_error(self):
         msg = self._make_message("/set_limit")
         with self._rc_started(), self._patch_manager():
-            await self.th.wait_limit(msg)
+            await self.wait_limit(msg)
         self.assertGreater(self._sent_count(), 0)
 
     async def test_non_numeric_limit_sends_error(self):
         msg = self._make_message("/set_limit abc")
         with self._rc_started(), self._patch_manager():
-            await self.th.wait_limit(msg)
+            await self.wait_limit(msg)
         self.assertGreater(self._sent_count(), 0)
 
     async def test_no_rollcall_sends_error(self):
         msg = self._make_message("/set_limit 5")
         with self._rc_not_started(), self._patch_manager():
-            await self.th.wait_limit(msg)
+            await self.wait_limit(msg)
         self.assertGreater(self._sent_count(), 0)
 
     async def test_limit_moves_overflow_to_waitlist(self):
@@ -809,12 +947,10 @@ class TestSetLimit(HandlerTestBase):
         self.rc.inListLimit = None
         msg = self._make_message("/set_limit 1")
         with self._rc_started(), self._patch_manager(), \
-             patch('telegram_helper.notify_proxy_owner_wait_to_in', new=AsyncMock()), \
-             patch('telegram_helper.increment_user_stat'), \
-             patch('telegram_helper.increment_rollcall_stat'), \
-             patch('telegram_helper.get_rc_db_id', return_value=1), \
-             patch('telegram_helper.format_mention_with_name', return_value="Bob"):
-            await self.th.wait_limit(msg)
+             patch('handlers.lifecycle.notify_proxy_owner_wait_to_in', new=AsyncMock()), \
+             patch('handlers.settings.get_rc_db_id', return_value=1), \
+             patch('handlers.settings.format_mention_with_name', return_value="Bob"):
+            await self.wait_limit(msg)
         # Bob should move to waitlist (inList > limit)
         self.assertIn(u2, self.rc.waitList)
         self.assertEqual(self.rc.inList, [u1])
@@ -831,40 +967,40 @@ class TestDeleteUser(HandlerTestBase):
         self.rc.delete_user.return_value = True
         msg = self._make_message("/delete_user Alice")
         with self._rc_started(), self._admin_ok(), self._patch_manager():
-            await self.th.delete_user(msg)
+            await self.delete_user(msg)
         # Should NOT delete directly — shows confirmation prompt instead
         self.rc.delete_user.assert_not_called()
         sent_text = self._sent_text().lower()
         self.assertIn("alice", sent_text)
         # Pending delete should be stored
-        self.assertIn((100, 1), self.th._pending_deletes)
+        self.assertIn((100, 1), self.bot_state._pending_deletes)
 
     async def test_user_not_found_sends_notice(self):
         """Confirmation is stored even for unknown users — callback handles not-found."""
         self.rc.delete_user.return_value = False
         msg = self._make_message("/delete_user Ghost")
         with self._rc_started(), self._admin_ok(), self._patch_manager():
-            await self.th.delete_user(msg)
+            await self.delete_user(msg)
         # Confirmation prompt is sent; pending delete stored
-        self.assertIn((100, 1), self.th._pending_deletes)
+        self.assertIn((100, 1), self.bot_state._pending_deletes)
 
     async def test_missing_name_sends_error(self):
         msg = self._make_message("/delete_user")
         with self._rc_started(), self._admin_ok(), self._patch_manager():
-            await self.th.delete_user(msg)
+            await self.delete_user(msg)
         self.assertGreater(self._sent_count(), 0)
 
     async def test_no_admin_rights_sends_error(self):
         msg = self._make_message("/delete_user Alice")
         with self._rc_started(), self._admin_denied(), self._patch_manager():
-            await self.th.delete_user(msg)
+            await self.delete_user(msg)
         sent = self._sent_text()
         self.assertIn("permission", str(sent).lower())
 
     async def test_no_rollcall_sends_error(self):
         msg = self._make_message("/delete_user Alice")
         with self._rc_not_started(), self._patch_manager():
-            await self.th.delete_user(msg)
+            await self.delete_user(msg)
         self.assertGreater(self._sent_count(), 0)
 
 
@@ -877,27 +1013,27 @@ class TestDeleteTemplate(HandlerTestBase):
     async def test_deletes_existing_template(self):
         msg = self._make_message("/delete_template sunday")
         with self._admin_ok(), self._patch_manager(), \
-             patch('telegram_helper.delete_template', return_value=True):
-            await self.th.delete_template_command(msg)
+             patch('handlers.templates.delete_template', return_value=True):
+            await self.delete_template_command(msg)
         self.assertIn("deleted", self._sent_text().lower())
 
     async def test_template_not_found(self):
         msg = self._make_message("/delete_template ghost")
         with self._admin_ok(), self._patch_manager(), \
-             patch('telegram_helper.delete_template', return_value=False):
-            await self.th.delete_template_command(msg)
+             patch('handlers.templates.delete_template', return_value=False):
+            await self.delete_template_command(msg)
         self.assertIn("not found", self._sent_text().lower())
 
     async def test_missing_name_sends_usage(self):
         msg = self._make_message("/delete_template")
         with self._admin_ok(), self._patch_manager():
-            await self.th.delete_template_command(msg)
+            await self.delete_template_command(msg)
         self.assertIn("Usage", self._sent_text())
 
     async def test_no_admin_rights_sends_error(self):
         msg = self._make_message("/delete_template sunday")
         with self._admin_denied(), self._patch_manager():
-            await self.th.delete_template_command(msg)
+            await self.delete_template_command(msg)
         self.assertIn("permission", self._sent_text().lower())
 
 
@@ -910,26 +1046,26 @@ class TestEventFee(HandlerTestBase):
     async def test_sets_fee(self):
         msg = self._make_message("/event_fee 500")
         with self._rc_started(), self._patch_manager():
-            await self.th.event_fee(msg)
+            await self.event_fee(msg)
         self.assertEqual(self.rc.event_fee, "500")
         self.rc.save.assert_called()
 
     async def test_no_rollcall_sends_error(self):
         msg = self._make_message("/event_fee 500")
         with self._rc_not_started(), self._patch_manager():
-            await self.th.event_fee(msg)
+            await self.event_fee(msg)
         self.assertGreater(self._sent_count(), 0)
 
     async def test_zero_fee_sends_error(self):
         msg = self._make_message("/event_fee 0")
         with self._rc_started(), self._patch_manager():
-            await self.th.event_fee(msg)
+            await self.event_fee(msg)
         self.assertGreater(self._sent_count(), 0)
 
     async def test_non_numeric_fee_sends_error(self):
         msg = self._make_message("/event_fee free")
         with self._rc_started(), self._patch_manager():
-            await self.th.event_fee(msg)
+            await self.event_fee(msg)
         self.assertGreater(self._sent_count(), 0)
 
 
@@ -947,14 +1083,14 @@ class TestIndividualFee(HandlerTestBase):
         self.rc.inList = [u1, u2, u3]
         msg = self._make_message("/individual_fee")
         with self._rc_started(), self._patch_manager():
-            await self.th.individual_fee(msg)
+            await self.individual_fee(msg)
         sent = self._sent_text()
         self.assertIn("200", sent)  # 600 / 3
 
     async def test_no_rollcall_sends_error(self):
         msg = self._make_message("/individual_fee")
         with self._rc_not_started(), self._patch_manager():
-            await self.th.individual_fee(msg)
+            await self.individual_fee(msg)
         self.assertGreater(self._sent_count(), 0)
 
 
@@ -969,7 +1105,7 @@ class TestWhen(HandlerTestBase):
         self.rc.finalizeDate = datetime(2026, 5, 10, 18, 30)
         msg = self._make_message("/when")
         with self._rc_started(), self._patch_manager():
-            await self.th.when(msg)
+            await self.when(msg)
         sent = self._sent_text()
         self.assertIn("10-05-2026", sent)
 
@@ -977,13 +1113,13 @@ class TestWhen(HandlerTestBase):
         self.rc.finalizeDate = None
         msg = self._make_message("/when")
         with self._rc_started(), self._patch_manager():
-            await self.th.when(msg)
+            await self.when(msg)
         self.assertGreater(self._sent_count(), 0)
 
     async def test_no_rollcall_sends_error(self):
         msg = self._make_message("/when")
         with self._rc_not_started(), self._patch_manager():
-            await self.th.when(msg)
+            await self.when(msg)
         self.assertGreater(self._sent_count(), 0)
 
 
@@ -996,7 +1132,7 @@ class TestSetLocation(HandlerTestBase):
     async def test_sets_location(self):
         msg = self._make_message("/location Central Park")
         with self._rc_started(), self._patch_manager():
-            await self.th.set_location(msg)
+            await self.set_location(msg)
         self.assertEqual(self.rc.location, "Central Park")
         self.rc.save.assert_called()
         self.assertIn("Central Park", self._sent_text())
@@ -1004,13 +1140,13 @@ class TestSetLocation(HandlerTestBase):
     async def test_missing_location_sends_error(self):
         msg = self._make_message("/location")
         with self._rc_started(), self._patch_manager():
-            await self.th.set_location(msg)
+            await self.set_location(msg)
         self.assertGreater(self._sent_count(), 0)
 
     async def test_no_rollcall_sends_error(self):
         msg = self._make_message("/location Park")
         with self._rc_not_started(), self._patch_manager():
-            await self.th.set_location(msg)
+            await self.set_location(msg)
         self.assertGreater(self._sent_count(), 0)
 
 
@@ -1026,20 +1162,20 @@ class TestRcNumberSelection(HandlerTestBase):
         multi = self._make_manager([self.rc, rc2])
         multi.get_rollcall.return_value = rc2
         msg = self._make_message("/whos_in ::2")
-        with self._rc_started(), patch('telegram_helper.manager', multi):
-            await self.th.whos_in(msg)
+        with self._rc_started(), patch('handlers.lists.manager', multi):
+            await self.whos_in(msg)
         multi.get_rollcall.assert_called_with(100, 1)  # index 1 = #2
 
     async def test_out_of_range_rc_number_sends_error(self):
         msg = self._make_message("/whos_in ::5")
         with self._rc_started(), self._patch_manager():
-            await self.th.whos_in(msg)
+            await self.whos_in(msg)
         self.assertGreater(self._sent_count(), 0)
 
     async def test_non_numeric_rc_suffix_sends_error(self):
         msg = self._make_message("/whos_out ::abc")
         with self._rc_started(), self._patch_manager():
-            await self.th.whos_out(msg)
+            await self.whos_out(msg)
         self.assertGreater(self._sent_count(), 0)
 
 
@@ -1052,12 +1188,12 @@ class TestStatsCommand(HandlerTestBase):
     async def _run_stats(self, text):
         msg = self._make_message(text, user_id=42, first_name="Alice", username="alice")
         with self._patch_manager(), \
-             patch('telegram_helper.build_user_stats_text', new=AsyncMock(return_value="stats text")), \
-             patch('telegram_helper.build_group_stats_text', new=AsyncMock(return_value="group text")), \
-             patch('telegram_helper.build_leaderboard_text', new=AsyncMock(return_value="leader text")), \
-             patch('telegram_helper.build_bot_stats_text', new=AsyncMock(return_value="bot text")), \
-             patch('telegram_helper.resolve_user_for_stats', new=AsyncMock(return_value=(42, "Alice"))):
-            await self.th.stats_command(msg)
+             patch('handlers.stats.build_user_stats_text', new=AsyncMock(return_value="stats text")), \
+             patch('handlers.stats.build_group_stats_text', new=AsyncMock(return_value="group text")), \
+             patch('handlers.stats.build_leaderboard_text', new=AsyncMock(return_value="leader text")), \
+             patch('handlers.stats.build_bot_stats_text', new=AsyncMock(return_value="bot text")), \
+             patch('handlers.stats.resolve_user_for_stats', new=AsyncMock(return_value=(42, "Alice"))):
+            await self.stats_command(msg)
 
     async def test_stats_my_stats_sends_message(self):
         await self._run_stats("/stats")
@@ -1081,15 +1217,15 @@ class TestShowPanel(HandlerTestBase):
     async def test_no_rollcall_sends_error(self):
         empty_manager = self._make_manager([])
         msg = self._make_message("/panel")
-        with patch('telegram_helper.manager', empty_manager):
-            await self.th.show_panel(msg)
+        with patch('handlers.lifecycle.manager', empty_manager):
+            await self.show_panel(msg)
         self.assertGreater(self._sent_count(), 0)
 
     async def test_with_rollcall_shows_panel(self):
         msg = self._make_message("/panel")
         with self._patch_manager(), \
-             patch('telegram_helper.get_status_keyboard', new=AsyncMock(return_value=MagicMock())):
-            await self.th.show_panel(msg)
+             patch('handlers.lifecycle.get_status_keyboard', new=AsyncMock(return_value=MagicMock())):
+            await self.show_panel(msg)
         self.assertGreater(self._sent_count(), 0)
 
 

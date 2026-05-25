@@ -10,9 +10,9 @@ Bugs covered:
   BUG-3  models.py: inListLimit non-numeric DB value caused ValueError
   BUG-4  models.py: User.__init__ crashed when username was None during
           name disambiguation
-  BUG-5  telegram_helper.py: version_command crashed on missing/corrupt
+  BUG-5  handlers/core.py: version_command crashed on missing/corrupt
           version.json and silently sent nothing when no version was deployed
-  BUG-6  telegram_helper.py: broadcast used legacy JSON file instead of DB
+  BUG-6  handlers/core.py: broadcast used legacy JSON file instead of DB
           and swallowed all delivery errors
   BUG-7  check_reminders.py: errors were printed instead of logged
   SEC-1  db.py: cursor left undefined if conn.cursor() raises — finally
@@ -263,7 +263,7 @@ class TestUserNoneUsername(unittest.TestCase):
 
 class TestVersionCommand(unittest.TestCase):
     """
-    telegram_helper.py L338-352:
+    handlers/core.py version_command:
     - FileNotFoundError and JSONDecodeError were unhandled (bot would crash)
     - If no version has DeployedOnProd=='Y', nothing was sent to the user
     Fixed: both cases now send an error message and return cleanly.
@@ -273,15 +273,17 @@ class TestVersionCommand(unittest.TestCase):
         return asyncio.get_event_loop().run_until_complete(coro)
 
     def setUp(self):
-        import telegram_helper as th
-        self.th = th
+        import bot_state
+        from handlers.core import version_command
+        self.version_command = version_command
+        self.bot_state = bot_state
         self.bot_mock = MagicMock()
         self.bot_mock.send_message = AsyncMock()
-        self._original_bot = th.bot
-        th.bot = self.bot_mock
+        self._original_bot = bot_state.bot
+        bot_state.bot = self.bot_mock
 
     def tearDown(self):
-        self.th.bot = self._original_bot
+        self.bot_state.bot = self._original_bot
 
     def _make_message(self, chat_id=1):
         msg = MagicMock()
@@ -292,7 +294,7 @@ class TestVersionCommand(unittest.TestCase):
         """FileNotFoundError → graceful error message, no crash."""
         message = self._make_message()
         with patch("builtins.open", side_effect=FileNotFoundError("not found")):
-            self._run(self.th.version_command(message))
+            self._run(self.version_command(message))
         self.bot_mock.send_message.assert_called_once()
         args = self.bot_mock.send_message.call_args[0]
         self.assertIn("unavailable", args[1].lower())
@@ -303,7 +305,7 @@ class TestVersionCommand(unittest.TestCase):
         message = self._make_message()
         with patch("builtins.open", mock_open(read_data="not-json")):
             with patch("json.load", side_effect=json.JSONDecodeError("err", "", 0)):
-                self._run(self.th.version_command(message))
+                self._run(self.version_command(message))
         self.bot_mock.send_message.assert_called_once()
         args = self.bot_mock.send_message.call_args[0]
         self.assertIn("unavailable", args[1].lower())
@@ -316,7 +318,7 @@ class TestVersionCommand(unittest.TestCase):
         import json
         message = self._make_message()
         with patch("builtins.open", mock_open(read_data=json.dumps(versions))):
-            self._run(self.th.version_command(message))
+            self._run(self.version_command(message))
         self.bot_mock.send_message.assert_called_once()
         args = self.bot_mock.send_message.call_args[0]
         self.assertIn("no released version", args[1].lower())
@@ -330,7 +332,7 @@ class TestVersionCommand(unittest.TestCase):
         import json
         message = self._make_message()
         with patch("builtins.open", mock_open(read_data=json.dumps(versions))):
-            self._run(self.th.version_command(message))
+            self._run(self.version_command(message))
         self.bot_mock.send_message.assert_called_once()
         args = self.bot_mock.send_message.call_args[0]
         self.assertIn("4.5", str(args[1]))
@@ -347,7 +349,7 @@ class TestVersionCommand(unittest.TestCase):
         import json
         message = self._make_message()
         with patch("builtins.open", mock_open(read_data=json.dumps(versions))):
-            self._run(self.th.version_command(message))
+            self._run(self.version_command(message))
         args = self.bot_mock.send_message.call_args[0]
         self.assertIn("New deployed", args[1])
 
@@ -358,7 +360,7 @@ class TestVersionCommand(unittest.TestCase):
 
 class TestBroadcast(unittest.TestCase):
     """
-    telegram_helper.py L284-304:
+    handlers/core.py broadcast:
     - Old code read database.json (legacy, race-prone, bare except:pass)
     - Fixed: uses get_all_chat_ids() from DB; logs per-chat failures
     """
@@ -367,15 +369,17 @@ class TestBroadcast(unittest.TestCase):
         return asyncio.get_event_loop().run_until_complete(coro)
 
     def setUp(self):
-        import telegram_helper as th
-        self.th = th
+        import bot_state
+        from handlers.core import broadcast
+        self.broadcast = broadcast
+        self.bot_state = bot_state
         self.bot_mock = MagicMock()
         self.bot_mock.send_message = AsyncMock()
-        self._original_bot = th.bot
-        th.bot = self.bot_mock
+        self._original_bot = bot_state.bot
+        bot_state.bot = self.bot_mock
 
     def tearDown(self):
-        self.th.bot = self._original_bot
+        self.bot_state.bot = self._original_bot
 
     def _make_message(self, text="/broadcast Hello world", from_id=1):
         msg = MagicMock()
@@ -387,8 +391,8 @@ class TestBroadcast(unittest.TestCase):
     def test_broadcast_sends_to_all_chat_ids_from_db(self):
         """Broadcast must iterate DB chat IDs, not read any JSON file."""
         message = self._make_message()
-        with patch("telegram_helper.get_all_chat_ids", return_value=[111, 222]) as mock_ids:
-            self._run(self.th.broadcast(message))
+        with patch("handlers.core.get_all_chat_ids", return_value=[111, 222]) as mock_ids:
+            self._run(self.broadcast(message))
             mock_ids.assert_called_once()
         # 2 group sends + 1 summary reply
         self.assertEqual(self.bot_mock.send_message.call_count, 3)
@@ -405,8 +409,8 @@ class TestBroadcast(unittest.TestCase):
 
         self.bot_mock.send_message.side_effect = failing_send
 
-        with patch("telegram_helper.get_all_chat_ids", return_value=[111, 222]):
-            self._run(self.th.broadcast(message))
+        with patch("handlers.core.get_all_chat_ids", return_value=[111, 222]):
+            self._run(self.broadcast(message))
 
         summary_text = self.bot_mock.send_message.call_args[0][1]
         self.assertIn("1", summary_text)   # 1 success
@@ -415,8 +419,8 @@ class TestBroadcast(unittest.TestCase):
     def test_broadcast_missing_message_text_returns_early(self):
         """'/broadcast' with no message body sends an error and exits."""
         message = self._make_message(text="/broadcast")
-        with patch("telegram_helper.get_all_chat_ids", return_value=[111]) as mock_ids:
-            self._run(self.th.broadcast(message))
+        with patch("handlers.core.get_all_chat_ids", return_value=[111]) as mock_ids:
+            self._run(self.broadcast(message))
             mock_ids.assert_not_called()
         self.bot_mock.send_message.assert_called_once()
         args = self.bot_mock.send_message.call_args[0]
@@ -425,8 +429,8 @@ class TestBroadcast(unittest.TestCase):
     def test_broadcast_no_chats_in_db(self):
         """Empty chat list → informative message, no send attempts."""
         message = self._make_message()
-        with patch("telegram_helper.get_all_chat_ids", return_value=[]):
-            self._run(self.th.broadcast(message))
+        with patch("handlers.core.get_all_chat_ids", return_value=[]):
+            self._run(self.broadcast(message))
         self.bot_mock.send_message.assert_called_once()
         args = self.bot_mock.send_message.call_args[0]
         self.assertIn("No chats", args[1])
@@ -592,55 +596,56 @@ class TestDbCursorSafety(unittest.TestCase):
 
 class TestLogTaskExc(unittest.TestCase):
     """
-    telegram_helper.py: all asyncio.create_task() calls must attach
-    _log_task_exc so background-task crashes surface in the log.
+    All asyncio.create_task() calls must attach _log_task_exc so
+    background-task crashes surface in the log.
+    _log_task_exc lives in bot_state.py and is imported by handler modules.
     """
 
     def test_log_task_exc_helper_exists(self):
-        import telegram_helper as th
+        import bot_state
         self.assertTrue(
-            callable(getattr(th, '_log_task_exc', None)),
-            "_log_task_exc must be a callable defined in telegram_helper"
+            callable(getattr(bot_state, '_log_task_exc', None)),
+            "_log_task_exc must be a callable defined in bot_state"
         )
 
     def test_log_task_exc_logs_exception(self):
         """_log_task_exc must call logging.error when the task raised."""
         import logging
-        import telegram_helper as th
+        import bot_state
 
         failing_task = MagicMock()
         failing_task.cancelled.return_value = False
         failing_task.exception.return_value = RuntimeError("boom")
 
         with patch.object(logging, 'error') as mock_err:
-            th._log_task_exc(failing_task)
+            bot_state._log_task_exc(failing_task)
 
         mock_err.assert_called_once()
 
     def test_log_task_exc_silent_on_cancel(self):
         """_log_task_exc must not log when the task was cancelled."""
         import logging
-        import telegram_helper as th
+        import bot_state
 
         cancelled_task = MagicMock()
         cancelled_task.cancelled.return_value = True
 
         with patch.object(logging, 'error') as mock_err:
-            th._log_task_exc(cancelled_task)
+            bot_state._log_task_exc(cancelled_task)
 
         mock_err.assert_not_called()
 
     def test_log_task_exc_silent_on_success(self):
         """_log_task_exc must not log when the task completed normally."""
         import logging
-        import telegram_helper as th
+        import bot_state
 
         ok_task = MagicMock()
         ok_task.cancelled.return_value = False
         ok_task.exception.return_value = None
 
         with patch.object(logging, 'error') as mock_err:
-            th._log_task_exc(ok_task)
+            bot_state._log_task_exc(ok_task)
 
         mock_err.assert_not_called()
 
@@ -648,25 +653,27 @@ class TestLogTaskExc(unittest.TestCase):
         """
         Source check: every asyncio.create_task(...) call must be followed by
         .add_done_callback(_log_task_exc) on the same logical line.
+        Checks voting.py and lifecycle.py where create_task is used.
         """
-        module_path = os.path.join(
-            os.path.dirname(__file__), "..", "rollCall", "telegram_helper.py"
-        )
-        with open(module_path) as f:
-            source = f.read()
-
         import re
-        # Find lines with asyncio.create_task(
-        lines = source.splitlines()
-        for i, line in enumerate(lines):
-            if "asyncio.create_task(" in line and "add_done_callback" not in line:
-                # Allow the callback on the very next line
-                next_line = lines[i + 1] if i + 1 < len(lines) else ""
-                self.assertIn(
-                    "add_done_callback",
-                    next_line,
-                    f"Line {i + 1}: asyncio.create_task() without .add_done_callback(_log_task_exc): {line.strip()}"
-                )
+        handler_files = [
+            os.path.join(os.path.dirname(__file__), "..", "rollCall", "handlers", "voting.py"),
+            os.path.join(os.path.dirname(__file__), "..", "rollCall", "handlers", "lifecycle.py"),
+        ]
+        for module_path in handler_files:
+            with open(module_path) as f:
+                source = f.read()
+
+            lines = source.splitlines()
+            for i, line in enumerate(lines):
+                if "asyncio.create_task(" in line and "add_done_callback" not in line:
+                    # Allow the callback on the very next line
+                    next_line = lines[i + 1] if i + 1 < len(lines) else ""
+                    self.assertIn(
+                        "add_done_callback",
+                        next_line,
+                        f"{module_path} line {i + 1}: asyncio.create_task() without .add_done_callback(_log_task_exc): {line.strip()}"
+                    )
 
 
 # ---------------------------------------------------------------------------
@@ -675,14 +682,14 @@ class TestLogTaskExc(unittest.TestCase):
 
 class TestBuzzCheckMemberTimeout(unittest.TestCase):
     """
-    telegram_helper.py buzz handler: get_chat_member must be wrapped in
+    handlers/lists.py buzz handler: get_chat_member must be wrapped in
     asyncio.wait_for(..., timeout=5.0) so a slow Telegram API response
     does not block the entire buzz batch indefinitely.
     """
 
     def test_source_check_member_uses_wait_for(self):
         module_path = os.path.join(
-            os.path.dirname(__file__), "..", "rollCall", "telegram_helper.py"
+            os.path.dirname(__file__), "..", "rollCall", "handlers", "lists.py"
         )
         with open(module_path) as f:
             source = f.read()
@@ -701,7 +708,7 @@ class TestBuzzCheckMemberTimeout(unittest.TestCase):
     def test_source_timeout_error_keeps_user(self):
         """On TimeoutError, the user should NOT be marked inactive."""
         module_path = os.path.join(
-            os.path.dirname(__file__), "..", "rollCall", "telegram_helper.py"
+            os.path.dirname(__file__), "..", "rollCall", "handlers", "lists.py"
         )
         with open(module_path) as f:
             source = f.read()
@@ -719,13 +726,13 @@ class TestBuzzCheckMemberTimeout(unittest.TestCase):
 
 class TestStartRollCallNoDatabaseJson(unittest.TestCase):
     """
-    telegram_helper.py start_roll_call: the legacy database.json write block
+    handlers/lifecycle.py start_roll_call: the legacy database.json write block
     must be removed. Broadcast now uses get_all_chat_ids() from db.py.
     """
 
     def test_source_no_database_json_write(self):
         module_path = os.path.join(
-            os.path.dirname(__file__), "..", "rollCall", "telegram_helper.py"
+            os.path.dirname(__file__), "..", "rollCall", "handlers", "lifecycle.py"
         )
         with open(module_path) as f:
             source = f.read()
@@ -733,7 +740,7 @@ class TestStartRollCallNoDatabaseJson(unittest.TestCase):
         self.assertNotIn(
             "database.json",
             source,
-            "database.json must not appear in telegram_helper — legacy write block must be removed"
+            "database.json must not appear in lifecycle.py — legacy write block must be removed"
         )
 
 
@@ -743,20 +750,22 @@ class TestStartRollCallNoDatabaseJson(unittest.TestCase):
 
 class TestSifDuplicateProxyGuard(unittest.IsolatedAsyncioTestCase):
     """
-    telegram_helper.py set_in_for (/sif): if the same proxy name is already
+    handlers/proxy.py set_in_for (/sif): if the same proxy name is already
     IN or WAITING, the handler must send a warning and return early without
     calling addIn or touching the DB.
     """
 
     @classmethod
     def setUpClass(cls):
-        import telegram_helper as th
-        cls.th = th
+        import bot_state
+        from handlers.proxy import set_in_for
+        cls.bot_state = bot_state
+        cls.set_in_for = set_in_for
 
     def setUp(self):
-        self.th.bot.send_message = AsyncMock()
-        self.th._rate_limits.clear()
-        self.th._pending_deletes.clear()
+        self.bot_state.bot.send_message = AsyncMock()
+        self.bot_state._rate_limits.clear()
+        self.bot_state._pending_deletes.clear()
 
     def _make_message(self, text, chat_id=100, user_id=1):
         msg = MagicMock()
@@ -790,13 +799,13 @@ class TestSifDuplicateProxyGuard(unittest.IsolatedAsyncioTestCase):
         m.get_ghost_tracking_enabled.return_value = False
         m.get_absent_limit.return_value = 1
 
-        with patch('telegram_helper.manager', m), \
-             patch('telegram_helper.admin_rights', new=AsyncMock(return_value=True)), \
-             patch('telegram_helper.get_ghost_count_by_proxy_name', return_value=0):
+        with patch('handlers.proxy.manager', m), \
+             patch('handlers.proxy.admin_rights', new=AsyncMock(return_value=True)), \
+             patch('handlers.proxy.get_ghost_count_by_proxy_name', return_value=0):
             msg = self._make_message("/sif Charlie")
-            await self.th.set_in_for(msg)
+            await self.set_in_for(msg)
 
-        sent_texts = [call[0][1] for call in self.th.bot.send_message.call_args_list]
+        sent_texts = [call[0][1] for call in self.bot_state.bot.send_message.call_args_list]
         self.assertTrue(
             any("already IN or WAITING" in t for t in sent_texts),
             f"Expected duplicate warning, got: {sent_texts}"
@@ -820,13 +829,13 @@ class TestSifDuplicateProxyGuard(unittest.IsolatedAsyncioTestCase):
         m.get_ghost_tracking_enabled.return_value = False
         m.get_absent_limit.return_value = 1
 
-        with patch('telegram_helper.manager', m), \
-             patch('telegram_helper.admin_rights', new=AsyncMock(return_value=True)), \
-             patch('telegram_helper.get_ghost_count_by_proxy_name', return_value=0):
+        with patch('handlers.proxy.manager', m), \
+             patch('handlers.proxy.admin_rights', new=AsyncMock(return_value=True)), \
+             patch('handlers.proxy.get_ghost_count_by_proxy_name', return_value=0):
             msg = self._make_message("/sif Dave")
-            await self.th.set_in_for(msg)
+            await self.set_in_for(msg)
 
-        sent_texts = [call[0][1] for call in self.th.bot.send_message.call_args_list]
+        sent_texts = [call[0][1] for call in self.bot_state.bot.send_message.call_args_list]
         self.assertTrue(
             any("already IN or WAITING" in t for t in sent_texts),
             f"Expected duplicate warning, got: {sent_texts}"
@@ -852,13 +861,13 @@ class TestSifDuplicateProxyGuard(unittest.IsolatedAsyncioTestCase):
         m.get_ghost_tracking_enabled.return_value = False
         m.get_absent_limit.return_value = 1
 
-        with patch('telegram_helper.manager', m), \
-             patch('telegram_helper.admin_rights', new=AsyncMock(return_value=True)), \
-             patch('telegram_helper.get_ghost_count_by_proxy_name', return_value=0):
+        with patch('handlers.proxy.manager', m), \
+             patch('handlers.proxy.admin_rights', new=AsyncMock(return_value=True)), \
+             patch('handlers.proxy.get_ghost_count_by_proxy_name', return_value=0):
             msg = self._make_message("/sif Eve")
-            await self.th.set_in_for(msg)
+            await self.set_in_for(msg)
 
-        sent_texts = [call[0][1] for call in self.th.bot.send_message.call_args_list]
+        sent_texts = [call[0][1] for call in self.bot_state.bot.send_message.call_args_list]
         self.assertFalse(
             any("already IN or WAITING" in t for t in sent_texts),
             "Should NOT send duplicate warning for a new proxy user"
@@ -881,7 +890,7 @@ class TestSetTemplatePartialUpdate(unittest.TestCase):
     def test_source_loads_existing_template_before_overwrite(self):
         """Source must call get_template to load the existing record."""
         module_path = os.path.join(
-            os.path.dirname(__file__), "..", "rollCall", "telegram_helper.py"
+            os.path.dirname(__file__), "..", "rollCall", "handlers", "templates.py"
         )
         with open(module_path) as f:
             source = f.read()
@@ -900,7 +909,7 @@ class TestSetTemplatePartialUpdate(unittest.TestCase):
     def test_source_first_token_eq_check(self):
         """Source must guard that the first token has no '=' before treating it as title."""
         module_path = os.path.join(
-            os.path.dirname(__file__), "..", "rollCall", "telegram_helper.py"
+            os.path.dirname(__file__), "..", "rollCall", "handlers", "templates.py"
         )
         with open(module_path) as f:
             source = f.read()
@@ -918,20 +927,22 @@ class TestSetTemplatePartialUpdate(unittest.TestCase):
 
 class TestErcRenumberingMessage(unittest.IsolatedAsyncioTestCase):
     """
-    telegram_helper.py end_roll_call: when rollcalls remain after ending one,
+    handlers/lifecycle.py end_roll_call: when rollcalls remain after ending one,
     the warning must show the specific old→new ID mapping (e.g. '#3 ... → #2')
     instead of a generic "IDs have been updated" message.
     """
 
     @classmethod
     def setUpClass(cls):
-        import telegram_helper as th
-        cls.th = th
+        import bot_state
+        from handlers.lifecycle import end_roll_call
+        cls.bot_state = bot_state
+        cls.end_roll_call = end_roll_call
 
     def setUp(self):
-        self.th.bot.send_message = AsyncMock()
-        self.th._rate_limits.clear()
-        self.th._pending_deletes.clear()
+        self.bot_state.bot.send_message = AsyncMock()
+        self.bot_state._rate_limits.clear()
+        self.bot_state._pending_deletes.clear()
 
     def _make_rc(self, title, rc_id=1):
         rc = MagicMock()
@@ -982,13 +993,13 @@ class TestErcRenumberingMessage(unittest.IsolatedAsyncioTestCase):
         msg.from_user.first_name = "Alice"
         msg.from_user.username = "alice"
 
-        with patch('telegram_helper.manager', m), \
-             patch('telegram_helper.admin_rights', new=AsyncMock(return_value=True)), \
-             patch('telegram_helper.update_streak_on_checkin', return_value=None):
-            await self.th.end_roll_call(msg)
+        with patch('handlers.lifecycle.manager', m), \
+             patch('handlers.lifecycle.admin_rights', new=AsyncMock(return_value=True)), \
+             patch('handlers.lifecycle.update_streak_on_checkin', return_value=None):
+            await self.end_roll_call(msg)
 
         sent_texts = " ".join(
-            str(call[0][1]) for call in self.th.bot.send_message.call_args_list
+            str(call[0][1]) for call in self.bot_state.bot.send_message.call_args_list
         )
         self.assertIn("→", sent_texts, "Renumbering message must contain '→' arrow mapping")
         self.assertNotIn(
@@ -1000,7 +1011,7 @@ class TestErcRenumberingMessage(unittest.IsolatedAsyncioTestCase):
     def test_source_no_generic_ids_updated_message(self):
         """The old generic message must not appear in source."""
         module_path = os.path.join(
-            os.path.dirname(__file__), "..", "rollCall", "telegram_helper.py"
+            os.path.dirname(__file__), "..", "rollCall", "handlers", "lifecycle.py"
         )
         with open(module_path) as f:
             source = f.read()
@@ -1074,7 +1085,7 @@ class TestErcConcurrencyLock(unittest.IsolatedAsyncioTestCase):
     def test_source_erc_handler_uses_lock(self):
         """The /erc handler source must contain 'async with manager.get_erc_lock'."""
         module_path = os.path.join(
-            os.path.dirname(__file__), "..", "rollCall", "telegram_helper.py"
+            os.path.dirname(__file__), "..", "rollCall", "handlers", "lifecycle.py"
         )
         with open(module_path) as f:
             source = f.read()
@@ -1087,7 +1098,7 @@ class TestErcConcurrencyLock(unittest.IsolatedAsyncioTestCase):
     def test_source_endconfirm_uses_lock(self):
         """The panel endconfirm callback must also use the per-chat lock."""
         module_path = os.path.join(
-            os.path.dirname(__file__), "..", "rollCall", "telegram_helper.py"
+            os.path.dirname(__file__), "..", "rollCall", "handlers", "lifecycle.py"
         )
         with open(module_path) as f:
             source = f.read()
@@ -1147,14 +1158,14 @@ class TestProxyDeleteCleansGhostRecord(unittest.TestCase):
 
 class TestProxyGhostEventUserName(unittest.TestCase):
     """
-    telegram_helper.py ghost_done callback: add_ghost_event for proxy users
+    handlers/ghost.py ghost_done callback: add_ghost_event for proxy users
     must pass user_name=proxy_name so the ghost_events audit table is always
     populated (not NULL) for every ghost event.
     """
 
     def test_source_proxy_ghost_event_passes_user_name(self):
         module_path = os.path.join(
-            os.path.dirname(__file__), "..", "rollCall", "telegram_helper.py"
+            os.path.dirname(__file__), "..", "rollCall", "handlers", "ghost.py"
         )
         with open(module_path) as f:
             source = f.read()

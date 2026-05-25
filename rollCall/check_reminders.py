@@ -116,7 +116,7 @@ async def check(rollcalls, timezone, chat_id):
 
                         # Cancel any pending debounce and clean up panel state
                         try:
-                            from telegram_helper import _cancel_panel_debounce, _panel_msg_ids, _pending_panel_updates
+                            from bot_state import _cancel_panel_debounce, _panel_msg_ids, _pending_panel_updates
                             _cancel_panel_debounce(chat_id, rc_number)
                             _panel_msg_ids.pop((chat_id, rc_number), None)
                             for num in sorted(n for (c, n) in list(_panel_msg_ids) if c == chat_id and n > rc_number):
@@ -242,7 +242,8 @@ async def _auto_start_from_template(chat_id: int, tmpl: dict):
 
     # Send the full rollcall panel with inline vote buttons
     try:
-        from telegram_helper import get_status_keyboard, _panel_msg_ids
+        from handlers.lifecycle import get_status_keyboard
+        from bot_state import _panel_msg_ids
         markup = await get_status_keyboard(rc_number)
         text = rc.allList().replace("__RCID__", str(rc_number))
         sent = await bot.send_message(chat_id, text, reply_markup=markup, parse_mode=None)
@@ -265,7 +266,10 @@ async def _auto_start_from_template(chat_id: int, tmpl: dict):
 
     # Ensure the reminder/auto-close loop is running for this new rollcall
     if rc.finalizeDate:
-        asyncio.create_task(start(rollcalls, tzname, chat_id))
+        def _log_exc(t):
+            if not t.cancelled() and t.exception():
+                logging.error(f"Reminder loop raised: {t.exception()}")
+        asyncio.create_task(start(rollcalls, tzname, chat_id)).add_done_callback(_log_exc)
 
 
 async def check_template_schedules():

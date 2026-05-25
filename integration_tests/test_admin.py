@@ -3,7 +3,7 @@ Integration: admin commands — /delete_user, /set_status, /audit_log.
 """
 import db
 from helpers import IntegrationBase, USERS, ADMIN_USER, CHAT_ID
-from conftest import get_mock_bot
+from mock_helpers import get_mock_bot
 
 
 class TestDeleteUser(IntegrationBase):

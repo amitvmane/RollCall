@@ -4,7 +4,7 @@ mark_absent, clear_absent, full ghost flow with erc.
 """
 import db
 from helpers import IntegrationBase, USERS, ADMIN_USER, CHAT_ID
-from conftest import get_mock_bot
+from mock_helpers import get_mock_bot
 
 
 class TestGhostToggle(IntegrationBase):
@@ -143,3 +143,73 @@ class TestGhostFullFlow(IntegrationBase):
         call = self.call(f"reconf_in_0_{ghost_user['id']}", ghost_user)
         await self.ghost_callback_handler(call)
         self.assertEqual(len(self.mgr.get_rollcall(CHAT_ID, 0).inList), 2)
+
+
+class TestMarkAbsent(IntegrationBase):
+    """Tests for /mark_absent and the mabs_sel / ghost_yes / ghost_no / ghost_done callback chain."""
+
+    async def _end_session_with_users(self, title="Past Game", n_users=3):
+        """Start rollcall, vote n users in, end it, return the ended rollcall DB id."""
+        await self.start_rc(title)
+        for user in USERS[:n_users]:
+            await self.vote_in(user)
+        await self.end_roll_call(self.msg("/erc", ADMIN_USER))
+
+    async def test_mark_absent_ghost_tracking_disabled_sends_error(self):
+        await self.toggle_ghost_tracking(self.msg("/toggle_ghost_tracking off", ADMIN_USER))
+        get_mock_bot().send_message.reset_mock()
+        await self.mark_absent(self.msg("/mark_absent", ADMIN_USER))
+        texts = self.sent_texts()
+        self.assertTrue(any("not enabled" in t.lower() or "tracking" in t.lower() for t in texts))
+
+    async def test_mark_absent_no_sessions_to_review(self):
+        await self.toggle_ghost_tracking(self.msg("/toggle_ghost_tracking on", ADMIN_USER))
+        get_mock_bot().send_message.reset_mock()
+        await self.mark_absent(self.msg("/mark_absent", ADMIN_USER))
+        texts = self.sent_texts()
+        self.assertTrue(any("caught up" in t.lower() or "no session" in t.lower() for t in texts))
+
+    async def test_mark_absent_shows_session_selection(self):
+        await self.toggle_ghost_tracking(self.msg("/toggle_ghost_tracking on", ADMIN_USER))
+        await self._end_session_with_users()
+        get_mock_bot().send_message.reset_mock()
+        await self.mark_absent(self.msg("/mark_absent", ADMIN_USER))
+        texts = self.sent_texts()
+        self.assertTrue(any("session" in t.lower() or "review" in t.lower() for t in texts))
+
+    async def test_ghost_no_callback_marks_session_done(self):
+        await self.toggle_ghost_tracking(self.msg("/toggle_ghost_tracking on", ADMIN_USER))
+        await self._end_session_with_users()
+        import db as _db
+        sessions = _db.get_unprocessed_rollcalls(CHAT_ID, days=30)
+        self.assertGreater(len(sessions), 0)
+        rc_db_id = sessions[0]["id"]
+        # Fire ghost_no — no ghosts, mark done
+        call = self.call(f"ghost_no_{rc_db_id}", ADMIN_USER)
+        await self.ghost_callback_handler(call)
+        # Session should now be marked absent_done
+        remaining = _db.get_unprocessed_rollcalls(CHAT_ID, days=30)
+        self.assertEqual(len(remaining), 0)
+
+    async def test_mabs_sel_callback_shows_user_selection(self):
+        await self.toggle_ghost_tracking(self.msg("/toggle_ghost_tracking on", ADMIN_USER))
+        await self._end_session_with_users()
+        import db as _db
+        sessions = _db.get_unprocessed_rollcalls(CHAT_ID, days=30)
+        rc_db_id = sessions[0]["id"]
+        call = self.call(f"mabs_sel_{rc_db_id}", ADMIN_USER)
+        await self.ghost_callback_handler(call)
+        get_mock_bot().edit_message_text.assert_called()
+
+    async def test_ghost_done_records_selected_ghosts(self):
+        await self.toggle_ghost_tracking(self.msg("/toggle_ghost_tracking on", ADMIN_USER))
+        await self._end_session_with_users(n_users=2)
+        import db as _db
+        sessions = _db.get_unprocessed_rollcalls(CHAT_ID, days=30)
+        rc_db_id = sessions[0]["id"]
+        # Manually seed a ghost selection for USERS[0]
+        self.bs._ghost_selections[(CHAT_ID, rc_db_id)] = {USERS[0]["id"]}
+        call = self.call(f"ghost_done_{rc_db_id}", ADMIN_USER)
+        await self.ghost_callback_handler(call)
+        count = _db.get_ghost_count(CHAT_ID, USERS[0]["id"])
+        self.assertGreater(count, 0)

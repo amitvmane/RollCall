@@ -5,7 +5,7 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from conftest import get_mock_bot, reset_db
+from mock_helpers import get_mock_bot, reset_db, _next_msg_id
 
 # Lazy imports — modules only available after conftest runs
 def _import_all():
@@ -17,20 +17,25 @@ def _import_all():
     )
     from handlers.voting import in_user, out_user, maybe_user
     from handlers.proxy import set_in_for, set_out_for, set_maybe_for
-    from handlers.lists import whos_in, whos_out, whos_maybe, whos_waiting, buzz_command
+    from handlers.lists import whos_in, whos_out, whos_maybe, whos_waiting, buzz_command, history_command
     from handlers.ghost import (
         toggle_ghost_tracking, set_absent_limit, clear_absent, mark_absent,
         ghost_callback_handler,
     )
-    from handlers.admin import delete_user, set_status_override, audit_log_command
+    from handlers.admin import delete_user, set_status_override, audit_log_command, audit_pagination_callback
     from handlers.templates import (
         list_templates, set_template, start_template,
-        delete_template_command, schedules_command,
+        delete_template_command, schedules_command, schedule_template_cmd, schedules_toggle_callback,
     )
     from handlers.settings import (
         shh, louder, wait_limit, event_fee, individual_fee, when, set_location,
+        set_rollcall_time, reminder,
     )
-    from handlers.core import set_admins, unset_admins
+    from handlers.core import (
+        set_admins, unset_admins, welcome_and_explanation, help_commands,
+        broadcast, config_timezone, version_command, show_reminders,
+    )
+    from handlers.stats import stats_command
     return locals()
 
 
@@ -127,6 +132,19 @@ class IntegrationBase(unittest.IsolatedAsyncioTestCase):
         cls.set_location = staticmethod(h["set_location"])
         cls.set_admins = staticmethod(h["set_admins"])
         cls.unset_admins = staticmethod(h["unset_admins"])
+        cls.welcome_and_explanation = staticmethod(h["welcome_and_explanation"])
+        cls.help_commands = staticmethod(h["help_commands"])
+        cls.broadcast = staticmethod(h["broadcast"])
+        cls.config_timezone = staticmethod(h["config_timezone"])
+        cls.version_command = staticmethod(h["version_command"])
+        cls.show_reminders = staticmethod(h["show_reminders"])
+        cls.history_command = staticmethod(h["history_command"])
+        cls.stats_command = staticmethod(h["stats_command"])
+        cls.set_rollcall_time = staticmethod(h["set_rollcall_time"])
+        cls.reminder = staticmethod(h["reminder"])
+        cls.audit_pagination_callback = staticmethod(h["audit_pagination_callback"])
+        cls.schedule_template_cmd = staticmethod(h["schedule_template_cmd"])
+        cls.schedules_toggle_callback = staticmethod(h["schedules_toggle_callback"])
 
     def setUp(self):
         reset_db()
@@ -147,6 +165,7 @@ class IntegrationBase(unittest.IsolatedAsyncioTestCase):
         bot.edit_message_text.reset_mock()
         bot.edit_message_reply_markup.reset_mock()
         bot.answer_callback_query.reset_mock()
+        bot.get_chat_member.return_value.status = "administrator"
 
     # ── convenience helpers ──────────────────────────────────────────────────
 
@@ -200,7 +219,6 @@ class IntegrationBase(unittest.IsolatedAsyncioTestCase):
 
 
 def _make_sent_msg():
-    from conftest import _next_msg_id
     m = MagicMock()
     m.message_id = _next_msg_id()
     return m

@@ -42,14 +42,14 @@ class GhostTestBase(unittest.IsolatedAsyncioTestCase):
         from handlers.stats import stats_command
 
         cls.bot_state = bot_state
-        cls.ghost_callback_handler = ghost_callback_handler
-        cls.toggle_ghost_tracking = toggle_ghost_tracking
-        cls.set_absent_limit = set_absent_limit
-        cls.clear_absent = clear_absent
-        cls.mark_absent = mark_absent
-        cls.end_roll_call = end_roll_call
-        cls.in_user = in_user
-        cls.stats_command = stats_command
+        cls.ghost_callback_handler = staticmethod(ghost_callback_handler)
+        cls.toggle_ghost_tracking = staticmethod(toggle_ghost_tracking)
+        cls.set_absent_limit = staticmethod(set_absent_limit)
+        cls.clear_absent = staticmethod(clear_absent)
+        cls.mark_absent = staticmethod(mark_absent)
+        cls.end_roll_call = staticmethod(end_roll_call)
+        cls.in_user = staticmethod(in_user)
+        cls.stats_command = staticmethod(stats_command)
 
     def setUp(self):
         self.bot_state.bot.send_message = AsyncMock()

@@ -60,55 +60,57 @@ class HandlerTestBase(unittest.IsolatedAsyncioTestCase):
             when, set_location,
         )
 
-        # Attach everything to cls for test access
+        # Attach everything to cls for test access.
+        # staticmethod prevents Python's descriptor protocol from binding self
+        # when these are called as self.func(message) in test methods.
         cls.bot_state = bot_state
-        cls.in_user = in_user
-        cls.out_user = out_user
-        cls.maybe_user = maybe_user
-        cls.start_roll_call = start_roll_call
-        cls.end_roll_call = end_roll_call
-        cls.callback_handler = callback_handler
-        cls.get_status_keyboard = get_status_keyboard
-        cls.show_panel_for_rollcall = show_panel_for_rollcall
-        cls.notify_proxy_owner_wait_to_in = notify_proxy_owner_wait_to_in
-        cls.set_in_for = set_in_for
-        cls.set_out_for = set_out_for
-        cls.set_maybe_for = set_maybe_for
-        cls.whos_in = whos_in
-        cls.whos_out = whos_out
-        cls.whos_maybe = whos_maybe
-        cls.whos_waiting = whos_waiting
-        cls.buzz_command = buzz_command
-        cls.ghost_callback_handler = ghost_callback_handler
-        cls.toggle_ghost_tracking = toggle_ghost_tracking
-        cls.set_absent_limit = set_absent_limit
-        cls.clear_absent = clear_absent
-        cls.mark_absent = mark_absent
-        cls.delete_user = delete_user
-        cls.stats_command = stats_command
-        cls.list_templates = list_templates
-        cls.set_template = set_template
-        cls.start_template = start_template
-        cls.delete_template_command = delete_template_command
-        cls.schedules_command = schedules_command
-        cls.schedule_template_cmd = schedule_template_cmd
-        cls.welcome_and_explanation = welcome_and_explanation
-        cls.help_commands = help_commands
-        cls.set_admins = set_admins
-        cls.unset_admins = unset_admins
-        cls.broadcast = broadcast
-        cls.config_timezone = config_timezone
-        cls.version_command = version_command
-        cls.show_reminders = show_reminders
-        cls.shh = shh
-        cls.louder = louder
-        cls.set_title = set_title
-        cls.show_panel = show_panel
-        cls.wait_limit = wait_limit
-        cls.event_fee = event_fee
-        cls.individual_fee = individual_fee
-        cls.when = when
-        cls.set_location = set_location
+        cls.in_user = staticmethod(in_user)
+        cls.out_user = staticmethod(out_user)
+        cls.maybe_user = staticmethod(maybe_user)
+        cls.start_roll_call = staticmethod(start_roll_call)
+        cls.end_roll_call = staticmethod(end_roll_call)
+        cls.callback_handler = staticmethod(callback_handler)
+        cls.get_status_keyboard = staticmethod(get_status_keyboard)
+        cls.show_panel_for_rollcall = staticmethod(show_panel_for_rollcall)
+        cls.notify_proxy_owner_wait_to_in = staticmethod(notify_proxy_owner_wait_to_in)
+        cls.set_in_for = staticmethod(set_in_for)
+        cls.set_out_for = staticmethod(set_out_for)
+        cls.set_maybe_for = staticmethod(set_maybe_for)
+        cls.whos_in = staticmethod(whos_in)
+        cls.whos_out = staticmethod(whos_out)
+        cls.whos_maybe = staticmethod(whos_maybe)
+        cls.whos_waiting = staticmethod(whos_waiting)
+        cls.buzz_command = staticmethod(buzz_command)
+        cls.ghost_callback_handler = staticmethod(ghost_callback_handler)
+        cls.toggle_ghost_tracking = staticmethod(toggle_ghost_tracking)
+        cls.set_absent_limit = staticmethod(set_absent_limit)
+        cls.clear_absent = staticmethod(clear_absent)
+        cls.mark_absent = staticmethod(mark_absent)
+        cls.delete_user = staticmethod(delete_user)
+        cls.stats_command = staticmethod(stats_command)
+        cls.list_templates = staticmethod(list_templates)
+        cls.set_template = staticmethod(set_template)
+        cls.start_template = staticmethod(start_template)
+        cls.delete_template_command = staticmethod(delete_template_command)
+        cls.schedules_command = staticmethod(schedules_command)
+        cls.schedule_template_cmd = staticmethod(schedule_template_cmd)
+        cls.welcome_and_explanation = staticmethod(welcome_and_explanation)
+        cls.help_commands = staticmethod(help_commands)
+        cls.set_admins = staticmethod(set_admins)
+        cls.unset_admins = staticmethod(unset_admins)
+        cls.broadcast = staticmethod(broadcast)
+        cls.config_timezone = staticmethod(config_timezone)
+        cls.version_command = staticmethod(version_command)
+        cls.show_reminders = staticmethod(show_reminders)
+        cls.shh = staticmethod(shh)
+        cls.louder = staticmethod(louder)
+        cls.set_title = staticmethod(set_title)
+        cls.show_panel = staticmethod(show_panel)
+        cls.wait_limit = staticmethod(wait_limit)
+        cls.event_fee = staticmethod(event_fee)
+        cls.individual_fee = staticmethod(individual_fee)
+        cls.when = staticmethod(when)
+        cls.set_location = staticmethod(set_location)
 
     def setUp(self):
         # Fresh AsyncMock for bot.send_message each test

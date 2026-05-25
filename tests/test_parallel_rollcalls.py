@@ -35,22 +35,22 @@ class TestParallelRollcallsBase(unittest.IsolatedAsyncioTestCase):
         from handlers.settings import wait_limit, event_fee, set_location
 
         cls.bot_state = bot_state
-        cls.in_user = in_user
-        cls.out_user = out_user
-        cls.maybe_user = maybe_user
-        cls.start_roll_call = start_roll_call
-        cls.end_roll_call = end_roll_call
-        cls.set_title = set_title
-        cls.show_panel_for_rollcall = show_panel_for_rollcall
-        cls.set_in_for = set_in_for
-        cls.whos_in = whos_in
-        cls.whos_out = whos_out
-        cls.whos_maybe = whos_maybe
-        cls.whos_waiting = whos_waiting
-        cls.delete_user = delete_user
-        cls.wait_limit = wait_limit
-        cls.event_fee = event_fee
-        cls.set_location = set_location
+        cls.in_user = staticmethod(in_user)
+        cls.out_user = staticmethod(out_user)
+        cls.maybe_user = staticmethod(maybe_user)
+        cls.start_roll_call = staticmethod(start_roll_call)
+        cls.end_roll_call = staticmethod(end_roll_call)
+        cls.set_title = staticmethod(set_title)
+        cls.show_panel_for_rollcall = staticmethod(show_panel_for_rollcall)
+        cls.set_in_for = staticmethod(set_in_for)
+        cls.whos_in = staticmethod(whos_in)
+        cls.whos_out = staticmethod(whos_out)
+        cls.whos_maybe = staticmethod(whos_maybe)
+        cls.whos_waiting = staticmethod(whos_waiting)
+        cls.delete_user = staticmethod(delete_user)
+        cls.wait_limit = staticmethod(wait_limit)
+        cls.event_fee = staticmethod(event_fee)
+        cls.set_location = staticmethod(set_location)
 
     def setUp(self):
         self.bot_state.bot.send_message = AsyncMock()

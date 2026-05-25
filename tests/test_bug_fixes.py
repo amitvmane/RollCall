@@ -274,16 +274,21 @@ class TestVersionCommand(unittest.TestCase):
 
     def setUp(self):
         import bot_state
+        import handlers.core as core_mod
         from handlers.core import version_command
         self.version_command = version_command
         self.bot_state = bot_state
+        self.core_mod = core_mod
         self.bot_mock = MagicMock()
         self.bot_mock.send_message = AsyncMock()
         self._original_bot = bot_state.bot
+        self._original_core_bot = core_mod.bot
         bot_state.bot = self.bot_mock
+        core_mod.bot = self.bot_mock
 
     def tearDown(self):
         self.bot_state.bot = self._original_bot
+        self.core_mod.bot = self._original_core_bot
 
     def _make_message(self, chat_id=1):
         msg = MagicMock()
@@ -370,16 +375,21 @@ class TestBroadcast(unittest.TestCase):
 
     def setUp(self):
         import bot_state
+        import handlers.core as core_mod
         from handlers.core import broadcast
         self.broadcast = broadcast
         self.bot_state = bot_state
+        self.core_mod = core_mod
         self.bot_mock = MagicMock()
         self.bot_mock.send_message = AsyncMock()
         self._original_bot = bot_state.bot
+        self._original_core_bot = core_mod.bot
         bot_state.bot = self.bot_mock
+        core_mod.bot = self.bot_mock
 
     def tearDown(self):
         self.bot_state.bot = self._original_bot
+        self.core_mod.bot = self._original_core_bot
 
     def _make_message(self, text="/broadcast Hello world", from_id=1):
         msg = MagicMock()
@@ -760,7 +770,7 @@ class TestSifDuplicateProxyGuard(unittest.IsolatedAsyncioTestCase):
         import bot_state
         from handlers.proxy import set_in_for
         cls.bot_state = bot_state
-        cls.set_in_for = set_in_for
+        cls.set_in_for = staticmethod(set_in_for)
 
     def setUp(self):
         self.bot_state.bot.send_message = AsyncMock()
@@ -937,7 +947,7 @@ class TestErcRenumberingMessage(unittest.IsolatedAsyncioTestCase):
         import bot_state
         from handlers.lifecycle import end_roll_call
         cls.bot_state = bot_state
-        cls.end_roll_call = end_roll_call
+        cls.end_roll_call = staticmethod(end_roll_call)
 
     def setUp(self):
         self.bot_state.bot.send_message = AsyncMock()

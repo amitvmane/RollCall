@@ -190,5 +190,11 @@
         "Description": "🚀 Auto Panel on Start — /src and scheduled template auto-starts now immediately send the full inline vote panel (instead of plain text), so members can vote without any extra steps. 🎉 Ended-by Attribution — /erc and panel end now append 'Ended by <name>' to the finish message. 🐛 Production fix: panel_msg_id was never actually persisted (name 'db' is not defined error in _persist_panel_msg_id — update_rollcall was not imported as a function); panel persistence now works correctly across restarts. 🛡️ Guard: _dm_promoted_real_user is now only called when user_id is an int (all 5 call sites guarded), preventing silent errors for proxy users promoted from waitlist. 📌 Debounce cancel on end — pending panel debounce tasks are now cancelled when a rollcall ends (/erc or panel end) to prevent stale panel sends. ⚡ Rate limit on panel buttons — btn_in/out/maybe callbacks now apply the same rate-limit check as the equivalent commands.",
         "DeployedOnProd": "N",
         "DeployedDatetime": "21-05-2026 00:00 UTC"
+    },
+    {
+        "Version": 7.5,
+        "Description": "🏗️ Major code refactoring for effective LLM token utilization — telegram_helper.py split into focused handler modules (core, voting, lifecycle, settings, ghost, admin, lists, proxy, templates, stats); each module is single-responsibility and significantly smaller, reducing token overhead for AI-assisted development and code review. 🐛 7 bug fixes: 3-segment timezone parsing (/timezone America/Indiana/Indianapolis), string-vs-int comparison in /reminder, uncaught exceptions in /wait_limit and /set_rollcall_time, ghost reconf double-counting stats on comment update, SQL aggregate column alias mismatch (SQLite vs PostgreSQL), traceback print statements replaced with structured logging throughout.",
+        "DeployedOnProd": "Y",
+        "DeployedDatetime": "26-05-2026 00:00 UTC"
     }
 ]

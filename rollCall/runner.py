@@ -35,6 +35,7 @@ try:
     from telegram_helper import bot
     from rollcall_manager import manager
     from check_reminders import check_template_schedules, resume_reminder_loops
+    from bot_state import _log_task_exc
 except ImportError as e:
     logger.error(f"Failed to import required modules: {e}")
     sys.exit(1)
@@ -253,7 +254,8 @@ async def main():
         logger.warning("Continuing without health check endpoint...")
     
     # Start template auto-scheduler (persistent background task)
-    asyncio.create_task(check_template_schedules())
+    _sched_task = asyncio.create_task(check_template_schedules())
+    _sched_task.add_done_callback(_log_task_exc)
     logger.info("✅ Template scheduler started")
 
     # Resume reminder/auto-close loops for rollcalls already in DB with a finalizeDate.

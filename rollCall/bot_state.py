@@ -57,9 +57,8 @@ _BUZZ_COOLDOWN_SECONDS = 30
 # Panel message tracking: (chat_id, rc_1based) -> message_id of the active panel message
 _panel_msg_ids: dict = {}
 
-# Louder mode: pending debounced panel sends coalesced into one new message
+# Pending panel update tasks (cancelled on rollcall end to avoid stale sends)
 _pending_panel_updates: dict = {}
-_LOUDER_PANEL_DEBOUNCE_SECS = 300
 
 # Audit log display settings
 _AUDIT_PER_PAGE = 15

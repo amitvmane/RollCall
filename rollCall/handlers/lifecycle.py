@@ -11,7 +11,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot_state import (
     bot, _panel_msg_ids, _pending_panel_updates, _pending_deletes, _pending_overrides,
-    _LOUDER_PANEL_DEBOUNCE_SECS, _log_task_exc, _cancel_panel_debounce,
+    _log_task_exc, _cancel_panel_debounce,
     _is_rate_limited, _get_display_name, format_mention_with_name,
     warn_no_username, _dm_promoted_real_user, get_rc_db_id,
 )
@@ -87,41 +87,15 @@ def _persist_panel_msg_id(rc, msg_id: int) -> None:
 async def _update_panel(cid: int, rc_number: int, rc, force_new: bool = False) -> None:
     """Update the status panel for a rollcall.
 
-    shh mode    — edits the existing panel in-place (silent, no ping).
-    louder mode — debounces new panel messages: resets a 5-minute timer on every
-                  vote; one fresh panel is posted 5 minutes after the last vote.
-    force_new   — skips debounce and sends immediately (used by /panel command).
+    Always edits the existing panel in-place immediately so every vote is
+    reflected without delay. Falls back to sending a new message if the
+    original panel was deleted or has not been sent yet.
+    force_new — always sends a fresh message (used by /panel command).
     """
     key = (cid, rc_number)
 
     if key not in _panel_msg_ids and getattr(rc, 'panel_msg_id', None):
         _panel_msg_ids[key] = rc.panel_msg_id
-
-    if not force_new and not manager.get_shh_mode(cid):
-        existing = _pending_panel_updates.get(key)
-        if existing and not existing.done():
-            existing.cancel()
-
-        async def _delayed_send():
-            try:
-                await asyncio.sleep(_LOUDER_PANEL_DEBOUNCE_SECS)
-                _text = rc.allList().replace("__RCID__", str(rc_number))
-                _markup = await get_status_keyboard(rc_number)
-                sent = await bot.send_message(cid, _text, reply_markup=_markup)
-                _panel_msg_ids[key] = sent.message_id
-                _persist_panel_msg_id(rc, sent.message_id)
-            except asyncio.CancelledError:
-                pass
-            except Exception as e:
-                logging.error(f"Debounced panel send failed for ({cid}, {rc_number}): {e}")
-            finally:
-                if _pending_panel_updates.get(key) is asyncio.current_task():
-                    _pending_panel_updates.pop(key, None)
-
-        task = asyncio.create_task(_delayed_send())
-        task.add_done_callback(_log_task_exc)
-        _pending_panel_updates[key] = task
-        return
 
     text = rc.allList().replace("__RCID__", str(rc_number))
     markup = await get_status_keyboard(rc_number)

@@ -81,8 +81,10 @@ class TestTemplateStart(IntegrationBase):
     async def test_start_template_queues_panel_update(self):
         await self._create_template()
         await self.start_template(self.msg("/start_template weekly", ADMIN_USER))
-        # Panel is debounced (300s louder-mode); verify the pending update was queued
-        self.assertTrue(len(self.bs._pending_panel_updates) > 0)
+        # Panel is now sent immediately (debounce removed); verify panel message was sent
+        texts = self.sent_texts()
+        self.assertTrue(any("Max limit:" in t for t in texts),
+                        f"Expected panel message to be sent, got: {texts}")
 
     async def test_start_template_unknown_name_sends_error(self):
         await self.start_template(self.msg("/start_template nonexistent", ADMIN_USER))

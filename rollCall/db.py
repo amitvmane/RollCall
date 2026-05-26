@@ -670,6 +670,7 @@ def _run_migrations(conn, cursor):
             conn.rollback()
 
     # Add in_pos/out_pos/wait_pos to users and proxy_users (added for join-order preservation)
+    # Add proxy_owner_id to proxy_users (added for proxy ownership tracking)
     for tbl in ("users", "proxy_users"):
         if db_type == 'postgresql':
             for col in ("in_pos", "out_pos", "wait_pos"):
@@ -685,6 +686,19 @@ def _run_migrations(conn, cursor):
                     conn.commit()
                 except Exception:
                     conn.rollback()  # column already exists — safe to ignore
+
+    if db_type == 'postgresql':
+        try:
+            cursor.execute("ALTER TABLE proxy_users ADD COLUMN IF NOT EXISTS proxy_owner_id BIGINT DEFAULT NULL")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    else:
+        try:
+            cursor.execute("ALTER TABLE proxy_users ADD COLUMN proxy_owner_id INTEGER DEFAULT NULL")
+            conn.commit()
+        except Exception:
+            conn.rollback()  # column already exists — safe to ignore
 
     # PostgreSQL: replace COALESCE expression constraint on ghost_records with partial unique indexes
     # (the expression constraint caused ON CONFLICT clauses to fail at runtime)

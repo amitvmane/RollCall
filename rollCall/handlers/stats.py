@@ -314,12 +314,14 @@ async def build_group_stats_text(chat_id: int) -> str:
         cursor = conn.cursor()
         if db_type == "postgresql":
             cursor.execute(
-                "SELECT SUM(total_in), SUM(total_out), SUM(total_maybe), SUM(total_waiting_to_in) "
+                "SELECT SUM(total_in) AS sum_in, SUM(total_out) AS sum_out, "
+                "SUM(total_maybe) AS sum_maybe, SUM(total_waiting_to_in) AS sum_wait "
                 "FROM user_stats WHERE chat_id = %s", (chat_id,),
             )
         else:
             cursor.execute(
-                "SELECT SUM(total_in), SUM(total_out), SUM(total_maybe), SUM(total_waiting_to_in) "
+                "SELECT SUM(total_in) AS sum_in, SUM(total_out) AS sum_out, "
+                "SUM(total_maybe) AS sum_maybe, SUM(total_waiting_to_in) AS sum_wait "
                 "FROM user_stats WHERE chat_id = ?", (chat_id,),
             )
         row = cursor.fetchone()

@@ -3,7 +3,6 @@ Core handlers: /start, /help, /rollcalls, /version, /set_admins, /unset_admins, 
 """
 import json
 import logging
-import traceback
 
 from bot_state import bot, data_file_path
 from config import ADMINS
@@ -157,7 +156,7 @@ async def config_timezone(message):
 
         if len(msg.split(" ")) < 2:
             raise parameterMissing("The correct format is: /timezone continent/country or continent/state")
-        if len(msg.split(" ")[1].split("/")) != 2:
+        if len(msg.split(" ")[1].split("/")) < 2:
             raise parameterMissing("The correct format is: /timezone continent/country or continent/state")
 
         manager.get_chat(cid)
@@ -171,7 +170,7 @@ async def config_timezone(message):
             await bot.send_message(cid, f"Given timezone is invalid , check this <a href='https://gist.github.com/heyalexej/8bf688fd67d7199be4a1682b3eec7568'>website</a>", parse_mode='HTML')
 
     except Exception as e:
-        print(traceback.format_exc())
+        logging.exception("[config_timezone] Unexpected error")
         await bot.send_message(message.chat.id, str(e))
 
 

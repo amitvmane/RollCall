@@ -327,7 +327,7 @@ async def ghost_callback_handler(call):
             result = rc.addIn(user)
             rc.save()
             rc_db_id = get_rc_db_id(rc)
-            if result not in ('AB', 'AC') and rc_db_id and isinstance(uid, int):
+            if result not in ('AB', 'AC', 'AU') and rc_db_id and isinstance(uid, int):
                 increment_user_stat(cid, uid, "total_in")
                 increment_rollcall_stat(rc_db_id, "total_in")
             await bot.answer_callback_query(call.id, "💪 You're IN!")

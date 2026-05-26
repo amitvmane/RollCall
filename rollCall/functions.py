@@ -85,7 +85,7 @@ def auto_complete_timezone(timezone):
             return None
             
         continent = parts[0].lower()
-        place = parts[1].lower().replace(" ", "_")
+        place = parts[-1].lower().replace(" ", "_")
         
         # Handle common aliases
         if place == 'india':

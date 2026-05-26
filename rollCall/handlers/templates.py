@@ -5,7 +5,6 @@ Template handlers: /templates, /set_template, /start_template, /delete_template,
 import asyncio
 import html
 import logging
-import traceback
 from datetime import datetime, timedelta
 
 import pytz
@@ -533,7 +532,7 @@ async def set_template(message):
             await bot.send_message(cid, "Failed to save template. Please try again.")
 
     except Exception as e:
-        print(traceback.format_exc())
+        logging.exception("[set_template] Unexpected error")
         await bot.send_message(message.chat.id, str(e))
 
 

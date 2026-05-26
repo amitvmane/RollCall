@@ -4,7 +4,6 @@ Settings handlers: /srt, /srr, /event_fee, /individual_fee, /when, /location, /s
 import asyncio
 import logging
 import re
-import traceback
 from datetime import datetime, timedelta
 
 import pytz
@@ -88,7 +87,7 @@ async def set_rollcall_time(message):
         asyncio.create_task(start(rollcalls, rc.timezone, cid)).add_done_callback(_log_task_exc)
 
     except Exception as e:
-        print(traceback.format_exc())
+        logging.exception("[set_rollcall_time] Unexpected error")
         await bot.send_message(message.chat.id, str(e))
 
 
@@ -149,7 +148,7 @@ async def reminder(message):
         if finalize - timedelta(hours=int(hour)) < datetime.now(pytz.timezone(rc.timezone)):
             raise incorrectParameter("Reminder notification time is less than current time, please set it correctly.")
 
-        rc.reminder = int(hour) if hour != 0 else None
+        rc.reminder = int(hour) if int(hour) != 0 else None
         rc.save()
         if not manager.get_shh_mode(cid):
             await bot.send_message(cid, f'I will remind {hour}hour/s before the event! Thank you!')
@@ -158,7 +157,7 @@ async def reminder(message):
         await _update_panel(cid, rc_number + 1, rc)
 
     except ValueError as e:
-        print(traceback.format_exc())
+        logging.exception("[reminder] Invalid value")
         await bot.send_message(cid, 'The correct format is /set_rollcall_reminder HH')
     except Exception as e:
         await bot.send_message(cid, str(e))
@@ -434,10 +433,11 @@ async def wait_limit(message):
         await _update_panel(cid, rc_number + 1, rc)
 
     except parameterMissing as e:
-        print(traceback.format_exc())
         await bot.send_message(message.chat.id, str(e))
     except rollCallNotStarted as e:
-        print(traceback.format_exc())
+        await bot.send_message(message.chat.id, str(e))
+    except Exception as e:
+        logging.exception("[wait_limit] Unexpected error")
         await bot.send_message(message.chat.id, str(e))
 
 

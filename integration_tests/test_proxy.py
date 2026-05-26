@@ -3,7 +3,7 @@ Integration: proxy commands — /sif, /sof, /smf, ghost warning, duplicate guard
 """
 import db
 from helpers import IntegrationBase, USERS, ADMIN_USER, CHAT_ID
-from conftest import get_mock_bot
+from mock_helpers import get_mock_bot
 
 
 class TestProxyCommands(IntegrationBase):

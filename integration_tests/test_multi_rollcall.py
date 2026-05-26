@@ -2,7 +2,7 @@
 Integration: multiple simultaneous rollcalls — ::N routing, isolation, panel renumbering.
 """
 from helpers import IntegrationBase, USERS, ADMIN_USER, CHAT_ID
-from conftest import get_mock_bot
+from mock_helpers import get_mock_bot
 
 
 class TestMultiRollcallRouting(IntegrationBase):

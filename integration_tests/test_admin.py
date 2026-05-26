@@ -153,3 +153,31 @@ class TestAuditLog(IntegrationBase):
         get_mock_bot().send_message.reset_mock()
         await self.audit_log_command(self.msg("/audit_log 3", ADMIN_USER))
         self.assertGreater(self.sent_count(), 0)
+
+
+class TestAuditPagination(IntegrationBase):
+    """audit_pg_* callback and audit_noop."""
+
+    async def _seed_log_entries(self, n=10):
+        await self.start_rc()
+        for i in range(n):
+            await self.set_in_for(self.msg(f"/sif LogUser{i}", ADMIN_USER))
+
+    async def test_audit_noop_callback_answered(self):
+        call = self.call("audit_noop", ADMIN_USER)
+        await self.audit_pagination_callback(call)
+        get_mock_bot().answer_callback_query.assert_called()
+
+    async def test_audit_pg_callback_loads_page(self):
+        await self._seed_log_entries(15)
+        # Load page 2 with 5 per page
+        call = self.call("audit_pg_2_5", ADMIN_USER)
+        await self.audit_pagination_callback(call)
+        get_mock_bot().answer_callback_query.assert_called()
+        get_mock_bot().edit_message_text.assert_called()
+
+    async def test_audit_pg_first_page(self):
+        await self._seed_log_entries(8)
+        call = self.call("audit_pg_1_5", ADMIN_USER)
+        await self.audit_pagination_callback(call)
+        get_mock_bot().answer_callback_query.assert_called()

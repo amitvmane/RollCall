@@ -2,7 +2,7 @@
 Integration: settings commands — /shh, /louder, /sl, /ef, /if, /w, /loc.
 """
 from helpers import IntegrationBase, USERS, ADMIN_USER, CHAT_ID
-from conftest import get_mock_bot
+from mock_helpers import get_mock_bot
 
 
 class TestQuietMode(IntegrationBase):
@@ -162,3 +162,90 @@ class TestLocation(IntegrationBase):
         await self.set_location(self.msg("/loc Field 2", ADMIN_USER))
         rc = self.rc(0)
         self.assertIn("Field 2", rc.location or "")
+
+
+class TestSetRollcallTime(IntegrationBase):
+    """Tests for /srt (set_rollcall_time)."""
+
+    def _future_date_str(self, days=365):
+        from datetime import datetime, timedelta
+        return (datetime.now() + timedelta(days=days)).strftime("%d-%m-%Y %H:%M")
+
+    async def test_srt_no_rollcall_sends_error(self):
+        await self.set_rollcall_time(self.msg("/srt 01-01-2099 10:00", ADMIN_USER))
+        texts = self.sent_texts()
+        self.assertTrue(any("not active" in t.lower() for t in texts))
+
+    async def test_srt_no_args_sends_error(self):
+        await self.start_rc()
+        await self.set_rollcall_time(self.msg("/srt", ADMIN_USER))
+        texts = self.sent_texts()
+        self.assertTrue(any("format" in t.lower() or "datetime" in t.lower() for t in texts))
+
+    async def test_srt_sets_finalize_date(self):
+        await self.start_rc()
+        future = self._future_date_str()
+        await self.set_rollcall_time(self.msg(f"/srt {future}", ADMIN_USER))
+        rc = self.rc(0)
+        self.assertIsNotNone(rc.finalizeDate)
+
+    async def test_srt_past_date_sends_error(self):
+        await self.start_rc()
+        await self.set_rollcall_time(self.msg("/srt 01-01-2000 10:00", ADMIN_USER))
+        texts = self.sent_texts()
+        self.assertTrue(any("future" in t.lower() or "valid" in t.lower() for t in texts))
+
+    async def test_srt_cancel_clears_finalize_date(self):
+        await self.start_rc()
+        future = self._future_date_str()
+        await self.set_rollcall_time(self.msg(f"/srt {future}", ADMIN_USER))
+        self.assertIsNotNone(self.rc(0).finalizeDate)
+        get_mock_bot().send_message.reset_mock()
+        await self.set_rollcall_time(self.msg("/srt cancel", ADMIN_USER))
+        self.assertIsNone(self.rc(0).finalizeDate)
+
+
+class TestSetRollcallReminder(IntegrationBase):
+    """Tests for /srr (set_rollcall_reminder)."""
+
+    def _future_date_str(self, days=365):
+        from datetime import datetime, timedelta
+        return (datetime.now() + timedelta(days=days)).strftime("%d-%m-%Y %H:%M")
+
+    async def test_srr_no_rollcall_sends_error(self):
+        await self.reminder(self.msg("/srr 2", ADMIN_USER))
+        texts = self.sent_texts()
+        self.assertTrue(any("not active" in t.lower() for t in texts))
+
+    async def test_srr_no_finalize_date_sends_error(self):
+        await self.start_rc()
+        await self.reminder(self.msg("/srr 2", ADMIN_USER))
+        texts = self.sent_texts()
+        self.assertTrue(any("finalize" in t.lower() or "first" in t.lower() for t in texts))
+
+    async def test_srr_sets_reminder(self):
+        await self.start_rc()
+        future = self._future_date_str(days=10)
+        await self.set_rollcall_time(self.msg(f"/srt {future}", ADMIN_USER))
+        get_mock_bot().send_message.reset_mock()
+        await self.reminder(self.msg("/srr 2", ADMIN_USER))
+        rc = self.rc(0)
+        self.assertEqual(rc.reminder, 2)
+
+    async def test_srr_cancel_clears_reminder(self):
+        await self.start_rc()
+        future = self._future_date_str(days=10)
+        await self.set_rollcall_time(self.msg(f"/srt {future}", ADMIN_USER))
+        await self.reminder(self.msg("/srr 2", ADMIN_USER))
+        self.assertEqual(self.rc(0).reminder, 2)
+        await self.reminder(self.msg("/srr cancel", ADMIN_USER))
+        self.assertIsNone(self.rc(0).reminder)
+
+    async def test_srr_zero_hours_sends_error(self):
+        await self.start_rc()
+        future = self._future_date_str(days=10)
+        await self.set_rollcall_time(self.msg(f"/srt {future}", ADMIN_USER))
+        get_mock_bot().send_message.reset_mock()
+        await self.reminder(self.msg("/srr 0", ADMIN_USER))
+        texts = self.sent_texts()
+        self.assertTrue(any("hour" in t.lower() or "higher" in t.lower() or "format" in t.lower() for t in texts))

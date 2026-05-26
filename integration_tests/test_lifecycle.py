@@ -3,7 +3,7 @@ Integration: core lifecycle — /src, /st, /panel, 10-user vote session, /erc.
 """
 import asyncio
 from helpers import IntegrationBase, USERS, ADMIN_USER, CHAT_ID
-from conftest import get_mock_bot
+from mock_helpers import get_mock_bot
 
 
 class TestStartRollCall(IntegrationBase):

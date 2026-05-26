@@ -4,7 +4,7 @@ Integration: templates — create, list, start, delete, scheduling, auto-start.
 import asyncio
 import db
 from helpers import IntegrationBase, USERS, ADMIN_USER, CHAT_ID
-from conftest import get_mock_bot
+from mock_helpers import get_mock_bot
 
 
 class TestTemplateCreate(IntegrationBase):
@@ -218,3 +218,77 @@ class TestScheduleCommand(IntegrationBase):
         await self.schedules_command(self.msg("/schedules", ADMIN_USER))
         texts = self.sent_texts()
         self.assertTrue(any("sg" in t.lower() or "sunday game" in t.lower() for t in texts))
+
+
+class TestScheduleTemplateCmd(IntegrationBase):
+    """/schedule_template — set, disable, show, error paths."""
+
+    async def _make_tmpl(self, name="sg"):
+        await self.set_template(self.msg(
+            f'/set_template {name} "Sunday Game" event_day=sunday event_time=17:00',
+            ADMIN_USER
+        ))
+
+    async def test_schedule_template_no_args_sends_usage(self):
+        await self.schedule_template_cmd(self.msg("/schedule_template", ADMIN_USER))
+        texts = self.sent_texts()
+        self.assertTrue(any("usage" in t.lower() or "example" in t.lower() for t in texts))
+
+    async def test_schedule_template_unknown_template_sends_error(self):
+        await self.schedule_template_cmd(self.msg("/schedule_template nobody friday 09:00", ADMIN_USER))
+        texts = self.sent_texts()
+        self.assertTrue(any("not found" in t.lower() for t in texts))
+
+    async def test_schedule_template_sets_weekly_schedule(self):
+        await self._make_tmpl()
+        await self.schedule_template_cmd(self.msg("/schedule_template sg friday 09:00", ADMIN_USER))
+        tmpl = db.get_template(CHAT_ID, "sg")
+        self.assertEqual(tmpl.get("schedule_day"), "friday")
+        self.assertEqual(tmpl.get("schedule_time"), "09:00")
+
+    async def test_schedule_template_weekly_sends_confirmation(self):
+        await self._make_tmpl()
+        get_mock_bot().send_message.reset_mock()
+        await self.schedule_template_cmd(self.msg("/schedule_template sg friday 09:00", ADMIN_USER))
+        texts = self.sent_texts()
+        self.assertTrue(any("friday" in t.lower() or "schedule" in t.lower() for t in texts))
+
+    async def test_schedule_template_biweekly(self):
+        await self._make_tmpl()
+        await self.schedule_template_cmd(self.msg("/schedule_template sg friday 09:00 biweekly", ADMIN_USER))
+        tmpl = db.get_template(CHAT_ID, "sg")
+        self.assertEqual(tmpl.get("recurrence_type"), "biweekly")
+
+    async def test_schedule_template_monthly(self):
+        await self._make_tmpl()
+        await self.schedule_template_cmd(self.msg("/schedule_template sg monthly 15 09:00", ADMIN_USER))
+        tmpl = db.get_template(CHAT_ID, "sg")
+        self.assertEqual(tmpl.get("recurrence_type"), "monthly")
+
+    async def test_schedule_template_off_disables(self):
+        await self._make_tmpl()
+        await self.schedule_template_cmd(self.msg("/schedule_template sg friday 09:00", ADMIN_USER))
+        get_mock_bot().send_message.reset_mock()
+        await self.schedule_template_cmd(self.msg("/schedule_template sg off", ADMIN_USER))
+        texts = self.sent_texts()
+        self.assertTrue(any("disabled" in t.lower() for t in texts))
+
+    async def test_schedule_template_show_status_no_schedule(self):
+        await self._make_tmpl()
+        await self.schedule_template_cmd(self.msg("/schedule_template sg", ADMIN_USER))
+        texts = self.sent_texts()
+        self.assertTrue(any("disabled" in t.lower() or "schedule" in t.lower() for t in texts))
+
+    async def test_schedule_template_show_status_with_schedule(self):
+        await self._make_tmpl()
+        await self.schedule_template_cmd(self.msg("/schedule_template sg friday 09:00", ADMIN_USER))
+        get_mock_bot().send_message.reset_mock()
+        await self.schedule_template_cmd(self.msg("/schedule_template sg", ADMIN_USER))
+        texts = self.sent_texts()
+        self.assertTrue(any("friday" in t.lower() or "enabled" in t.lower() for t in texts))
+
+    async def test_schedule_template_invalid_time_format(self):
+        await self._make_tmpl()
+        await self.schedule_template_cmd(self.msg("/schedule_template sg friday notaTime", ADMIN_USER))
+        texts = self.sent_texts()
+        self.assertTrue(any("valid time" in t.lower() or "hh:mm" in t.lower() for t in texts))

@@ -132,20 +132,23 @@ async def warn_no_username(cid: int, first_name: str) -> None:
             "Please set one: Settings → Edit Profile → Username\n"
             "The bot uses it for logging and identification.",
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logging.warning(f"[warn_no_username] Could not send warning to chat {cid} for {first_name}: {e}")
 
 
 async def _dm_promoted_real_user(user_id: int, rc_title: str, rc_number: int) -> None:
-    """DM a real user that they've been promoted from waitlist to IN. Silently ignores errors."""
+    """DM a real user that they've been promoted from waitlist to IN."""
     try:
         await bot.send_message(
             user_id,
             f"🎉 Good news! A spot opened up and you're now *IN* for *{rc_title}* (#{rc_number}). See you there!",
             parse_mode="Markdown",
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logging.warning(
+            f"[_dm_promoted_real_user] Could not DM user {user_id} for '{rc_title}' (#{rc_number}): {e} "
+            f"— user may not have started the bot"
+        )
 
 
 # ── RollCall DB-id helper ─────────────────────────────────────────────────────

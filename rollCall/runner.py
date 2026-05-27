@@ -45,7 +45,8 @@ except ImportError as e:
 try:
     import telebot.asyncio_helper as _asyncio_helper
     _asyncio_helper.SESSION_TIME_TO_LIVE = 300
-    logger.info("aiohttp session TTL set to 300s")
+    _asyncio_helper.RETRY_ON_ERROR = True   # auto-retry on 429 / transient errors
+    logger.info("aiohttp session TTL set to 300s, retry-on-error enabled")
 except Exception:
     pass
 

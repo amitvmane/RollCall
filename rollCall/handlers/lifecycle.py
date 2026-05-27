@@ -10,8 +10,8 @@ from datetime import datetime
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot_state import (
-    bot, _panel_msg_ids, _pending_panel_updates, _pending_deletes, _pending_overrides,
-    _log_task_exc, _cancel_panel_debounce,
+    bot, _panel_msg_ids, _pending_deletes, _pending_overrides,
+    _log_task_exc,
     _is_rate_limited, _get_display_name, format_mention_with_name,
     warn_no_username, _dm_promoted_real_user, get_rc_db_id,
 )
@@ -241,12 +241,9 @@ async def end_roll_call(message):
             await bot.send_message(cid, finish_text)
             logging.info(f"[{_ts()}] Rollcall ended: '{rc.title}' (RC #{rc_number+1})")
             _panel_msg_ids.pop((cid, rc_number + 1), None)
-            _cancel_panel_debounce(cid, rc_number + 1)
             manager.remove_rollcall(cid, rc_number)
             for num in sorted(n for (c, n) in list(_panel_msg_ids) if c == cid and n > rc_number + 1):
                 _panel_msg_ids[(cid, num - 1)] = _panel_msg_ids.pop((cid, num))
-            for num in sorted(n for (c, n) in list(_pending_panel_updates) if c == cid and n > rc_number + 1):
-                _pending_panel_updates[(cid, num - 1)] = _pending_panel_updates.pop((cid, num))
             logging.info(f"[{_ts()}] [CHAT {cid}] Rollcall ended: '{rc.title}' by {message.from_user.first_name} (@{message.from_user.username})")
             log_admin_action(cid, message.from_user.id, message.from_user.first_name, "end_rollcall", target_name=rc.title)
 
@@ -625,12 +622,9 @@ async def callback_handler(call):
 
                 logging.info(f"[{_ts()}] [CHAT {cid}] Rollcall ended: '{rc.title}' by {ended_by} (panel)")
                 _panel_msg_ids.pop((cid, rc_number), None)
-                _cancel_panel_debounce(cid, rc_number)
                 manager.remove_rollcall(cid, rc_number - 1)
                 for num in sorted(n for (c, n) in list(_panel_msg_ids) if c == cid and n > rc_number):
                     _panel_msg_ids[(cid, num - 1)] = _panel_msg_ids.pop((cid, num))
-                for num in sorted(n for (c, n) in list(_pending_panel_updates) if c == cid and n > rc_number):
-                    _pending_panel_updates[(cid, num - 1)] = _pending_panel_updates.pop((cid, num))
 
                 if ghost_tracking_on and has_any_users and rc_db_id and not absent_already_marked:
                     markup = InlineKeyboardMarkup(row_width=2)

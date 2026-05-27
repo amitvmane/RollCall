@@ -157,7 +157,6 @@ class IntegrationBase(unittest.IsolatedAsyncioTestCase):
         self.bs._rate_limits.clear()
         self.bs._buzz_cooldowns.clear()
         self.bs._panel_msg_ids.clear()
-        self.bs._pending_panel_updates.clear()
         # Reset bot mock call history
         bot = get_mock_bot()
         bot.send_message.reset_mock()

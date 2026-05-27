@@ -133,6 +133,7 @@ def create_tables():
                     is_active BOOLEAN DEFAULT TRUE,
                     ended_at TIMESTAMP,
                     absent_marked BOOLEAN DEFAULT FALSE,
+                    panel_msg_id BIGINT DEFAULT NULL,
                     FOREIGN KEY (chat_id) REFERENCES chats(chat_id) ON DELETE CASCADE
                 )
             """)
@@ -269,6 +270,7 @@ def create_tables():
                     is_active INTEGER DEFAULT 1,
                     ended_at TIMESTAMP,
                     absent_marked INTEGER DEFAULT 0,
+                    panel_msg_id INTEGER DEFAULT NULL,
                     FOREIGN KEY (chat_id) REFERENCES chats(chat_id) ON DELETE CASCADE
                 )
             """)

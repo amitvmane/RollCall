@@ -57,9 +57,6 @@ _BUZZ_COOLDOWN_SECONDS = 30
 # Panel message tracking: (chat_id, rc_1based) -> message_id of the active panel message
 _panel_msg_ids: dict = {}
 
-# Pending panel update tasks (cancelled on rollcall end to avoid stale sends)
-_pending_panel_updates: dict = {}
-
 # Audit log display settings
 _AUDIT_PER_PAGE = 15
 
@@ -76,13 +73,6 @@ def _log_task_exc(task: asyncio.Task) -> None:
     """Done-callback for fire-and-forget tasks — logs any unhandled exception."""
     if not task.cancelled() and task.exception():
         logging.error(f"Background task '{task.get_name()}' raised: {task.exception()}")
-
-
-def _cancel_panel_debounce(cid: int, rc_number: int) -> None:
-    """Cancel a pending debounced panel send when a rollcall ends."""
-    task = _pending_panel_updates.pop((cid, rc_number), None)
-    if task and not task.done():
-        task.cancel()
 
 
 # ── Rate-limit helpers ────────────────────────────────────────────────────────

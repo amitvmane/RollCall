@@ -348,10 +348,10 @@ class RollCall:
 
             return False
 
-        except:
+        except Exception:
             logging.error(traceback.format_exc())
             return False
-        
+
     def addIn(self, user):
         logging.debug(f"allNames: {[repr(u) for u in self.allNames]}")
         if type(user.user_id) == str:

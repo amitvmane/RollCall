@@ -13,6 +13,7 @@ from bot_state import (
     bot, _panel_msg_ids, _pending_deletes, _pending_overrides,
     _log_task_exc,
     _is_rate_limited, _get_display_name, format_mention_with_name,
+    format_mention_with_name_md, _esc_md,
     warn_no_username, _dm_promoted_real_user, get_rc_db_id,
 )
 from config import ADMINS
@@ -140,19 +141,19 @@ async def notify_proxy_owner_wait_to_in(rc, moved_user: User, cid, title: str, r
         try:
             member = await bot.get_chat_member(cid, owner_id)
             if member.user.username:
-                owner_mention = f"@{member.user.username}"
+                owner_mention = f"@{_esc_md(member.user.username)}"
             else:
-                owner_mention = f"[{member.user.first_name}](tg://user?id={owner_id})"
+                owner_mention = f"[{_esc_md(member.user.first_name)}](tg://user?id={owner_id})"
         except Exception:
             owner_mention = "Proxy owner"
 
-        txt = f"{owner_mention}, your proxy {format_mention_with_name(moved_user)} → IN for '{title}' (#{rc_number})"
+        txt = f"{owner_mention}, your proxy {format_mention_with_name_md(moved_user)} → IN for '{_esc_md(title)}' (#{rc_number})"
         await bot.send_message(cid, txt, parse_mode="Markdown")
 
         try:
             await bot.send_message(
                 owner_id,
-                f"🎉 Your proxy *{moved_user.name}* got promoted from WAITING → IN for *{title}* (#{rc_number})!",
+                f"🎉 Your proxy *{_esc_md(moved_user.name)}* got promoted from WAITING → IN for *{_esc_md(title)}* (#{rc_number})!",
                 parse_mode="Markdown",
             )
         except Exception:
@@ -416,7 +417,7 @@ async def callback_handler(call):
                         cid,
                         f"👻 *Warning:* You've ghosted *{ghost_count}* session(s) before.\n"
                         f"Absent limit: *{absent_limit}*\n\n"
-                        f"Are you committing to be at *{rc.title}*?",
+                        f"Are you committing to be at *{_esc_md(rc.title)}*?",
                         parse_mode="Markdown",
                         reply_markup=markup
                     )
@@ -458,7 +459,7 @@ async def callback_handler(call):
                     if isinstance(user.user_id, int):
                         await bot.send_message(
                             cid,
-                            f"{format_mention_with_name(user)} → WAITING for '{rc.title}' (#{rc_number})",
+                            f"{format_mention_with_name_md(user)} → WAITING for '{_esc_md(rc.title)}' (#{rc_number})",
                             parse_mode="Markdown",
                         )
                     else:
@@ -471,7 +472,7 @@ async def callback_handler(call):
                     if isinstance(user.user_id, int):
                         await bot.send_message(
                             cid,
-                            f"{format_mention_with_name(user)} → {label} for '{rc.title}' (#{rc_number})",
+                            f"{format_mention_with_name_md(user)} → {label} for '{_esc_md(rc.title)}' (#{rc_number})",
                             parse_mode="Markdown",
                         )
                     else:
@@ -482,7 +483,7 @@ async def callback_handler(call):
                     if isinstance(result.user_id, int):
                         await bot.send_message(
                             cid,
-                            f"{format_mention_with_name(result)} → IN (from WAITING) for '{rc.title}' (#{rc_number})",
+                            f"{format_mention_with_name_md(result)} → IN (from WAITING) for '{_esc_md(rc.title)}' (#{rc_number})",
                             parse_mode="Markdown",
                         )
                     else:

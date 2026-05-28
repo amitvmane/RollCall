@@ -18,6 +18,7 @@ services:
       
       # Database Configuration (SQLite with persistent volume)
       - DATABASE_URL=sqlite:////app/data/rollcall.db
+      - TZ=Asia/Kolkata
     
     volumes:
       # Persist database across container restarts

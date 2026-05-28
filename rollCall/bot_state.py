@@ -123,6 +123,24 @@ def format_mention_with_name(user: User) -> str:
     return user.name
 
 
+def _esc_md(text: str) -> str:
+    """Escape Markdown v1 special characters in user-supplied strings."""
+    if not text:
+        return text or ""
+    for c in ('_', '*', '`', '['):
+        text = text.replace(c, f'\\{c}')
+    return text
+
+
+def format_mention_with_name_md(user: User) -> str:
+    """Markdown-safe version: escapes special chars in @username/name; preserves tg:// links."""
+    if isinstance(user.user_id, int):
+        if user.username:
+            return f"@{_esc_md(user.username)} ({_esc_md(user.name)})"
+        return f"[{_esc_md(user.name)}](tg://user?id={user.user_id})"
+    return _esc_md(user.name)
+
+
 async def warn_no_username(cid: int, first_name: str) -> None:
     """Warn in group that this user has no Telegram username set."""
     try:

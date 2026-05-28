@@ -35,7 +35,13 @@ class TestHelp(IntegrationBase):
     async def test_help_mentions_key_commands(self):
         await self.help_commands(self.msg("/help", ADMIN_USER))
         full = " ".join(self.sent_texts())
-        for cmd in ["/in", "/out", "/src", "/erc"]:
+        for cmd in ["/in", "/out"]:
+            self.assertIn(cmd, full)
+
+    async def test_help_admin_mentions_admin_commands(self):
+        await self.help_commands(self.msg("/help admin", ADMIN_USER))
+        full = " ".join(self.sent_texts())
+        for cmd in ["/src", "/erc"]:
             self.assertIn(cmd, full)
 
 

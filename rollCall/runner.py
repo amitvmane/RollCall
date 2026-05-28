@@ -164,7 +164,7 @@ async def register_commands():
         ttypes.BotCommand("stats",         "Attendance stats and leaderboard"),
         ttypes.BotCommand("history",       "Past rollcall history"),
         ttypes.BotCommand("timezone",      "Set your timezone (e.g. Asia/Kolkata)"),
-        ttypes.BotCommand("help",          "Show all commands"),
+        ttypes.BotCommand("help",          "User commands  |  /help admin for admin commands"),
         ttypes.BotCommand("version",       "Show bot version"),
     ]
 

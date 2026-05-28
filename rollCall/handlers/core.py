@@ -22,11 +22,73 @@ async def welcome_and_explanation(message):
     await bot.send_message(cid, 'Hi! im RollCall!\n\nUse /help to see all the commands')
 
 
-@bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/help")
+@bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/help")
 async def help_commands(message):
-    await bot.send_message(message.chat.id, r'''🎯 *RollCall Bot — Commands*
+    parts = message.text.strip().lower().split()
+    is_admin_help = len(parts) > 1 and parts[1] == "admin"
 
-🗳 *Voting*
+    if is_admin_help:
+        await bot.send_message(message.chat.id, r'''⚙️ *RollCall — Admin Commands*
+
+🔧 *Rollcall*
+/start\_roll\_call (/src) [title] — Start a rollcall
+/end\_roll\_call (/erc) [::N] — End rollcall
+/panel [::N] — Resend vote panel with buttons
+
+📝 *Settings*
+/set\_title (/st) title — Event title
+/set\_limit (/sl) N — Max attendees (0 = unlimited)
+/set\_rollcall\_time (/srt) DD-MM-YYYY HH:MM — Auto-close time
+/set\_rollcall\_reminder (/srr) hours — Reminder before close
+/event\_fee (/ef) amount — Total event fee
+/individual\_fee (/if) — Per-person fee split
+/location (/loc) place — Event location
+/when (/w) — Show scheduled event time
+/shh — Silent mode (no ack messages)
+/louder — Loud mode (ack message after each vote)
+/timezone (/tz) Region/City — e.g. Asia/Kolkata
+
+👥 *Proxy* _(non-Telegram members)_
+/set\_in\_for (/sif) name [::N]
+/set\_out\_for (/sof) name [::N]
+/set\_maybe\_for (/smf) name [::N]
+
+📅 *Templates*
+/templates — List saved templates
+/set\_template name "Title" [limit=N] [location=X] [fee=X]
+/start\_template name [title] — Start rollcall from template
+/delete\_template name
+/schedule\_template name <weekday> <HH:MM> — Weekly auto-start
+/schedule\_template name <weekday> <HH:MM> biweekly
+/schedule\_template name monthly <day> <HH:MM>
+/schedule\_template name off — Disable schedule
+/schedules — View & toggle schedules
+
+🗂 *User Management*
+/delete\_user name [::N] — Remove user (asks confirmation)
+/set\_status name <in|out|maybe> [::N] — Override user status
+/buzz [message] [::N] — Ping non-voters (30s cooldown)
+/set\_admins / /unset\_admins — Toggle admin-only mode
+
+👻 *Ghost Tracking*
+/toggle\_ghost\_tracking [on|off]
+/set\_absent\_limit N — Missed sessions before reconfirmation
+/mark\_absent — Review & mark no-shows from a past session
+/clear\_absent name — Reset ghost count for a user
+
+📋 *Audit*
+/audit\_log [N] — Last N admin actions (default 20)
+
+🔑 *Super Admin*
+/broadcast "message" — Send message to all bot chats
+
+💡 Add `::2` or `::3` to target a specific rollcall when multiple are active
+_For user commands: /help_
+''', parse_mode='Markdown')
+    else:
+        await bot.send_message(message.chat.id, r'''🎯 *RollCall Bot*
+
+🗳 *Vote*
 /in [comment] — Mark yourself IN ✅
 /out [comment] — Mark yourself OUT ❌
 /maybe [comment] — Mark yourself MAYBE 🤔
@@ -46,62 +108,14 @@ async def help_commands(message):
 /stats @user or name — Another user's stats
 /history [N] [page] — Past ended rollcalls
 
-━━━━━━━━━━━━━━━━━━
-🔧 *Admin — Rollcall*
-/start\_roll\_call (/src) [title] — Start a rollcall
-/end\_roll\_call (/erc) [::N] — End rollcall
-/panel [::N] — Resend vote panel with buttons
-
-⚙️ *Admin — Settings*
-/set\_title (/st) title — Event title
-/set\_limit (/sl) N — Max attendees (0 = unlimited)
-/set\_rollcall\_time (/srt) DD-MM-YYYY HH:MM — Auto-close time
-/set\_rollcall\_reminder (/srr) hours — Reminder before close
-/event\_fee (/ef) amount — Total event fee
-/individual\_fee (/if) — Per-person fee split
-/location (/loc) place — Event location
-/when (/w) — Show scheduled event time
-/shh — Silent mode (panel edits silently, no ack messages)
-/louder — Loud mode (ack message shown after each vote)
+⚙️ *Settings*
 /timezone (/tz) Region/City — e.g. Asia/Kolkata
+/shh — Silent mode
+/louder — Loud mode
+/version — Bot version
 
-👥 *Admin — Proxy* _(non-Telegram members)_
-/set\_in\_for (/sif) name [::N]
-/set\_out\_for (/sof) name [::N]
-/set\_maybe\_for (/smf) name [::N]
-
-📅 *Admin — Templates*
-/templates — List saved templates
-/set\_template name "Title" [limit=N] [location=X] [fee=X]
-/start\_template name [title] — Start rollcall from template
-/delete\_template name
-/schedule\_template name <weekday> <HH:MM> — Weekly auto-start
-/schedule\_template name <weekday> <HH:MM> biweekly
-/schedule\_template name monthly <day> <HH:MM>
-/schedule\_template name off — Disable schedule
-/schedules — View & toggle schedules
-
-🗂 *Admin — User Management*
-/delete\_user name [::N] — Remove user (asks confirmation)
-/set\_status name <in|out|maybe> [::N] — Override user status
-/buzz [message] [::N] — Ping non-voters (30s cooldown)
-/set\_admins / /unset\_admins — Toggle admin-only mode
-
-👻 *Admin — Ghost Tracking* _(no-show monitoring)_
-/toggle\_ghost\_tracking [on|off]
-/set\_absent\_limit N — Missed sessions before reconfirmation
-/mark\_absent — Review & mark no-shows from a past session
-/clear\_absent name — Reset ghost count for a user
-
-📝 *Admin — Audit*
-/audit\_log [N] — Last N admin actions (default 20)
-
-🔑 *Super Admin*
-/broadcast "message" — Send message to all bot chats
-
-💡 *Tips*
-• Add `::2` or `::3` to target a specific rollcall when multiple are active
-• Shortcuts: /src /erc /wi /wo /wm /ww /sif /sof /smf /st /sl /ef /s /r /v /tz
+💡 Add `::2` or `::3` to target a specific rollcall when multiple are active
+_For admin commands: /help admin_
 ''', parse_mode='Markdown')
 
 

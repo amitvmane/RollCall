@@ -9,6 +9,13 @@ from db import get_ghost_leaderboard, get_connection, db_type, release_connectio
 from rollcall_manager import manager
 
 
+def _esc(text: str) -> str:
+    """Escape Markdown v1 special characters in user-supplied strings."""
+    for c in ('_', '*', '`', '['):
+        text = text.replace(c, f'\\{c}')
+    return text
+
+
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] in ["/stats", "/s"])
 async def stats_command(message):
     cid = message.chat.id
@@ -202,7 +209,7 @@ async def build_leaderboard_text(chat_id: int, limit: int = 10) -> str:
         for rank, row in enumerate(rows, 1):
             uid, t_in, t_out, t_maybe = (row["user_id"], row["total_in"], row["total_out"], row["total_maybe"]) if isinstance(row, dict) else row[:4]
             first_name, username = name_map.get(uid, ("User", None))
-            name_text = f"@{username}" if username else (first_name or "User")
+            name_text = f"@{_esc(username)}" if username else _esc(first_name or "User")
             lines.append(f"{rank}. {name_text} – ✅ {t_in}  ❌ {t_out}  🤔 {t_maybe}")
 
         return "\n".join(lines)
@@ -281,7 +288,7 @@ async def build_user_stats_text(chat_id: int, user_id: int, first_name: str) -> 
             )
         row = cursor.fetchone()
         if not row:
-            return f"*Stats for {first_name}:*\n\nNo data yet. Participate in a few rollcalls first!"
+            return f"*Stats for {_esc(first_name)}:*\n\nNo data yet. Participate in a few rollcalls first!"
 
         data = row if isinstance(row, dict) else {c[0]: row[i] for i, c in enumerate(cursor.description)}
 
@@ -295,7 +302,7 @@ async def build_user_stats_text(chat_id: int, user_id: int, first_name: str) -> 
         pct     = f"{min(100, round(t_in / t_rc * 100))}%" if t_rc > 0 else "—"
 
         return "\n".join([
-            f"*Stats for {first_name}:*", "",
+            f"*Stats for {_esc(first_name)}:*", "",
             f"✅ IN: {t_in}", f"❌ OUT: {t_out}", f"🤔 MAYBE: {t_maybe}",
             f"⏫ From WAITING → IN: {t_wait}",
             f"📋 Total rollcalls: {t_rc}", f"📊 Attendance rate: {pct}", "",

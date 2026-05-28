@@ -250,9 +250,10 @@ async def _auto_start_from_template(chat_id: int, tmpl: dict):
         close_info = ""
         if rc.finalizeDate:
             close_info = f"\nCloses: {rc.finalizeDate.strftime('%A, %d %b at %H:%M')}"
+        from bot_state import _esc_md
         await bot.send_message(
             chat_id,
-            f"📋 *{title}* rollcall is now open!{close_info}\nVote with /in or /out.",
+            f"📋 *{_esc_md(title)}* rollcall is now open!{close_info}\nVote with /in or /out.",
             parse_mode="Markdown"
         )
 

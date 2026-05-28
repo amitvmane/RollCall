@@ -5,7 +5,7 @@ import asyncio
 import logging
 
 from bot_state import (
-    bot, _is_buzz_rate_limited, _buzz_cooldowns, _BUZZ_COOLDOWN_SECONDS, _fmt_ended_at,
+    bot, _is_buzz_rate_limited, _buzz_cooldowns, _BUZZ_COOLDOWN_SECONDS, _fmt_ended_at, _esc_md,
 )
 from exceptions import (
     rollCallNotStarted, incorrectParameter, insufficientPermissions, parameterMissing,
@@ -173,7 +173,7 @@ async def history_command(message):
             in_count = r.get("in_count", 0)
             ghost_count = r.get("ghost_count", 0)
             ghost_str = f"  👻 {ghost_count}" if ghost_count else ""
-            lines.append(f"{i}. *{title}* — {ended}  ✅ {in_count}{ghost_str}")
+            lines.append(f"{i}. *{_esc_md(title)}* — {ended}  ✅ {in_count}{ghost_str}")
 
         if len(records) == limit:
             lines.append(f"\n_Use /history {limit} {page + 1} to see more_")
@@ -237,7 +237,7 @@ async def buzz_command(message):
             if not candidates:
                 await bot.send_message(
                     cid,
-                    f"✅ Everyone the bot knows has already voted on *{rc.title}*!",
+                    f"✅ Everyone the bot knows has already voted on *{_esc_md(rc.title)}*!",
                     parse_mode="Markdown"
                 )
                 return
@@ -265,7 +265,7 @@ async def buzz_command(message):
             else:
                 await bot.send_message(
                     cid,
-                    f"✅ Everyone the bot knows has already voted on *{rc.title}*!",
+                    f"✅ Everyone the bot knows has already voted on *{_esc_md(rc.title)}*!",
                     parse_mode="Markdown"
                 )
             return
@@ -276,7 +276,7 @@ async def buzz_command(message):
             note = custom_msg or "Just a heads-up from the group! 👋"
             await bot.send_message(cid, f"📣 {note}\n\n{mentions}", parse_mode="Markdown")
         else:
-            note = custom_msg or f"rollcall *{rc.title}* is open — have you voted?"
+            note = custom_msg or f"rollcall *{_esc_md(rc.title)}* is open — have you voted?"
             await bot.send_message(cid, f"👋 Hey {mentions}\n\n{note}", parse_mode="Markdown")
         log_admin_action(cid, message.from_user.id, message.from_user.first_name, "buzz",
                          details=f"pinged {len(to_ping)} member(s)")
@@ -296,7 +296,7 @@ def _build_mention_list(users: list) -> str:
         name = (u.get('first_name') or username or str(uid)).strip()
         safe_name = name.replace("[", "\\[").replace("]", "\\]").replace("_", "\\_").replace("*", "\\*")
         if username:
-            parts.append(f"@{username}")
+            parts.append(f"@{_esc_md(username)}")
         elif uid:
             parts.append(f"[{safe_name}](tg://user?id={uid})")
     return " ".join(parts)

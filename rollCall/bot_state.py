@@ -159,7 +159,7 @@ async def _dm_promoted_real_user(user_id: int, rc_title: str, rc_number: int) ->
     try:
         await bot.send_message(
             user_id,
-            f"🎉 Good news! A spot opened up and you're now *IN* for *{rc_title}* (#{rc_number}). See you there!",
+            f"🎉 Good news! A spot opened up and you're now *IN* for *{_esc_md(rc_title)}* (#{rc_number}). See you there!",
             parse_mode="Markdown",
         )
     except Exception as e:

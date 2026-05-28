@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 import pytz
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot_state import bot, _sched_selection, _log_task_exc
+from bot_state import bot, _sched_selection, _log_task_exc, _esc_md
 from exceptions import insufficientPermissions
 from functions import admin_rights, get_next_weekday_datetime, weekly_minutes, WEEKDAY_MAP
 from rollcall_manager import manager
@@ -215,13 +215,13 @@ async def schedule_template_cmd(message):
                     opens_str = f"day {sched_day} of each month at {sched_time}"
                 else:
                     opens_str = f"{sched_day.capitalize()} {sched_time} ({recurrence_label})"
-                status = f"🗓 *{name}* schedule: 🟢 enabled\nOpens: {opens_str}\n"
+                status = f"🗓 *{_esc_md(name)}* schedule: 🟢 enabled\nOpens: {opens_str}\n"
                 if event_day and event_time:
                     status += f"Closes: {event_day.capitalize()} {event_time}\n"
                 if last_run:
                     status += f"Last auto-started: {last_run}"
             else:
-                status = f"🗓 *{name}* schedule: 🔴 disabled"
+                status = f"🗓 *{_esc_md(name)}* schedule: 🔴 disabled"
             await bot.send_message(cid, status, parse_mode="Markdown")
             return
 
@@ -314,7 +314,7 @@ async def schedule_template_cmd(message):
                 opens_str = f"{sched_day.capitalize()} at {sched_time} ({recurrence_label})"
             await bot.send_message(
                 cid,
-                f"🟢 Schedule set for template *{name}*:\n"
+                f"🟢 Schedule set for template *{_esc_md(name)}*:\n"
                 f"Opens: {opens_str}\n"
                 f"Closes: {event_day.capitalize()} at {event_time}",
                 parse_mode="Markdown"

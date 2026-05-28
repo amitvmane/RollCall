@@ -9,7 +9,8 @@ from datetime import datetime, timedelta
 import pytz
 
 from bot_state import (
-    bot, _log_task_exc, _dm_promoted_real_user, format_mention_with_name, get_rc_db_id,
+    bot, _log_task_exc, _dm_promoted_real_user,
+    format_mention_with_name, format_mention_with_name_md, _esc_md, get_rc_db_id,
 )
 from exceptions import (
     rollCallNotStarted, insufficientPermissions, parameterMissing, incorrectParameter,
@@ -401,7 +402,7 @@ async def wait_limit(message):
                     if isinstance(u.user_id, int):
                         await bot.send_message(
                             cid,
-                            f"{format_mention_with_name(u)} → IN (from WAITING) for '{rc.title}' (#{rc_number + 1})",
+                            f"{format_mention_with_name_md(u)} → IN (from WAITING) for '{_esc_md(rc.title)}' (#{rc_number + 1})",
                             parse_mode="Markdown",
                         )
                     else:

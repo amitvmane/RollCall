@@ -7,7 +7,7 @@ from datetime import datetime
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot_state import bot, _pending_deletes, _pending_overrides
+from bot_state import bot, _pending_deletes, _pending_overrides, _esc_md
 from exceptions import (
     rollCallNotStarted, insufficientPermissions, parameterMissing, incorrectParameter,
 )
@@ -136,7 +136,7 @@ async def delete_user(message):
         )
         await bot.send_message(
             cid,
-            f"⚠️ Remove *{name}* from rollcall #{rc_number + 1}?",
+            f"⚠️ Remove *{_esc_md(name)}* from rollcall #{rc_number + 1}?",
             parse_mode="Markdown",
             reply_markup=markup,
         )
@@ -233,7 +233,7 @@ async def set_status_override(message):
         )
         await bot.send_message(
             cid,
-            f"Move *{found_user.name}* → *{new_status.upper()}* in rollcall #{rc_number + 1}?",
+            f"Move *{_esc_md(found_user.name)}* → *{new_status.upper()}* in rollcall #{rc_number + 1}?",
             parse_mode="Markdown",
             reply_markup=markup,
         )

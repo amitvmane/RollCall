@@ -6,7 +6,8 @@ import logging
 
 from bot_state import (
     bot, _log_task_exc, _pending_reconf, _is_rate_limited, _get_display_name,
-    format_mention_with_name, warn_no_username, _dm_promoted_real_user, get_rc_db_id,
+    format_mention_with_name, format_mention_with_name_md, _esc_md,
+    warn_no_username, _dm_promoted_real_user, get_rc_db_id,
 )
 from exceptions import (
     rollCallNotStarted, incorrectParameter, duplicateProxy,
@@ -72,7 +73,7 @@ async def in_user(message):
                     cid,
                     f"👻 *Warning:* You've ghosted *{ghost_count}* session(s) before.\n"
                     f"⚠️ Absent Limit: *{absent_limit}*\n\n"
-                    f"Are you committing to be at *{rc.title}*?",
+                    f"Are you committing to be at *{_esc_md(rc.title)}*?",
                     parse_mode="Markdown",
                     reply_markup=markup
                 )
@@ -99,7 +100,7 @@ async def in_user(message):
                 if isinstance(user.user_id, int):
                     await bot.send_message(
                         cid,
-                        f"{format_mention_with_name(user)} is now IN!",
+                        f"{format_mention_with_name_md(user)} is now IN!",
                         parse_mode="Markdown",
                     )
                 else:
@@ -170,7 +171,7 @@ async def out_user(message):
                 if isinstance(result.user_id, int):
                     await bot.send_message(
                         cid,
-                        f"{format_mention_with_name(result)} → IN",
+                        f"{format_mention_with_name_md(result)} → IN",
                         parse_mode="Markdown",
                     )
                 else:
@@ -191,7 +192,7 @@ async def out_user(message):
             if not manager.get_shh_mode(cid):
                 await bot.send_message(
                     cid,
-                    f"{format_mention_with_name(user)} → OUT for '{rc.title}' (#{rc_number + 1})",
+                    f"{format_mention_with_name_md(user)} → OUT for '{_esc_md(rc.title)}' (#{rc_number + 1})",
                     parse_mode="Markdown",
                 )
 
@@ -258,7 +259,7 @@ async def maybe_user(message):
                 if isinstance(result.user_id, int):
                     await bot.send_message(
                         cid,
-                        f"{format_mention_with_name(result)} → IN (from WAITING) for '{rc.title}' (#{rc_number + 1})",
+                        f"{format_mention_with_name_md(result)} → IN (from WAITING) for '{_esc_md(rc.title)}' (#{rc_number + 1})",
                         parse_mode="Markdown",
                     )
                 else:
@@ -277,7 +278,7 @@ async def maybe_user(message):
                 if isinstance(user.user_id, int):
                     await bot.send_message(
                         cid,
-                        f"{format_mention_with_name(user)} is now MAYBE!",
+                        f"{format_mention_with_name_md(user)} is now MAYBE!",
                         parse_mode="Markdown",
                     )
                 else:

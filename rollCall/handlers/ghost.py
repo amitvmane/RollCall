@@ -10,7 +10,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot_state import (
     bot, _ghost_selections, _pending_reconf, _pending_deletes, _pending_overrides,
-    _log_task_exc, _get_display_name, format_mention_with_name, get_rc_db_id,
+    _log_task_exc, _get_display_name, format_mention_with_name, _esc_md, get_rc_db_id,
     _build_ghost_select_keyboard, _fmt_ended_at,
 )
 from exceptions import insufficientPermissions, rollCallNotStarted, incorrectParameter
@@ -462,10 +462,10 @@ async def ghost_callback_handler(call):
                 rc.save()
                 log_admin_action(cid, admin_id, call.from_user.first_name, "delete_user", target_name=name, rollcall_id=getattr(rc, 'db_id', None) or getattr(rc, 'id', None), details=rc.title)
                 await bot.answer_callback_query(call.id, f"✅ Deleted {name}")
-                await bot.edit_message_text(f"✅ *{name}* removed from rollcall #{rc_number + 1}.", cid, call.message.message_id, parse_mode="Markdown")
+                await bot.edit_message_text(f"✅ *{_esc_md(name)}* removed from rollcall #{rc_number + 1}.", cid, call.message.message_id, parse_mode="Markdown")
             else:
                 await bot.answer_callback_query(call.id, "User not found")
-                await bot.edit_message_text(f"⚠️ User *{name}* not found.", cid, call.message.message_id, parse_mode="Markdown")
+                await bot.edit_message_text(f"⚠️ User *{_esc_md(name)}* not found.", cid, call.message.message_id, parse_mode="Markdown")
             return
 
         # ── ovrd_yes / ovrd_no ───────────────────────────────────────────────
@@ -509,7 +509,7 @@ async def ghost_callback_handler(call):
             log_admin_action(cid, admin_id, call.from_user.first_name, "set_status", target_name=f"{user.name} → {status}", rollcall_id=getattr(rc, 'db_id', None) or getattr(rc, 'id', None), details=rc.title)
             await bot.answer_callback_query(call.id, f"✅ Moved to {status.upper()}")
             await bot.edit_message_text(
-                f"✅ *{user.name}* → *{status.upper()}* in rollcall #{rc_number + 1}.",
+                f"✅ *{_esc_md(user.name)}* → *{status.upper()}* in rollcall #{rc_number + 1}.",
                 cid, call.message.message_id, parse_mode="Markdown"
             )
             return

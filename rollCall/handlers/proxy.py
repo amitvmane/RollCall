@@ -6,7 +6,8 @@ import logging
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot_state import (
-    bot, format_mention_with_name, _dm_promoted_real_user, _log_task_exc, get_rc_db_id,
+    bot, format_mention_with_name, format_mention_with_name_md, _esc_md,
+    _dm_promoted_real_user, _log_task_exc, get_rc_db_id,
 )
 from exceptions import (
     rollCallNotStarted, insufficientPermissions, parameterMissing, incorrectParameter,
@@ -83,9 +84,9 @@ async def set_in_for(message):
                     )
                     await bot.send_message(
                         cid,
-                        f"👻 *Warning:* *{proxy_name}* has ghosted *{ghost_count}* session(s) before.\n"
+                        f"👻 *Warning:* *{_esc_md(proxy_name)}* has ghosted *{ghost_count}* session(s) before.\n"
                         f"⚠️ Absent Limit: *{limit}*\n\n"
-                        f"Still add to *{rc.title}*?",
+                        f"Still add to *{_esc_md(rc.title)}*?",
                         parse_mode="Markdown",
                         reply_markup=markup
                     )
@@ -179,7 +180,7 @@ async def set_out_for(message):
                     if isinstance(result.user_id, int):
                         await bot.send_message(
                             cid,
-                            f"{format_mention_with_name(result)} → IN",
+                            f"{format_mention_with_name_md(result)} → IN",
                             parse_mode="Markdown",
                         )
                     else:
@@ -255,7 +256,7 @@ async def set_maybe_for(message):
                     if isinstance(result.user_id, int):
                         await bot.send_message(
                             cid,
-                            f"{format_mention_with_name(result)} → IN (from WAITING) for '{rc.title}' (#{rc_number + 1})",
+                            f"{format_mention_with_name_md(result)} → IN (from WAITING) for '{_esc_md(rc.title)}' (#{rc_number + 1})",
                             parse_mode="Markdown",
                         )
                     else:

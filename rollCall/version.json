@@ -196,5 +196,11 @@
         "Description": "🏗️ Major code refactoring for effective LLM token utilization — telegram_helper.py split into focused handler modules (core, voting, lifecycle, settings, ghost, admin, lists, proxy, templates, stats); each module is single-responsibility and significantly smaller, reducing token overhead for AI-assisted development and code review. 🐛 7 bug fixes: 3-segment timezone parsing (/timezone America/Indiana/Indianapolis), string-vs-int comparison in /reminder, uncaught exceptions in /wait_limit and /set_rollcall_time, ghost reconf double-counting stats on comment update, SQL aggregate column alias mismatch (SQLite vs PostgreSQL), traceback print statements replaced with structured logging throughout.",
         "DeployedOnProd": "Y",
         "DeployedDatetime": "26-05-2026 00:00 UTC"
+    },
+    {
+        "Version": 7.6,
+        "Description": "🛡️ Markdown injection hardening — usernames/titles with _, *, `, [ no longer crash Telegram parse_mode='Markdown' sends. New _esc_md() and format_mention_with_name_md() helpers in bot_state applied across stats, lifecycle, voting, proxy, admin, ghost, settings, templates, lists, check_reminders. Fixes production 'can't parse entities' errors for users like @Nasri_Gunner. 📖 /help split — /help shows user commands, /help admin shows admin commands; cleaner discovery and shorter scroll. 🕐 IST log timestamps — TZ=Asia/Kolkata in docker-compose so log timestamps and datetime.now() match the operator's timezone. 🐛 4 bug fixes from deep audit: (1) stale wait_pos/out_pos after promotion caused unfair waitlist ordering — positions now reset when leaving a bucket so re-entry is FIFO at the back; (2) auto-close vs /erc race condition — check_reminders now takes the same erc_lock and re-verifies before double-sending finish text or ghost prompt; (3) /maybe and /smf were missing notify_proxy_owner_wait_to_in for WAITLIST→IN promotions — now consistent with /out, /sof, panel, /set_limit; (4) stats._esc() None guard; bare except in models.delete_user replaced with except Exception. ⚙️ Misc: 429 retry-on-error, panel persistence DB migrations, debounce removed (immediate panel updates).",
+        "DeployedOnProd": "N",
+        "DeployedDatetime": "29-05-2026 00:00 UTC"
     }
 ]

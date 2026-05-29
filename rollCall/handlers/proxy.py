@@ -261,6 +261,10 @@ async def set_maybe_for(message):
                         )
                     else:
                         await bot.send_message(cid, f"{result.name} → IN (from WAITING) for '{rc.title}' (#{rc_number + 1})")
+                if isinstance(result.user_id, int):
+                    asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
+                from handlers.lifecycle import notify_proxy_owner_wait_to_in
+                await notify_proxy_owner_wait_to_in(rc, result, cid, rc.title, rc_number + 1)
             elif result is None:
                 if not manager.get_shh_mode(cid):
                     await bot.send_message(cid, f"{user.name} is now MAYBE!")

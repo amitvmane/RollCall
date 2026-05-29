@@ -11,6 +11,8 @@ from rollcall_manager import manager
 
 def _esc(text: str) -> str:
     """Escape Markdown v1 special characters in user-supplied strings."""
+    if not text:
+        return text or ""
     for c in ('_', '*', '`', '['):
         text = text.replace(c, f'\\{c}')
     return text

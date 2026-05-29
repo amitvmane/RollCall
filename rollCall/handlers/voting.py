@@ -268,6 +268,9 @@ async def maybe_user(message):
             if isinstance(result.user_id, int):
                 asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
 
+            from handlers.lifecycle import notify_proxy_owner_wait_to_in
+            await notify_proxy_owner_wait_to_in(rc, result, cid, rc.title, rc_number + 1)
+
             if rc_db_id is not None and isinstance(result.user_id, int):
                 increment_user_stat(cid, result.user_id, "total_waiting_to_in")
                 increment_user_stat(cid, result.user_id, "total_in")

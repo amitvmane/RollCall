@@ -76,54 +76,66 @@ async def check(rollcalls, timezone, chat_id):
 
                 if rollcall.finalizeDate is not None and rollcall.reminder is None:
                     if now_date >= finalize_dt:
-                        logging.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Rollcall #{rc_number} started: {rollcall.title}")
-                        if not manager.get_shh_mode(chat_id):
-                            finish_text = rollcall.finishList().replace('__RCID__', str(rc_number))
-                            finish_text = f"{finish_text}\n\n🕐 Auto-closed at scheduled time"
-                            await bot.send_message(chat_id, finish_text)
+                        # Take the same lock /erc uses so we don't race with a
+                        # concurrent manual end (which would double-send the
+                        # finish text and ghost prompt).
+                        async with manager.get_erc_lock(chat_id):
+                            current_rcs = manager.get_rollcalls(chat_id)
+                            if rollcall not in current_rcs:
+                                # /erc beat us to it — nothing left to do.
+                                continue
+                            # Recompute rc_number in case /erc on another
+                            # rollcall renumbered the list while we waited.
+                            rc_number = current_rcs.index(rollcall) + 1
 
-                        rc_db_id = getattr(rollcall, "db_id", None) or getattr(rollcall, "id", None)
+                            logging.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Rollcall #{rc_number} started: {rollcall.title}")
+                            if not manager.get_shh_mode(chat_id):
+                                finish_text = rollcall.finishList().replace('__RCID__', str(rc_number))
+                                finish_text = f"{finish_text}\n\n🕐 Auto-closed at scheduled time"
+                                await bot.send_message(chat_id, finish_text)
 
-                        # Update attendance streaks for real users who were IN
-                        for u in rollcall.inList:
-                            if isinstance(u.user_id, int):
+                            rc_db_id = getattr(rollcall, "db_id", None) or getattr(rollcall, "id", None)
+
+                            # Update attendance streaks for real users who were IN
+                            for u in rollcall.inList:
+                                if isinstance(u.user_id, int):
+                                    try:
+                                        update_streak_on_checkin(chat_id, u.user_id)
+                                    except Exception:
+                                        logging.warning(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to update streak for user {u.user_id} in chat {chat_id}: {traceback.format_exc()}")
+
+                            if rc_db_id is not None:
+                                end_rollcall(rc_db_id)
+
+                                # Fire ghost prompt if tracking is enabled and rollcall had IN users
                                 try:
-                                    update_streak_on_checkin(chat_id, u.user_id)
+                                    from db import get_rollcall_in_users
+                                    ghost_tracking_on = manager.get_ghost_tracking_enabled(chat_id)
+                                    has_users = bool(get_rollcall_in_users(rc_db_id))
+                                    absent_already = getattr(rollcall, "absent_marked", False)
+                                    if ghost_tracking_on and has_users and not absent_already:
+                                        markup = InlineKeyboardMarkup(row_width=2)
+                                        markup.add(
+                                            InlineKeyboardButton("👻 Yes, select ghosts", callback_data=f"ghost_yes_{rc_db_id}"),
+                                            InlineKeyboardButton("✅ No, all showed up", callback_data=f"ghost_no_{rc_db_id}"),
+                                        )
+                                        await bot.send_message(chat_id, "👻 Did anyone ghost today's session?", reply_markup=markup)
                                 except Exception:
-                                    logging.warning(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to update streak for user {u.user_id} in chat {chat_id}: {traceback.format_exc()}")
+                                    logging.error(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error sending ghost prompt after auto-close: {traceback.format_exc()}")
 
-                        if rc_db_id is not None:
-                            end_rollcall(rc_db_id)
+                            if rollcall in rollcalls:
+                                rollcalls.remove(rollcall)
 
-                            # Fire ghost prompt if tracking is enabled and rollcall had IN users
+                            # Clean up panel state for the closed rollcall
                             try:
-                                from db import get_rollcall_in_users
-                                ghost_tracking_on = manager.get_ghost_tracking_enabled(chat_id)
-                                has_users = bool(get_rollcall_in_users(rc_db_id))
-                                absent_already = getattr(rollcall, "absent_marked", False)
-                                if ghost_tracking_on and has_users and not absent_already:
-                                    markup = InlineKeyboardMarkup(row_width=2)
-                                    markup.add(
-                                        InlineKeyboardButton("👻 Yes, select ghosts", callback_data=f"ghost_yes_{rc_db_id}"),
-                                        InlineKeyboardButton("✅ No, all showed up", callback_data=f"ghost_no_{rc_db_id}"),
-                                    )
-                                    await bot.send_message(chat_id, "👻 Did anyone ghost today's session?", reply_markup=markup)
+                                from bot_state import _panel_msg_ids
+                                _panel_msg_ids.pop((chat_id, rc_number), None)
+                                for num in sorted(n for (c, n) in list(_panel_msg_ids) if c == chat_id and n > rc_number):
+                                    _panel_msg_ids[(chat_id, num - 1)] = _panel_msg_ids.pop((chat_id, num))
                             except Exception:
-                                logging.error(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error sending ghost prompt after auto-close: {traceback.format_exc()}")
+                                pass
 
-                        if rollcall in rollcalls:
-                            rollcalls.remove(rollcall)
-
-                        # Clean up panel state for the closed rollcall
-                        try:
-                            from bot_state import _panel_msg_ids
-                            _panel_msg_ids.pop((chat_id, rc_number), None)
-                            for num in sorted(n for (c, n) in list(_panel_msg_ids) if c == chat_id and n > rc_number):
-                                _panel_msg_ids[(chat_id, num - 1)] = _panel_msg_ids.pop((chat_id, num))
-                        except Exception:
-                            pass
-
-                        rollcall.finalizeDate = None
+                            rollcall.finalizeDate = None
                         continue
 
             except Exception as e:

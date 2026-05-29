@@ -1165,24 +1165,31 @@ def add_or_update_user(rollcall_id: int, user_id: int, first_name: str, username
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
 
-        # Fetch existing positions
+        # Fetch existing positions and current status
         cursor.execute(
-            f"SELECT in_pos, out_pos, wait_pos FROM users WHERE rollcall_id = {ph} AND user_id = {ph}",
+            f"SELECT in_pos, out_pos, wait_pos, status FROM users WHERE rollcall_id = {ph} AND user_id = {ph}",
             (rollcall_id, user_id)
         )
         existing = cursor.fetchone()
 
         if existing:
             existing = dict(existing)
+            prev_status = existing['status']
             in_pos   = existing['in_pos']
             out_pos  = existing['out_pos']
             wait_pos = existing['wait_pos']
-            # Moving away from IN resets in_pos so a re-vote IN gets a fresh
-            # position at the end of the list (reflects actual join order).
-            if status in ('out', 'maybe'):
+            # Reset the position of any bucket the user is leaving so re-entry
+            # later assigns a fresh position at the END of that bucket. This
+            # ensures fair FIFO ordering — in particular, a user promoted
+            # WAITLIST→IN who later returns to the waitlist goes to the back.
+            if prev_status == 'in' and status != 'in':
                 in_pos = None
+            if prev_status == 'out' and status != 'out':
+                out_pos = None
+            if prev_status == 'waitlist' and status != 'waitlist':
+                wait_pos = None
             # Assign NEW position when entering a bucket for the first time
-            # (or re-entering IN after having left).
+            # (or re-entering after having left).
             if status == 'in' and in_pos is None:
                 in_pos = get_next_position(rollcall_id, 'in')
             elif status == 'out' and out_pos is None:
@@ -1252,24 +1259,31 @@ def add_or_update_proxy_user(rollcall_id: int, name: str, status: str, comment: 
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
 
-        # Fetch existing positions
+        # Fetch existing positions and current status
         cursor.execute(
-            f"SELECT in_pos, out_pos, wait_pos FROM proxy_users WHERE rollcall_id = {ph} AND name = {ph}",
+            f"SELECT in_pos, out_pos, wait_pos, status FROM proxy_users WHERE rollcall_id = {ph} AND name = {ph}",
             (rollcall_id, name)
         )
         existing = cursor.fetchone()
 
         if existing:
             existing = dict(existing)
+            prev_status = existing['status']
             in_pos   = existing['in_pos']
             out_pos  = existing['out_pos']
             wait_pos = existing['wait_pos']
-            # Moving away from IN resets in_pos so a re-vote IN gets a fresh
-            # position at the end of the list (reflects actual join order).
-            if status in ('out', 'maybe'):
+            # Reset the position of any bucket the proxy is leaving so re-entry
+            # later assigns a fresh position at the END of that bucket. This
+            # ensures fair FIFO ordering — in particular, a proxy promoted
+            # WAITLIST→IN who later returns to the waitlist goes to the back.
+            if prev_status == 'in' and status != 'in':
                 in_pos = None
+            if prev_status == 'out' and status != 'out':
+                out_pos = None
+            if prev_status == 'waitlist' and status != 'waitlist':
+                wait_pos = None
             # Assign NEW position when entering a bucket for the first time
-            # (or re-entering IN after having left).
+            # (or re-entering after having left).
             if status == 'in' and in_pos is None:
                 in_pos = get_next_position(rollcall_id, 'in')
             elif status == 'out' and out_pos is None:

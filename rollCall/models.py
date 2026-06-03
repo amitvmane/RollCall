@@ -5,7 +5,6 @@ from functions import *
 from datetime import datetime
 import db
 import re
-import traceback
 
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -338,14 +337,14 @@ class RollCall:
                         if name in self.proxy_owners:
                             del self.proxy_owners[name]
                 except Exception:
-                    logging.error(traceback.format_exc())
+                    logging.exception("delete_user: failed to clean proxy_owners mapping")
 
                 return True
 
             return False
 
         except Exception:
-            logging.error(traceback.format_exc())
+            logging.exception("delete_user: unexpected error")
             return False
 
     def addIn(self, user):

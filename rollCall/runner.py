@@ -4,6 +4,7 @@ Main entry point with health monitoring, validation, and graceful shutdown
 """
 
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -12,24 +13,95 @@ from datetime import datetime
 from db import init_db, db_ping
 from aiohttp import web
 
-# Configure logging before imports
-log_dir = '/app/logs'
-os.makedirs(log_dir, exist_ok=True)  # Ensure directory exists
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(f'{log_dir}/bot.log'),
-        logging.StreamHandler()
-    ],
-    force=True  # ← overrides any early init by imported modules
-)
-logging.getLogger("TeleBot").setLevel(logging.WARNING)
-logging.getLogger("aiohttp").setLevel(logging.WARNING)
-logging.getLogger("asyncio").setLevel(logging.WARNING)
+class JsonFormatter(logging.Formatter):
+    """One-line JSON log records — machine-readable for log aggregators."""
+
+    def format(self, record):
+        payload = {
+            "ts": datetime.utcfromtimestamp(record.created).isoformat(timespec="milliseconds") + "Z",
+            "level": record.levelname,
+            "logger": record.name,
+            "msg": record.getMessage(),
+        }
+        if record.exc_info:
+            payload["exc"] = self.formatException(record.exc_info)
+        # Surface any structured extras attached via logger.info(..., extra={...}).
+        for k, v in record.__dict__.items():
+            if k in payload or k.startswith("_") or k in (
+                "args", "asctime", "created", "exc_info", "exc_text", "filename",
+                "funcName", "levelname", "levelno", "lineno", "module", "msecs",
+                "message", "msg", "name", "pathname", "process", "processName",
+                "relativeCreated", "stack_info", "thread", "threadName",
+            ):
+                continue
+            try:
+                json.dumps(v)
+                payload[k] = v
+            except (TypeError, ValueError):
+                payload[k] = repr(v)
+        return json.dumps(payload, ensure_ascii=False)
+
+
+def _setup_logging():
+    """Configure root logging. JSON when STRUCTURED_LOGS=true (or 1/yes),
+    plain text otherwise. Writes to both stdout and /app/logs/bot.log."""
+    log_dir = "/app/logs"
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+    except OSError:
+        # Local dev / tests run outside the container.
+        log_dir = None
+
+    structured = os.getenv("STRUCTURED_LOGS", "").strip().lower() in ("1", "true", "yes", "on")
+    text_fmt = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+    handlers = []
+    stream = logging.StreamHandler()
+    stream.setFormatter(JsonFormatter() if structured else logging.Formatter(text_fmt))
+    handlers.append(stream)
+    if log_dir:
+        fileh = logging.FileHandler(f"{log_dir}/bot.log")
+        fileh.setFormatter(JsonFormatter() if structured else logging.Formatter(text_fmt))
+        handlers.append(fileh)
+
+    logging.basicConfig(level=logging.INFO, handlers=handlers, force=True)
+    logging.getLogger("TeleBot").setLevel(logging.WARNING)
+    logging.getLogger("aiohttp").setLevel(logging.WARNING)
+    logging.getLogger("asyncio").setLevel(logging.WARNING)
+
+
+def _setup_error_sink():
+    """Initialize Sentry if SENTRY_DSN is set and sentry-sdk is installed.
+    Both are optional — the bot runs fine without either."""
+    dsn = os.getenv("SENTRY_DSN", "").strip()
+    if not dsn:
+        return None
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.logging import LoggingIntegration
+        sentry_sdk.init(
+            dsn=dsn,
+            traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.0")),
+            release=os.getenv("RELEASE_VERSION") or None,
+            environment=os.getenv("ENVIRONMENT", "production"),
+            integrations=[LoggingIntegration(level=logging.INFO, event_level=logging.ERROR)],
+        )
+        return "ok"
+    except ImportError:
+        return "sentry-sdk not installed"
+    except Exception as e:
+        return f"sentry init failed: {e}"
+
+
+_setup_logging()
+_sentry_status = _setup_error_sink()
 
 logger = logging.getLogger(__name__)
+if _sentry_status == "ok":
+    logger.info("✅ Sentry error reporting enabled")
+elif _sentry_status:
+    logger.warning(f"⚠️  Sentry not enabled: {_sentry_status}")
 
 # Import bot components
 try:
@@ -121,6 +193,11 @@ async def health_check(request):
     except Exception as e:
         problems.append(f"db_error: {type(e).__name__}")
 
+    from db import get_pool_stats
+    pool_stats = get_pool_stats()
+    if pool_stats and pool_stats.get("saturated"):
+        problems.append(f"db_pool_saturated_{pool_stats['in_use']}/{pool_stats['max']}")
+
     from check_reminders import _active_loops
     scheduler_ok = _task_alive(_health_state["scheduler_task"])
     prune_ok = _task_alive(_health_state["prune_task"])
@@ -134,8 +211,12 @@ async def health_check(request):
     last_err = _last_error_state.get('at')
     last_err_msg = _last_error_state.get('msg')
 
+    pool_part = (
+        f" pool={pool_stats['in_use']}/{pool_stats['max']}(peak={pool_stats['high_water']})"
+        if pool_stats else ""
+    )
     status_text = (
-        f"bot={bot_status} db={'ok' if db_ok else 'FAIL'} "
+        f"bot={bot_status} db={'ok' if db_ok else 'FAIL'}{pool_part} "
         f"scheduler={'ok' if scheduler_ok else 'DEAD'} "
         f"prune={'ok' if prune_ok else 'DEAD'} "
         f"chats={cache_size} reminder_loops={len(_active_loops)}"

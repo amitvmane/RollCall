@@ -478,9 +478,10 @@ class TestCheckRemindersLogging(unittest.TestCase):
 
     def test_check_reminders_source_uses_logging_not_print(self):
         """
-        Source-level check: the error handler must call logging.error,
-        not print().  Ensures neither bare print(e) nor print(traceback...)
-        remain after the fix.
+        Source-level check: the error handler must use the logging module
+        (logging.exception preferred; logging.error/warning still acceptable),
+        not print(). R8 replaced explicit traceback.format_exc() calls with
+        logging.exception(), so `import traceback` is no longer required.
         """
         module_path = os.path.join(
             os.path.dirname(__file__), "..", "rollCall", "check_reminders.py"
@@ -488,12 +489,14 @@ class TestCheckRemindersLogging(unittest.TestCase):
         with open(module_path) as f:
             source = f.read()
 
-        # The fixed file must import logging and traceback
         self.assertIn("import logging", source)
-        self.assertIn("import traceback", source)
-        # logging.error must appear in the exception handlers
-        self.assertIn("logging.error", source)
-        # Bare print(e) must not appear
+        # One of logging.exception / logging.error / logging.warning must show up
+        # in the exception handlers (we now strongly prefer logging.exception).
+        self.assertTrue(
+            "logging.exception" in source or "logging.error" in source,
+            "check_reminders.py must log exceptions via logging.{exception,error}",
+        )
+        # No bare print(e) leaks
         self.assertNotIn("print(e)", source)
 
     def test_reminder_loop_exception_calls_logging_error(self):
@@ -527,7 +530,11 @@ class TestCheckRemindersLogging(unittest.TestCase):
                 raise asyncio.CancelledError()
             # First call: return immediately instead of actually sleeping
 
-        with patch.object(logging, 'error') as mock_log, \
+        # R8 switched check_reminders to logging.exception() (which records the
+        # traceback automatically). Either logging.exception or logging.error
+        # being called proves the failure was recorded.
+        with patch.object(logging, 'exception') as mock_exc, \
+             patch.object(logging, 'error') as mock_err, \
              patch.object(real_mod.pytz, 'timezone', side_effect=RuntimeError("tz boom")), \
              patch.object(real_mod.asyncio, 'sleep', side_effect=controlled_sleep), \
              patch.object(sys.modules['rollcall_manager'].manager, 'get_rollcalls', return_value=rollcalls):
@@ -539,9 +546,10 @@ class TestCheckRemindersLogging(unittest.TestCase):
             finally:
                 loop.close()
 
-        mock_log.assert_called()
-        logged_msg = str(mock_log.call_args)
-        self.assertIn("check_reminders", logged_msg.lower())
+        self.assertTrue(
+            mock_exc.called or mock_err.called,
+            "check() must log the inner RuntimeError via logging.{exception,error}",
+        )
 
 
 # ---------------------------------------------------------------------------

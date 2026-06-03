@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import traceback
 from datetime import datetime, timedelta
 
 import pytz
@@ -102,7 +101,7 @@ async def check(rollcalls, timezone, chat_id):
                                     try:
                                         update_streak_on_checkin(chat_id, u.user_id)
                                     except Exception:
-                                        logging.warning(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to update streak for user {u.user_id} in chat {chat_id}: {traceback.format_exc()}")
+                                        logging.exception(f"Failed to update streak for user {u.user_id} in chat {chat_id}")
 
                             # Bump per-user total_rollcalls so /stats attendance rate works
                             participants = set(
@@ -132,7 +131,7 @@ async def check(rollcalls, timezone, chat_id):
                                         )
                                         await bot.send_message(chat_id, "👻 Did anyone ghost today's session?", reply_markup=markup)
                                 except Exception:
-                                    logging.error(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error sending ghost prompt after auto-close: {traceback.format_exc()}")
+                                    logging.exception("Error sending ghost prompt after auto-close")
 
                             if rollcall in rollcalls:
                                 rollcalls.remove(rollcall)
@@ -149,8 +148,8 @@ async def check(rollcalls, timezone, chat_id):
                             rollcall.finalizeDate = None
                         continue
 
-            except Exception as e:
-                logging.error(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error processing rollcall reminder: {traceback.format_exc()}")
+            except Exception:
+                logging.exception("Error processing rollcall reminder")
 
         if len(rollcalls) == 0 or no_reminder_rollcalls == len(rollcalls):
             break
@@ -177,7 +176,7 @@ async def start(rollcalls, timezone, chat_id):
         logging.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Starting reminder check for chat {chat_id}")
         await check(rollcalls, timezone, chat_id)
     except Exception:
-        logging.error(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Unexpected error in reminder loop: {traceback.format_exc()}")
+        logging.exception("Unexpected error in reminder loop")
     finally:
         _active_loops.discard(chat_id)
         logging.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Reminder loop finished for chat {chat_id}")
@@ -204,10 +203,7 @@ async def resume_reminder_loops():
                     f"Resumed reminder loop for chat {chat_id} ({len(rollcalls)} active rollcall(s))"
                 )
         except Exception:
-            logging.error(
-                f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
-                f"Error resuming reminder loop for chat {chat_id}: {traceback.format_exc()}"
-            )
+            logging.exception(f"Error resuming reminder loop for chat {chat_id}")
     logging.info(
         f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
         f"Startup: resumed {resumed} reminder loop(s) across {len(chat_ids)} chat(s)"
@@ -366,16 +362,11 @@ async def check_template_schedules():
                     await _auto_start_from_template(chat_id, tmpl)
                     update_template_last_scheduled_date(chat_id, tmpl["name"], today_date)
                 except Exception:
-                    logging.error(
-                        f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
-                        f"Failed to auto-start template '{tmpl.get('name')}' for chat {chat_id}: "
-                        f"{traceback.format_exc()}"
+                    logging.exception(
+                        f"Failed to auto-start template '{tmpl.get('name')}' for chat {chat_id}"
                     )
 
         except Exception:
-            logging.error(
-                f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
-                f"Error in template schedule loop: {traceback.format_exc()}"
-            )
+            logging.exception("Error in template schedule loop")
 
         await asyncio.sleep(60)

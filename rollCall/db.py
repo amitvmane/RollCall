@@ -30,12 +30,28 @@ from config import DATABASE_URL
 db_pool = None
 db_conn = None
 db_type = None
+_pool_max = 0
+_pool_in_use = 0
+_pool_high_water = 0  # peak in-use count observed since boot
+_pool_saturation_logged_at = 0.0  # for warn throttling
 # Allowlists for safe SQL field interpolation
 VALID_USER_STAT_FIELDS = {
     'total_in', 'total_out', 'total_maybe', 'total_waiting_to_in',
     'total_rollcalls', 'total_response_seconds', 'best_streak', 'current_streak'
 }
 VALID_ROLLCALL_STAT_FIELDS = {'total_in', 'total_out', 'total_maybe'}
+
+
+def get_pool_stats():
+    """Return current connection pool stats. None for SQLite (single connection)."""
+    if db_type != 'postgresql':
+        return None
+    return {
+        'in_use': _pool_in_use,
+        'max': _pool_max,
+        'high_water': _pool_high_water,
+        'saturated': _pool_in_use >= _pool_max,
+    }
 
 
 def init_db():
@@ -59,15 +75,22 @@ def init_db():
     logging.debug("Database initialized successfully")
 
 def init_postgresql():
-    """Initialize PostgreSQL connection pool"""
-    global db_pool
+    """Initialize PostgreSQL connection pool. Pool bounds are tunable via
+    DB_POOL_MINCONN / DB_POOL_MAXCONN (defaults 1 / 5)."""
+    global db_pool, _pool_max
     try:
-        db_pool = SimpleConnectionPool(
-            minconn=1,
-            maxconn=5,
-            dsn=DATABASE_URL
-        )
-        logging.debug("PostgreSQL connection pool created")
+        minconn = int(os.environ.get("DB_POOL_MINCONN", "1"))
+        maxconn = int(os.environ.get("DB_POOL_MAXCONN", "5"))
+    except ValueError:
+        minconn, maxconn = 1, 5
+    if minconn < 1:
+        minconn = 1
+    if maxconn < minconn:
+        maxconn = minconn
+    try:
+        db_pool = SimpleConnectionPool(minconn=minconn, maxconn=maxconn, dsn=DATABASE_URL)
+        _pool_max = maxconn
+        logging.info(f"PostgreSQL connection pool created (min={minconn}, max={maxconn})")
     except Exception as e:
         logging.error(f"Failed to create PostgreSQL connection pool: {e}")
         raise
@@ -86,16 +109,33 @@ def init_sqlite():
         raise
 
 def get_connection():
-    """Get database connection"""
+    """Get database connection. Tracks pool usage and throttle-warns once
+    every 60s if the PG pool is saturated."""
+    global _pool_in_use, _pool_high_water, _pool_saturation_logged_at
     if db_type == 'postgresql':
-        return db_pool.getconn()
-    else:
-        return db_conn
+        if _pool_in_use >= _pool_max:
+            now = datetime.now().timestamp()
+            if now - _pool_saturation_logged_at > 60:
+                _pool_saturation_logged_at = now
+                logging.warning(
+                    f"PG connection pool saturated ({_pool_in_use}/{_pool_max}) — "
+                    f"consider raising DB_POOL_MAXCONN. Peak={_pool_high_water}."
+                )
+        conn = db_pool.getconn()
+        _pool_in_use += 1
+        if _pool_in_use > _pool_high_water:
+            _pool_high_water = _pool_in_use
+        return conn
+    return db_conn
+
 
 def release_connection(conn):
-    """Release database connection"""
+    """Release database connection back to the pool (no-op for SQLite)."""
+    global _pool_in_use
     if db_type == 'postgresql':
         db_pool.putconn(conn)
+        if _pool_in_use > 0:
+            _pool_in_use -= 1
 
 def create_tables():
     """Create database tables if they don't exist"""

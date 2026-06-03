@@ -4,7 +4,6 @@ notify_proxy_owner_wait_to_in, and the btn_* callback handler.
 """
 import asyncio
 import logging
-import traceback
 from datetime import datetime
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton

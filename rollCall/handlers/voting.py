@@ -59,6 +59,9 @@ async def in_user(message):
             comment = ' '.join(arr)
         user.comment = comment
 
+        if isinstance(user.user_id, int):
+            upsert_chat_member(cid, user.user_id, _display_name, _username)
+
         if isinstance(user.user_id, int) and manager.get_ghost_tracking_enabled(cid):
             ghost_count = get_ghost_count(cid, user.user_id)
             absent_limit = manager.get_absent_limit(cid)
@@ -78,9 +81,6 @@ async def in_user(message):
                     reply_markup=markup
                 )
                 return
-
-        if isinstance(user.user_id, int):
-            upsert_chat_member(cid, user.user_id, _display_name, _username)
 
         result = rc.addIn(user)
         rc.save()
@@ -188,13 +188,27 @@ async def out_user(message):
                 increment_user_stat(cid, result.user_id, "total_in")
                 increment_rollcall_stat(rc_db_id, "total_in")
 
-        if was_in and any(u.user_id == user.user_id for u in rc.outList):
-            if not manager.get_shh_mode(cid):
-                await bot.send_message(
-                    cid,
-                    f"{format_mention_with_name_md(user)} → OUT for '{_esc_md(rc.title)}' (#{rc_number + 1})",
-                    parse_mode="Markdown",
-                )
+        if not manager.get_shh_mode(cid) and result not in ('AB', 'AU') and not isinstance(result, User):
+            in_outlist_now = any(u.user_id == user.user_id for u in rc.outList)
+            if in_outlist_now:
+                if isinstance(user.user_id, int):
+                    if was_in:
+                        await bot.send_message(
+                            cid,
+                            f"{format_mention_with_name_md(user)} → OUT for '{_esc_md(rc.title)}' (#{rc_number + 1})",
+                            parse_mode="Markdown",
+                        )
+                    else:
+                        await bot.send_message(
+                            cid,
+                            f"{format_mention_with_name_md(user)} is now OUT!",
+                            parse_mode="Markdown",
+                        )
+                else:
+                    if was_in:
+                        await bot.send_message(cid, f"{user.name} → OUT for '{rc.title}' (#{rc_number + 1})")
+                    else:
+                        await bot.send_message(cid, f"{user.name} is now OUT!")
 
         from handlers.lifecycle import _update_panel
         await _update_panel(cid, rc_number + 1, rc)

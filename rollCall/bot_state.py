@@ -44,11 +44,25 @@ _sched_selection: dict = {}
 _rate_limits: dict = {}
 _RATE_LIMIT_SECONDS = 2
 
-# Pending delete confirmations: (chat_id, admin_user_id) -> {'name': str, 'rc_number': int}
+# Pending delete confirmations: (chat_id, admin_user_id) -> {'name': str, 'rc_number': int, '_ts': float}
 _pending_deletes: dict = {}
 
-# Pending status overrides: (chat_id, admin_user_id) -> {'user': User, 'new_status': str, 'rc_number': int}
+# Pending status overrides: (chat_id, admin_user_id) -> {'user': User, 'new_status': str, 'rc_number': int, '_ts': float}
 _pending_overrides: dict = {}
+
+# Pending /sif post-ghost-warning add: (chat_id, admin_user_id, proxy_name) -> {'comment': str, '_ts': float}
+_pending_proxy_add: dict = {}
+
+# How long pending confirmations stay valid before being garbage-collected (seconds).
+_PENDING_TTL_SECONDS = 3600
+
+
+def _prune_pending(d: dict) -> None:
+    """Drop entries older than _PENDING_TTL_SECONDS from a pending-action dict."""
+    now = datetime.now().timestamp()
+    stale = [k for k, v in d.items() if (now - (v.get('_ts', now))) > _PENDING_TTL_SECONDS]
+    for k in stale:
+        d.pop(k, None)
 
 # Per-chat /buzz rate limiting: chat_id -> last buzz timestamp
 _buzz_cooldowns: dict = {}
@@ -124,10 +138,11 @@ def format_mention_with_name(user: User) -> str:
 
 
 def _esc_md(text: str) -> str:
-    """Escape Markdown v1 special characters in user-supplied strings."""
+    """Escape Markdown v1 special characters in user-supplied strings.
+    Includes `]` so display names cannot break `[name](tg://user?id=X)` links."""
     if not text:
         return text or ""
-    for c in ('_', '*', '`', '['):
+    for c in ('_', '*', '`', '[', ']'):
         text = text.replace(c, f'\\{c}')
     return text
 

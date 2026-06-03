@@ -1,15 +1,11 @@
 import logging
 import asyncio
-import telebot
-from config import TELEGRAM_TOKEN
 from exceptions import *
 from functions import *
 from datetime import datetime
 import db
 import re
 import traceback
-
-bot = telebot.TeleBot(token=TELEGRAM_TOKEN)
 
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',

@@ -4,10 +4,13 @@ import Levenshtein
 from datetime import datetime, timedelta
 import pytz
 import asyncio
-from telebot.async_telebot import AsyncTeleBot
-from config import TELEGRAM_TOKEN
 
-bot = AsyncTeleBot(TELEGRAM_TOKEN)
+
+def _bot():
+    """Lazy import to avoid a circular dependency:
+    bot_state → models → functions, so functions cannot import bot_state at module load."""
+    from bot_state import bot
+    return bot
 
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -58,7 +61,7 @@ async def admin_rights(message, manager):
         if message.from_user is None:
             return False
 
-        member = await bot.get_chat_member(chat_id, message.from_user.id)
+        member = await _bot().get_chat_member(chat_id, message.from_user.id)
         if member.status not in ['administrator', 'creator']:
             logging.error(f"[{_ts()}] Error - user does not have sufficient permissions for this operation")
             return False

@@ -195,6 +195,7 @@ async def start_roll_call(message):
         text = rc.allList().replace("__RCID__", str(rc_index + 1))
         sent = await bot.send_message(message.chat.id, text, reply_markup=markup)
         _panel_msg_ids[(cid, rc_index + 1)] = sent.message_id
+        _persist_panel_msg_id(rc, sent.message_id)
 
     except Exception as e:
         await bot.send_message(cid, str(e))
@@ -232,9 +233,15 @@ async def end_roll_call(message):
             in_users = rc.inList
             has_any_users = len(in_users) > 0
 
+            participants = set(
+                u.user_id for u in (rc.inList + rc.outList + rc.maybeList + rc.waitList)
+                if isinstance(u.user_id, int)
+            )
             for u in in_users:
                 if isinstance(u.user_id, int):
                     update_streak_on_checkin(cid, u.user_id)
+            for uid in participants:
+                increment_user_stat(cid, uid, "total_rollcalls")
 
             ended_by = message.from_user.first_name or message.from_user.username or "someone"
             finish_text = rc.finishList().replace("__RCID__", str(rc_number + 1))
@@ -354,6 +361,7 @@ async def show_panel(message):
 
         sent = await bot.send_message(cid, text, reply_markup=markup)
         _panel_msg_ids[(cid, rc_number + 1)] = sent.message_id
+        _persist_panel_msg_id(rc, sent.message_id)
 
     except Exception as e:
         await bot.send_message(message.chat.id, str(e))
@@ -606,9 +614,15 @@ async def callback_handler(call):
                 absent_already_marked = rc.absent_marked
                 ended_number = rc_number
 
+                participants = set(
+                    u.user_id for u in (rc.inList + rc.outList + rc.maybeList + rc.waitList)
+                    if isinstance(u.user_id, int)
+                )
                 for u in rc.inList:
                     if isinstance(u.user_id, int):
                         update_streak_on_checkin(cid, u.user_id)
+                for uid in participants:
+                    increment_user_stat(cid, uid, "total_rollcalls")
 
                 await bot.answer_callback_query(call.id, "Rollcall ended")
                 ended_by = call.from_user.first_name or call.from_user.username or "someone"
@@ -636,7 +650,7 @@ async def callback_handler(call):
                     await bot.send_message(cid, "👻 Did anyone ghost today's session?", reply_markup=markup)
 
                 updated_rollcalls = manager.get_rollcalls(cid)
-                if len(updated_rollcalls) > 0:
+                if len(updated_rollcalls) > 0 and not manager.get_shh_mode(cid):
                     lines = [f"⚠️ Rollcall #{ended_number} ended. IDs updated:"]
                     for idx, rollcall in enumerate(updated_rollcalls):
                         new_id = idx + 1
@@ -650,6 +664,7 @@ async def callback_handler(call):
                         markup = await get_status_keyboard(new_id)
                         sent = await bot.send_message(cid, text, reply_markup=markup)
                         _panel_msg_ids[(cid, new_id)] = sent.message_id
+                        _persist_panel_msg_id(rollcall, sent.message_id)
             return
 
         # ── Cancel end rollcall ───────────────────────────────────────────────

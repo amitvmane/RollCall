@@ -4,13 +4,13 @@ import traceback
 from datetime import datetime, timedelta
 
 import pytz
-from telebot.async_telebot import AsyncTeleBot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from config import TELEGRAM_TOKEN
-from db import end_rollcall, update_streak_on_checkin, get_all_scheduled_templates, update_template_last_scheduled_date, get_all_chat_ids
-
-bot = AsyncTeleBot(token=TELEGRAM_TOKEN)
+from bot_state import bot
+from db import (
+    end_rollcall, update_streak_on_checkin, get_all_scheduled_templates,
+    update_template_last_scheduled_date, get_all_chat_ids, increment_user_stat,
+)
 
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -103,6 +103,17 @@ async def check(rollcalls, timezone, chat_id):
                                         update_streak_on_checkin(chat_id, u.user_id)
                                     except Exception:
                                         logging.warning(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to update streak for user {u.user_id} in chat {chat_id}: {traceback.format_exc()}")
+
+                            # Bump per-user total_rollcalls so /stats attendance rate works
+                            participants = set(
+                                u.user_id for u in (rollcall.inList + rollcall.outList + rollcall.maybeList + rollcall.waitList)
+                                if isinstance(u.user_id, int)
+                            )
+                            for uid in participants:
+                                try:
+                                    increment_user_stat(chat_id, uid, "total_rollcalls")
+                                except Exception:
+                                    logging.warning(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to increment total_rollcalls for user {uid}")
 
                             if rc_db_id is not None:
                                 end_rollcall(rc_db_id)
@@ -251,12 +262,13 @@ async def _auto_start_from_template(chat_id: int, tmpl: dict):
 
     # Send the full rollcall panel with inline vote buttons
     try:
-        from handlers.lifecycle import get_status_keyboard
+        from handlers.lifecycle import get_status_keyboard, _persist_panel_msg_id
         from bot_state import _panel_msg_ids
         markup = await get_status_keyboard(rc_number)
         text = rc.allList().replace("__RCID__", str(rc_number))
         sent = await bot.send_message(chat_id, text, reply_markup=markup, parse_mode=None)
         _panel_msg_ids[(chat_id, rc_number)] = sent.message_id
+        _persist_panel_msg_id(rc, sent.message_id)
     except Exception:
         # Fallback: plain announcement if panel send fails
         close_info = ""

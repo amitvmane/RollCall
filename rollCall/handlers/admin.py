@@ -7,14 +7,14 @@ from datetime import datetime
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot_state import bot, _pending_deletes, _pending_overrides, _esc_md
+from bot_state import bot, _pending_deletes, _pending_overrides, _esc_md, _prune_pending
 from exceptions import (
     rollCallNotStarted, insufficientPermissions, parameterMissing, incorrectParameter,
 )
 from functions import admin_rights, roll_call_not_started
 from models import User
 from rollcall_manager import manager
-from db import log_admin_action, get_admin_audit_log, count_admin_audit_log
+from db import log_admin_action, get_admin_audit_log, count_admin_audit_log, delete_user_by_id
 
 
 _AUDIT_PER_PAGE = 15
@@ -128,7 +128,13 @@ async def delete_user(message):
         name = " ".join(arr[1:])
         admin_id = message.from_user.id
 
-        _pending_deletes[(cid, admin_id)] = {'name': name, 'rc_number': rc_number}
+        _prune_pending(_pending_deletes)
+        _prune_pending(_pending_overrides)
+        _pending_deletes[(cid, admin_id)] = {
+            'name': name,
+            'rc_number': rc_number,
+            '_ts': datetime.now().timestamp(),
+        }
         markup = InlineKeyboardMarkup(row_width=2)
         markup.add(
             InlineKeyboardButton("✅ Yes, delete", callback_data=f"delconf_yes_{rc_number}_{admin_id}"),
@@ -206,17 +212,36 @@ async def set_status_override(message):
 
         rc = manager.get_rollcall(cid, rc_number)
 
-        found_user = None
-        for lst in (rc.inList, rc.outList, rc.maybeList, rc.waitList):
+        candidates = []
+        bucket_map = (
+            (rc.inList, 'in'), (rc.outList, 'out'), (rc.maybeList, 'maybe'), (rc.waitList, 'waitlist'),
+        )
+        wanted = name.lstrip("@").lower()
+        for lst, status_name in bucket_map:
             for u in lst:
-                if u.name.lower() == name.lower() or (u.username and u.username.lower() == name.lstrip("@").lower()):
-                    found_user = u
-                    break
-            if found_user:
-                break
+                if (u.username and u.username.lower() == wanted) or u.name.lower() == name.lower():
+                    candidates.append((u, status_name))
 
-        if not found_user:
+        if not candidates:
             await bot.send_message(cid, f"⚠️ User '{name}' not found in rollcall #{rc_number + 1}.")
+            return
+        if len(candidates) > 1:
+            distinct = {(u.user_id, s) for u, s in candidates}
+            if len(distinct) > 1:
+                hint = ", ".join(sorted({u.name for u, _ in candidates}))
+                await bot.send_message(
+                    cid,
+                    f"⚠️ '{name}' matches multiple users ({hint}). Use the exact @username to disambiguate.",
+                )
+                return
+        found_user, current_status = candidates[0]
+
+        if current_status == new_status:
+            await bot.send_message(
+                cid,
+                f"ℹ️ *{_esc_md(found_user.name)}* is already {new_status.upper()} in rollcall #{rc_number + 1}.",
+                parse_mode="Markdown",
+            )
             return
 
         admin_id = message.from_user.id
@@ -224,6 +249,7 @@ async def set_status_override(message):
             'user': found_user,
             'new_status': new_status,
             'rc_number': rc_number,
+            '_ts': datetime.now().timestamp(),
         }
 
         markup = InlineKeyboardMarkup(row_width=2)

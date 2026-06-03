@@ -473,6 +473,7 @@ async def set_template(message):
                 tail = tail[first_space + 1:].strip() if first_space > 0 else ""
 
         tokens = tail.split()
+        bad_values = []
         for tok in tokens:
             if "=" not in tok:
                 continue
@@ -480,34 +481,35 @@ async def set_template(message):
             key = key.strip().lower()
             val = val.strip().strip('"').strip("'")
 
-            if key == "limit":
+            def _try_int(field_name, current):
                 try:
-                    inlistlimit = int(val)
+                    return int(val)
                 except ValueError:
-                    pass
+                    bad_values.append(f"{field_name}={val!r}")
+                    return current
+
+            if key == "limit":
+                inlistlimit = _try_int("limit", inlistlimit)
             elif key == "location":
                 location = val
             elif key == "fee":
                 eventfee = val
             elif key == "offset_days":
-                try:
-                    offsetdays = int(val)
-                except ValueError:
-                    pass
+                offsetdays = _try_int("offset_days", offsetdays)
             elif key == "offset_hours":
-                try:
-                    offsethours = int(val)
-                except ValueError:
-                    pass
+                offsethours = _try_int("offset_hours", offsethours)
             elif key == "offset_minutes":
-                try:
-                    offsetminutes = int(val)
-                except ValueError:
-                    pass
+                offsetminutes = _try_int("offset_minutes", offsetminutes)
             elif key == "event_day":
                 event_day = val.lower()
             elif key == "event_time":
                 event_time = val
+
+        if bad_values:
+            await bot.send_message(
+                cid,
+                f"⚠️ Ignored non-integer value(s): {', '.join(bad_values)}. Existing values preserved.",
+            )
 
         ok = create_or_update_template(
             chatid=cid, name=name, title=title,

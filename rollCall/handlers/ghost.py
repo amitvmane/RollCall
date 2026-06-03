@@ -10,8 +10,8 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot_state import (
     bot, _ghost_selections, _pending_reconf, _pending_deletes, _pending_overrides,
-    _log_task_exc, _get_display_name, format_mention_with_name, _esc_md, get_rc_db_id,
-    _build_ghost_select_keyboard, _fmt_ended_at,
+    _pending_proxy_add, _log_task_exc, _get_display_name, format_mention_with_name,
+    _esc_md, get_rc_db_id, _build_ghost_select_keyboard, _fmt_ended_at,
 )
 from exceptions import insufficientPermissions, rollCallNotStarted, incorrectParameter
 from functions import admin_rights, roll_call_not_started
@@ -22,7 +22,7 @@ from db import (
     get_ghost_leaderboard, get_user_ghost_count_by_name, get_ghost_count_by_proxy_name,
     mark_rollcall_absent_done, get_unprocessed_rollcalls,
     add_ghost_event, get_rollcall_in_users, save_ghost_selections, load_ghost_selections,
-    reset_streak_on_ghost, log_admin_action,
+    reset_streak_on_ghost, log_admin_action, upsert_chat_member,
     increment_user_stat, increment_rollcall_stat,
 )
 
@@ -322,7 +322,9 @@ async def ghost_callback_handler(call):
                 return
             rc = rollcalls[rc_number]
             _username = call.from_user.username or None
-            user = User(_get_display_name(call.from_user), _username, uid, rc.allNames)
+            _display = _get_display_name(call.from_user)
+            upsert_chat_member(cid, uid, _display, _username)
+            user = User(_display, _username, uid, rc.allNames)
             user.comment = state.get('comment', '')
             result = rc.addIn(user)
             rc.save()
@@ -333,35 +335,6 @@ async def ghost_callback_handler(call):
             await bot.answer_callback_query(call.id, "💪 You're IN!")
             await bot.edit_message_text(
                 f"💪 {user.name} committed to IN!\n\n{rc.allList().replace('__RCID__', str(rc_number + 1))}",
-                cid, call.message.message_id
-            )
-            return
-
-        # ── reconf_maybe ─────────────────────────────────────────────────────
-        if data.startswith("reconf_maybe_"):
-            parts = data.split("_")
-            rc_number = int(parts[2])
-            uid = int(parts[3])
-            if call.from_user.id != uid:
-                await bot.answer_callback_query(call.id, "This confirmation is not for you.")
-                return
-            _pending_reconf.pop((cid, uid), None)
-            rollcalls = manager.get_rollcalls(cid)
-            if rc_number >= len(rollcalls):
-                await bot.answer_callback_query(call.id, "Roll call no longer active.")
-                return
-            rc = rollcalls[rc_number]
-            _username = call.from_user.username or None
-            user = User(_get_display_name(call.from_user), _username, uid, rc.allNames)
-            rc.addMaybe(user)
-            rc.save()
-            rc_db_id = get_rc_db_id(rc)
-            if rc_db_id and isinstance(uid, int):
-                increment_user_stat(cid, uid, "total_maybe")
-                increment_rollcall_stat(rc_db_id, "total_maybe")
-            await bot.answer_callback_query(call.id, "🤔 Marked as Maybe")
-            await bot.edit_message_text(
-                f"🤔 {user.name} marked as Maybe.\n\n{rc.allList().replace('__RCID__', str(rc_number + 1))}",
                 cid, call.message.message_id
             )
             return
@@ -406,17 +379,17 @@ async def ghost_callback_handler(call):
                 await bot.answer_callback_query(call.id, "Rollcall not found")
                 return
 
-            user = User(proxy_name, None, proxy_name, rc.allNames)
             proxy_owner_id = call.from_user.id
+            pending = _pending_proxy_add.pop((cid, proxy_owner_id, proxy_name), {})
+            comment = pending.get('comment', '')
+
+            user = User(proxy_name, None, proxy_name, rc.allNames)
+            user.comment = comment
             rc.set_proxy_owner(proxy_name, proxy_owner_id)
 
-            result = rc.addIn(user)
-            from db import add_or_update_proxy_user
-            add_or_update_proxy_user(
-                rc.id, proxy_name,
-                "waitlist" if result == 'AC' else "in",
-                "", proxy_owner_id=proxy_owner_id,
-            )
+            # rc.addIn → _save_user_to_db writes the proxy row with the right
+            # status (in or waitlist), preserving comment and owner from above.
+            rc.addIn(user)
             rc.save()
 
             await bot.answer_callback_query(call.id, f"✅ Added {proxy_name}")
@@ -427,6 +400,9 @@ async def ghost_callback_handler(call):
 
         # ── proxy_cancel ─────────────────────────────────────────────────────
         if data.startswith("proxy_cancel_"):
+            parts = data.split("_", 3)
+            proxy_name = parts[3] if len(parts) > 3 else ""
+            _pending_proxy_add.pop((cid, call.from_user.id, proxy_name), None)
             await bot.answer_callback_query(call.id, "❌ Cancelled")
             await bot.edit_message_text("❌ Cancelled — user not added", cid, call.message.message_id)
             return
@@ -493,7 +469,11 @@ async def ghost_callback_handler(call):
                 await bot.edit_message_text("⚠️ Rollcall not found.", cid, call.message.message_id)
                 return
 
-            rc.delete_user(user.name)
+            from db import delete_user_by_id
+            rc_db_id = get_rc_db_id(rc)
+            if rc_db_id is not None:
+                delete_user_by_id(rc_db_id, user.user_id)
+            rc._load_users_from_db()
             if status == 'in':
                 result = rc.addIn(user)
             elif status == 'out':

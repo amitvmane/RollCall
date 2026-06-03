@@ -1603,8 +1603,9 @@ def get_all_scheduled_templates() -> List[Dict]:
 
 def delete_user_by_name(rollcall_id: int, name: str) -> bool:
     """Delete a user by name — checks proxy_users first, then real users.
-    Supports matching by first_name OR username (with or without @).
-    """
+    Matches @username uniquely; first_name is only used when it identifies
+    exactly one user (otherwise we refuse to delete to avoid wiping the
+    wrong account when two real users share a first name)."""
     conn = get_connection()
     try:
         cursor = conn.cursor()
@@ -1629,13 +1630,33 @@ def delete_user_by_name(rollcall_id: int, name: str) -> bool:
 
         # Only try real users if no proxy was deleted
         if rows_deleted == 0:
-            # Strip @ if admin passed @username format
             clean_name = name.lstrip('@')
+
+            # Username is unique within a rollcall, so try it first.
             cursor.execute(
-                f"DELETE FROM users WHERE rollcall_id = {ph} AND (first_name = {ph} OR username = {ph})",
-                (rollcall_id, clean_name, clean_name)
+                f"DELETE FROM users WHERE rollcall_id = {ph} AND username = {ph}",
+                (rollcall_id, clean_name)
             )
             rows_deleted = cursor.rowcount
+
+            if rows_deleted == 0:
+                # Fall back to first_name — but only when it uniquely identifies one user.
+                cursor.execute(
+                    f"SELECT user_id FROM users WHERE rollcall_id = {ph} AND first_name = {ph}",
+                    (rollcall_id, clean_name)
+                )
+                matches = cursor.fetchall()
+                if len(matches) == 1:
+                    uid = matches[0][0] if not isinstance(matches[0], dict) else matches[0]['user_id']
+                    cursor.execute(
+                        f"DELETE FROM users WHERE rollcall_id = {ph} AND user_id = {ph}",
+                        (rollcall_id, uid)
+                    )
+                    rows_deleted = cursor.rowcount
+                elif len(matches) > 1:
+                    logging.warning(
+                        f"delete_user_by_name: '{clean_name}' matches {len(matches)} users in rollcall {rollcall_id}; refusing to delete"
+                    )
 
         conn.commit()
         return rows_deleted > 0
@@ -1643,6 +1664,38 @@ def delete_user_by_name(rollcall_id: int, name: str) -> bool:
     except Exception as e:
         conn.rollback()
         logging.error(f"Error deleting user: {e}")
+        return False
+    finally:
+        cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def delete_user_by_id(rollcall_id: int, user_id) -> bool:
+    """Delete a real user (int user_id) or proxy user (str user_id) by exact id.
+    Used by /set_status which knows the precise user from the in-memory cache."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        rows_deleted = 0
+        if isinstance(user_id, int):
+            cursor.execute(
+                f"DELETE FROM users WHERE rollcall_id = {ph} AND user_id = {ph}",
+                (rollcall_id, user_id)
+            )
+            rows_deleted = cursor.rowcount
+        else:
+            cursor.execute(
+                f"DELETE FROM proxy_users WHERE rollcall_id = {ph} AND name = {ph}",
+                (rollcall_id, str(user_id))
+            )
+            rows_deleted = cursor.rowcount
+        conn.commit()
+        return rows_deleted > 0
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"Error deleting user by id: {e}")
         return False
     finally:
         cursor.close()

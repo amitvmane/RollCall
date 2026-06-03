@@ -395,6 +395,20 @@ async def wait_limit(message):
                     cid,
                     f"{names} moved from IN to WAITING because limit was set to {limit} for '{rc.title}' (ID: {rc_number + 1})."
                 )
+            # DM each real user who was demoted so they know they're now in
+            # the waitlist (we already DM the wait→in direction; symmetric).
+            for u in moved_from_in_to_wait:
+                if isinstance(u.user_id, int):
+                    async def _dm(uid, title, rcn):
+                        try:
+                            await bot.send_message(
+                                uid,
+                                f"⚠️ A new attendance limit was set for *{_esc_md(title)}* (#{rcn}) and you've been moved from IN to the WAITLIST.",
+                                parse_mode="Markdown",
+                            )
+                        except Exception:
+                            logging.warning(f"Could not DM demoted user {uid}")
+                    asyncio.create_task(_dm(u.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
 
         if moved_from_wait_to_in:
             if not manager.get_shh_mode(cid):

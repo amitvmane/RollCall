@@ -5,9 +5,12 @@ import logging
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+from datetime import datetime
+
 from bot_state import (
     bot, format_mention_with_name, format_mention_with_name_md, _esc_md,
     _dm_promoted_real_user, _log_task_exc, get_rc_db_id,
+    _pending_proxy_add, _prune_pending,
 )
 from exceptions import (
     rollCallNotStarted, insufficientPermissions, parameterMissing, incorrectParameter,
@@ -77,6 +80,11 @@ async def set_in_for(message):
             if ghost_count > 0:
                 limit = manager.get_absent_limit(cid)
                 if ghost_count >= limit:
+                    _prune_pending(_pending_proxy_add)
+                    _pending_proxy_add[(cid, message.from_user.id, proxy_name)] = {
+                        'comment': comment,
+                        '_ts': datetime.now().timestamp(),
+                    }
                     markup = InlineKeyboardMarkup(row_width=2)
                     markup.add(
                         InlineKeyboardButton("✅ Yes, add anyway", callback_data=f"proxy_add_{rc_number}_{proxy_name}"),
@@ -93,15 +101,11 @@ async def set_in_for(message):
                     return
 
             proxy_owner_id = message.from_user.id
-            add_or_update_proxy_user(
-                rc.id,
-                user.user_id,
-                "in",
-                comment,
-                proxy_owner_id=proxy_owner_id,
-            )
             rc.set_proxy_owner(user.user_id, proxy_owner_id)
 
+            # rc.addIn → _save_user_to_db already writes the proxy row with
+            # the correct status (in or waitlist), so no separate
+            # add_or_update_proxy_user call is needed here.
             result = rc.addIn(user)
             rc.save()
 

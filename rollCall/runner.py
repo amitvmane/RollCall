@@ -7,6 +7,8 @@ import asyncio
 import logging
 import os
 import sys
+from datetime import datetime
+
 from db import init_db, db_ping
 from aiohttp import web
 
@@ -84,25 +86,69 @@ def validate_environment():
             logger.warning(f"⚠️  Directory missing: {directory}/ (will be created)")
             os.makedirs(directory, exist_ok=True)
 
+# Background-task tracking so /health can report liveness signals.
+_health_state = {
+    "scheduler_task": None,        # asyncio.Task for check_template_schedules
+    "prune_task": None,            # asyncio.Task for memory_prune_loop
+    "last_error_at": None,         # ISO timestamp of last unhandled exception
+    "last_error_msg": None,        # one-line summary
+}
+
+
+def _task_alive(task) -> bool:
+    return task is not None and not task.done()
+
+
 async def health_check(request):
+    """Deeper /health: checks DB, Telegram API, background-task liveness,
+    and recent-error window. Used by container orchestration."""
+    problems = []
     try:
         me = await asyncio.wait_for(bot.get_me(), timeout=10)
-        cache_size = len(manager._cache)
-        if not db_ping():
-            raise Exception("Database ping failed")
-        return web.Response(
-            text=f"OK - Bot: @{me.username}, Cache: {cache_size} chats",
-            status=200
-        )
+        bot_status = f"@{me.username}"
     except asyncio.TimeoutError:
-        logger.warning("Health check: Telegram API timeout (bot may be slow, not dead)")
-        return web.Response(text="WARN: Telegram API timeout", status=200)
+        problems.append("telegram_api_timeout")
+        bot_status = "TIMEOUT"
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        return web.Response(
-            text=f"ERROR: {str(e)}",
-            status=503
-        )
+        problems.append(f"telegram_api_error: {type(e).__name__}")
+        bot_status = "ERROR"
+
+    db_ok = False
+    try:
+        db_ok = db_ping()
+        if not db_ok:
+            problems.append("db_ping_failed")
+    except Exception as e:
+        problems.append(f"db_error: {type(e).__name__}")
+
+    from check_reminders import _active_loops
+    scheduler_ok = _task_alive(_health_state["scheduler_task"])
+    prune_ok = _task_alive(_health_state["prune_task"])
+    if not scheduler_ok:
+        problems.append("template_scheduler_dead")
+    if not prune_ok:
+        problems.append("memory_prune_dead")
+
+    cache_size = len(manager._cache)
+    from bot_state import _last_error_state
+    last_err = _last_error_state.get('at')
+    last_err_msg = _last_error_state.get('msg')
+
+    status_text = (
+        f"bot={bot_status} db={'ok' if db_ok else 'FAIL'} "
+        f"scheduler={'ok' if scheduler_ok else 'DEAD'} "
+        f"prune={'ok' if prune_ok else 'DEAD'} "
+        f"chats={cache_size} reminder_loops={len(_active_loops)}"
+    )
+    if last_err:
+        status_text += f" last_error={last_err}({last_err_msg or '?'})"
+    if problems:
+        status_text = "DEGRADED " + ",".join(problems) + " | " + status_text
+
+    # 503 only when DB or Telegram are unreachable — degraded background
+    # tasks should be visible but not flap container restarts.
+    status_code = 503 if ("db_ping_failed" in problems or "telegram_api_error" in [p.split(":")[0] for p in problems]) else 200
+    return web.Response(text=status_text, status=status_code)
     
 async def ping(request):
     """Simple ping endpoint"""
@@ -124,6 +170,10 @@ async def webhook_handler(request):
         return web.Response(status=500)
 
 
+# Tracked for clean shutdown so we don't leak the TCP listener on container restart.
+_app_runner_ref = {"runner": None}
+
+
 async def start_health_server():
     """Start HTTP health check server (and webhook endpoint if WEBHOOK_URL is set)."""
     app = web.Application()
@@ -135,6 +185,7 @@ async def start_health_server():
 
     runner = web.AppRunner(app)
     await runner.setup()
+    _app_runner_ref["runner"] = runner
 
     # Use port from environment or default to 8080
     port = int(os.getenv('HEALTH_CHECK_PORT', '8080'))
@@ -149,7 +200,12 @@ async def start_health_server():
 
 
 async def register_commands():
-    """Register bot commands so the Telegram / menu is always up-to-date."""
+    """Register bot commands at two scopes:
+    - default: only commands everyone can run (voting, lists, stats, help)
+    - chat administrators: full set including admin/owner-only commands
+
+    This keeps the Telegram command menu uncluttered for regular members
+    and avoids showing them commands that just return a permission error."""
     import telebot.types as ttypes
 
     user_commands = [
@@ -203,8 +259,80 @@ async def register_commands():
         ttypes.BotCommand("louder",                  "Disable silent mode"),
     ]
 
-    await bot.set_my_commands(admin_commands, scope=ttypes.BotCommandScopeDefault())
-    logger.info(f"✅ Bot commands registered ({len(admin_commands)} commands visible to all users)")
+    # Default scope (regular members in groups + private chats): user commands only
+    await bot.set_my_commands(user_commands, scope=ttypes.BotCommandScopeDefault())
+    # Chat-admin scope: full admin command set. Telegram shows this list only
+    # to users with admin rights in the group.
+    try:
+        await bot.set_my_commands(
+            admin_commands,
+            scope=ttypes.BotCommandScopeAllChatAdministrators(),
+        )
+    except Exception as e:
+        # Older telebot or transient API failures shouldn't block startup.
+        logger.warning(f"Failed to register admin-scoped commands (continuing): {e}")
+
+    logger.info(
+        f"✅ Bot commands registered — {len(user_commands)} for users, "
+        f"{len(admin_commands)} for chat admins"
+    )
+
+
+async def memory_prune_loop(interval_seconds: int = 600):
+    """Drop stale entries from in-memory state on a fixed interval.
+
+    Long-lived bots accumulate entries in `_rate_limits`, `_buzz_cooldowns`,
+    pending-action dicts, panel msg ids, and per-chat erc locks. None of these
+    grow huge per chat, but they never shrink either — over weeks of uptime
+    that's a slow leak. This loop bounds them."""
+    from bot_state import (
+        _rate_limits, _buzz_cooldowns, _pending_deletes, _pending_overrides,
+        _pending_proxy_add, _prune_pending, _panel_msg_ids,
+    )
+
+    RATE_LIMIT_AGE = 300   # individual vote rate-limit window is 2s; 5 min is well past stale
+    BUZZ_COOLDOWN_AGE = 300  # /buzz cooldown is 30s; 5 min flushes any straggler
+
+    while True:
+        try:
+            now = datetime.now().timestamp()
+
+            # Timestamp-keyed dicts
+            for k in [k for k, ts in _rate_limits.items() if now - ts > RATE_LIMIT_AGE]:
+                _rate_limits.pop(k, None)
+            for k in [k for k, ts in _buzz_cooldowns.items() if now - ts > BUZZ_COOLDOWN_AGE]:
+                _buzz_cooldowns.pop(k, None)
+
+            # Pending-action dicts (already have a 1h TTL)
+            _prune_pending(_pending_deletes)
+            _prune_pending(_pending_overrides)
+            _prune_pending(_pending_proxy_add)
+
+            # Per-chat state — clean entries for chats whose rollcalls are
+            # all gone, or panel ids past the current rollcall count.
+            for cid, chat in list(manager._cache.items()):
+                rc_count = len(chat.get('rollCalls', []))
+                for key in list(_panel_msg_ids):
+                    c, rc_num = key
+                    if c == cid and rc_num > rc_count:
+                        _panel_msg_ids.pop(key, None)
+
+            # Drop erc locks for chats with no active rollcalls and no waiter
+            for cid in list(manager._erc_locks):
+                chat = manager._cache.get(cid)
+                if (not chat or not chat.get('rollCalls')) and not manager._erc_locks[cid].locked():
+                    manager._erc_locks.pop(cid, None)
+
+            logger.debug(
+                f"prune: rl={len(_rate_limits)} buzz={len(_buzz_cooldowns)} "
+                f"pd={len(_pending_deletes)} po={len(_pending_overrides)} "
+                f"ppa={len(_pending_proxy_add)} panel={len(_panel_msg_ids)} "
+                f"erc_locks={len(manager._erc_locks)}"
+            )
+        except Exception:
+            logger.exception("Error in memory_prune_loop")
+
+        await asyncio.sleep(interval_seconds)
 
 
 async def main():
@@ -257,7 +385,14 @@ async def main():
     # Start template auto-scheduler (persistent background task)
     _sched_task = asyncio.create_task(check_template_schedules())
     _sched_task.add_done_callback(_log_task_exc)
+    _health_state["scheduler_task"] = _sched_task
     logger.info("✅ Template scheduler started")
+
+    # Start periodic memory pruning (keeps long-lived in-memory state bounded)
+    _prune_task = asyncio.create_task(memory_prune_loop())
+    _prune_task.add_done_callback(_log_task_exc)
+    _health_state["prune_task"] = _prune_task
+    logger.info("✅ Memory prune loop started")
 
     # Resume reminder/auto-close loops for rollcalls already in DB with a finalizeDate.
     # Without this, any rollcall created before a bot restart would never auto-close.
@@ -312,6 +447,14 @@ async def main():
             logger.info("✅ Manager cache cleared")
         except Exception as e:
             logger.error(f"⚠️  Error clearing cache: {e}")
+
+        # Release the health-check port so the next container start can bind it.
+        try:
+            if _app_runner_ref.get("runner") is not None:
+                await _app_runner_ref["runner"].cleanup()
+                logger.info("✅ Health check server stopped")
+        except Exception as e:
+            logger.error(f"⚠️  Error stopping health server: {e}")
 
         logger.info("=" * 60)
         logger.info("👋 Goodbye!")

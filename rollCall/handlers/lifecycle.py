@@ -14,12 +14,12 @@ from bot_state import (
     _log_task_exc,
     _is_rate_limited, _get_display_name, format_mention_with_name,
     format_mention_with_name_md, _esc_md,
-    warn_no_username, _dm_promoted_real_user, get_rc_db_id,
+    warn_no_username, _dm_promoted_real_user, get_rc_db_id, reply_error,
 )
 from config import ADMINS
 from exceptions import (
     rollCallNotStarted, insufficientPermissions, parameterMissing, incorrectParameter,
-    duplicateProxy, repeatlyName,
+    duplicateProxy, repeatlyName, amountOfRollCallsReached,
 )
 from functions import admin_rights, roll_call_not_started
 from models import User
@@ -175,7 +175,7 @@ async def start_roll_call(message):
         rollcalls = manager.get_rollcalls(cid)
 
         if len(rollcalls) >= 3:
-            raise Exception("Allowed Maximum number of active roll calls per group is 3.")
+            raise amountOfRollCallsReached("Allowed Maximum number of active roll calls per group is 3.")
 
         if await admin_rights(message, manager) == False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
@@ -198,7 +198,7 @@ async def start_roll_call(message):
         _persist_panel_msg_id(rc, sent.message_id)
 
     except Exception as e:
-        await bot.send_message(cid, str(e))
+        await reply_error(cid, e)
 
 
 # ── /end_roll_call ────────────────────────────────────────────────────────────
@@ -278,7 +278,7 @@ async def end_roll_call(message):
                         text = f"Rollcall number {new_id}\n\n" + rollcall.allList().replace("__RCID__", str(new_id))
                         await bot.send_message(cid, text)
     except Exception as e:
-        await bot.send_message(message.chat.id, str(e))
+        await reply_error(message, e)
 
 
 # ── /set_title ────────────────────────────────────────────────────────────────
@@ -328,7 +328,7 @@ async def set_title(message):
         logging.info(f"[{_ts()}] Title changed: {user} -> {title}")
 
     except Exception as e:
-        await bot.send_message(message.chat.id, str(e))
+        await reply_error(message, e)
 
 
 # ── /panel ────────────────────────────────────────────────────────────────────
@@ -364,7 +364,7 @@ async def show_panel(message):
         _persist_panel_msg_id(rc, sent.message_id)
 
     except Exception as e:
-        await bot.send_message(message.chat.id, str(e))
+        await reply_error(message, e)
 
 
 # ── btn_* callback handler ────────────────────────────────────────────────────
@@ -688,6 +688,6 @@ async def callback_handler(call):
             return
         logging.exception("Error in callback_handler")
         try:
-            await bot.answer_callback_query(call.id, str(e)[:200])
+            await bot.answer_callback_query(call.id, "⚠️ Something went wrong.")
         except Exception:
             pass

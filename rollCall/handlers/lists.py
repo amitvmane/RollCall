@@ -6,6 +6,7 @@ import logging
 
 from bot_state import (
     bot, _is_buzz_rate_limited, _buzz_cooldowns, _BUZZ_COOLDOWN_SECONDS, _fmt_ended_at, _esc_md,
+    reply_error,
 )
 from exceptions import (
     rollCallNotStarted, incorrectParameter, insufficientPermissions, parameterMissing,
@@ -46,7 +47,7 @@ async def whos_in(message):
         await bot.send_message(cid, f"{rc.title if len(rollcalls) > 1 else ''} {rc.inListText()}")
 
     except Exception as e:
-        await bot.send_message(message.chat.id, str(e))
+        await reply_error(message, e)
 
 
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/whos_out")
@@ -76,7 +77,7 @@ async def whos_out(message):
         await bot.send_message(cid, f"{rc.title if len(rollcalls) > 1 else ''} {rc.outListText()}")
 
     except Exception as e:
-        await bot.send_message(message.chat.id, str(e))
+        await reply_error(message, e)
 
 
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/whos_maybe")
@@ -106,7 +107,7 @@ async def whos_maybe(message):
         await bot.send_message(cid, f"{rc.title if len(rollcalls) > 1 else ''} {rc.maybeListText()}")
 
     except Exception as e:
-        await bot.send_message(message.chat.id, str(e))
+        await reply_error(message, e)
 
 
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/whos_waiting")
@@ -136,7 +137,7 @@ async def whos_waiting(message):
         await bot.send_message(cid, f"{rc.title if len(rollcalls) > 1 else ''} {rc.waitListText()}")
 
     except Exception as e:
-        await bot.send_message(message.chat.id, str(e))
+        await reply_error(message, e)
 
 
 @bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/history")
@@ -281,11 +282,8 @@ async def buzz_command(message):
         log_admin_action(cid, message.from_user.id, message.from_user.first_name, "buzz",
                          details=f"pinged {len(to_ping)} member(s)")
 
-    except (rollCallNotStarted, incorrectParameter, insufficientPermissions, parameterMissing) as e:
-        await bot.send_message(cid, str(e))
-    except Exception:
-        logging.exception("Error in /buzz")
-        await bot.send_message(cid, "Error running buzz, please try again later.")
+    except Exception as e:
+        await reply_error(cid, e)
 
 
 def _build_mention_list(users: list) -> str:

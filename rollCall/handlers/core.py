@@ -4,7 +4,7 @@ Core handlers: /start, /help, /rollcalls, /version, /set_admins, /unset_admins, 
 import json
 import logging
 
-from bot_state import bot, data_file_path
+from bot_state import bot, data_file_path, reply_error
 from config import ADMINS
 from exceptions import parameterMissing
 from functions import admin_rights, auto_complete_timezone
@@ -191,7 +191,7 @@ async def config_timezone(message):
 
     except Exception as e:
         logging.exception("[config_timezone] Unexpected error")
-        await bot.send_message(message.chat.id, str(e))
+        await reply_error(message, e)
 
 
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/version")

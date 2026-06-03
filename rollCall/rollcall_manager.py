@@ -38,10 +38,17 @@ class RollCallManager:
         self._erc_locks: Dict[int, asyncio.Lock] = {}
 
     def get_erc_lock(self, chat_id: int) -> asyncio.Lock:
-        """Return (creating if needed) the per-chat lock for end-rollcall operations."""
+        """Return (creating if needed) the per-chat write lock.
+
+        Originally added for /erc serialization (hence the name) but now used
+        as the general per-chat mutation lock — voting, proxy, set_limit, etc.
+        should all take this to prevent races with concurrent ends/renumbers."""
         if chat_id not in self._erc_locks:
             self._erc_locks[chat_id] = asyncio.Lock()
         return self._erc_locks[chat_id]
+
+    # Friendlier alias for new call sites; same underlying lock.
+    get_chat_write_lock = get_erc_lock
 
     def get_chat(self, chat_id: int) -> Dict:
         """Get or create chat data"""

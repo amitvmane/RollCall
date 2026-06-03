@@ -12,6 +12,7 @@ from bot_state import (
     bot, _ghost_selections, _pending_reconf, _pending_deletes, _pending_overrides,
     _pending_proxy_add, _log_task_exc, _get_display_name, format_mention_with_name,
     _esc_md, get_rc_db_id, _build_ghost_select_keyboard, _fmt_ended_at,
+    reply_error,
 )
 from exceptions import insufficientPermissions, rollCallNotStarted, incorrectParameter
 from functions import admin_rights, roll_call_not_started
@@ -56,7 +57,7 @@ async def toggle_ghost_tracking(message):
             for i, rc in enumerate(rollcalls):
                 await _update_panel(cid, i + 1, rc)
     except Exception as e:
-        await bot.send_message(message.chat.id, str(e))
+        await reply_error(message, e)
 
 
 @bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/set_absent_limit")
@@ -84,7 +85,7 @@ async def set_absent_limit(message):
                 f"Users who ghost {limit}+ session(s) will be asked to reconfirm their IN vote. 👻"
             )
     except Exception as e:
-        await bot.send_message(message.chat.id, str(e))
+        await reply_error(message, e)
 
 
 @bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/clear_absent")
@@ -126,7 +127,7 @@ async def clear_absent(message):
         name = record.get('user_name') or proxy_name or target_name
         await bot.send_message(cid, f"✅ {name}'s ghost record has been cleared. Fresh start! 👻➡️✅")
     except Exception as e:
-        await bot.send_message(message.chat.id, str(e))
+        await reply_error(message, e)
 
 
 @bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/mark_absent")
@@ -158,7 +159,7 @@ async def mark_absent(message):
 
         await bot.send_message(cid, "Which session do you want to review?", reply_markup=markup)
     except Exception as e:
-        await bot.send_message(message.chat.id, str(e))
+        await reply_error(message, e)
 
 
 @bot.callback_query_handler(func=lambda call: call.data and (
@@ -520,6 +521,6 @@ async def ghost_callback_handler(call):
             return
         logging.exception("Error in ghost_callback_handler")
         try:
-            await bot.answer_callback_query(call.id, str(e)[:200])
+            await bot.answer_callback_query(call.id, "⚠️ Something went wrong.")
         except Exception:
             pass

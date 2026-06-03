@@ -7,7 +7,7 @@ from datetime import datetime
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot_state import bot, _pending_deletes, _pending_overrides, _esc_md, _prune_pending
+from bot_state import bot, _pending_deletes, _pending_overrides, _esc_md, _prune_pending, reply_error
 from exceptions import (
     rollCallNotStarted, insufficientPermissions, parameterMissing, incorrectParameter,
 )
@@ -148,7 +148,7 @@ async def delete_user(message):
         )
 
     except Exception as e:
-        await bot.send_message(message.chat.id, str(e))
+        await reply_error(message, e)
 
 
 @bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/audit_log")
@@ -166,7 +166,7 @@ async def audit_log_command(message):
                 pass
         await _send_audit_page(cid, page=1, per_page=per_page)
     except (insufficientPermissions,) as e:
-        await bot.send_message(message.chat.id, str(e))
+        await reply_error(message, e)
     except Exception:
         logging.exception("Error in /audit_log")
         await bot.send_message(message.chat.id, "Error fetching audit log.")
@@ -265,7 +265,7 @@ async def set_status_override(message):
         )
 
     except (rollCallNotStarted, incorrectParameter, insufficientPermissions, parameterMissing) as e:
-        await bot.send_message(cid, str(e))
+        await reply_error(cid, e)
     except Exception:
         logging.exception("Error in /set_status")
         await bot.send_message(cid, "Error processing /set_status, please try again.")

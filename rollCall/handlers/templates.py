@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 import pytz
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot_state import bot, _sched_selection, _log_task_exc, _esc_md
+from bot_state import bot, _sched_selection, _log_task_exc, _esc_md, reply_error
 from exceptions import insufficientPermissions
 from functions import admin_rights, get_next_weekday_datetime, weekly_minutes, WEEKDAY_MAP
 from rollcall_manager import manager
@@ -164,7 +164,7 @@ async def schedules_command(message):
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
         await _send_schedules(cid)
     except (insufficientPermissions,) as e:
-        await bot.send_message(cid, str(e))
+        await reply_error(cid, e)
     except Exception:
         logging.exception("Error in /schedules")
         await bot.send_message(cid, "Error fetching schedule info.")
@@ -323,7 +323,7 @@ async def schedule_template_cmd(message):
             await bot.send_message(cid, f"Failed to save schedule for '{name}'.")
 
     except Exception as e:
-        await bot.send_message(message.chat.id, str(e))
+        await reply_error(message, e)
 
 
 @bot.message_handler(func=lambda message: message.text.split(" ")[0].split("@")[0].lower() == "/start_template")
@@ -535,7 +535,7 @@ async def set_template(message):
 
     except Exception as e:
         logging.exception("[set_template] Unexpected error")
-        await bot.send_message(message.chat.id, str(e))
+        await reply_error(message, e)
 
 
 @bot.message_handler(func=lambda message: message.text.split(" ")[0].split("@")[0].lower() == "/delete_template")

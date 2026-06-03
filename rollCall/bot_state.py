@@ -12,7 +12,18 @@ from telebot.async_telebot import AsyncTeleBot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import TELEGRAM_TOKEN
+from exceptions import (
+    rollCallNotStarted, insufficientPermissions, parameterMissing, incorrectParameter,
+    duplicateProxy, repeatlyName, timeError, amountOfRollCallsReached, rollCallAlreadyStarted,
+)
 from models import RollCall, User
+
+# Exceptions whose str(e) is a curated user-facing message — safe to expose
+# directly. Anything outside this set is treated as an internal error.
+_USER_FACING_EXCEPTIONS = (
+    rollCallNotStarted, insufficientPermissions, parameterMissing, incorrectParameter,
+    duplicateProxy, repeatlyName, timeError, amountOfRollCallsReached, rollCallAlreadyStarted,
+)
 
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -64,6 +75,52 @@ def _prune_pending(d: dict) -> None:
     for k in stale:
         d.pop(k, None)
 
+
+# ── Centralized handler error wrapping ───────────────────────────────────────
+# Exceptions whose `str(e)` is a curated user-facing message; the wrapper
+# sends them verbatim. Anything else is logged with full traceback and the
+# user gets a generic message (no internal details leaked).
+from functools import wraps as _wraps  # noqa: E402
+
+_GENERIC_ERROR_MSG = "⚠️ Something went wrong. The error has been logged."
+
+
+def _handler_chat_id(arg):
+    """Pull a chat_id out of a Message or CallbackQuery."""
+    try:
+        if getattr(arg, 'chat', None) is not None:
+            return arg.chat.id
+        if getattr(arg, 'message', None) is not None:
+            return arg.message.chat.id
+    except Exception:
+        return None
+    return None
+
+
+async def reply_error(target, e):
+    """Reply with an error message that's safe to expose to users.
+
+    `target` may be a chat_id (int), a Message, or a CallbackQuery.
+
+    User-facing exception classes (defined in exceptions.py) are sent verbatim
+    because their message is curated. Anything else is logged with a full
+    traceback and the user sees a generic "something went wrong" message — no
+    Python internals (Markdown parse errors, KeyError text, DB error strings)
+    leak into the chat."""
+    cid = target if isinstance(target, int) else _handler_chat_id(target)
+    if cid is None:
+        return
+    if isinstance(e, _USER_FACING_EXCEPTIONS):
+        msg = str(e)
+    else:
+        logging.exception(f"Non-user-facing exception caught in handler: {type(e).__name__}: {e}")
+        _record_error(e)
+        msg = _GENERIC_ERROR_MSG
+    try:
+        await bot.send_message(cid, msg)
+    except Exception:
+        logging.exception("reply_error: failed to send error reply")
+
 # Per-chat /buzz rate limiting: chat_id -> last buzz timestamp
 _buzz_cooldowns: dict = {}
 _BUZZ_COOLDOWN_SECONDS = 30
@@ -83,10 +140,25 @@ def _ts() -> str:
 
 # ── Task helpers ──────────────────────────────────────────────────────────────
 
+# Last unhandled-error signal for /health diagnostics
+_last_error_state = {'at': None, 'msg': None}
+
+
+def _record_error(exc: BaseException) -> None:
+    """Record the last unhandled error so /health can surface it."""
+    try:
+        _last_error_state['at'] = datetime.now().isoformat(timespec='seconds')
+        _last_error_state['msg'] = f"{type(exc).__name__}: {str(exc)[:80]}"
+    except Exception:
+        pass
+
+
 def _log_task_exc(task: asyncio.Task) -> None:
     """Done-callback for fire-and-forget tasks — logs any unhandled exception."""
     if not task.cancelled() and task.exception():
-        logging.error(f"Background task '{task.get_name()}' raised: {task.exception()}")
+        exc = task.exception()
+        logging.error(f"Background task '{task.get_name()}' raised: {exc}")
+        _record_error(exc)
 
 
 # ── Rate-limit helpers ────────────────────────────────────────────────────────

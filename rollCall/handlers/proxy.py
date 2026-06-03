@@ -10,7 +10,7 @@ from datetime import datetime
 from bot_state import (
     bot, format_mention_with_name, format_mention_with_name_md, _esc_md,
     _dm_promoted_real_user, _log_task_exc, get_rc_db_id,
-    _pending_proxy_add, _prune_pending,
+    _pending_proxy_add, _prune_pending, reply_error,
 )
 from exceptions import (
     rollCallNotStarted, insufficientPermissions, parameterMissing, incorrectParameter,
@@ -126,7 +126,7 @@ async def set_in_for(message):
             await show_panel_for_rollcall(cid, rc_number + 1)
 
     except Exception as e:
-        await bot.send_message(message.chat.id, str(e))
+        await reply_error(message, e)
 
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/set_out_for")
@@ -204,7 +204,7 @@ async def set_out_for(message):
             await show_panel_for_rollcall(cid, rc_number + 1)
 
     except Exception as e:
-        await bot.send_message(message.chat.id, str(e))
+        await reply_error(message, e)
 
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/set_maybe_for")
@@ -277,4 +277,4 @@ async def set_maybe_for(message):
             await show_panel_for_rollcall(cid, rc_number + 1)
 
     except Exception as e:
-        await bot.send_message(message.chat.id, str(e))
+        await reply_error(message, e)

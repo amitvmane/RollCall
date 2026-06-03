@@ -7,7 +7,7 @@ import logging
 from bot_state import (
     bot, _log_task_exc, _pending_reconf, _is_rate_limited, _get_display_name,
     format_mention_with_name, format_mention_with_name_md, _esc_md,
-    warn_no_username, _dm_promoted_real_user, get_rc_db_id,
+    warn_no_username, _dm_promoted_real_user, get_rc_db_id, reply_error,
 )
 from exceptions import (
     rollCallNotStarted, incorrectParameter, duplicateProxy,
@@ -82,35 +82,41 @@ async def in_user(message):
                 )
                 return
 
-        result = rc.addIn(user)
-        rc.save()
+        async with manager.get_chat_write_lock(cid):
+            # Re-fetch rc inside the lock — /erc could have removed it.
+            rc = manager.get_rollcall(cid, rc_number)
+            if rc is None:
+                raise rollCallNotStarted("Roll call is not active")
 
-        rc_db_id = get_rc_db_id(rc)
-        if result not in ('AB', 'AC', 'AU') and rc_db_id is not None and isinstance(user.user_id, int):
-            increment_user_stat(cid, user.user_id, "total_in")
-            increment_rollcall_stat(rc_db_id, "total_in")
+            result = rc.addIn(user)
+            rc.save()
 
-        if result == 'AB':
-            raise duplicateProxy("No duplicate proxy please :-), Thanks!")
-        elif result == 'AC':
-            if not manager.get_shh_mode(cid):
-                await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
-        elif result is None:
-            if not manager.get_shh_mode(cid):
-                if isinstance(user.user_id, int):
-                    await bot.send_message(
-                        cid,
-                        f"{format_mention_with_name_md(user)} is now IN!",
-                        parse_mode="Markdown",
-                    )
-                else:
-                    await bot.send_message(cid, f"{user.name} is now IN!")
+            rc_db_id = get_rc_db_id(rc)
+            if result not in ('AB', 'AC', 'AU') and rc_db_id is not None and isinstance(user.user_id, int):
+                increment_user_stat(cid, user.user_id, "total_in")
+                increment_rollcall_stat(rc_db_id, "total_in")
 
-        from handlers.lifecycle import _update_panel
-        await _update_panel(cid, rc_number + 1, rc)
+            if result == 'AB':
+                raise duplicateProxy("No duplicate proxy please :-), Thanks!")
+            elif result == 'AC':
+                if not manager.get_shh_mode(cid):
+                    await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
+            elif result is None:
+                if not manager.get_shh_mode(cid):
+                    if isinstance(user.user_id, int):
+                        await bot.send_message(
+                            cid,
+                            f"{format_mention_with_name_md(user)} is now IN!",
+                            parse_mode="Markdown",
+                        )
+                    else:
+                        await bot.send_message(cid, f"{user.name} is now IN!")
+
+            from handlers.lifecycle import _update_panel
+            await _update_panel(cid, rc_number + 1, rc)
 
     except Exception as e:
-        await bot.send_message(message.chat.id, str(e))
+        await reply_error(message, e)
 
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/out")
@@ -154,67 +160,72 @@ async def out_user(message):
         if isinstance(user.user_id, int):
             upsert_chat_member(cid, user.user_id, _display_name, _username)
 
-        was_in = any(u.user_id == user.user_id for u in rc.inList)
+        async with manager.get_chat_write_lock(cid):
+            rc = manager.get_rollcall(cid, rc_number)
+            if rc is None:
+                raise rollCallNotStarted("Roll call is not active")
 
-        result = rc.addOut(user)
-        rc.save()
+            was_in = any(u.user_id == user.user_id for u in rc.inList)
 
-        rc_db_id = get_rc_db_id(rc)
-        if result not in ('AB', 'AU') and rc_db_id is not None and isinstance(user.user_id, int):
-            increment_user_stat(cid, user.user_id, "total_out")
-            increment_rollcall_stat(rc_db_id, "total_out")
+            result = rc.addOut(user)
+            rc.save()
 
-        if result == 'AB':
-            raise duplicateProxy("No duplicate proxy please :-), Thanks!")
-        elif isinstance(result, User):
-            if not manager.get_shh_mode(cid):
+            rc_db_id = get_rc_db_id(rc)
+            if result not in ('AB', 'AU') and rc_db_id is not None and isinstance(user.user_id, int):
+                increment_user_stat(cid, user.user_id, "total_out")
+                increment_rollcall_stat(rc_db_id, "total_out")
+
+            if result == 'AB':
+                raise duplicateProxy("No duplicate proxy please :-), Thanks!")
+            elif isinstance(result, User):
+                if not manager.get_shh_mode(cid):
+                    if isinstance(result.user_id, int):
+                        await bot.send_message(
+                            cid,
+                            f"{format_mention_with_name_md(result)} → IN",
+                            parse_mode="Markdown",
+                        )
+                    else:
+                        await bot.send_message(cid, f"{result.name} → IN")
+
                 if isinstance(result.user_id, int):
-                    await bot.send_message(
-                        cid,
-                        f"{format_mention_with_name_md(result)} → IN",
-                        parse_mode="Markdown",
-                    )
-                else:
-                    await bot.send_message(cid, f"{result.name} → IN")
+                    asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
 
-            if isinstance(result.user_id, int):
-                asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
+                from handlers.lifecycle import notify_proxy_owner_wait_to_in
+                await notify_proxy_owner_wait_to_in(rc, result, cid, rc.title, rc_number + 1)
 
-            from handlers.lifecycle import notify_proxy_owner_wait_to_in
-            await notify_proxy_owner_wait_to_in(rc, result, cid, rc.title, rc_number + 1)
+                if rc_db_id is not None and isinstance(result.user_id, int):
+                    increment_user_stat(cid, result.user_id, "total_waiting_to_in")
+                    increment_user_stat(cid, result.user_id, "total_in")
+                    increment_rollcall_stat(rc_db_id, "total_in")
 
-            if rc_db_id is not None and isinstance(result.user_id, int):
-                increment_user_stat(cid, result.user_id, "total_waiting_to_in")
-                increment_user_stat(cid, result.user_id, "total_in")
-                increment_rollcall_stat(rc_db_id, "total_in")
-
-        if not manager.get_shh_mode(cid) and result not in ('AB', 'AU') and not isinstance(result, User):
-            in_outlist_now = any(u.user_id == user.user_id for u in rc.outList)
-            if in_outlist_now:
-                if isinstance(user.user_id, int):
-                    if was_in:
-                        await bot.send_message(
-                            cid,
-                            f"{format_mention_with_name_md(user)} → OUT for '{_esc_md(rc.title)}' (#{rc_number + 1})",
-                            parse_mode="Markdown",
-                        )
+            if not manager.get_shh_mode(cid) and result not in ('AB', 'AU') and not isinstance(result, User):
+                in_outlist_now = any(u.user_id == user.user_id for u in rc.outList)
+                if in_outlist_now:
+                    if isinstance(user.user_id, int):
+                        if was_in:
+                            await bot.send_message(
+                                cid,
+                                f"{format_mention_with_name_md(user)} → OUT for '{_esc_md(rc.title)}' (#{rc_number + 1})",
+                                parse_mode="Markdown",
+                            )
+                        else:
+                            await bot.send_message(
+                                cid,
+                                f"{format_mention_with_name_md(user)} is now OUT!",
+                                parse_mode="Markdown",
+                            )
                     else:
-                        await bot.send_message(
-                            cid,
-                            f"{format_mention_with_name_md(user)} is now OUT!",
-                            parse_mode="Markdown",
-                        )
-                else:
-                    if was_in:
-                        await bot.send_message(cid, f"{user.name} → OUT for '{rc.title}' (#{rc_number + 1})")
-                    else:
-                        await bot.send_message(cid, f"{user.name} is now OUT!")
+                        if was_in:
+                            await bot.send_message(cid, f"{user.name} → OUT for '{rc.title}' (#{rc_number + 1})")
+                        else:
+                            await bot.send_message(cid, f"{user.name} is now OUT!")
 
-        from handlers.lifecycle import _update_panel
-        await _update_panel(cid, rc_number + 1, rc)
+            from handlers.lifecycle import _update_panel
+            await _update_panel(cid, rc_number + 1, rc)
 
     except Exception as e:
-        await bot.send_message(message.chat.id, str(e))
+        await reply_error(message, e)
 
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/maybe")
@@ -258,51 +269,56 @@ async def maybe_user(message):
         if isinstance(user.user_id, int):
             upsert_chat_member(cid, user.user_id, _display_name, _username)
 
-        result = rc.addMaybe(user)
-        rc.save()
+        async with manager.get_chat_write_lock(cid):
+            rc = manager.get_rollcall(cid, rc_number)
+            if rc is None:
+                raise rollCallNotStarted("Roll call is not active")
 
-        rc_db_id = get_rc_db_id(rc)
-        if result not in ('AB', 'AU') and rc_db_id is not None and isinstance(user.user_id, int):
-            increment_user_stat(cid, user.user_id, "total_maybe")
-            increment_rollcall_stat(rc_db_id, "total_maybe")
+            result = rc.addMaybe(user)
+            rc.save()
 
-        if result == 'AB':
-            raise duplicateProxy("No duplicate proxy please :-), Thanks!")
-        elif isinstance(result, User):
-            if not manager.get_shh_mode(cid):
+            rc_db_id = get_rc_db_id(rc)
+            if result not in ('AB', 'AU') and rc_db_id is not None and isinstance(user.user_id, int):
+                increment_user_stat(cid, user.user_id, "total_maybe")
+                increment_rollcall_stat(rc_db_id, "total_maybe")
+
+            if result == 'AB':
+                raise duplicateProxy("No duplicate proxy please :-), Thanks!")
+            elif isinstance(result, User):
+                if not manager.get_shh_mode(cid):
+                    if isinstance(result.user_id, int):
+                        await bot.send_message(
+                            cid,
+                            f"{format_mention_with_name_md(result)} → IN (from WAITING) for '{_esc_md(rc.title)}' (#{rc_number + 1})",
+                            parse_mode="Markdown",
+                        )
+                    else:
+                        await bot.send_message(cid, f"{result.name} → IN (from WAITING) for '{rc.title}' (#{rc_number + 1})")
+
                 if isinstance(result.user_id, int):
-                    await bot.send_message(
-                        cid,
-                        f"{format_mention_with_name_md(result)} → IN (from WAITING) for '{_esc_md(rc.title)}' (#{rc_number + 1})",
-                        parse_mode="Markdown",
-                    )
-                else:
-                    await bot.send_message(cid, f"{result.name} → IN (from WAITING) for '{rc.title}' (#{rc_number + 1})")
+                    asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
 
-            if isinstance(result.user_id, int):
-                asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
+                from handlers.lifecycle import notify_proxy_owner_wait_to_in
+                await notify_proxy_owner_wait_to_in(rc, result, cid, rc.title, rc_number + 1)
 
-            from handlers.lifecycle import notify_proxy_owner_wait_to_in
-            await notify_proxy_owner_wait_to_in(rc, result, cid, rc.title, rc_number + 1)
+                if rc_db_id is not None and isinstance(result.user_id, int):
+                    increment_user_stat(cid, result.user_id, "total_waiting_to_in")
+                    increment_user_stat(cid, result.user_id, "total_in")
+                    increment_rollcall_stat(rc_db_id, "total_in")
 
-            if rc_db_id is not None and isinstance(result.user_id, int):
-                increment_user_stat(cid, result.user_id, "total_waiting_to_in")
-                increment_user_stat(cid, result.user_id, "total_in")
-                increment_rollcall_stat(rc_db_id, "total_in")
+            elif result is None:
+                if not manager.get_shh_mode(cid):
+                    if isinstance(user.user_id, int):
+                        await bot.send_message(
+                            cid,
+                            f"{format_mention_with_name_md(user)} is now MAYBE!",
+                            parse_mode="Markdown",
+                        )
+                    else:
+                        await bot.send_message(cid, f"{user.name} is now MAYBE!")
 
-        elif result is None:
-            if not manager.get_shh_mode(cid):
-                if isinstance(user.user_id, int):
-                    await bot.send_message(
-                        cid,
-                        f"{format_mention_with_name_md(user)} is now MAYBE!",
-                        parse_mode="Markdown",
-                    )
-                else:
-                    await bot.send_message(cid, f"{user.name} is now MAYBE!")
-
-        from handlers.lifecycle import _update_panel
-        await _update_panel(cid, rc_number + 1, rc)
+            from handlers.lifecycle import _update_panel
+            await _update_panel(cid, rc_number + 1, rc)
 
     except Exception as e:
-        await bot.send_message(message.chat.id, str(e))
+        await reply_error(message, e)

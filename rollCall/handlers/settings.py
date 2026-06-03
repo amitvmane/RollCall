@@ -11,6 +11,7 @@ import pytz
 from bot_state import (
     bot, _log_task_exc, _dm_promoted_real_user,
     format_mention_with_name, format_mention_with_name_md, _esc_md, get_rc_db_id,
+    reply_error,
 )
 from exceptions import (
     rollCallNotStarted, insufficientPermissions, parameterMissing, incorrectParameter,
@@ -89,7 +90,7 @@ async def set_rollcall_time(message):
 
     except Exception as e:
         logging.exception("[set_rollcall_time] Unexpected error")
-        await bot.send_message(message.chat.id, str(e))
+        await reply_error(message, e)
 
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/set_rollcall_reminder")
@@ -161,7 +162,7 @@ async def reminder(message):
         logging.exception("[reminder] Invalid value")
         await bot.send_message(cid, 'The correct format is /set_rollcall_reminder HH')
     except Exception as e:
-        await bot.send_message(cid, str(e))
+        await reply_error(cid, e)
 
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/event_fee")
@@ -205,7 +206,7 @@ async def event_fee(message):
         await _update_panel(cid, rc_number + 1, rc)
 
     except Exception as e:
-        await bot.send_message(cid, str(e))
+        await reply_error(cid, e)
 
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/individual_fee")
@@ -246,7 +247,7 @@ async def individual_fee(message):
         await bot.send_message(cid, f'Individual fee is {ind_fee}')
 
     except Exception as e:
-        await bot.send_message(cid, str(e))
+        await reply_error(cid, e)
 
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/when")
@@ -280,7 +281,7 @@ async def when(message):
         await bot.send_message(cid, f"The event with title {rc.title} will start at {rc.finalizeDate.strftime('%d-%m-%Y %H:%M')}!")
 
     except Exception as e:
-        await bot.send_message(cid, str(e))
+        await reply_error(cid, e)
 
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/location")
@@ -321,7 +322,7 @@ async def set_location(message):
         await _update_panel(cid, rc_number + 1, rc)
 
     except Exception as e:
-        await bot.send_message(cid, str(e))
+        await reply_error(cid, e)
 
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/set_limit")
@@ -448,12 +449,12 @@ async def wait_limit(message):
         await _update_panel(cid, rc_number + 1, rc)
 
     except parameterMissing as e:
-        await bot.send_message(message.chat.id, str(e))
+        await reply_error(message, e)
     except rollCallNotStarted as e:
-        await bot.send_message(message.chat.id, str(e))
+        await reply_error(message, e)
     except Exception as e:
         logging.exception("[wait_limit] Unexpected error")
-        await bot.send_message(message.chat.id, str(e))
+        await reply_error(message, e)
 
 
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/shh")

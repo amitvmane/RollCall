@@ -74,7 +74,7 @@ async def in_user(message):
                 )
                 await bot.send_message(
                     cid,
-                    f"👻 *Warning:* You've ghosted *{ghost_count}* session(s) before.\n"
+                    f"👻 *Warning:* {format_mention_with_name_md(user)}, you've ghosted *{ghost_count}* session(s) before.\n"
                     f"⚠️ Absent Limit: *{absent_limit}*\n\n"
                     f"Are you committing to be at *{_esc_md(rc.title)}*?",
                     parse_mode="Markdown",

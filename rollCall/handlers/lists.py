@@ -200,7 +200,9 @@ async def buzz_command(message):
         msg = message.text.strip()
         parts = msg.split()
 
-        rc_number = 0
+        # rc_number is None when ::N is NOT given (default = union across all
+        # active rollcalls), or 0-based index when admin explicitly targets one.
+        rc_number = None
         custom_msg = None
         filtered = []
         for part in parts[1:]:
@@ -224,23 +226,40 @@ async def buzz_command(message):
             )
             return
 
+        # rc is set for the message-text path below (per-rollcall title or
+        # union-across-all). voted_ids is what we subtract from candidates.
+        rc = None
+        rollcalls = []
         if not no_rollcall:
             rollcalls = manager.get_rollcalls(cid)
-            if len(rollcalls) <= rc_number:
-                raise incorrectParameter(f"Rollcall #{rc_number + 1} doesn't exist. Check /rollcalls.")
-            rc = manager.get_rollcall(cid, rc_number)
-            voted_ids = {
-                u.user_id for u in rc.inList + rc.outList + rc.maybeList + rc.waitList
-                if isinstance(u.user_id, int)
-            }
+            if rc_number is not None:
+                # Explicit ::N — only that rollcall's voters are spared.
+                if rc_number < 0 or len(rollcalls) <= rc_number:
+                    raise incorrectParameter(f"Rollcall #{rc_number + 1} doesn't exist. Check /rollcalls.")
+                rc = manager.get_rollcall(cid, rc_number)
+                voted_ids = {
+                    u.user_id for u in rc.inList + rc.outList + rc.maybeList + rc.waitList
+                    if isinstance(u.user_id, int)
+                }
+            else:
+                # Default — anyone who voted on ANY active rollcall is already
+                # engaged; don't ping them. rc is set to the first for the
+                # single-rollcall message fallback below.
+                rc = rollcalls[0]
+                voted_ids = set()
+                for r in rollcalls:
+                    voted_ids |= {
+                        u.user_id for u in r.inList + r.outList + r.maybeList + r.waitList
+                        if isinstance(u.user_id, int)
+                    }
             candidates = [u for u in candidates if u['user_id'] not in voted_ids]
 
             if not candidates:
-                await bot.send_message(
-                    cid,
-                    f"✅ Everyone the bot knows has already voted on *{_esc_md(rc.title)}*!",
-                    parse_mode="Markdown"
-                )
+                if rc_number is not None or len(rollcalls) == 1:
+                    msg_text = f"✅ Everyone the bot knows has already voted on *{_esc_md(rc.title)}*!"
+                else:
+                    msg_text = "✅ Everyone the bot knows has already voted on at least one active rollcall!"
+                await bot.send_message(cid, msg_text, parse_mode="Markdown")
                 return
 
         async def _check_member(u):
@@ -276,11 +295,11 @@ async def buzz_command(message):
             if no_rollcall:
                 await bot.send_message(cid, "All known members appear to have left the group.")
             else:
-                await bot.send_message(
-                    cid,
-                    f"✅ Everyone the bot knows has already voted on *{_esc_md(rc.title)}*!",
-                    parse_mode="Markdown"
-                )
+                if rc_number is not None or len(rollcalls) == 1:
+                    msg_text = f"✅ Everyone the bot knows has already voted on *{_esc_md(rc.title)}*!"
+                else:
+                    msg_text = "✅ Everyone the bot knows has already voted on at least one active rollcall!"
+                await bot.send_message(cid, msg_text, parse_mode="Markdown")
             return
 
         mentions = _build_mention_list(to_ping)
@@ -289,7 +308,13 @@ async def buzz_command(message):
             note = custom_msg or "Just a heads-up from the group! 👋"
             await bot.send_message(cid, f"📣 {note}\n\n{mentions}", parse_mode="Markdown")
         else:
-            note = custom_msg or f"rollcall *{_esc_md(rc.title)}* is open — have you voted?"
+            if custom_msg:
+                note = custom_msg
+            elif rc_number is not None or len(rollcalls) == 1:
+                note = f"rollcall *{_esc_md(rc.title)}* is open — have you voted?"
+            else:
+                titles = ", ".join(f"*{_esc_md(r.title)}*" for r in rollcalls)
+                note = f"active rollcalls ({titles}) are open — have you voted?"
             await bot.send_message(cid, f"👋 Hey {mentions}\n\n{note}", parse_mode="Markdown")
         log_admin_action(cid, message.from_user.id, message.from_user.first_name, "buzz",
                          details=f"pinged {len(to_ping)} member(s)")

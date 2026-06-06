@@ -3,6 +3,7 @@ Voting handlers: /in, /out, /maybe
 """
 import asyncio
 import logging
+from datetime import datetime
 
 from bot_state import (
     bot, _log_task_exc, _pending_reconf, _is_rate_limited, _get_display_name,
@@ -72,7 +73,11 @@ async def in_user(message):
                 # repeat /in instead of spamming a second warning.
                 if (cid, user.user_id) in _pending_reconf:
                     return
-                _pending_reconf[(cid, user.user_id)] = {'rc_number': rc_number, 'comment': comment}
+                _pending_reconf[(cid, user.user_id)] = {
+                    'rc_number': rc_number,
+                    'comment': comment,
+                    '_ts': datetime.now().timestamp(),
+                }
                 markup = InlineKeyboardMarkup(row_width=2)
                 markup.add(
                     InlineKeyboardButton("✅ Yes, I'll be there!", callback_data=f"reconf_in_{rc_number}_{user.user_id}"),

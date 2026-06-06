@@ -32,8 +32,48 @@ logging.basicConfig(
 
 # ── Bot instance & paths ──────────────────────────────────────────────────────
 
-bot = AsyncTeleBot(token=TELEGRAM_TOKEN)
+bot = AsyncTeleBot(token=TELEGRAM_TOKEN, use_class_middlewares=True)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+# Auto-track real users on any group interaction so /buzz reaches lurkers
+# who haven't voted yet. Wrapped in try/except because under tests the
+# telebot module is a MagicMock — BaseMiddleware isn't a real class then,
+# and the subclass declaration would fail at import time.
+try:
+    from telebot.asyncio_handler_backends import BaseMiddleware
+
+    class _MemberTrackingMiddleware(BaseMiddleware):
+        def __init__(self):
+            super().__init__()
+            self.update_types = ['message', 'callback_query']
+
+        async def pre_process(self, message, data):
+            try:
+                # CallbackQuery: chat lives on .message.chat; plain Message: on .chat
+                msg_obj = getattr(message, 'message', None)
+                chat = msg_obj.chat if msg_obj is not None else getattr(message, 'chat', None)
+                user = getattr(message, 'from_user', None)
+                if chat is None or user is None or getattr(user, 'is_bot', False):
+                    return
+                # chat_members is a per-group roster; DMs (chat.id > 0) are excluded.
+                if getattr(chat, 'id', 0) >= 0:
+                    return
+                uid = getattr(user, 'id', None)
+                if not isinstance(uid, int):
+                    return
+                from db import upsert_chat_member
+                first_name = (getattr(user, 'first_name', None) or '').strip() or str(uid)
+                upsert_chat_member(chat.id, uid, first_name, user.username or None)
+            except Exception:
+                logging.exception("member tracking middleware: ignored failure")
+
+        async def post_process(self, message, data, exception):
+            pass
+
+    bot.setup_middleware(_MemberTrackingMiddleware())
+except Exception:
+    logging.debug("Member-tracking middleware not installed (likely test environment)")
 
 
 def data_file_path(filename: str) -> str:
@@ -45,7 +85,8 @@ def data_file_path(filename: str) -> str:
 # (chat_id, rollcall_db_id) -> set of user_ids selected as ghosts
 _ghost_selections: dict = {}
 
-# (chat_id, user_id) -> {'rc_number': int, 'comment': str} for pending reconfirmation
+# (chat_id, user_id) -> {'rc_number': int, 'comment': str, '_ts': float} for pending reconfirmation.
+# _ts is required so the memory_prune_loop drops abandoned entries via _prune_pending.
 _pending_reconf: dict = {}
 
 # /schedules multi-select state: chat_id -> set of template names currently checked

@@ -419,7 +419,11 @@ async def callback_handler(call):
                     if (cid, user.user_id) in _pending_reconf:
                         await bot.answer_callback_query(call.id, "You already have a pending confirmation — please use the earlier buttons.")
                         return
-                    _pending_reconf[(cid, user.user_id)] = {'rc_number': rc_number - 1, 'comment': ''}
+                    _pending_reconf[(cid, user.user_id)] = {
+                        'rc_number': rc_number - 1,
+                        'comment': '',
+                        '_ts': datetime.now().timestamp(),
+                    }
                     markup = InlineKeyboardMarkup(row_width=2)
                     markup.add(
                         InlineKeyboardButton("✅ Yes, I'll be there!", callback_data=f"reconf_in_{rc_number - 1}_{user.user_id}"),

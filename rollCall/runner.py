@@ -368,7 +368,7 @@ async def memory_prune_loop(interval_seconds: int = 600):
     that's a slow leak. This loop bounds them."""
     from bot_state import (
         _rate_limits, _buzz_cooldowns, _pending_deletes, _pending_overrides,
-        _pending_proxy_add, _prune_pending, _panel_msg_ids,
+        _pending_proxy_add, _pending_reconf, _prune_pending, _panel_msg_ids,
     )
 
     RATE_LIMIT_AGE = 300   # individual vote rate-limit window is 2s; 5 min is well past stale
@@ -388,6 +388,7 @@ async def memory_prune_loop(interval_seconds: int = 600):
             _prune_pending(_pending_deletes)
             _prune_pending(_pending_overrides)
             _prune_pending(_pending_proxy_add)
+            _prune_pending(_pending_reconf)
 
             # Per-chat state — clean entries for chats whose rollcalls are
             # all gone, or panel ids past the current rollcall count.
@@ -407,8 +408,8 @@ async def memory_prune_loop(interval_seconds: int = 600):
             logger.debug(
                 f"prune: rl={len(_rate_limits)} buzz={len(_buzz_cooldowns)} "
                 f"pd={len(_pending_deletes)} po={len(_pending_overrides)} "
-                f"ppa={len(_pending_proxy_add)} panel={len(_panel_msg_ids)} "
-                f"erc_locks={len(manager._erc_locks)}"
+                f"ppa={len(_pending_proxy_add)} pr={len(_pending_reconf)} "
+                f"panel={len(_panel_msg_ids)} erc_locks={len(manager._erc_locks)}"
             )
         except Exception:
             logger.exception("Error in memory_prune_loop")

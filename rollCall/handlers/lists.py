@@ -258,7 +258,19 @@ async def buzz_command(message):
                 return None
 
         results = await asyncio.gather(*[_check_member(u) for u in candidates])
-        to_ping = [u for u in results if u is not None]
+        # chat_members PK already guarantees one row per (chat_id, user_id),
+        # but dedupe defensively here so a corrupted or backfilled DB can't
+        # produce duplicate @mentions in a single buzz.
+        to_ping = []
+        seen_uids = set()
+        for u in results:
+            if u is None:
+                continue
+            uid = u.get('user_id')
+            if uid in seen_uids:
+                continue
+            seen_uids.add(uid)
+            to_ping.append(u)
 
         if not to_ping:
             if no_rollcall:

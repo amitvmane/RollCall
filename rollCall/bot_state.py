@@ -14,7 +14,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from config import TELEGRAM_TOKEN
 from exceptions import (
     rollCallNotStarted, insufficientPermissions, parameterMissing, incorrectParameter,
-    duplicateProxy, repeatlyName, timeError, amountOfRollCallsReached, rollCallAlreadyStarted,
+    duplicateProxy, alreadyInList, repeatlyName, timeError, amountOfRollCallsReached, rollCallAlreadyStarted,
 )
 from models import RollCall, User
 
@@ -22,7 +22,7 @@ from models import RollCall, User
 # directly. Anything outside this set is treated as an internal error.
 _USER_FACING_EXCEPTIONS = (
     rollCallNotStarted, insufficientPermissions, parameterMissing, incorrectParameter,
-    duplicateProxy, repeatlyName, timeError, amountOfRollCallsReached, rollCallAlreadyStarted,
+    duplicateProxy, alreadyInList, repeatlyName, timeError, amountOfRollCallsReached, rollCallAlreadyStarted,
 )
 
 logging.basicConfig(

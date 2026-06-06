@@ -11,7 +11,7 @@ from bot_state import (
     warn_no_username, _dm_promoted_real_user, get_rc_db_id, reply_error,
 )
 from exceptions import (
-    rollCallNotStarted, incorrectParameter, duplicateProxy,
+    rollCallNotStarted, incorrectParameter, alreadyInList,
 )
 from functions import roll_call_not_started
 from models import User
@@ -108,7 +108,7 @@ async def in_user(message):
                 increment_rollcall_stat(rc_db_id, "total_in")
 
             if result == 'AB':
-                raise duplicateProxy("No duplicate proxy please :-), Thanks!")
+                raise alreadyInList(f"{user.name}, you're already IN for '{rc.title}'.")
             elif result == 'AC':
                 if not manager.get_shh_mode(cid):
                     await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
@@ -187,7 +187,7 @@ async def out_user(message):
                 increment_rollcall_stat(rc_db_id, "total_out")
 
             if result == 'AB':
-                raise duplicateProxy("No duplicate proxy please :-), Thanks!")
+                raise alreadyInList(f"{user.name}, you're already OUT for '{rc.title}'.")
             elif isinstance(result, User):
                 if not manager.get_shh_mode(cid):
                     if isinstance(result.user_id, int):
@@ -294,7 +294,7 @@ async def maybe_user(message):
                 increment_rollcall_stat(rc_db_id, "total_maybe")
 
             if result == 'AB':
-                raise duplicateProxy("No duplicate proxy please :-), Thanks!")
+                raise alreadyInList(f"{user.name}, you're already MAYBE for '{rc.title}'.")
             elif isinstance(result, User):
                 if not manager.get_shh_mode(cid):
                     if isinstance(result.user_id, int):

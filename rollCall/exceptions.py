@@ -10,6 +10,9 @@ class insufficientPermissions(Exception):
 class duplicateProxy(Exception):
     pass
 
+class alreadyInList(Exception):
+    pass
+
 class repeatlyName(Exception):
     pass
 

@@ -65,7 +65,13 @@ async def in_user(message):
         if isinstance(user.user_id, int) and manager.get_ghost_tracking_enabled(cid):
             ghost_count = get_ghost_count(cid, user.user_id)
             absent_limit = manager.get_absent_limit(cid)
-            if ghost_count >= absent_limit:
+            already_in = any(u.user_id == user.user_id for u in rc.inList)
+            if ghost_count >= absent_limit and not already_in:
+                # Don't stack prompts — if one is already open, the buttons on
+                # the existing message are still valid; silently ignore the
+                # repeat /in instead of spamming a second warning.
+                if (cid, user.user_id) in _pending_reconf:
+                    return
                 _pending_reconf[(cid, user.user_id)] = {'rc_number': rc_number, 'comment': comment}
                 markup = InlineKeyboardMarkup(row_width=2)
                 markup.add(

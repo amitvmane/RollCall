@@ -200,13 +200,19 @@
     {
         "Version": 7.6,
         "Description": "🛡️ Markdown injection hardening — usernames/titles with _, *, `, [ no longer crash Telegram parse_mode='Markdown' sends. New _esc_md() and format_mention_with_name_md() helpers in bot_state applied across stats, lifecycle, voting, proxy, admin, ghost, settings, templates, lists, check_reminders. Fixes production 'can't parse entities' errors for users like @Nasri_Gunner. 📖 /help split — /help shows user commands, /help admin shows admin commands; cleaner discovery and shorter scroll. 🕐 IST log timestamps — TZ=Asia/Kolkata in docker-compose so log timestamps and datetime.now() match the operator's timezone. 🐛 4 bug fixes from deep audit: (1) stale wait_pos/out_pos after promotion caused unfair waitlist ordering — positions now reset when leaving a bucket so re-entry is FIFO at the back; (2) auto-close vs /erc race condition — check_reminders now takes the same erc_lock and re-verifies before double-sending finish text or ghost prompt; (3) /maybe and /smf were missing notify_proxy_owner_wait_to_in for WAITLIST→IN promotions — now consistent with /out, /sof, panel, /set_limit; (4) stats._esc() None guard; bare except in models.delete_user replaced with except Exception. ⚙️ Misc: 429 retry-on-error, panel persistence DB migrations, debounce removed (immediate panel updates).",
-        "DeployedOnProd": "Y",
+        "DeployedOnProd": "N",
         "DeployedDatetime": "29-05-2026 00:00 UTC"
     },
     {
         "Version": 7.7,
         "Description": "🛡️ Hardening release — 17 bug fixes + reliability pass. ✅ /stats attendance rate now works (was always blank). 💬 /out shows a confirmation message like /in and /maybe. 🤫 Panel-end respects /shh mode. 🔠 Display names with ] no longer break formatting. 🧹 /delete_user refuses to wipe two users sharing a first name — use @username to disambiguate. 📨 Users moved IN→WAITLIST by /set_limit now get a DM. 🔁 /set_status is a no-op if you're already in that bucket (no more list reorder). 📋 Cleaner command menu — regular members see user commands, admins see admin commands. 🔒 Votes that race with /erc fail cleanly instead of silently breaking. 🩺 /health reports background-task liveness and DB pool usage. 🐛 Plus many internal fixes for memory growth, panel recovery after restart, and proxy-comment loss in ghost prompts.",
-        "DeployedOnProd": "Y",
+        "DeployedOnProd": "N",
         "DeployedDatetime": "03-06-2026 00:00 UTC"
+    },
+    {
+        "Version": 7.8,
+        "Description": "👻 Ghost feature polish — (1) confirmed attendance now decrements ghost_count by 1 (floored at 0) when admin finalises /mark_absent, so users who show up earn their way out of the reconfirmation threshold without needing /clear_absent; (2) reconfirmation prompt no longer duplicates — spamming /in (or the panel IN button) while a prompt is already pending is silently ignored, and the prompt is skipped entirely if the user is already on the IN list; (3) the warning message now @-mentions the user by name on both the /in path and the panel-button path so it's clear who it's directed at.",
+        "DeployedOnProd": "Y",
+        "DeployedDatetime": "06-06-2026 11:06 UTC"
     }
 ]

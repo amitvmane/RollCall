@@ -411,9 +411,14 @@ async def callback_handler(call):
             if action == "in" and isinstance(user.user_id, int) and manager.get_ghost_tracking_enabled(cid):
                 from db import get_ghost_count
                 from bot_state import _pending_reconf
+                from bot_state import format_mention_with_name_md
                 ghost_count = get_ghost_count(cid, user.user_id)
                 absent_limit = manager.get_absent_limit(cid)
-                if ghost_count >= absent_limit:
+                already_in = any(u.user_id == user.user_id for u in rc.inList)
+                if ghost_count >= absent_limit and not already_in:
+                    if (cid, user.user_id) in _pending_reconf:
+                        await bot.answer_callback_query(call.id, "You already have a pending confirmation — please use the earlier buttons.")
+                        return
                     _pending_reconf[(cid, user.user_id)] = {'rc_number': rc_number - 1, 'comment': ''}
                     markup = InlineKeyboardMarkup(row_width=2)
                     markup.add(
@@ -422,8 +427,8 @@ async def callback_handler(call):
                     )
                     await bot.send_message(
                         cid,
-                        f"👻 *Warning:* You've ghosted *{ghost_count}* session(s) before.\n"
-                        f"Absent limit: *{absent_limit}*\n\n"
+                        f"👻 *Warning:* {format_mention_with_name_md(user)}, you've ghosted *{ghost_count}* session(s) before.\n"
+                        f"⚠️ Absent Limit: *{absent_limit}*\n\n"
                         f"Are you committing to be at *{_esc_md(rc.title)}*?",
                         parse_mode="Markdown",
                         reply_markup=markup

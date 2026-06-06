@@ -2087,7 +2087,7 @@ def increment_ghost_count(chat_id: int, user_id: int, user_name: str, proxy_name
 
 def reset_ghost_count(chat_id: int, user_id: int, proxy_name: str = None) -> bool:
     """Reset ghost count to 0 for a user or proxy user (admin clear).
-    
+
     For proxy users, pass user_id=-1 and the proxy_name.
     """
     conn = get_connection()
@@ -2110,6 +2110,40 @@ def reset_ghost_count(chat_id: int, user_id: int, proxy_name: str = None) -> boo
     except Exception as e:
         conn.rollback()
         logging.error(f"Error resetting ghost count: {e}")
+        return False
+    finally:
+        cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def decrement_ghost_count(chat_id: int, user_id: int, proxy_name: str = None) -> bool:
+    """Decrement ghost count by 1, floored at 0. No-op if no record exists.
+
+    Called from the /mark_absent finalize step for every IN user who was NOT
+    selected as a ghost — i.e. they actually attended. The count never goes
+    negative; when it lands at 0, last_ghosted_at is cleared too so the
+    leaderboard and reconf threshold treat them as fresh.
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        sql = (
+            "UPDATE ghost_records SET "
+            "ghost_count = CASE WHEN ghost_count > 0 THEN ghost_count - 1 ELSE 0 END, "
+            "last_ghosted_at = CASE WHEN ghost_count > 1 THEN last_ghosted_at ELSE NULL END "
+            f"WHERE chat_id = {ph} AND "
+        )
+        if proxy_name:
+            cursor.execute(sql + f"proxy_name = {ph}", (chat_id, proxy_name))
+        else:
+            cursor.execute(sql + f"user_id = {ph}", (chat_id, user_id))
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"Error decrementing ghost count: {e}")
         return False
     finally:
         cursor.close()

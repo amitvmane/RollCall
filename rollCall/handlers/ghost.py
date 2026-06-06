@@ -19,7 +19,7 @@ from functions import admin_rights, roll_call_not_started
 from models import User
 from rollcall_manager import manager
 from db import (
-    get_ghost_count, increment_ghost_count, reset_ghost_count,
+    get_ghost_count, increment_ghost_count, reset_ghost_count, decrement_ghost_count,
     get_ghost_leaderboard, get_user_ghost_count_by_name, get_ghost_count_by_proxy_name,
     mark_rollcall_absent_done, get_unprocessed_rollcalls,
     add_ghost_event, get_rollcall_in_users, save_ghost_selections, load_ghost_selections,
@@ -299,6 +299,20 @@ async def ghost_callback_handler(call):
                     add_ghost_event(rc_db_id, cid, None, user_name=proxy_name, proxy_name=proxy_name)
                     new_count = get_ghost_count_by_proxy_name(cid, proxy_name)
                     lines.append(f"👻 {proxy_name} (via /sif) — ghosted {new_count} session(s) total")
+
+            # Forgive 1 absence for every IN user who actually attended (not selected).
+            # decrement_ghost_count floors at 0, so users with no prior absences stay at 0.
+            for u in in_users:
+                real_uid = u.get('user_id')
+                proxy_name = u.get('proxy_name')
+                if proxy_name:
+                    if proxy_name in selected:
+                        continue
+                    decrement_ghost_count(cid, -1, proxy_name=proxy_name)
+                elif real_uid is not None:
+                    if real_uid in selected:
+                        continue
+                    decrement_ghost_count(cid, real_uid)
 
             summary = "\n".join(lines)
             await bot.answer_callback_query(call.id, f"{len(selected)} ghost(s) recorded.")

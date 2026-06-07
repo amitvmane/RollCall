@@ -32,48 +32,63 @@ logging.basicConfig(
 
 # ── Bot instance & paths ──────────────────────────────────────────────────────
 
-bot = AsyncTeleBot(token=TELEGRAM_TOKEN, use_class_middlewares=True)
+# use_class_middlewares was added to AsyncTeleBot after pyTelegramBotAPI 4.14.
+# Fall back gracefully on older pinned versions — the bot must boot even if the
+# member-tracking middleware can't install. Lurkers just won't get auto-tracked.
+try:
+    bot = AsyncTeleBot(token=TELEGRAM_TOKEN, use_class_middlewares=True)
+    _middleware_supported = True
+except TypeError:
+    bot = AsyncTeleBot(token=TELEGRAM_TOKEN)
+    _middleware_supported = False
+    logging.warning(
+        "AsyncTeleBot does not accept use_class_middlewares (pyTelegramBotAPI < 4.15?). "
+        "Running without member-tracking middleware; /buzz will only reach members who have voted."
+    )
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 # Auto-track real users on any group interaction so /buzz reaches lurkers
 # who haven't voted yet. Wrapped in try/except because under tests the
 # telebot module is a MagicMock — BaseMiddleware isn't a real class then,
-# and the subclass declaration would fail at import time.
-try:
-    from telebot.asyncio_handler_backends import BaseMiddleware
+# and the subclass declaration would fail at import time. Also skipped
+# when the installed pyTelegramBotAPI predates use_class_middlewares.
+if _middleware_supported:
+    try:
+        from telebot.asyncio_handler_backends import BaseMiddleware
 
-    class _MemberTrackingMiddleware(BaseMiddleware):
-        def __init__(self):
-            super().__init__()
-            self.update_types = ['message', 'callback_query']
+        class _MemberTrackingMiddleware(BaseMiddleware):
+            def __init__(self):
+                super().__init__()
+                self.update_types = ['message', 'callback_query']
 
-        async def pre_process(self, message, data):
-            try:
-                # CallbackQuery: chat lives on .message.chat; plain Message: on .chat
-                msg_obj = getattr(message, 'message', None)
-                chat = msg_obj.chat if msg_obj is not None else getattr(message, 'chat', None)
-                user = getattr(message, 'from_user', None)
-                if chat is None or user is None or getattr(user, 'is_bot', False):
-                    return
-                # chat_members is a per-group roster; DMs (chat.id > 0) are excluded.
-                if getattr(chat, 'id', 0) >= 0:
-                    return
-                uid = getattr(user, 'id', None)
-                if not isinstance(uid, int):
-                    return
-                from db import upsert_chat_member
-                first_name = (getattr(user, 'first_name', None) or '').strip() or str(uid)
-                upsert_chat_member(chat.id, uid, first_name, user.username or None)
-            except Exception:
-                logging.exception("member tracking middleware: ignored failure")
+            async def pre_process(self, message, data):
+                try:
+                    # CallbackQuery: chat lives on .message.chat; plain Message: on .chat
+                    msg_obj = getattr(message, 'message', None)
+                    chat = msg_obj.chat if msg_obj is not None else getattr(message, 'chat', None)
+                    user = getattr(message, 'from_user', None)
+                    if chat is None or user is None or getattr(user, 'is_bot', False):
+                        return
+                    # chat_members is a per-group roster; DMs (chat.id > 0) are excluded.
+                    if getattr(chat, 'id', 0) >= 0:
+                        return
+                    uid = getattr(user, 'id', None)
+                    if not isinstance(uid, int):
+                        return
+                    from db import upsert_chat_member
+                    first_name = (getattr(user, 'first_name', None) or '').strip() or str(uid)
+                    upsert_chat_member(chat.id, uid, first_name, user.username or None)
+                except Exception:
+                    logging.exception("member tracking middleware: ignored failure")
 
-        async def post_process(self, message, data, exception):
-            pass
+            async def post_process(self, message, data, exception):
+                pass
 
-    bot.setup_middleware(_MemberTrackingMiddleware())
-except Exception:
-    logging.debug("Member-tracking middleware not installed (likely test environment)")
+        bot.setup_middleware(_MemberTrackingMiddleware())
+    except Exception:
+        logging.debug("Member-tracking middleware not installed (likely test environment)")
 
 
 def data_file_path(filename: str) -> str:

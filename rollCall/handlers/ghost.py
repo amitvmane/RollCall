@@ -32,6 +32,31 @@ def _ts() -> str:
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 
+def _decrement_attended(cid: int, in_users: list, selected: set) -> int:
+    """Forgive 1 absence for each IN user NOT in the selected-ghosts set.
+
+    decrement_ghost_count floors at 0 so callers can pass selected=set() to mean
+    'everyone attended.' Returns the count of decrement calls made (for logging).
+    """
+    n = 0
+    for u in in_users:
+        proxy_name = u.get('proxy_name')
+        real_uid = u.get('user_id')
+        if proxy_name:
+            if proxy_name in selected:
+                continue
+            decrement_ghost_count(cid, -1, proxy_name=proxy_name)
+            n += 1
+        elif real_uid is not None:
+            if real_uid in selected:
+                continue
+            decrement_ghost_count(cid, real_uid)
+            n += 1
+    if n:
+        logging.info(f"[{_ts()}] decrement_attended: cid={cid}, decremented {n} user(s)")
+    return n
+
+
 @bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/toggle_ghost_tracking")
 async def toggle_ghost_tracking(message):
     try:
@@ -178,6 +203,8 @@ async def ghost_callback_handler(call):
             rc_db_id = int(data.split("_", 2)[2])
             mark_rollcall_absent_done(rc_db_id)
             _ghost_selections.pop((cid, rc_db_id), None)
+            # Everyone IN attended → forgive 1 absence each.
+            _decrement_attended(cid, get_rollcall_in_users(rc_db_id), set())
             await bot.answer_callback_query(call.id, "✅ Got it!")
             await bot.edit_message_text("✅ No ghosts — everyone showed up! Great session! 🎉", cid, call.message.message_id)
             return
@@ -265,6 +292,8 @@ async def ghost_callback_handler(call):
             logging.info(f"[{_ts()}] ghost_done: key={key}, selected from map={selected}")
 
             if not selected:
+                # Selection canvas opened but no one tapped → everyone IN attended.
+                _decrement_attended(cid, get_rollcall_in_users(rc_db_id), set())
                 await bot.answer_callback_query(call.id, "No ghosts selected — marking all as attended.")
                 await bot.edit_message_text("✅ No ghosts selected — all marked as attended.", cid, call.message.message_id)
                 return
@@ -301,18 +330,7 @@ async def ghost_callback_handler(call):
                     lines.append(f"👻 {proxy_name} (via /sif) — ghosted {new_count} session(s) total")
 
             # Forgive 1 absence for every IN user who actually attended (not selected).
-            # decrement_ghost_count floors at 0, so users with no prior absences stay at 0.
-            for u in in_users:
-                real_uid = u.get('user_id')
-                proxy_name = u.get('proxy_name')
-                if proxy_name:
-                    if proxy_name in selected:
-                        continue
-                    decrement_ghost_count(cid, -1, proxy_name=proxy_name)
-                elif real_uid is not None:
-                    if real_uid in selected:
-                        continue
-                    decrement_ghost_count(cid, real_uid)
+            _decrement_attended(cid, in_users, selected)
 
             summary = "\n".join(lines)
             await bot.answer_callback_query(call.id, f"{len(selected)} ghost(s) recorded.")

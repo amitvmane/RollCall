@@ -19,6 +19,16 @@ Do not use `await bot.send_message(cid, str(e))` for caught exceptions — use `
 
 Anything that mutates a chat's rollcall state (votes, proxy adds, set_limit, end_rollcall) should run inside `async with manager.get_chat_write_lock(cid):` to serialize with concurrent operations like /erc and template auto-close. Re-fetch the rollcall *inside* the lock since /erc may have removed it while you were waiting.
 
+## Smoke test (real-import boot check)
+
+`scripts/smoke_test.py` runs the production import chain against the **real** pinned dependencies — no test mocks. It compiles every module under `rollCall/`, constructs `AsyncTeleBot`, verifies the member-tracking middleware installs, imports the full handlers package, and confirms `runner.py` loads. Run it locally before pushing any dep bump or any change to `bot_state.py` / `runner.py`:
+
+```bash
+python scripts/smoke_test.py
+```
+
+CI runs the same script as the `Smoke (real-import boot check)` job. Unit tests can't catch signature mismatches (telebot is mocked in `conftest.py`), so this layer is the one that surfaces issues like the v7.8 `use_class_middlewares=True` crash.
+
 ## Logging
 
 Prefer `logging.exception("context")` inside `except` blocks — it captures the traceback automatically. Do not use `traceback.format_exc()` interpolation. The bot supports `STRUCTURED_LOGS=true` to emit one-line JSON to stdout for log aggregators, and `SENTRY_DSN=...` (with `sentry-sdk` installed as an optional dep) for error reporting.

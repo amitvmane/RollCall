@@ -67,6 +67,37 @@ jobs:
             --count --statistics || true
         # '|| true' so lint warnings don't block merge — review output manually
 
+  smoke:
+    name: Smoke (real-import boot check)
+    runs-on: ubuntu-latest
+    # Runs the production import chain against the REAL pinned dependencies
+    # (no test mocks). Catches signature mismatches like the v7.8
+    # use_class_middlewares=True TypeError that unit tests can't surface
+    # because they mock telebot away.
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-smoke-${{ hashFiles('requirements.txt') }}
+
+      - name: Install runtime dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run smoke test
+        env:
+          TELEGRAM_TOKEN: "123:ci-smoke"
+        run: python scripts/smoke_test.py
+
   docker:
     name: Docker Build Check
     runs-on: ubuntu-latest

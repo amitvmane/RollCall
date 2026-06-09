@@ -116,7 +116,28 @@ def main() -> int:
             raise RuntimeError("runner.main not callable — entry point changed")
     check("runner module imports cleanly, runner.main callable", import_runner)
 
-    # ── 6. Key db helpers exist (catches accidental rename/delete) ──────
+    # ── 6. Bot methods we CALL actually exist on AsyncTeleBot ───────────
+    # Catches "method renamed in a future telebot release" — the silent
+    # cousin of the v7.8 use_class_middlewares crash. If the method ever
+    # disappears we want to fail at smoke time, not at first user action.
+    def bot_methods_present():
+        import bot_state
+        required = [
+            "send_message", "edit_message_text", "edit_message_reply_markup",
+            "answer_callback_query", "get_chat_member", "get_me",
+            "set_my_commands", "set_webhook", "remove_webhook",
+            "infinity_polling", "process_new_updates", "close_session",
+            "message_handler", "callback_query_handler", "setup_middleware",
+        ]
+        missing = [m for m in required if not hasattr(bot_state.bot, m)]
+        if missing:
+            raise RuntimeError(
+                f"AsyncTeleBot is missing methods we call: {missing}. "
+                "A pyTelegramBotAPI bump likely renamed or removed these."
+            )
+    check("bot methods we invoke exist on AsyncTeleBot", bot_methods_present)
+
+    # ── 7. Key db helpers exist (catches accidental rename/delete) ──────
     def db_helpers_present():
         from db import (
             upsert_chat_member, get_active_members, mark_member_inactive,

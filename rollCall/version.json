@@ -212,7 +212,13 @@
     {
         "Version": 7.8,
         "Description": "👻 Ghost feature polish — (1) confirmed attendance now decrements ghost_count by 1 (floored at 0) for every IN user who wasn't selected as a ghost. The decrement fires on all three finalize paths: ghost_no_ ('everyone attended' button), ghost_done_ with no selection, and ghost_done_ with selection. Initial v7.8 attempt only covered the third path, so 'No ghosts' button (the common case) was a no-op — fixed. (2) reconfirmation prompt no longer duplicates — spamming /in (or the panel IN button) while a prompt is already pending is silently ignored, and the prompt is skipped entirely if the user is already on the IN list; (3) the warning message now @-mentions the user by name on both the /in path and the panel-button path so it's clear who it's directed at. 🧹 Memory hygiene — abandoned reconfirmation prompts (user ignored the buttons) now carry a _ts and are pruned by the memory_prune_loop after 1h, so the dict no longer leaks until restart. 📣 /buzz upgrades — (a) new tracking middleware records every real user on any group message or button tap, not just on /in/out/maybe votes, so /buzz finally reaches lurkers who have never voted; (b) defensive dedup of the mention list guarantees one ping per user per buzz even if the chat_members table ever ends up with duplicate rows; (c) when multiple rollcalls are active, /buzz (no ::N) now spares anyone who voted on ANY of them — admins can still target one with /buzz ::N. Message text adapts: per-rollcall title when targeted or only one rollcall is open, otherwise lists all active rollcall titles. 🛠️ Duplicate-vote message fix — /in, /out, /maybe used to reply with 'No duplicate proxy please :-)' for real-user re-votes, which made no sense to non-admin members. New alreadyInList exception now gives 'You're already IN / OUT / MAYBE for <title>.' with the actual bucket and rollcall name. /sif, /sof, /smf still use duplicateProxy since those really are proxy-name collisions.",
-        "DeployedOnProd": "Y",
+        "DeployedOnProd": "N",
         "DeployedDatetime": "06-06-2026 11:06 UTC"
+    },
+    {
+        "Version": 7.9,
+        "Description": "📦 Tier A dependency bumps — pyTelegramBotAPI held at 4.14.1 (separate decision for the Telegram API surface). All other pins moved to latest stable: pytz 2023.3→2026.2 (tz data refresh), Levenshtein 0.23.0→0.27.1, matplotlib 3.6.3→3.9.4 (only used in stats charts), urllib3 1.26.12→2.6.3 (MAJOR — dropped legacy SSL/TLS code, changed Retry defaults), python-dotenv 1.0.0→1.2.1, aiohttp 3.9.0→3.13.5, psycopg2-binary 2.9.9→2.9.12. Verified against the full test suite (295 unit + 315 integration + 9 smoke checks) before shipping. urllib3 2.x is the only major bump; watch /health and the polling loop post-deploy for any unexpected retry behavior.",
+        "DeployedOnProd": "Y",
+        "DeployedDatetime": "09-06-2026 06:50 UTC"
     }
 ]

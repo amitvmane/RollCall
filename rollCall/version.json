@@ -220,5 +220,11 @@
         "Description": "📦 Tier A dependency bumps — pyTelegramBotAPI held at 4.14.1 (separate decision for the Telegram API surface). All other pins moved to latest stable: pytz 2023.3→2026.2 (tz data refresh), Levenshtein 0.23.0→0.27.1, matplotlib 3.6.3→3.9.4 (only used in stats charts), urllib3 1.26.12→2.6.3 (MAJOR — dropped legacy SSL/TLS code, changed Retry defaults), python-dotenv 1.0.0→1.2.1, aiohttp 3.9.0→3.13.5, psycopg2-binary 2.9.9→2.9.12. Verified against the full test suite (295 unit + 315 integration + 9 smoke checks) before shipping. urllib3 2.x is the only major bump; watch /health and the polling loop post-deploy for any unexpected retry behavior.",
         "DeployedOnProd": "Y",
         "DeployedDatetime": "09-06-2026 06:50 UTC"
+    },
+    {
+        "Version": 8.0,
+        "Description": "🔒 Reproducible builds — requirements.lock pins the full transitive dep tree (8 direct → 33 total) generated via pip-compile against Python 3.12. Dockerfile and CI now install from the lock file instead of requirements.txt, so prod and CI run the exact same package versions; eliminates silent transitive drift between environments. 🐍 Python 3.12 — Dockerfile base image bumped python:3.11-slim → python:3.12-slim to match the version already validated in CI. CI matrix collapsed from {3.10, 3.11, 3.12} to a single 3.12 job, reducing test runtime to ~1/3 and validating only what prod actually runs. Smoke + 295 unit + 315 integration tests all green on the locked 3.12 env. Sets the stage for safer Tier B (pyTelegramBotAPI) bumps next.",
+        "DeployedOnProd": "N",
+        "DeployedDatetime": "11-06-2026 12:30 UTC"
     }
 ]

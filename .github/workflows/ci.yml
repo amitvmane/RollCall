@@ -9,32 +9,28 @@ on:
 
 jobs:
   test:
-    name: Run Tests (Python ${{ matrix.python-version }})
+    name: Run Tests (Python 3.12)
     runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        python-version: ["3.10", "3.11", "3.12"]
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python 3.12
         uses: actions/setup-python@v6
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.12"
 
       - name: Cache pip dependencies
         uses: actions/cache@v5
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('requirements.txt') }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.lock') }}
           restore-keys: |
-            ${{ runner.os }}-pip-${{ matrix.python-version }}-
+            ${{ runner.os }}-pip-
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt pytest
+      - name: Install dependencies (locked)
+        run: pip install -r requirements.lock pytest
 
       - name: Run unit tests
         run: python -m pytest tests/ -v --tb=short
@@ -50,7 +46,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Set up Python
+      - name: Set up Python 3.12
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -79,7 +75,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Set up Python
+      - name: Set up Python 3.12
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -88,10 +84,10 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-smoke-${{ hashFiles('requirements.txt') }}
+          key: ${{ runner.os }}-pip-smoke-${{ hashFiles('requirements.lock') }}
 
-      - name: Install runtime dependencies
-        run: pip install -r requirements.txt
+      - name: Install runtime dependencies (locked)
+        run: pip install -r requirements.lock
 
       - name: Run smoke test
         env:

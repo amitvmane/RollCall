@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # Set working directory
 WORKDIR /app
@@ -12,8 +12,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy entire project
 COPY . .
 
-# Install Python dependencies
-RUN pip3 install --no-cache-dir -r requirements.txt
+# Install Python dependencies from the fully pinned lock file
+# (requirements.lock pins all transitive deps; requirements.txt only pins direct deps)
+RUN pip3 install --no-cache-dir -r requirements.lock
 
 # Create directories for database and logs
 RUN mkdir -p /app/data /app/logs && \

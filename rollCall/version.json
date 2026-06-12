@@ -226,5 +226,11 @@
         "Description": "🔒 Reproducible builds — requirements.lock pins the full transitive dep tree (8 direct → 33 total) generated via pip-compile against Python 3.12. Dockerfile and CI now install from the lock file instead of requirements.txt, so prod and CI run the exact same package versions; eliminates silent transitive drift between environments. 🐍 Python 3.12 — Dockerfile base image bumped python:3.11-slim → python:3.12-slim to match the version already validated in CI. CI matrix collapsed from {3.10, 3.11, 3.12} to a single 3.12 job, reducing test runtime to ~1/3 and validating only what prod actually runs. Smoke + 295 unit + 315 integration tests all green on the locked 3.12 env. Sets the stage for safer Tier B (pyTelegramBotAPI) bumps next.",
         "DeployedOnProd": "N",
         "DeployedDatetime": "11-06-2026 12:30 UTC"
+    },
+    {
+        "Version": 8.1,
+        "Description": "🧹 Python 3.12 deprecation cleanup — pure hygiene PR, zero behavior change. (1) datetime.utcnow() replaced everywhere in production code (rollCall/db.py, rollCall/models.py — 3 call sites) with a local _utcnow_naive() helper that returns datetime.now(timezone.utc).replace(tzinfo=None). Same naive-UTC value the bot has always used, just without the 3.12 deprecation warning that will become an error in a future Python release. (2) sqlite3 default datetime adapter (also deprecated in 3.12) replaced with an explicit register_adapter at db.py module import; produces byte-identical 'YYYY-MM-DD HH:MM:SS[.ffffff]' output that the existing _parse_db_datetime reader already handles, so DB round-trips are unchanged and existing rows still parse cleanly. Result: deprecation warning count from the full test suite dropped from ~1500 → 1 (the lone remaining warning is asyncio.get_event_loop() inside test code, out of scope). Full suite still green: smoke + 295 unit + 315 integration on locked Python 3.12, plus smoke inside the Docker image. Future-proofs the bot for Python 3.13/3.14 where these deprecations become hard errors.",
+        "DeployedOnProd": "N",
+        "DeployedDatetime": "12-06-2026 04:35 UTC"
     }
 ]

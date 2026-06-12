@@ -218,7 +218,7 @@
     {
         "Version": 7.9,
         "Description": "📦 Tier A dependency bumps — pyTelegramBotAPI held at 4.14.1 (separate decision for the Telegram API surface). All other pins moved to latest stable: pytz 2023.3→2026.2 (tz data refresh), Levenshtein 0.23.0→0.27.1, matplotlib 3.6.3→3.9.4 (only used in stats charts), urllib3 1.26.12→2.6.3 (MAJOR — dropped legacy SSL/TLS code, changed Retry defaults), python-dotenv 1.0.0→1.2.1, aiohttp 3.9.0→3.13.5, psycopg2-binary 2.9.9→2.9.12. Verified against the full test suite (295 unit + 315 integration + 9 smoke checks) before shipping. urllib3 2.x is the only major bump; watch /health and the polling loop post-deploy for any unexpected retry behavior.",
-        "DeployedOnProd": "Y",
+        "DeployedOnProd": "N",
         "DeployedDatetime": "09-06-2026 06:50 UTC"
     },
     {
@@ -229,8 +229,8 @@
     },
     {
         "Version": 8.1,
-        "Description": "🧹 Python 3.12 deprecation cleanup — pure hygiene PR, zero behavior change. (1) datetime.utcnow() replaced everywhere in production code (rollCall/db.py, rollCall/models.py — 3 call sites) with a local _utcnow_naive() helper that returns datetime.now(timezone.utc).replace(tzinfo=None). Same naive-UTC value the bot has always used, just without the 3.12 deprecation warning that will become an error in a future Python release. (2) sqlite3 default datetime adapter (also deprecated in 3.12) replaced with an explicit register_adapter at db.py module import; produces byte-identical 'YYYY-MM-DD HH:MM:SS[.ffffff]' output that the existing _parse_db_datetime reader already handles, so DB round-trips are unchanged and existing rows still parse cleanly. Result: deprecation warning count from the full test suite dropped from ~1500 → 1 (the lone remaining warning is asyncio.get_event_loop() inside test code, out of scope). Full suite still green: smoke + 295 unit + 315 integration on locked Python 3.12, plus smoke inside the Docker image. Future-proofs the bot for Python 3.13/3.14 where these deprecations become hard errors.",
-        "DeployedOnProd": "N",
-        "DeployedDatetime": "12-06-2026 04:35 UTC"
+        "Description": "🧹 Python 3.12 deprecation cleanup — pure hygiene PR, zero behavior change. (1) datetime.utcnow() replaced everywhere in production code (rollCall/db.py, rollCall/models.py — 3 call sites) with a local _utcnow_naive() helper that returns datetime.now(timezone.utc).replace(tzinfo=None). Same naive-UTC value the bot has always used, just without the 3.12 deprecation warning that will become an error in a future Python release. (2) sqlite3 default datetime adapter (also deprecated in 3.12) replaced with an explicit register_adapter at db.py module import; produces byte-identical 'YYYY-MM-DD HH:MM:SS[.ffffff]' output that the existing _parse_db_datetime reader already handles, so DB round-trips are unchanged and existing rows still parse cleanly. Result: deprecation warning count from the full test suite dropped from ~1500 → 1 (the lone remaining warning is asyncio.get_event_loop() inside test code, out of scope). Full suite still green: smoke + 295 unit + 315 integration on locked Python 3.12, plus smoke inside the Docker image. Future-proofs the bot for Python 3.13/3.14 where these deprecations become hard errors. Also bundles same-day fixes shipped under the v8.1 train: (a) /buzz no longer surfaces UnboundLocalError from log_admin_action's finally block (d9c2793); (b) /stats Voting% + Attendance% split with real attendance, leaderboard ranks by actual attendance, streak resets on OUT/MAYBE (bd43d4b); (c) /stats correctness for /stats group, /stats bot, /stats <name> resolver (incl. proxy fallback + ambiguous-name hint), proxy users counted as first-class participants in personal/leaderboard/group stats, and /help refactor with COMMANDS-driven single source of truth + /help <name> detail view (0330011). Full test suite at deploy time: smoke 9/9, unit 296/296, integration 341/341 on Python 3.12 + locked deps; docker build + in-image smoke also green.",
+        "DeployedOnProd": "Y",
+        "DeployedDatetime": "12-06-2026 13:00 UTC"
     }
 ]

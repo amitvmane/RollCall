@@ -23,7 +23,7 @@ from db import (
     get_ghost_leaderboard, get_user_ghost_count_by_name, get_ghost_count_by_proxy_name,
     mark_rollcall_absent_done, get_unprocessed_rollcalls,
     add_ghost_event, get_rollcall_in_users, save_ghost_selections, load_ghost_selections,
-    reset_streak_on_ghost, log_admin_action, upsert_chat_member,
+    reset_user_streak, log_admin_action, upsert_chat_member,
     increment_user_stat, increment_rollcall_stat,
 )
 
@@ -315,7 +315,7 @@ async def ghost_callback_handler(call):
                     logging.info(f"[{_ts()}] Ghosting real user: {name}")
                     increment_ghost_count(cid, item, name)
                     add_ghost_event(rc_db_id, cid, item, name)
-                    reset_streak_on_ghost(cid, item)
+                    reset_user_streak(cid, item)
                     new_count = get_ghost_count(cid, item)
                     lines.append(f"👻 {name} — ghosted {new_count} session(s) total")
                 else:

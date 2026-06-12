@@ -7,7 +7,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot_state import bot
 from db import (
-    end_rollcall, update_streak_on_checkin, get_all_scheduled_templates,
+    end_rollcall, update_streak_on_checkin, reset_user_streak, get_all_scheduled_templates,
     update_template_last_scheduled_date, get_all_chat_ids, increment_user_stat,
 )
 
@@ -96,18 +96,25 @@ async def check(rollcalls, timezone, chat_id):
                             rc_db_id = getattr(rollcall, "db_id", None) or getattr(rollcall, "id", None)
 
                             # Update attendance streaks for real users who were IN
-                            for u in rollcall.inList:
-                                if isinstance(u.user_id, int):
-                                    try:
-                                        update_streak_on_checkin(chat_id, u.user_id)
-                                    except Exception:
-                                        logging.exception(f"Failed to update streak for user {u.user_id} in chat {chat_id}")
+                            in_user_ids = {u.user_id for u in rollcall.inList if isinstance(u.user_id, int)}
+                            for uid in in_user_ids:
+                                try:
+                                    update_streak_on_checkin(chat_id, uid)
+                                except Exception:
+                                    logging.exception(f"Failed to update streak for user {uid} in chat {chat_id}")
 
                             # Bump per-user total_rollcalls so /stats attendance rate works
                             participants = set(
                                 u.user_id for u in (rollcall.inList + rollcall.outList + rollcall.maybeList + rollcall.waitList)
                                 if isinstance(u.user_id, int)
                             )
+                            # Reset streak for participants who voted OUT/MAYBE (didn't end up IN).
+                            # No-shows aren't penalised here — ghost-marking handles them.
+                            for uid in participants - in_user_ids:
+                                try:
+                                    reset_user_streak(chat_id, uid)
+                                except Exception:
+                                    logging.exception(f"Failed to reset streak for user {uid} in chat {chat_id}")
                             for uid in participants:
                                 try:
                                     increment_user_stat(chat_id, uid, "total_rollcalls")

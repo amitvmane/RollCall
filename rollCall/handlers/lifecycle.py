@@ -25,7 +25,7 @@ from models import User
 from rollcall_manager import manager
 from db import (
     update_rollcall, log_admin_action, increment_user_stat, increment_rollcall_stat,
-    update_streak_on_checkin, upsert_chat_member,
+    update_streak_on_checkin, reset_user_streak, upsert_chat_member,
 )
 
 
@@ -236,9 +236,14 @@ async def end_roll_call(message):
                 u.user_id for u in (rc.inList + rc.outList + rc.maybeList + rc.waitList)
                 if isinstance(u.user_id, int)
             )
-            for u in in_users:
-                if isinstance(u.user_id, int):
-                    update_streak_on_checkin(cid, u.user_id)
+            in_user_ids = {u.user_id for u in in_users if isinstance(u.user_id, int)}
+            for uid in in_user_ids:
+                update_streak_on_checkin(cid, uid)
+            # Streak resets for participants who voted but didn't end up IN
+            # (OUT or MAYBE). No-shows (never voted) are not penalised here —
+            # the ghost-mark flow handles those deliberately.
+            for uid in participants - in_user_ids:
+                reset_user_streak(cid, uid)
             for uid in participants:
                 increment_user_stat(cid, uid, "total_rollcalls")
 
@@ -626,9 +631,12 @@ async def callback_handler(call):
                     u.user_id for u in (rc.inList + rc.outList + rc.maybeList + rc.waitList)
                     if isinstance(u.user_id, int)
                 )
-                for u in rc.inList:
-                    if isinstance(u.user_id, int):
-                        update_streak_on_checkin(cid, u.user_id)
+                in_user_ids = {u.user_id for u in rc.inList if isinstance(u.user_id, int)}
+                for uid in in_user_ids:
+                    update_streak_on_checkin(cid, uid)
+                # Same streak-reset rule as the /erc command path above.
+                for uid in participants - in_user_ids:
+                    reset_user_streak(cid, uid)
                 for uid in participants:
                     increment_user_stat(cid, uid, "total_rollcalls")
 

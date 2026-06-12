@@ -5,7 +5,11 @@ import logging
 
 from bot_state import bot
 from config import ADMINS
-from db import get_ghost_leaderboard, get_connection, db_type, release_connection
+from db import (
+    get_ghost_leaderboard, get_connection, db_type, release_connection,
+    get_user_attendance_count, get_leaderboard_by_attendance,
+    get_chat_ended_rollcall_count,
+)
 from rollcall_manager import manager
 
 
@@ -164,28 +168,19 @@ async def build_bot_stats_text() -> str:
 
 
 async def build_leaderboard_text(chat_id: int, limit: int = 10) -> str:
+    """Top-N by REAL attendance (final-IN in ended rollcalls), tiebreak by
+    total_rollcalls ASC so a user with the same attended count but fewer
+    rollcalls participated (higher %) ranks first."""
+    rows = get_leaderboard_by_attendance(chat_id, limit)
+    if not rows:
+        return "*Leaderboard:*\n\nNo data yet. Participate in some rollcalls first!"
+
+    user_ids = [r['user_id'] for r in rows]
+
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
-
-        if db_type == "postgresql":
-            cursor.execute(
-                "SELECT user_id, total_in, total_out, total_maybe FROM user_stats "
-                "WHERE chat_id = %s ORDER BY total_in DESC, total_out ASC LIMIT %s",
-                (chat_id, limit),
-            )
-        else:
-            cursor.execute(
-                "SELECT user_id, total_in, total_out, total_maybe FROM user_stats "
-                "WHERE chat_id = ? ORDER BY total_in DESC, total_out ASC LIMIT ?",
-                (chat_id, limit),
-            )
-        rows = cursor.fetchall()
-        if not rows:
-            return "*Leaderboard:*\n\nNo data yet. Participate in some rollcalls first!"
-
-        user_ids = [r[0] if not isinstance(r, dict) else r["user_id"] for r in rows]
-
         if db_type == "postgresql":
             cursor.execute(
                 "SELECT DISTINCT ON (u.user_id) u.user_id, u.first_name, u.username "
@@ -206,19 +201,33 @@ async def build_leaderboard_text(chat_id: int, limit: int = 10) -> str:
         for ur in cursor.fetchall():
             uid, first_name, username = (ur["user_id"], ur["first_name"], ur["username"]) if isinstance(ur, dict) else (ur[0], ur[1], ur[2])
             name_map[uid] = (first_name, username)
-
-        lines = [f"*Leaderboard (top {len(rows)} by IN):*", ""]
-        for rank, row in enumerate(rows, 1):
-            uid, t_in, t_out, t_maybe = (row["user_id"], row["total_in"], row["total_out"], row["total_maybe"]) if isinstance(row, dict) else row[:4]
-            first_name, username = name_map.get(uid, ("User", None))
-            name_text = f"@{_esc(username)}" if username else _esc(first_name or "User")
-            lines.append(f"{rank}. {name_text} – ✅ {t_in}  ❌ {t_out}  🤔 {t_maybe}")
-
-        return "\n".join(lines)
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == "postgresql":
             release_connection(conn)
+
+    # Denominator for both rates = total ended rollcalls in the chat
+    # (so attendance% can be < 100% for someone who skipped sessions).
+    total_rcs = get_chat_ended_rollcall_count(chat_id)
+
+    lines = [f"*Leaderboard (top {len(rows)} by attendance):*", ""]
+    for rank, row in enumerate(rows, 1):
+        uid = row['user_id']
+        attended = row['attended']
+        voted = row['total_rollcalls']
+        first_name, username = name_map.get(uid, ("User", None))
+        name_text = f"@{_esc(username)}" if username else _esc(first_name or "User")
+        if total_rcs > 0:
+            att_pct = f"{round(attended / total_rcs * 100)}%"
+            vote_pct = f"{round(voted / total_rcs * 100)}%"
+            lines.append(
+                f"{rank}. {name_text} — ✅ {attended}/{total_rcs} ({att_pct})  ·  🗳 {voted}/{total_rcs} ({vote_pct})"
+            )
+        else:
+            lines.append(f"{rank}. {name_text} — ✅ {attended}  ·  🗳 {voted}")
+
+    return "\n".join(lines)
 
 
 async def resolve_user_for_stats(chat_id: int, arg: str):
@@ -298,16 +307,29 @@ async def build_user_stats_text(chat_id: int, user_id: int, first_name: str) -> 
         t_out   = data.get("total_out", 0) or 0
         t_maybe = data.get("total_maybe", 0) or 0
         t_wait  = data.get("total_waiting_to_in", 0) or 0
-        t_rc    = data.get("total_rollcalls", 0) or 0
+        voted_in_rcs = data.get("total_rollcalls", 0) or 0  # rollcalls user participated in (any bucket)
         streak  = data.get("current_streak", 0) or 0
         best    = data.get("best_streak", 0) or 0
-        pct     = f"{min(100, round(t_in / t_rc * 100))}%" if t_rc > 0 else "—"
+
+        # Two distinct percentages, both with the SAME denominator (total
+        # ended rollcalls in the chat). Voting% = engagement (did you bother
+        # to vote?); Attendance% = actual attendance (did you end up IN at
+        # /erc?). Both required because voting alone trivially hits 100% for
+        # anyone who participated once if denominator is per-user.
+        total_rcs = get_chat_ended_rollcall_count(chat_id)
+        attended = get_user_attendance_count(chat_id, user_id)
+        if total_rcs > 0:
+            vote_pct = f"{round(voted_in_rcs / total_rcs * 100)}%"
+            att_pct = f"{round(attended / total_rcs * 100)}%"
+        else:
+            vote_pct = att_pct = "—"
 
         return "\n".join([
             f"*Stats for {_esc(first_name)}:*", "",
-            f"✅ IN: {t_in}", f"❌ OUT: {t_out}", f"🤔 MAYBE: {t_maybe}",
-            f"⏫ From WAITING → IN: {t_wait}",
-            f"📋 Total rollcalls: {t_rc}", f"📊 Attendance rate: {pct}", "",
+            f"🗳 Voted in: {voted_in_rcs} of {total_rcs} rollcalls ({vote_pct})",
+            f"✅ Attended: {attended} of {total_rcs} rollcalls ({att_pct})",
+            f"📊 Vote breakdown — IN: {t_in}  OUT: {t_out}  MAYBE: {t_maybe}",
+            f"⏫ Promoted from waitlist: {t_wait}", "",
             f"🔥 Current streak: {streak} session(s)",
             f"🏆 Best streak: {best} session(s)",
         ])

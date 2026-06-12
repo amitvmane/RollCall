@@ -2475,9 +2475,11 @@ def update_streak_on_checkin(chat_id: int, user_id: int) -> None:
             release_connection(conn)
 
 
-def reset_streak_on_ghost(chat_id: int, user_id: int) -> None:
-    """Reset current_streak to 0 when a user ghosts a session."""
+def reset_user_streak(chat_id: int, user_id: int) -> None:
+    """Reset current_streak to 0. Called when a user breaks a streak — either
+    by being ghost-marked, or by ending a session as OUT / MAYBE rather than IN."""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
@@ -2487,10 +2489,146 @@ def reset_streak_on_ghost(chat_id: int, user_id: int) -> None:
         """, (chat_id, user_id))
         conn.commit()
     except Exception as e:
-        conn.rollback()
-        logging.error(f"Error resetting streak on ghost: {e}")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logging.error(f"Error resetting streak: {e}")
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def get_chat_ended_rollcall_count(chat_id: int) -> int:
+    """Return the total number of ENDED rollcalls in this chat.
+
+    Used as the denominator for Voting% and Attendance% in /stats — both
+    rates measure each user against ALL ended sessions, not just sessions
+    they participated in. That's the only way "voting %" means engagement
+    rather than "100% trivially because they voted at least once."
+    """
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        active_false = 'FALSE' if db_type == 'postgresql' else '0'
+        cursor.execute(
+            f"SELECT COUNT(*) FROM rollcalls WHERE chat_id = {ph} AND is_active = {active_false}",
+            (chat_id,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return 0
+        if isinstance(row, dict):
+            return int(next(iter(row.values())) or 0)
+        return int(row[0] or 0)
+    except Exception as e:
+        logging.error(f"Error counting ended rollcalls: {e}")
+        return 0
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def get_user_attendance_count(chat_id: int, user_id: int) -> int:
+    """Return the number of ENDED rollcalls in this chat where the user's
+    final status was IN. This is the authoritative attendance number —
+    user_stats.total_in counts every IN VOTE (which inflates if a user flips
+    IN→OUT→IN within one session), so it must not be used for attendance %.
+    """
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        active_false = 'FALSE' if db_type == 'postgresql' else '0'
+        cursor.execute(f"""
+            SELECT COUNT(*) FROM users u
+            JOIN rollcalls r ON u.rollcall_id = r.id
+            WHERE r.chat_id = {ph} AND u.user_id = {ph}
+              AND u.status = 'in' AND r.is_active = {active_false}
+        """, (chat_id, user_id))
+        row = cursor.fetchone()
+        if row is None:
+            return 0
+        if isinstance(row, dict):
+            return int(next(iter(row.values())) or 0)
+        return int(row[0] or 0)
+    except Exception as e:
+        logging.error(f"Error counting attendance: {e}")
+        return 0
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def get_leaderboard_by_attendance(chat_id: int, limit: int = 10) -> List[Dict]:
+    """Return top-N users ordered by ACTUAL attendance count (final-IN in
+    ended rollcalls), tiebreak by total_rollcalls ASC so users who attended
+    the same number of sessions but participated in fewer (higher attendance
+    %) rank higher. Each row: user_id, attended, total_rollcalls, total_in,
+    total_out, total_maybe.
+    """
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        active_false = 'FALSE' if db_type == 'postgresql' else '0'
+        cursor.execute(f"""
+            SELECT us.user_id,
+                   COALESCE(att.attended, 0) AS attended,
+                   COALESCE(us.total_rollcalls, 0) AS total_rc,
+                   COALESCE(us.total_in, 0) AS total_in,
+                   COALESCE(us.total_out, 0) AS total_out,
+                   COALESCE(us.total_maybe, 0) AS total_maybe
+            FROM user_stats us
+            LEFT JOIN (
+                SELECT u.user_id, COUNT(*) AS attended
+                FROM users u
+                JOIN rollcalls r ON u.rollcall_id = r.id
+                WHERE r.chat_id = {ph} AND u.status = 'in' AND r.is_active = {active_false}
+                GROUP BY u.user_id
+            ) att ON att.user_id = us.user_id
+            WHERE us.chat_id = {ph}
+            ORDER BY attended DESC, total_rc ASC, us.user_id ASC
+            LIMIT {ph}
+        """, (chat_id, chat_id, limit))
+        rows = cursor.fetchall()
+        result = []
+        for r in rows:
+            if isinstance(r, dict):
+                result.append({
+                    'user_id':         r.get('user_id'),
+                    'attended':        int(r.get('attended') or 0),
+                    'total_rollcalls': int(r.get('total_rc') or 0),
+                    'total_in':        int(r.get('total_in') or 0),
+                    'total_out':       int(r.get('total_out') or 0),
+                    'total_maybe':     int(r.get('total_maybe') or 0),
+                })
+            else:
+                result.append({
+                    'user_id':         r[0],
+                    'attended':        int(r[1] or 0),
+                    'total_rollcalls': int(r[2] or 0),
+                    'total_in':        int(r[3] or 0),
+                    'total_out':       int(r[4] or 0),
+                    'total_maybe':     int(r[5] or 0),
+                })
+        return result
+    except Exception as e:
+        logging.error(f"Error fetching attendance leaderboard: {e}")
+        return []
+    finally:
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 

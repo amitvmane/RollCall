@@ -10,6 +10,102 @@ from exceptions import parameterMissing
 from functions import admin_rights, auto_complete_timezone
 from rollcall_manager import manager
 from db import get_all_chat_ids, log_admin_action
+from commands_registry import (
+    COMMANDS, lookup_command, all_names_and_aliases,
+    USER_CATEGORY_ORDER, ADMIN_CATEGORY_ORDER,
+)
+
+try:
+    # Already pinned in requirements.lock — used here for "did you mean…?"
+    from Levenshtein import distance as _lev_distance  # type: ignore[import-not-found]
+except Exception:  # pragma: no cover - extremely defensive
+    def _lev_distance(a, b):
+        return abs(len(a) - len(b)) + sum(1 for x, y in zip(a, b) if x != y)
+
+
+def _esc_md(text):
+    """Escape Markdown v1 special characters in a value we're about to render."""
+    if not text:
+        return text or ""
+    for c in ('_', '*', '`', '['):
+        text = text.replace(c, f'\\{c}')
+    return text
+
+
+def _format_cmd_line(cmd):
+    """One-line summary entry: `/name (also /alias)  args  — summary`."""
+    aliases = cmd.get("aliases") or []
+    alias_part = f" (also /{', /'.join(aliases)})" if aliases else ""
+    args = cmd.get("args") or ""
+    args_part = f" {_esc_md(args)}" if args else ""
+    return f"/{_esc_md(cmd['name'])}{_esc_md(alias_part)}{args_part} — {_esc_md(cmd['summary'])}"
+
+
+def _render_command_list(scope_set, category_order, header):
+    """Render the user or admin /help view from the COMMANDS registry."""
+    by_cat = {}
+    for c in COMMANDS:
+        if c["scope"] not in scope_set:
+            continue
+        by_cat.setdefault(c["category"], []).append(c)
+
+    ordered_cats = [c for c in category_order if c in by_cat]
+    # Any category that wasn't in the order list goes to the end, alphabetised.
+    for cat in sorted(by_cat):
+        if cat not in ordered_cats:
+            ordered_cats.append(cat)
+
+    parts = [header, ""]
+    for cat in ordered_cats:
+        parts.append(f"*{_esc_md(cat)}*")
+        for c in by_cat[cat]:
+            parts.append(_format_cmd_line(c))
+        parts.append("")
+
+    parts.append("💡 `/help <command>` shows details — e.g. `/help start_roll_call`")
+    parts.append("💡 Add `::2` or `::3` to target a specific rollcall when multiple are active")
+    return "\n".join(parts)
+
+
+def _render_command_detail(cmd):
+    """Detail card for /help <name>."""
+    aliases = cmd.get("aliases") or []
+    alias_line = ", ".join(f"/{a}" for a in aliases) if aliases else "—"
+    args = cmd.get("args") or "—"
+    sample = cmd.get("sample") or "—"
+    details = cmd.get("details") or cmd.get("summary") or ""
+
+    lines = [
+        f"*/{_esc_md(cmd['name'])}*",
+        f"_{_esc_md(cmd['scope'].replace('_', ' ').title())} command — {_esc_md(cmd['category'])}_",
+        "",
+        _esc_md(cmd["summary"]),
+        "",
+        f"*Aliases:* {_esc_md(alias_line)}",
+        f"*Arguments:* {_esc_md(args)}",
+        f"*Example:* `{sample}`",  # leave sample raw inside code-span for readability
+        "",
+        _esc_md(details),
+    ]
+    return "\n".join(lines)
+
+
+def _suggest_command(query):
+    """Return the closest command name/alias by Levenshtein distance, or None
+    if nothing's within 2 edits. Defends against typos in /help <cmd>."""
+    if not query:
+        return None
+    q = query.strip().lstrip('/').lower()
+    if not q:
+        return None
+    best, best_d = None, 999
+    for candidate in all_names_and_aliases():
+        d = _lev_distance(q, candidate)
+        if d < best_d:
+            best, best_d = candidate, d
+    if best_d <= 2:
+        return best
+    return None
 
 
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/start")
@@ -24,99 +120,49 @@ async def welcome_and_explanation(message):
 
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/help")
 async def help_commands(message):
-    parts = message.text.strip().lower().split()
-    is_admin_help = len(parts) > 1 and parts[1] == "admin"
+    """Three forms:
+      /help              → user-command list
+      /help admin        → admin-command list (incl. super-admin docs)
+      /help <command>    → detail card for one command (name OR any alias)
+    Unknown <command> falls back to a fuzzy "did you mean…?" hint.
+    Everything renders from the COMMANDS registry in commands_registry.py."""
+    parts = message.text.strip().split()
+    if len(parts) <= 1:
+        await bot.send_message(
+            message.chat.id,
+            _render_command_list({"user"}, USER_CATEGORY_ORDER, "🎯 *RollCall — User Commands*"),
+            parse_mode='Markdown',
+        )
+        return
 
-    if is_admin_help:
-        await bot.send_message(message.chat.id, r'''⚙️ *RollCall — Admin Commands*
+    arg = parts[1].lower().lstrip('/')
+    if arg == "admin":
+        await bot.send_message(
+            message.chat.id,
+            _render_command_list({"user", "admin", "super_admin"}, ADMIN_CATEGORY_ORDER, "⚙️ *RollCall — Admin Commands*"),
+            parse_mode='Markdown',
+        )
+        return
 
-🔧 *Rollcall*
-/start\_roll\_call (/src) [title] — Start a rollcall
-/end\_roll\_call (/erc) [::N] — End rollcall
-/panel [::N] — Resend vote panel with buttons
+    cmd = lookup_command(arg)
+    if cmd is not None:
+        await bot.send_message(message.chat.id, _render_command_detail(cmd), parse_mode='Markdown')
+        return
 
-📝 *Settings*
-/set\_title (/st) title — Event title
-/set\_limit (/sl) N — Max attendees (0 = unlimited)
-/set\_rollcall\_time (/srt) DD-MM-YYYY HH:MM — Auto-close time
-/set\_rollcall\_reminder (/srr) hours — Reminder before close
-/event\_fee (/ef) amount — Total event fee
-/individual\_fee (/if) — Per-person fee split
-/location (/loc) place — Event location
-/when (/w) — Show scheduled event time
-/shh — Silent mode (no ack messages)
-/louder — Loud mode (ack message after each vote)
-/timezone (/tz) Region/City — e.g. Asia/Kolkata
-
-👥 *Proxy* _(non-Telegram members)_
-/set\_in\_for (/sif) name [::N]
-/set\_out\_for (/sof) name [::N]
-/set\_maybe\_for (/smf) name [::N]
-
-📅 *Templates*
-/templates — List saved templates
-/set\_template name "Title" [limit=N] [location=X] [fee=X]
-/start\_template name [title] — Start rollcall from template
-/delete\_template name
-/schedule\_template name <weekday> <HH:MM> — Weekly auto-start
-/schedule\_template name <weekday> <HH:MM> biweekly
-/schedule\_template name monthly <day> <HH:MM>
-/schedule\_template name off — Disable schedule
-/schedules — View & toggle schedules
-
-🗂 *User Management*
-/delete\_user name [::N] — Remove user (asks confirmation)
-/set\_status name <in|out|maybe> [::N] — Override user status
-/buzz [message] [::N] — Ping non-voters (30s cooldown)
-/set\_admins / /unset\_admins — Toggle admin-only mode
-
-👻 *Ghost Tracking*
-/toggle\_ghost\_tracking [on|off]
-/set\_absent\_limit N — Missed sessions before reconfirmation
-/mark\_absent — Review & mark no-shows from a past session
-/clear\_absent name — Reset ghost count for a user
-
-📋 *Audit*
-/audit\_log [N] — Last N admin actions (default 20)
-
-🔑 *Super Admin*
-/broadcast "message" — Send message to all bot chats
-
-💡 Add `::2` or `::3` to target a specific rollcall when multiple are active
-_For user commands: /help_
-''', parse_mode='Markdown')
+    # Unknown command — offer a suggestion if one is close.
+    suggestion = _suggest_command(arg)
+    if suggestion:
+        await bot.send_message(
+            message.chat.id,
+            f"No command `/{_esc_md(arg)}` — did you mean `/{_esc_md(suggestion)}`? Try `/help {suggestion}`.",
+            parse_mode='Markdown',
+        )
     else:
-        await bot.send_message(message.chat.id, r'''🎯 *RollCall Bot*
-
-🗳 *Vote*
-/in [comment] — Mark yourself IN ✅
-/out [comment] — Mark yourself OUT ❌
-/maybe [comment] — Mark yourself MAYBE 🤔
-
-📋 *View Lists*
-/rollcalls (/r) — All active rollcalls
-/whos\_in (/wi) — Who's IN
-/whos\_out (/wo) — Who's OUT
-/whos\_maybe (/wm) — Who's undecided
-/whos\_waiting (/ww) — Waitlist
-
-📊 *Stats & History*
-/stats — Your attendance stats & streak
-/stats group — Group summary
-/stats top — Leaderboard (top 10 by IN)
-/stats ghost — No-show leaderboard
-/stats @user or name — Another user's stats
-/history [N] [page] — Past ended rollcalls
-
-⚙️ *Settings*
-/timezone (/tz) Region/City — e.g. Asia/Kolkata
-/shh — Silent mode
-/louder — Loud mode
-/version — Bot version
-
-💡 Add `::2` or `::3` to target a specific rollcall when multiple are active
-_For admin commands: /help admin_
-''', parse_mode='Markdown')
+        await bot.send_message(
+            message.chat.id,
+            f"No command `/{_esc_md(arg)}`. Use /help or /help admin to see the list.",
+            parse_mode='Markdown',
+        )
 
 
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/set_admins")

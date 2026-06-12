@@ -2,12 +2,15 @@
 
 ## Command registry rule
 
-Whenever a bot command is **added, renamed, or removed**, you must update **both** of the following in the same change:
+`rollCall/commands_registry.py` is the **single source of truth** for every bot command. It feeds:
+- `register_commands()` in `rollCall/runner.py` (drives the Telegram BotCommand menu, user-scope vs admin-scope)
+- `help_commands()` in `rollCall/handlers/core.py` (drives `/help`, `/help admin`, and `/help <name>` detail view)
 
-1. **`register_commands()` in `rollCall/runner.py`** — put it in `user_commands` (visible to everyone) or `admin_commands` (visible only to chat admins via `BotCommandScopeAllChatAdministrators`).
-2. **`help_commands()` in `rollCall/handlers/core.py`** — the `/help` (user view) or `/help admin` (admin view) message text sent to users.
+Whenever a bot command is **added, renamed, or removed**:
+1. Edit only `commands_registry.py` — add/modify/remove the entry in the `COMMANDS` list with all eight fields (`name`, `aliases`, `scope`, `category`, `args`, `sample`, `summary`, `details`).
+2. Make sure the actual handler function exists and uses the same command name (and aliases) in its `@bot.message_handler(...)` decorator.
 
-These must stay in sync with each other and with the actual command handlers. Never add a handler without updating both.
+The menu and `/help` re-render automatically — no other files to keep in sync.
 
 ## Error replies
 

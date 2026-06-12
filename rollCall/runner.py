@@ -283,61 +283,21 @@ async def start_health_server():
 async def register_commands():
     """Register bot commands at two scopes:
     - default: only commands everyone can run (voting, lists, stats, help)
-    - chat administrators: full set including admin/owner-only commands
+    - chat administrators: full set including admin-only commands
 
-    This keeps the Telegram command menu uncluttered for regular members
-    and avoids showing them commands that just return a permission error."""
+    Pulls from the COMMANDS registry in commands_registry.py — the single
+    source of truth. Adding/renaming a command means editing only that file
+    and the matching handler; this function picks it up automatically.
+
+    super_admin-scoped commands (e.g. /broadcast) are intentionally not in
+    either menu — they're documented in /help admin but hidden from the
+    Telegram menu so non-owners don't see permission errors."""
     import telebot.types as ttypes
+    from commands_registry import COMMANDS
 
-    user_commands = [
-        ttypes.BotCommand("in",            "Mark yourself as attending"),
-        ttypes.BotCommand("out",           "Mark yourself as not attending"),
-        ttypes.BotCommand("maybe",         "Mark yourself as undecided"),
-        ttypes.BotCommand("rollcalls",     "List all active rollcalls"),
-        ttypes.BotCommand("whos_in",       "Show who's attending"),
-        ttypes.BotCommand("whos_out",      "Show who's not attending"),
-        ttypes.BotCommand("whos_maybe",    "Show who's undecided"),
-        ttypes.BotCommand("whos_waiting",  "Show waitlist"),
-        ttypes.BotCommand("stats",         "Attendance stats and leaderboard"),
-        ttypes.BotCommand("history",       "Past rollcall history"),
-        ttypes.BotCommand("timezone",      "Set your timezone (e.g. Asia/Kolkata)"),
-        ttypes.BotCommand("help",          "User commands  |  /help admin for admin commands"),
-        ttypes.BotCommand("version",       "Show bot version"),
-    ]
-
+    user_commands  = [ttypes.BotCommand(c["name"], c["summary"]) for c in COMMANDS if c["scope"] == "user"]
     admin_commands = user_commands + [
-        ttypes.BotCommand("start_roll_call",        "Start a new rollcall"),
-        ttypes.BotCommand("end_roll_call",           "End the active rollcall"),
-        ttypes.BotCommand("panel",                   "Show inline control panel"),
-        ttypes.BotCommand("set_title",               "Set rollcall title"),
-        ttypes.BotCommand("set_limit",               "Set max attendance limit"),
-        ttypes.BotCommand("set_rollcall_time",       "Set rollcall end date/time"),
-        ttypes.BotCommand("set_rollcall_reminder",   "Set reminder hours before close"),
-        ttypes.BotCommand("event_fee",               "Set total event fee"),
-        ttypes.BotCommand("individual_fee",          "Per-person fee split"),
-        ttypes.BotCommand("location",                "Set event location"),
-        ttypes.BotCommand("when",                    "Show rollcall scheduled time"),
-        ttypes.BotCommand("buzz",                    "Notify members who haven't voted"),
-        ttypes.BotCommand("set_in_for",              "Mark another user as IN"),
-        ttypes.BotCommand("set_out_for",             "Mark another user as OUT"),
-        ttypes.BotCommand("set_maybe_for",           "Mark another user as MAYBE"),
-        ttypes.BotCommand("delete_user",             "Remove a user from rollcall"),
-        ttypes.BotCommand("set_status",              "Move user between IN/OUT/MAYBE"),
-        ttypes.BotCommand("set_admins",              "Enable admin-only mode"),
-        ttypes.BotCommand("unset_admins",            "Disable admin-only mode"),
-        ttypes.BotCommand("templates",               "List saved templates"),
-        ttypes.BotCommand("set_template",            "Create or update a template"),
-        ttypes.BotCommand("start_template",          "Start rollcall from a template"),
-        ttypes.BotCommand("delete_template",         "Delete a template"),
-        ttypes.BotCommand("schedule_template",       "Schedule auto-start (weekly etc.)"),
-        ttypes.BotCommand("schedules",               "View and manage schedules"),
-        ttypes.BotCommand("toggle_ghost_tracking",   "Enable/disable ghost tracking"),
-        ttypes.BotCommand("set_absent_limit",        "Set reconfirmation threshold"),
-        ttypes.BotCommand("clear_absent",            "Clear ghost count for a user"),
-        ttypes.BotCommand("mark_absent",             "Mark users as absent"),
-        ttypes.BotCommand("audit_log",               "View admin audit log"),
-        ttypes.BotCommand("shh",                     "Enable silent mode"),
-        ttypes.BotCommand("louder",                  "Disable silent mode"),
+        ttypes.BotCommand(c["name"], c["summary"]) for c in COMMANDS if c["scope"] == "admin"
     ]
 
     # Default scope (regular members in groups + private chats): user commands only

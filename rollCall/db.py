@@ -2570,11 +2570,16 @@ def get_user_attendance_count(chat_id: int, user_id: int) -> int:
 
 
 def get_leaderboard_by_attendance(chat_id: int, limit: int = 10) -> List[Dict]:
-    """Return top-N users ordered by ACTUAL attendance count (final-IN in
-    ended rollcalls), tiebreak by total_rollcalls ASC so users who attended
-    the same number of sessions but participated in fewer (higher attendance
-    %) rank higher. Each row: user_id, attended, total_rollcalls, total_in,
-    total_out, total_maybe.
+    """Return top-N PARTICIPANTS (real users + proxies) ordered by actual
+    attendance count (final-IN in ended rollcalls), tiebreak by
+    participation count ASC (rewards consistency — fewer sessions to attend
+    the same number of times means higher attendance %).
+
+    Each row: kind ('real' or 'proxy'), user_id (int or None), proxy_name
+    (str or None), display_name (best-known label), attended,
+    total_rollcalls (sessions participated in), total_in/out/maybe (vote
+    breakdown — proxy rows count per-session, real-user rows count per-vote
+    via user_stats).
     """
     conn = get_connection()
     cursor = None
@@ -2582,6 +2587,8 @@ def get_leaderboard_by_attendance(chat_id: int, limit: int = 10) -> List[Dict]:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
         active_false = 'FALSE' if db_type == 'postgresql' else '0'
+
+        # Real users — same query as before
         cursor.execute(f"""
             SELECT us.user_id,
                    COALESCE(att.attended, 0) AS attended,
@@ -2598,34 +2605,371 @@ def get_leaderboard_by_attendance(chat_id: int, limit: int = 10) -> List[Dict]:
                 GROUP BY u.user_id
             ) att ON att.user_id = us.user_id
             WHERE us.chat_id = {ph}
-            ORDER BY attended DESC, total_rc ASC, us.user_id ASC
-            LIMIT {ph}
-        """, (chat_id, chat_id, limit))
-        rows = cursor.fetchall()
-        result = []
-        for r in rows:
-            if isinstance(r, dict):
-                result.append({
-                    'user_id':         r.get('user_id'),
-                    'attended':        int(r.get('attended') or 0),
-                    'total_rollcalls': int(r.get('total_rc') or 0),
-                    'total_in':        int(r.get('total_in') or 0),
-                    'total_out':       int(r.get('total_out') or 0),
-                    'total_maybe':     int(r.get('total_maybe') or 0),
-                })
+        """, (chat_id, chat_id))
+        real_rows = cursor.fetchall()
+
+        # Proxies — derived entirely from proxy_users because they have no
+        # user_stats counter row. Per-row metrics: attended = COUNT where
+        # status='in', total_rc = COUNT (any status), in/out/maybe = COUNT
+        # of each. proxy_users is UNIQUE(rollcall_id, name) so each row
+        # counts at most once per rollcall.
+        cursor.execute(f"""
+            SELECT pu.name,
+                   SUM(CASE WHEN pu.status = 'in'    THEN 1 ELSE 0 END) AS attended,
+                   COUNT(*) AS total_rc,
+                   SUM(CASE WHEN pu.status = 'in'    THEN 1 ELSE 0 END) AS total_in,
+                   SUM(CASE WHEN pu.status = 'out'   THEN 1 ELSE 0 END) AS total_out,
+                   SUM(CASE WHEN pu.status = 'maybe' THEN 1 ELSE 0 END) AS total_maybe
+            FROM proxy_users pu
+            JOIN rollcalls r ON pu.rollcall_id = r.id
+            WHERE r.chat_id = {ph} AND r.is_active = {active_false}
+            GROUP BY pu.name
+        """, (chat_id,))
+        proxy_rows = cursor.fetchall()
+
+        # Real-user display names — latest first_name/username per user_id
+        # from ended rollcalls. Filtered by is_active so we don't pull
+        # display data from in-progress sessions.
+        name_map = {}
+        if real_rows:
+            uids = [
+                (r['user_id'] if isinstance(r, dict) else r[0])
+                for r in real_rows
+            ]
+            placeholders = ",".join([ph] * len(uids))
+            if db_type == 'postgresql':
+                cursor.execute(f"""
+                    SELECT DISTINCT ON (u.user_id) u.user_id, u.first_name, u.username
+                    FROM users u
+                    JOIN rollcalls r ON u.rollcall_id = r.id
+                    WHERE r.chat_id = {ph} AND r.is_active = {active_false}
+                      AND u.user_id IN ({placeholders})
+                    ORDER BY u.user_id, u.updated_at DESC
+                """, (chat_id, *uids))
             else:
-                result.append({
-                    'user_id':         r[0],
-                    'attended':        int(r[1] or 0),
-                    'total_rollcalls': int(r[2] or 0),
-                    'total_in':        int(r[3] or 0),
-                    'total_out':       int(r[4] or 0),
-                    'total_maybe':     int(r[5] or 0),
-                })
-        return result
+                cursor.execute(f"""
+                    SELECT u.user_id, u.first_name, u.username
+                    FROM users u
+                    JOIN rollcalls r ON u.rollcall_id = r.id
+                    WHERE r.chat_id = {ph} AND r.is_active = {active_false}
+                      AND u.user_id IN ({placeholders})
+                    ORDER BY u.user_id, u.updated_at ASC
+                """, (chat_id, *uids))
+            for ur in cursor.fetchall():
+                if isinstance(ur, dict):
+                    name_map[ur['user_id']] = (ur.get('first_name'), ur.get('username'))
+                else:
+                    name_map[ur[0]] = (ur[1], ur[2])
+
+        # Materialize unified rows
+        unified = []
+        for r in real_rows:
+            uid = r['user_id'] if isinstance(r, dict) else r[0]
+            first_name, username = name_map.get(uid, (None, None))
+            unified.append({
+                'kind':            'real',
+                'user_id':         uid,
+                'proxy_name':      None,
+                'display_name':    first_name or username or f"User {uid}",
+                'username':        username,
+                'attended':        int((r['attended']    if isinstance(r, dict) else r[1]) or 0),
+                'total_rollcalls': int((r['total_rc']    if isinstance(r, dict) else r[2]) or 0),
+                'total_in':        int((r['total_in']    if isinstance(r, dict) else r[3]) or 0),
+                'total_out':       int((r['total_out']   if isinstance(r, dict) else r[4]) or 0),
+                'total_maybe':     int((r['total_maybe'] if isinstance(r, dict) else r[5]) or 0),
+            })
+        for r in proxy_rows:
+            name = r['name'] if isinstance(r, dict) else r[0]
+            unified.append({
+                'kind':            'proxy',
+                'user_id':         None,
+                'proxy_name':      name,
+                'display_name':    name,
+                'username':        None,
+                'attended':        int((r['attended']    if isinstance(r, dict) else r[1]) or 0),
+                'total_rollcalls': int((r['total_rc']    if isinstance(r, dict) else r[2]) or 0),
+                'total_in':        int((r['total_in']    if isinstance(r, dict) else r[3]) or 0),
+                'total_out':       int((r['total_out']   if isinstance(r, dict) else r[4]) or 0),
+                'total_maybe':     int((r['total_maybe'] if isinstance(r, dict) else r[5]) or 0),
+            })
+
+        # Sort by attended DESC, total_rollcalls ASC (rewards consistency),
+        # then deterministic tiebreak by display_name ASC.
+        unified.sort(key=lambda x: (-x['attended'], x['total_rollcalls'], x['display_name'] or ''))
+        return unified[:limit]
     except Exception as e:
         logging.error(f"Error fetching attendance leaderboard: {e}")
         return []
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def get_proxy_attendance_count(chat_id: int, proxy_name: str) -> int:
+    """Same idea as get_user_attendance_count, but for proxy users."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        active_false = 'FALSE' if db_type == 'postgresql' else '0'
+        cursor.execute(f"""
+            SELECT COUNT(*) FROM proxy_users pu
+            JOIN rollcalls r ON pu.rollcall_id = r.id
+            WHERE r.chat_id = {ph} AND pu.name = {ph}
+              AND pu.status = 'in' AND r.is_active = {active_false}
+        """, (chat_id, proxy_name))
+        row = cursor.fetchone()
+        if row is None:
+            return 0
+        if isinstance(row, dict):
+            return int(next(iter(row.values())) or 0)
+        return int(row[0] or 0)
+    except Exception as e:
+        logging.error(f"Error counting proxy attendance: {e}")
+        return 0
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def get_proxy_stats(chat_id: int, proxy_name: str) -> Dict:
+    """Return a single proxy's aggregate stats: total rollcalls participated
+    in (any status), attended (final-IN), and per-status vote breakdown.
+    For proxies the per-status breakdown is per-rollcall (proxy_users is
+    UNIQUE(rollcall_id, name) so each row = one final status per session)
+    — not per-vote like the real-user total_in counter."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        active_false = 'FALSE' if db_type == 'postgresql' else '0'
+        cursor.execute(f"""
+            SELECT COUNT(*) AS total_rc,
+                   SUM(CASE WHEN pu.status = 'in'    THEN 1 ELSE 0 END) AS total_in,
+                   SUM(CASE WHEN pu.status = 'out'   THEN 1 ELSE 0 END) AS total_out,
+                   SUM(CASE WHEN pu.status = 'maybe' THEN 1 ELSE 0 END) AS total_maybe
+            FROM proxy_users pu
+            JOIN rollcalls r ON pu.rollcall_id = r.id
+            WHERE r.chat_id = {ph} AND pu.name = {ph} AND r.is_active = {active_false}
+        """, (chat_id, proxy_name))
+        row = cursor.fetchone()
+        if row is None:
+            return {'total_rollcalls': 0, 'attended': 0, 'total_in': 0, 'total_out': 0, 'total_maybe': 0}
+        if isinstance(row, dict):
+            return {
+                'total_rollcalls': int(row.get('total_rc') or 0),
+                'attended':        int(row.get('total_in') or 0),
+                'total_in':        int(row.get('total_in') or 0),
+                'total_out':       int(row.get('total_out') or 0),
+                'total_maybe':     int(row.get('total_maybe') or 0),
+            }
+        return {
+            'total_rollcalls': int(row[0] or 0),
+            'attended':        int(row[1] or 0),
+            'total_in':        int(row[1] or 0),
+            'total_out':       int(row[2] or 0),
+            'total_maybe':     int(row[3] or 0),
+        }
+    except Exception as e:
+        logging.error(f"Error fetching proxy stats: {e}")
+        return {'total_rollcalls': 0, 'attended': 0, 'total_in': 0, 'total_out': 0, 'total_maybe': 0}
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def get_group_attendance_totals(chat_id: int) -> Dict:
+    """Aggregate group-level attendance stats including BOTH real users and
+    proxies. Returns: total_rollcalls (ended), real_attendance_slots,
+    proxy_attendance_slots, real_participants (distinct user_id),
+    proxy_participants (distinct proxy name), real_vote_in/out/maybe (from
+    user_stats — per-vote counts), proxy_in/out/maybe (per-session counts
+    from proxy_users), waitlist_promotions (from user_stats)."""
+    conn = get_connection()
+    cursor = None
+    out = {
+        'total_rollcalls': 0,
+        'real_attendance_slots': 0, 'proxy_attendance_slots': 0,
+        'real_participants': 0,     'proxy_participants': 0,
+        'real_vote_in': 0, 'real_vote_out': 0, 'real_vote_maybe': 0,
+        'proxy_in': 0,     'proxy_out': 0,     'proxy_maybe': 0,
+        'waitlist_promotions': 0,
+    }
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        active_false = 'FALSE' if db_type == 'postgresql' else '0'
+
+        cursor.execute(
+            f"SELECT COUNT(*) FROM rollcalls WHERE chat_id = {ph} AND is_active = {active_false}",
+            (chat_id,),
+        )
+        row = cursor.fetchone()
+        out['total_rollcalls'] = int((row[0] if not isinstance(row, dict) else next(iter(row.values()))) or 0)
+
+        cursor.execute(f"""
+            SELECT COUNT(*), COUNT(DISTINCT u.user_id)
+            FROM users u
+            JOIN rollcalls r ON u.rollcall_id = r.id
+            WHERE r.chat_id = {ph} AND u.status = 'in' AND r.is_active = {active_false}
+        """, (chat_id,))
+        row = cursor.fetchone()
+        if row is not None:
+            if isinstance(row, dict):
+                vals = list(row.values())
+                out['real_attendance_slots'] = int(vals[0] or 0)
+                out['real_participants']     = int(vals[1] or 0)
+            else:
+                out['real_attendance_slots'] = int(row[0] or 0)
+                out['real_participants']     = int(row[1] or 0)
+
+        cursor.execute(f"""
+            SELECT COUNT(*), COUNT(DISTINCT pu.name)
+            FROM proxy_users pu
+            JOIN rollcalls r ON pu.rollcall_id = r.id
+            WHERE r.chat_id = {ph} AND pu.status = 'in' AND r.is_active = {active_false}
+        """, (chat_id,))
+        row = cursor.fetchone()
+        if row is not None:
+            if isinstance(row, dict):
+                vals = list(row.values())
+                out['proxy_attendance_slots'] = int(vals[0] or 0)
+                out['proxy_participants']     = int(vals[1] or 0)
+            else:
+                out['proxy_attendance_slots'] = int(row[0] or 0)
+                out['proxy_participants']     = int(row[1] or 0)
+
+        cursor.execute(f"""
+            SELECT SUM(total_in), SUM(total_out), SUM(total_maybe), SUM(total_waiting_to_in)
+            FROM user_stats WHERE chat_id = {ph}
+        """, (chat_id,))
+        row = cursor.fetchone()
+        if row is not None:
+            if isinstance(row, dict):
+                vals = list(row.values())
+                out['real_vote_in']        = int(vals[0] or 0)
+                out['real_vote_out']       = int(vals[1] or 0)
+                out['real_vote_maybe']     = int(vals[2] or 0)
+                out['waitlist_promotions'] = int(vals[3] or 0)
+            else:
+                out['real_vote_in']        = int(row[0] or 0)
+                out['real_vote_out']       = int(row[1] or 0)
+                out['real_vote_maybe']     = int(row[2] or 0)
+                out['waitlist_promotions'] = int(row[3] or 0)
+
+        cursor.execute(f"""
+            SELECT SUM(CASE WHEN pu.status = 'in'    THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN pu.status = 'out'   THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN pu.status = 'maybe' THEN 1 ELSE 0 END)
+            FROM proxy_users pu
+            JOIN rollcalls r ON pu.rollcall_id = r.id
+            WHERE r.chat_id = {ph} AND r.is_active = {active_false}
+        """, (chat_id,))
+        row = cursor.fetchone()
+        if row is not None:
+            if isinstance(row, dict):
+                vals = list(row.values())
+                out['proxy_in']    = int(vals[0] or 0)
+                out['proxy_out']   = int(vals[1] or 0)
+                out['proxy_maybe'] = int(vals[2] or 0)
+            else:
+                out['proxy_in']    = int(row[0] or 0)
+                out['proxy_out']   = int(row[1] or 0)
+                out['proxy_maybe'] = int(row[2] or 0)
+
+        return out
+    except Exception as e:
+        logging.error(f"Error fetching group attendance totals: {e}")
+        return out
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def get_bot_attendance_totals() -> Dict:
+    """Bot-wide aggregate of real-attendance slots + active group counts.
+    Companion to build_bot_stats_text — does NOT scope to a single chat."""
+    conn = get_connection()
+    cursor = None
+    out = {'real_attendance_slots': 0, 'proxy_attendance_slots': 0,
+           'ended_rollcalls': 0, 'real_participants': 0, 'proxy_participants': 0}
+    try:
+        cursor = conn.cursor()
+        active_false = 'FALSE' if db_type == 'postgresql' else '0'
+
+        cursor.execute(f"SELECT COUNT(*) FROM rollcalls WHERE is_active = {active_false}")
+        row = cursor.fetchone()
+        out['ended_rollcalls'] = int((row[0] if not isinstance(row, dict) else next(iter(row.values()))) or 0)
+
+        cursor.execute(f"""
+            SELECT COUNT(*), COUNT(DISTINCT u.user_id)
+            FROM users u JOIN rollcalls r ON u.rollcall_id = r.id
+            WHERE u.status = 'in' AND r.is_active = {active_false}
+        """)
+        row = cursor.fetchone()
+        if row is not None:
+            if isinstance(row, dict):
+                vals = list(row.values())
+                out['real_attendance_slots'] = int(vals[0] or 0)
+                out['real_participants']     = int(vals[1] or 0)
+            else:
+                out['real_attendance_slots'] = int(row[0] or 0)
+                out['real_participants']     = int(row[1] or 0)
+
+        cursor.execute(f"""
+            SELECT COUNT(*), COUNT(DISTINCT pu.name)
+            FROM proxy_users pu JOIN rollcalls r ON pu.rollcall_id = r.id
+            WHERE pu.status = 'in' AND r.is_active = {active_false}
+        """)
+        row = cursor.fetchone()
+        if row is not None:
+            if isinstance(row, dict):
+                vals = list(row.values())
+                out['proxy_attendance_slots'] = int(vals[0] or 0)
+                out['proxy_participants']     = int(vals[1] or 0)
+            else:
+                out['proxy_attendance_slots'] = int(row[0] or 0)
+                out['proxy_participants']     = int(row[1] or 0)
+
+        return out
+    except Exception as e:
+        logging.error(f"Error fetching bot attendance totals: {e}")
+        return out
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def find_proxy_in_chat(chat_id: int, name: str) -> bool:
+    """Return True if a proxy named `name` exists in any rollcall of this chat.
+    Used by resolve_user_for_stats to fall through to proxy lookup."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(f"""
+            SELECT 1 FROM proxy_users pu
+            JOIN rollcalls r ON pu.rollcall_id = r.id
+            WHERE r.chat_id = {ph} AND pu.name = {ph}
+            LIMIT 1
+        """, (chat_id, name))
+        return cursor.fetchone() is not None
+    except Exception as e:
+        logging.error(f"Error finding proxy in chat: {e}")
+        return False
     finally:
         if cursor is not None:
             cursor.close()

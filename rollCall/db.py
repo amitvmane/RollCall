@@ -2544,6 +2544,10 @@ def log_admin_action(
 ) -> None:
     """Record an admin action in the audit log."""
     conn = get_connection()
+    # Guard against UnboundLocalError when conn.cursor() raises — if cursor
+    # was never assigned, finally would otherwise leak the NameError out and
+    # surface as "Something went wrong" to callers like /buzz.
+    cursor = None
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
@@ -2560,7 +2564,8 @@ def log_admin_action(
         except Exception:
             pass
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 

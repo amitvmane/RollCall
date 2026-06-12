@@ -599,6 +599,27 @@ class TestDbCursorSafety(unittest.TestCase):
             src = inspect.getsource(db_mod.add_or_update_proxy_user)
             self.assertIn("cursor = None", src)
 
+    def test_log_admin_action_guard_present(self):
+        """
+        log_admin_action must also have the cursor=None guard.
+
+        Production symptom: /buzz successfully sent the @mention message,
+        then log_admin_action's finally block raised UnboundLocalError
+        because cursor was never assigned (conn.cursor() had raised under
+        a degraded sqlite/PG connection). The UnboundLocalError leaked
+        back to buzz's outer catch and surfaced to the user as the
+        generic "Something went wrong" message — confusing UX since the
+        buzz itself had already succeeded.
+        """
+        import inspect
+        import db as db_mod
+        if not isinstance(db_mod.log_admin_action, MagicMock):
+            src = inspect.getsource(db_mod.log_admin_action)
+            self.assertIn("cursor = None", src,
+                          "cursor must be initialised to None before the try block")
+            self.assertIn("if cursor is not None", src,
+                          "finally block must guard cursor.close() with a None check")
+
     def test_get_all_chat_ids_returns_list(self):
         """get_all_chat_ids must exist and return a list (DB mocked → [])."""
         import db as db_mod

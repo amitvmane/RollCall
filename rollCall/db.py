@@ -6,8 +6,15 @@ Supports both PostgreSQL and SQLite
 import os
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
+
+
+def _utcnow_naive():
+    """Naive UTC 'now' — direct replacement for the deprecated datetime.utcnow().
+    Same value (no tzinfo) so all existing comparisons and stored timestamps
+    continue to round-trip identically."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -25,6 +32,17 @@ except ImportError:
 
 import sqlite3
 from config import DATABASE_URL
+
+# Replace the default sqlite3 datetime adapter (deprecated as of Python 3.12,
+# scheduled for removal). The bot stores naive UTC datetimes; this preserves
+# byte-identical "YYYY-MM-DD HH:MM:SS[.ffffff]" output that _parse_db_datetime
+# in models.py already reads back. Registered at module import time so every
+# sqlite3 connection — including get_connection() — uses the explicit adapter.
+def _sqlite_adapt_datetime_iso(val):
+    return val.isoformat(" ")
+
+
+sqlite3.register_adapter(datetime, _sqlite_adapt_datetime_iso)
 
 # Database connection pool/connection
 db_pool = None
@@ -2599,7 +2617,7 @@ def upsert_chat_member(chat_id: int, user_id: int, first_name: str, username: st
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
-        now = datetime.utcnow()
+        now = _utcnow_naive()
         if db_type == 'postgresql':
             cursor.execute(f"""
                 INSERT INTO chat_members (chat_id, user_id, first_name, username, is_active, last_seen)

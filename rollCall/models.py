@@ -2,7 +2,13 @@ import logging
 import asyncio
 from exceptions import *
 from functions import *
-from datetime import datetime
+from datetime import datetime, timezone
+
+# Naive UTC "now" — direct replacement for the deprecated datetime.utcnow().
+# Produces the same value (no tzinfo) so all existing comparisons and DB writes
+# continue to work without any downstream changes.
+def _utcnow_naive():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 import db
 import re
 
@@ -70,7 +76,7 @@ class RollCall:
             self.timezone = "Asia/Calcutta"
             self.location = None
             self.event_fee = None
-            self.createdDate = datetime.utcnow()
+            self.createdDate = _utcnow_naive()
 
             # Save to database and get ID
             if chat_id:
@@ -110,7 +116,7 @@ class RollCall:
 
         # Parse datetime from database safely for both SQLite and PostgreSQL
         self.finalizeDate = _parse_db_datetime(data.get('finalize_date'))
-        self.createdDate = _parse_db_datetime(data.get('created_at')) or datetime.utcnow()
+        self.createdDate = _parse_db_datetime(data.get('created_at')) or _utcnow_naive()
         # Load users from database
         self._load_users_from_db()
 

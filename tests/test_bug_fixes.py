@@ -599,6 +599,37 @@ class TestDbCursorSafety(unittest.TestCase):
             src = inspect.getsource(db_mod.add_or_update_proxy_user)
             self.assertIn("cursor = None", src)
 
+    def test_no_bare_except_in_production_code(self):
+        """
+        Bare `except:` catches BaseException — including KeyboardInterrupt
+        and SystemExit — preventing the process from shutting down cleanly.
+        Always use `except Exception:` (or a more specific subclass).
+
+        Was an issue in functions.py auto_complete_timezone (Levenshtein
+        score_cutoff overflow) before today's audit; fixed in the same
+        commit that added this test.
+        """
+        import os
+        import re
+        repo = os.path.join(os.path.dirname(__file__), "..", "rollCall")
+        offenders = []
+        for root, _, files in os.walk(repo):
+            for fname in files:
+                if not fname.endswith(".py"):
+                    continue
+                path = os.path.join(root, fname)
+                with open(path) as f:
+                    src = f.read().split("\n")
+                for i, line in enumerate(src):
+                    # Match `except:` (with optional trailing comment) but NOT
+                    # `except Foo:` or `except (A, B):`.
+                    if re.match(r"^\s*except:\s*(#.*)?$", line):
+                        offenders.append(f"{os.path.relpath(path, repo)}:{i+1}")
+        self.assertEqual(offenders, [],
+            f"Bare `except:` found at: {offenders}. "
+            "Use `except Exception:` so KeyboardInterrupt and SystemExit "
+            "still propagate.")
+
     def test_every_db_finally_cursor_close_is_guarded(self):
         """
         SEC-1 sweep coverage: every `cursor.close()` line in rollCall/db.py

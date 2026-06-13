@@ -123,8 +123,11 @@ def auto_complete_timezone(timezone):
                 if diff <= threshold and diff < best_distance:
                     best_distance = diff
                     best_match = tz
-            except:
-                # Levenshtein.distance might raise if distance exceeds cutoff
+            except Exception:
+                # Levenshtein.distance raises when distance exceeds the
+                # score_cutoff. Use a typed catch — bare `except:` also
+                # swallows KeyboardInterrupt and SystemExit, which we want
+                # to propagate so the process can shut down cleanly.
                 continue
         
         return best_match

@@ -770,29 +770,45 @@ class TestLogTaskExc(unittest.TestCase):
 
     def test_source_all_create_task_calls_attach_callback(self):
         """
-        Source check: every asyncio.create_task(...) call must be followed by
-        .add_done_callback(_log_task_exc) on the same logical line.
-        Checks voting.py and lifecycle.py where create_task is used.
-        """
-        import re
-        handler_files = [
-            os.path.join(os.path.dirname(__file__), "..", "rollCall", "handlers", "voting.py"),
-            os.path.join(os.path.dirname(__file__), "..", "rollCall", "handlers", "lifecycle.py"),
-        ]
-        for module_path in handler_files:
-            with open(module_path) as f:
-                source = f.read()
+        Source check: every asyncio.create_task(...) call anywhere under
+        rollCall/ must attach a done callback so exceptions surface in logs.
+        Without it asyncio silently swallows the exception when the task
+        is garbage-collected.
 
-            lines = source.splitlines()
-            for i, line in enumerate(lines):
-                if "asyncio.create_task(" in line and "add_done_callback" not in line:
-                    # Allow the callback on the very next line
-                    next_line = lines[i + 1] if i + 1 < len(lines) else ""
-                    self.assertIn(
-                        "add_done_callback",
-                        next_line,
-                        f"{module_path} line {i + 1}: asyncio.create_task() without .add_done_callback(_log_task_exc): {line.strip()}"
-                    )
+        Previously only covered voting.py + lifecycle.py — extended to walk
+        the whole rollCall/ tree after we found a missing callback in
+        check_reminders.resume_reminder_loops on 2026-06-14.
+        """
+        repo = os.path.join(os.path.dirname(__file__), "..", "rollCall")
+        offenders = []
+        for root, _, files in os.walk(repo):
+            for fname in files:
+                if not fname.endswith(".py"):
+                    continue
+                path = os.path.join(root, fname)
+                with open(path) as f:
+                    lines = f.read().splitlines()
+                for i, line in enumerate(lines):
+                    if "asyncio.create_task(" not in line:
+                        continue
+                    if "add_done_callback" in line:
+                        continue
+                    # Allow the callback on the next non-blank line (some
+                    # call sites split the chain for readability — see
+                    # runner.py's _sched_task / _prune_task)
+                    has_callback = False
+                    for j in range(i + 1, min(i + 4, len(lines))):
+                        if "add_done_callback" in lines[j]:
+                            has_callback = True
+                            break
+                        if lines[j].strip() and not lines[j].strip().startswith("#"):
+                            break
+                    if not has_callback:
+                        offenders.append(f"{os.path.relpath(path, repo)}:{i+1}")
+        self.assertEqual(offenders, [],
+            f"asyncio.create_task() without .add_done_callback(_log_task_exc) "
+            f"at: {offenders}. Background-task exceptions get silently "
+            "swallowed without the callback.")
 
 
 # ---------------------------------------------------------------------------

@@ -203,7 +203,11 @@ async def resume_reminder_loops():
             rollcalls = manager.get_rollcalls(chat_id)
             if any(rc.finalizeDate is not None for rc in rollcalls):
                 tzname = chat.get("timezone", "Asia/Kolkata")
-                asyncio.create_task(start(rollcalls, tzname, chat_id))
+                # Attach the done callback so any exception in the resumed
+                # reminder loop surfaces in logs. Without it, asyncio swallows
+                # the exception when the task is garbage-collected.
+                from bot_state import _log_task_exc
+                asyncio.create_task(start(rollcalls, tzname, chat_id)).add_done_callback(_log_task_exc)
                 resumed += 1
                 logging.info(
                     f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "

@@ -297,9 +297,100 @@ async def _auto_start_from_template(chat_id: int, tmpl: dict):
         asyncio.create_task(start(rollcalls, tzname, chat_id)).add_done_callback(_log_exc)
 
 
+# Catch-up window: if the loop's iteration drifts past the exact scheduled
+# minute (event-loop pressure, slow telegram API calls in a previous
+# iteration, or a bot restart that landed just after the schedule time),
+# still fire as long as we're within this many minutes after the scheduled
+# time and haven't fired today. 30 minutes is conservative enough to never
+# fire a "stale" rollcall but generous enough to absorb any realistic skew.
+SCHEDULE_CATCHUP_MINUTES = 30
+
+
+def _parse_hhmm(raw):
+    """Parse a schedule_time string into (hour, minute). Tolerates "9:00",
+    "09:00", "9:5", "09:05" — all are valid clock times even though only the
+    last is zero-padded. Returns None on any garbage so the caller can skip
+    rather than crash."""
+    if not raw:
+        return None
+    try:
+        sh, sm = raw.strip().split(":")
+        h, m = int(sh), int(sm)
+        if 0 <= h < 24 and 0 <= m < 60:
+            return h, m
+    except (ValueError, AttributeError):
+        pass
+    return None
+
+
+def _is_due_now(schedule_time, schedule_day, last_date, now, recurrence_type):
+    """Return True iff this template's schedule should fire on the current
+    iteration. Centralises the day/time/catch-up/dedupe logic for all three
+    recurrence types so we can't drift between them again.
+
+    Catch-up semantics: we treat the schedule as due if the chat's clock has
+    crossed the scheduled minute (within SCHEDULE_CATCHUP_MINUTES) AND we
+    haven't fired today AND day-of-week/day-of-month matches.
+
+    Old code did exact-minute string equality on now.strftime('%H:%M') ==
+    schedule_time. Any iteration that skipped the target minute (drift
+    accumulating over hours, an iteration that took >60s, or a bot restart
+    landing past the schedule) silently lost the entire week's run. This
+    function eliminates that whole class of bug.
+    """
+    hm = _parse_hhmm(schedule_time)
+    if hm is None:
+        return False
+    sh, sm = hm
+    today_date_str = now.strftime("%Y-%m-%d")
+
+    # Already fired today — never fire twice.
+    if last_date == today_date_str:
+        return False
+
+    scheduled_dt = now.replace(hour=sh, minute=sm, second=0, microsecond=0)
+
+    # Too early — clock hasn't reached the scheduled time yet.
+    if now < scheduled_dt:
+        return False
+    # Too late — outside the catch-up window. Avoid firing a stale rollcall
+    # hours after its time has passed (e.g. bot was down all day).
+    if (now - scheduled_dt).total_seconds() > SCHEDULE_CATCHUP_MINUTES * 60:
+        return False
+
+    today_name = now.strftime("%A").lower()
+    if recurrence_type == "monthly":
+        try:
+            target_day = int(schedule_day)
+        except (ValueError, TypeError):
+            return False
+        if now.day != target_day:
+            return False
+        return True
+
+    if today_name != (schedule_day or "").lower():
+        return False
+
+    if recurrence_type == "biweekly" and last_date:
+        try:
+            last_dt = datetime.strptime(last_date, "%Y-%m-%d").date()
+            if (now.date() - last_dt).days < 14:
+                return False
+        except (ValueError, TypeError):
+            return False
+
+    return True
+
+
 async def check_template_schedules():
-    """Persistent loop that fires scheduled templates at their configured day/time."""
-    # Align to the next minute boundary before entering the loop
+    """Persistent loop that fires scheduled templates at their configured day/time.
+
+    Iterates roughly once per minute; the catch-up window in _is_due_now
+    means we don't need micro-precise alignment, just regular polling.
+    """
+    # Align to the next minute boundary before entering the loop (purely
+    # cosmetic for logs — the catch-up window means timing doesn't have to
+    # be precise).
     current_sec = int(datetime.now().strftime("%S"))
     if current_sec != 0:
         await asyncio.sleep(60 - current_sec)
@@ -324,50 +415,19 @@ async def check_template_schedules():
                     tz = pytz.timezone("Asia/Calcutta")
 
                 now = datetime.now(tz)
-                today_name = now.strftime("%A").lower()
-                now_time_str = now.strftime("%H:%M")
                 today_date = now.strftime("%Y-%m-%d")
-
                 recurrence_type = tmpl.get("recurrence_type", "weekly") or "weekly"
 
-                if recurrence_type == "monthly":
-                    # schedule_day is a day-of-month integer string (e.g. "15")
-                    try:
-                        target_day = int(schedule_day)
-                    except (ValueError, TypeError):
-                        continue
-                    if now.day != target_day:
-                        continue
-                    if now_time_str != schedule_time:
-                        continue
-                    if last_date == today_date:
-                        continue
-                elif recurrence_type == "biweekly":
-                    if today_name != schedule_day.lower():
-                        continue
-                    if now_time_str != schedule_time:
-                        continue
-                    if last_date == today_date:
-                        continue
-                    if last_date:
-                        try:
-                            last_dt = datetime.strptime(last_date, "%Y-%m-%d").date()
-                            if (now.date() - last_dt).days < 14:
-                                continue
-                        except (ValueError, TypeError):
-                            continue
-                else:
-                    # weekly (default)
-                    if today_name != schedule_day.lower():
-                        continue
-                    if now_time_str != schedule_time:
-                        continue
-                    if last_date == today_date:
-                        continue
+                if not _is_due_now(schedule_time, schedule_day, last_date, now, recurrence_type):
+                    continue
 
                 try:
                     await _auto_start_from_template(chat_id, tmpl)
                     update_template_last_scheduled_date(chat_id, tmpl["name"], today_date)
+                    logging.info(
+                        f"[scheduler] Auto-started template '{tmpl.get('name')}' for chat {chat_id} "
+                        f"(scheduled {schedule_day} {schedule_time}, fired at {now.strftime('%H:%M:%S')})"
+                    )
                 except Exception:
                     logging.exception(
                         f"Failed to auto-start template '{tmpl.get('name')}' for chat {chat_id}"

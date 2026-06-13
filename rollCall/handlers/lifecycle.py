@@ -596,9 +596,15 @@ async def callback_handler(call):
                 return
             await bot.answer_callback_query(call.id)
             markup = await get_end_confirm_keyboard(rc_number)
+            # Auto-started rollcalls + /src with no args can leave rc.title empty
+            # or "<Empty>". Show a sensible label instead of "''" in the prompt.
+            if rc.title and rc.title != "<Empty>":
+                rc_label = f"'{rc.title}'"
+            else:
+                rc_label = "this rollcall"
             try:
                 await bot.edit_message_text(
-                    f"Are you sure you want to end rollcall '{rc.title}' (#{rc_number})?",
+                    f"Are you sure you want to end {rc_label} (#{rc_number})?",
                     cid, call.message.message_id, reply_markup=markup,
                 )
             except Exception as e:
@@ -622,6 +628,7 @@ async def callback_handler(call):
                     return
 
                 rc_db_id = rc.id
+                rc_title = rc.title  # capture before manager.remove_rollcall pops it
                 ghost_tracking_on = manager.get_ghost_tracking_enabled(cid)
                 has_any_users = len(rc.inList) > 0
                 absent_already_marked = rc.absent_marked
@@ -642,16 +649,45 @@ async def callback_handler(call):
 
                 await bot.answer_callback_query(call.id, "Rollcall ended")
                 ended_by = call.from_user.first_name or call.from_user.username or "someone"
-                log_admin_action(cid, call.from_user.id, ended_by, "end_rollcall", target_name=rc.title, rollcall_id=rc_db_id, details="via panel")
+                log_admin_action(cid, call.from_user.id, ended_by, "end_rollcall", target_name=rc_title, rollcall_id=rc_db_id, details="via panel")
 
+                # Build the final list. If finishList() raises (e.g. unexpected
+                # rc state), fall back to a short "ended by" notice rather than
+                # silently leaving the user staring at the stranded "Are you
+                # sure?" prompt — that was the original bug.
                 try:
                     final_text = rc.finishList().replace("__RCID__", str(rc_number))
-                    final_text = f"{final_text}\n\nRollcall ended by {ended_by}"
-                    await bot.send_message(cid, final_text)
+                    final_text = f"{final_text}\n\n🎉 Ended by {ended_by}"
                 except Exception:
-                    pass
+                    logging.exception(f"Failed to build finish list for rollcall #{rc_number}")
+                    final_text = f"Rollcall #{rc_number} ended by {ended_by}."
 
-                logging.info(f"[{_ts()}] [CHAT {cid}] Rollcall ended: '{rc.title}' by {ended_by} (panel)")
+                # Replace the "Are you sure?" prompt IN PLACE with the final
+                # text — this dismisses the confirmation message and the Yes/No
+                # buttons in one edit, exactly where the user clicked Yes. The
+                # original code did neither: prompt stayed on screen with stale
+                # buttons, and any failure when sending a new finish-list
+                # message was silently swallowed.
+                try:
+                    await bot.edit_message_text(
+                        final_text, cid, call.message.message_id, reply_markup=None,
+                    )
+                except Exception:
+                    # Edit can fail legitimately (message too old, deleted,
+                    # text >4096 chars). Fall back: strip the inline keyboard
+                    # so Yes/No can't be clicked again, then send the finish
+                    # list as a new message.
+                    logging.exception(f"Failed to edit end-confirm message for chat {cid}")
+                    try:
+                        await bot.edit_message_reply_markup(cid, call.message.message_id, reply_markup=None)
+                    except Exception:
+                        pass
+                    try:
+                        await bot.send_message(cid, final_text)
+                    except Exception:
+                        logging.exception(f"Failed to send finish list for chat {cid}")
+
+                logging.info(f"[{_ts()}] [CHAT {cid}] Rollcall ended: '{rc_title}' by {ended_by} (panel)")
                 _panel_msg_ids.pop((cid, rc_number), None)
                 manager.remove_rollcall(cid, rc_number - 1)
                 for num in sorted(n for (c, n) in list(_panel_msg_ids) if c == cid and n > rc_number):

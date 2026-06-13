@@ -130,6 +130,45 @@ class TestIsDueNowMonthly(unittest.TestCase):
         self.assertTrue(_is_due_now("09:00", "15", None, now, "monthly"))
 
 
+class TestAutoCloseUsesGteComparison(unittest.TestCase):
+    """The auto-CLOSE path in check_reminders.check() must use `>=` against
+    the rollcall's finalize_dt, NOT exact-minute equality. Auto-START's
+    silently-skipped-on-drift bug must not have a sibling on the close
+    side: if a rollcall is scheduled to close at 17:00 and the check loop
+    iteration lands at 17:05 (or bot was down until 17:30), the rollcall
+    must still end. The `>=` comparison gives this for free — exact
+    equality (the old auto-start bug) would NOT.
+
+    This is a source-inspection regression to lock in the invariant — the
+    check() function is an infinite loop, harder to drive directly from a
+    test, so we assert the invariant at the source level.
+    """
+
+    def test_check_uses_gte_for_finalize_dt(self):
+        import inspect
+        import check_reminders
+        src = inspect.getsource(check_reminders.check)
+        # Must use >= so a check loop iteration that lands AFTER the
+        # finalize moment (drift, restart, slow previous iter) still ends
+        # the rollcall.
+        self.assertIn("now_date >= finalize_dt", src,
+            "auto-close comparison must be >= so drift/restart can't skip "
+            "overdue rollcalls")
+        # Must NOT use exact equality on the formatted time string — that
+        # would silently miss minutes the same way auto-START did before
+        # b8ee99c.
+        self.assertNotIn('now_date_string == finalize_dt', src)
+
+    def test_check_uses_gte_for_reminder_time(self):
+        import inspect
+        import check_reminders
+        src = inspect.getsource(check_reminders.check)
+        # The pre-close reminder ("event is N hours away") must also use
+        # >= so it doesn't silently skip when the loop drifts past the
+        # exact reminder minute.
+        self.assertIn("now_date >= reminder_time", src)
+
+
 class TestRegressionMissedSundayRollcall(unittest.TestCase):
     """The exact production scenario reported: Sunday 9am scheduled, the
     loop drifted past the minute, and the schedule was silently skipped."""

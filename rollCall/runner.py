@@ -8,7 +8,7 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 from db import init_db, db_ping
 from aiohttp import web
@@ -19,7 +19,13 @@ class JsonFormatter(logging.Formatter):
 
     def format(self, record):
         payload = {
-            "ts": datetime.utcfromtimestamp(record.created).isoformat(timespec="milliseconds") + "Z",
+            # Build a naive UTC datetime via fromtimestamp(timezone.utc) +
+            # tz-strip — gives the exact same "YYYY-MM-DDTHH:MM:SS.fff" output
+            # the old utcfromtimestamp(record.created) produced, but without
+            # the Python 3.12 DeprecationWarning. The trailing "Z" is appended
+            # explicitly so the JSON shape is byte-identical to the previous
+            # log-aggregator-facing format.
+            "ts": datetime.fromtimestamp(record.created, timezone.utc).replace(tzinfo=None).isoformat(timespec="milliseconds") + "Z",
             "level": record.levelname,
             "logger": record.name,
             "msg": record.getMessage(),

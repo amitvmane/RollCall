@@ -158,6 +158,7 @@ def release_connection(conn):
 def create_tables():
     """Create database tables if they don't exist"""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         
@@ -565,7 +566,8 @@ def create_tables():
         logging.error(f"Error creating tables: {e}")
         raise
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -798,6 +800,7 @@ def _run_migrations(conn, cursor):
 def get_or_create_chat(chat_id: int) -> Dict:
     """Get or create chat settings"""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         if db_type == 'postgresql':
@@ -842,7 +845,8 @@ def get_or_create_chat(chat_id: int) -> Dict:
         logging.error(f"Error in get_or_create_chat: {e}")
         raise
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -850,6 +854,7 @@ def get_or_create_chat(chat_id: int) -> Dict:
 def update_chat_settings(chat_id: int, **kwargs) -> bool:
     """Update chat settings"""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         
@@ -879,13 +884,15 @@ def update_chat_settings(chat_id: int, **kwargs) -> bool:
         logging.error(f"Error updating chat settings: {e}")
         return False
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
 def create_rollcall(chat_id: int, title: str, timezone: str = 'Asia/Kolkata') -> int:
     """Create a new rollcall and return its ID"""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         
@@ -915,7 +922,8 @@ def create_rollcall(chat_id: int, title: str, timezone: str = 'Asia/Kolkata') ->
         logging.error(f"Error creating rollcall: {e}")
         raise
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -925,6 +933,7 @@ def ensure_rollcall_stats(rollcall_id: int) -> None:
     Called once at rollcall creation so increment_rollcall_stat never fails silently.
     """
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         if db_type == 'postgresql':
@@ -950,7 +959,8 @@ def ensure_rollcall_stats(rollcall_id: int) -> None:
         conn.rollback()
         logging.error(f"Error ensuring rollcall_stats: {e}")
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -958,6 +968,7 @@ def ensure_rollcall_stats(rollcall_id: int) -> None:
 def get_rollcall(rollcall_id: int) -> Optional[Dict]:
     """Get rollcall by ID"""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         
@@ -981,13 +992,15 @@ def get_rollcall(rollcall_id: int) -> Optional[Dict]:
         logging.error(f"Error getting rollcall: {e}")
         return None
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
 def update_rollcall(rollcall_id: int, **kwargs) -> bool:
     """Update rollcall fields"""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         
@@ -1014,13 +1027,15 @@ def update_rollcall(rollcall_id: int, **kwargs) -> bool:
         logging.error(f"Error updating rollcall: {e}")
         return False
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
 def get_active_rollcalls(chat_id: int) -> List[Dict]:
     """Get all active rollcalls for a chat"""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         
@@ -1049,7 +1064,8 @@ def get_active_rollcalls(chat_id: int) -> List[Dict]:
         logging.error(f"Error getting active rollcalls: {e}")
         return []
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -1071,6 +1087,7 @@ def create_or_update_template(
     Uniqueness is (chatid, name).
     """
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         if db_type == "postgresql":
@@ -1150,7 +1167,8 @@ def create_or_update_template(
         logging.error(f"Error creating/updating template: {e}")
         return False
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == "postgresql":
             release_connection(conn)
 
@@ -1158,6 +1176,7 @@ def create_or_update_template(
 def end_rollcall(rollcall_id: int) -> bool:
     """Mark a rollcall as ended"""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         
@@ -1186,7 +1205,8 @@ def end_rollcall(rollcall_id: int) -> bool:
         logging.error(f"Error ending rollcall: {e}")
         return False
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -1406,6 +1426,7 @@ def get_all_users(rollcall_id: int):
     - For MAYBE (no positions), fall back to created_at.
     """
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         if db_type == "postgresql":
@@ -1464,7 +1485,8 @@ def get_all_users(rollcall_id: int):
         logging.error(f"Error getting all users: {e}")
         return []
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == "postgresql":
             release_connection(conn)
 
@@ -1472,6 +1494,7 @@ def get_all_users(rollcall_id: int):
 def get_proxy_users_by_status(rollcall_id: int, status: str) -> List[Dict]:
     """Get proxy users by status ordered by position"""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         if db_type == 'postgresql':
@@ -1512,7 +1535,8 @@ def get_proxy_users_by_status(rollcall_id: int, status: str) -> List[Dict]:
         logging.error(f"Error getting proxy users: {e}")
         return []
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -1522,6 +1546,7 @@ def delete_template(chatid: int, name: str) -> bool:
     Delete a template for a chat by name.
     """
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         if db_type == "postgresql":
@@ -1541,7 +1566,8 @@ def delete_template(chatid: int, name: str) -> bool:
         logging.error(f"Error deleting template: {e}")
         return False
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == "postgresql":
             release_connection(conn)
 
@@ -1549,6 +1575,7 @@ def delete_template(chatid: int, name: str) -> bool:
 def set_template_schedule(chatid: int, name: str, schedule_day: str, schedule_time: str, recurrence_type: str = 'weekly') -> bool:
     """Set schedule day/time and enable auto-start for a template."""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         ph = "%s" if db_type == "postgresql" else "?"
@@ -1566,7 +1593,8 @@ def set_template_schedule(chatid: int, name: str, schedule_day: str, schedule_ti
         logging.error(f"Error setting template schedule: {e}")
         return False
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == "postgresql":
             release_connection(conn)
 
@@ -1574,6 +1602,7 @@ def set_template_schedule(chatid: int, name: str, schedule_day: str, schedule_ti
 def disable_template_schedule(chatid: int, name: str) -> bool:
     """Disable auto-start scheduling for a template."""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         ph = "%s" if db_type == "postgresql" else "?"
@@ -1589,7 +1618,8 @@ def disable_template_schedule(chatid: int, name: str) -> bool:
         logging.error(f"Error disabling template schedule: {e}")
         return False
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == "postgresql":
             release_connection(conn)
 
@@ -1597,6 +1627,7 @@ def disable_template_schedule(chatid: int, name: str) -> bool:
 def enable_template_schedule(chatid: int, name: str) -> bool:
     """Re-enable scheduling for a template using its previously saved schedule parameters."""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         ph = "%s" if db_type == "postgresql" else "?"
@@ -1612,7 +1643,8 @@ def enable_template_schedule(chatid: int, name: str) -> bool:
         logging.error(f"Error enabling template schedule: {e}")
         return False
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == "postgresql":
             release_connection(conn)
 
@@ -1620,6 +1652,7 @@ def enable_template_schedule(chatid: int, name: str) -> bool:
 def update_template_last_scheduled_date(chatid: int, name: str, date_str: str) -> bool:
     """Record the date (YYYY-MM-DD) when a template was last auto-started."""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         ph = "%s" if db_type == "postgresql" else "?"
@@ -1634,7 +1667,8 @@ def update_template_last_scheduled_date(chatid: int, name: str, date_str: str) -
         logging.error(f"Error updating last_scheduled_date: {e}")
         return False
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == "postgresql":
             release_connection(conn)
 
@@ -1642,6 +1676,7 @@ def update_template_last_scheduled_date(chatid: int, name: str, date_str: str) -
 def get_all_scheduled_templates() -> List[Dict]:
     """Return all templates with schedule_enabled=True across all chats."""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         if db_type == "postgresql":
@@ -1654,7 +1689,8 @@ def get_all_scheduled_templates() -> List[Dict]:
         logging.error(f"Error fetching scheduled templates: {e}")
         return []
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == "postgresql":
             release_connection(conn)
 
@@ -1665,6 +1701,7 @@ def delete_user_by_name(rollcall_id: int, name: str) -> bool:
     exactly one user (otherwise we refuse to delete to avoid wiping the
     wrong account when two real users share a first name)."""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
@@ -1724,7 +1761,8 @@ def delete_user_by_name(rollcall_id: int, name: str) -> bool:
         logging.error(f"Error deleting user: {e}")
         return False
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -1733,6 +1771,7 @@ def delete_user_by_id(rollcall_id: int, user_id) -> bool:
     """Delete a real user (int user_id) or proxy user (str user_id) by exact id.
     Used by /set_status which knows the precise user from the in-memory cache."""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
@@ -1756,7 +1795,8 @@ def delete_user_by_id(rollcall_id: int, user_id) -> bool:
         logging.error(f"Error deleting user by id: {e}")
         return False
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -1777,6 +1817,7 @@ def increment_user_stat(chat_id: int, user_id: int, field: str) -> None:
     if field not in VALID_USER_STAT_FIELDS:
         raise ValueError(f"Invalid stat field: {field}")
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         if db_type == 'postgresql':
@@ -1812,7 +1853,8 @@ def increment_user_stat(chat_id: int, user_id: int, field: str) -> None:
         conn.rollback()
         logging.error(f"Error incrementing user stat {field}: {e}")
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -1821,6 +1863,7 @@ def increment_rollcall_stat(rollcall_id: int, field: str) -> None:
     if field not in VALID_ROLLCALL_STAT_FIELDS:
         raise ValueError(f"Invalid rollcall stat field: {field}")
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         if db_type == 'postgresql':
@@ -1856,7 +1899,8 @@ def increment_rollcall_stat(rollcall_id: int, field: str) -> None:
         conn.rollback()
         logging.error(f"Error incrementing rollcall stat {field}: {e}")
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -1864,6 +1908,7 @@ def increment_rollcall_stat(rollcall_id: int, field: str) -> None:
 def get_next_position(rollcall_id: int, status: str) -> int:
     """Return next position index across both users and proxy_users tables."""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         if status == 'in':
@@ -1891,7 +1936,8 @@ def get_next_position(rollcall_id: int, status: str) -> int:
 
         return max(max_real, max_proxy) + 1
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -1902,6 +1948,7 @@ def get_templates(chatid: int) -> List[Dict]:
     Get all templates for a chat.
     """
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         if db_type == "postgresql":
@@ -1923,7 +1970,8 @@ def get_templates(chatid: int) -> List[Dict]:
         logging.error(f"Error getting templates: {e}")
         return []
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == "postgresql":
             release_connection(conn)
 
@@ -1946,7 +1994,8 @@ def db_ping():
         return False
     finally:
         if cursor:
-            cursor.close()
+            if cursor is not None:
+                cursor.close()
         if db_type == 'postgresql' and conn:
             release_connection(conn)
 
@@ -1955,6 +2004,7 @@ def get_template(chatid: int, name: str) -> Optional[Dict]:
     Get a single template for a chat by name.
     """
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         if db_type == "postgresql":
@@ -1978,7 +2028,8 @@ def get_template(chatid: int, name: str) -> Optional[Dict]:
         logging.error(f"Error getting template: {e}")
         return None
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == "postgresql":
             release_connection(conn)
 
@@ -1990,6 +2041,7 @@ def get_template(chatid: int, name: str) -> Optional[Dict]:
 def get_ghost_count(chat_id: int, user_id: int) -> int:
     """Return the ghost count for a user in a chat (0 if no record)."""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
@@ -2003,7 +2055,8 @@ def get_ghost_count(chat_id: int, user_id: int) -> int:
         logging.error(f"Error getting ghost count: {e}")
         return 0
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -2011,6 +2064,7 @@ def get_ghost_count(chat_id: int, user_id: int) -> int:
 def get_ghost_count_by_proxy_name(chat_id: int, proxy_name: str) -> int:
     """Return the ghost count for a proxy user in a chat (0 if no record)."""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
@@ -2024,7 +2078,8 @@ def get_ghost_count_by_proxy_name(chat_id: int, proxy_name: str) -> int:
         logging.error(f"Error getting ghost count by proxy name: {e}")
         return 0
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -2035,6 +2090,7 @@ def increment_ghost_count(chat_id: int, user_id: int, user_name: str, proxy_name
     For proxy users (added via /sif), pass user_id=-1 and the proxy_name.
     """
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         if db_type == 'postgresql':
@@ -2098,7 +2154,8 @@ def increment_ghost_count(chat_id: int, user_id: int, user_name: str, proxy_name
         logging.error(f"Error incrementing ghost count: {e}")
         return False
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -2109,6 +2166,7 @@ def reset_ghost_count(chat_id: int, user_id: int, proxy_name: str = None) -> boo
     For proxy users, pass user_id=-1 and the proxy_name.
     """
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
@@ -2130,7 +2188,8 @@ def reset_ghost_count(chat_id: int, user_id: int, proxy_name: str = None) -> boo
         logging.error(f"Error resetting ghost count: {e}")
         return False
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -2144,6 +2203,7 @@ def decrement_ghost_count(chat_id: int, user_id: int, proxy_name: str = None) ->
     leaderboard and reconf threshold treat them as fresh.
     """
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
@@ -2164,7 +2224,8 @@ def decrement_ghost_count(chat_id: int, user_id: int, proxy_name: str = None) ->
         logging.error(f"Error decrementing ghost count: {e}")
         return False
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -2172,6 +2233,7 @@ def decrement_ghost_count(chat_id: int, user_id: int, proxy_name: str = None) ->
 def get_ghost_leaderboard(chat_id: int) -> List[Dict]:
     """Return all users with ghost_count > 0 for a chat, sorted descending."""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
@@ -2187,7 +2249,8 @@ def get_ghost_leaderboard(chat_id: int) -> List[Dict]:
         logging.error(f"Error getting ghost leaderboard: {e}")
         return []
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -2195,6 +2258,7 @@ def get_ghost_leaderboard(chat_id: int) -> List[Dict]:
 def get_user_ghost_count_by_name(chat_id: int, user_name: str) -> Optional[Dict]:
     """Find a ghost record by user_name or proxy_name for a chat (for admin /clear_absent by name)."""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
@@ -2208,7 +2272,8 @@ def get_user_ghost_count_by_name(chat_id: int, user_name: str) -> Optional[Dict]
         logging.error(f"Error looking up ghost record by name: {e}")
         return None
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -2216,6 +2281,7 @@ def get_user_ghost_count_by_name(chat_id: int, user_name: str) -> Optional[Dict]
 def mark_rollcall_absent_done(rollcall_id: int) -> bool:
     """Mark a rollcall's absent selection as completed."""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
@@ -2232,7 +2298,8 @@ def mark_rollcall_absent_done(rollcall_id: int) -> bool:
         logging.error(f"Error marking rollcall absent done: {e}")
         return False
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -2246,6 +2313,7 @@ def get_unprocessed_rollcalls(chat_id: int, days: int = 30) -> List[Dict]:
       - had at least one user with status='in'
     """
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         if db_type == 'postgresql':
@@ -2283,7 +2351,8 @@ def get_unprocessed_rollcalls(chat_id: int, days: int = 30) -> List[Dict]:
         logging.error(f"Error getting unprocessed rollcalls: {e}")
         return []
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -2291,6 +2360,7 @@ def get_unprocessed_rollcalls(chat_id: int, days: int = 30) -> List[Dict]:
 def add_ghost_event(rollcall_id: int, chat_id: int, user_id: int = None, user_name: str = None, proxy_name: str = None) -> bool:
     """Record an individual ghost event for audit trail."""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
@@ -2306,7 +2376,8 @@ def add_ghost_event(rollcall_id: int, chat_id: int, user_id: int = None, user_na
         logging.error(f"Error adding ghost event: {e}")
         return False
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -2318,6 +2389,7 @@ def get_rollcall_in_users(rollcall_id: int) -> List[Dict]:
     Proxy users (added via /sif) have ``user_id=None`` and a ``proxy_name`` key.
     """
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
@@ -2350,7 +2422,8 @@ def get_rollcall_in_users(rollcall_id: int) -> List[Dict]:
         logging.error(f"Error getting rollcall IN users: {e}")
         return []
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -2359,6 +2432,7 @@ def get_rollcall_in_users(rollcall_id: int) -> List[Dict]:
 def save_ghost_selections(chat_id: int, rc_db_id: int, selected_ids: set) -> bool:
     """Save ghost selections to database for crash recovery"""
     conn = get_connection()
+    cursor = None
     cursor = conn.cursor()
     try:
         ph = "%s" if db_type == 'postgresql' else "?"
@@ -2379,7 +2453,8 @@ def save_ghost_selections(chat_id: int, rc_db_id: int, selected_ids: set) -> boo
         conn.rollback()
         return False
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -2387,6 +2462,7 @@ def save_ghost_selections(chat_id: int, rc_db_id: int, selected_ids: set) -> boo
 def load_ghost_selections(chat_id: int, rc_db_id: int) -> Optional[set]:
     """Load ghost selections from database for crash recovery"""
     conn = get_connection()
+    cursor = None
     cursor = conn.cursor()
     try:
         ph = "%s" if db_type == 'postgresql' else "?"
@@ -2404,7 +2480,8 @@ def load_ghost_selections(chat_id: int, rc_db_id: int) -> Optional[set]:
         logging.error(f"Error loading ghost selections: {e}")
         return None
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -2412,6 +2489,7 @@ def load_ghost_selections(chat_id: int, rc_db_id: int) -> Optional[set]:
 def create_ghost_selections_table() -> None:
     """Create ghost_selections table if not exists"""
     conn = get_connection()
+    cursor = None
     cursor = conn.cursor()
     try:
         if db_type == 'postgresql':
@@ -2434,7 +2512,8 @@ def create_ghost_selections_table() -> None:
     except Exception as e:
         logging.error(f"Error creating ghost_selections table: {e}")
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -2442,6 +2521,7 @@ def create_ghost_selections_table() -> None:
 def update_streak_on_checkin(chat_id: int, user_id: int) -> None:
     """Increment current_streak by 1 for a user at rollcall end; update best_streak if exceeded."""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
@@ -2470,7 +2550,8 @@ def update_streak_on_checkin(chat_id: int, user_id: int) -> None:
         conn.rollback()
         logging.error(f"Error updating streak on checkin: {e}")
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -2980,6 +3061,7 @@ def find_proxy_in_chat(chat_id: int, name: str) -> bool:
 def get_rollcall_history(chat_id: int, limit: int = 10, offset: int = 0) -> List[Dict]:
     """Return ended rollcalls for a chat with participant counts, supporting pagination."""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
@@ -3010,7 +3092,8 @@ def get_rollcall_history(chat_id: int, limit: int = 10, offset: int = 0) -> List
         logging.error(f"Error getting rollcall history: {e}")
         return []
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -3055,6 +3138,7 @@ def log_admin_action(
 def get_admin_audit_log(chat_id: int, limit: int = 15, offset: int = 0) -> List[Dict]:
     """Return admin/command actions for a chat with pagination support."""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
@@ -3068,7 +3152,8 @@ def get_admin_audit_log(chat_id: int, limit: int = 15, offset: int = 0) -> List[
         logging.error(f"Error fetching admin audit log: {e}")
         return []
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -3076,6 +3161,7 @@ def get_admin_audit_log(chat_id: int, limit: int = 15, offset: int = 0) -> List[
 def count_admin_audit_log(chat_id: int) -> int:
     """Return total number of recorded actions for a chat."""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
@@ -3089,7 +3175,8 @@ def count_admin_audit_log(chat_id: int) -> int:
         logging.error(f"Error counting admin audit log: {e}")
         return 0
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -3101,6 +3188,7 @@ def upsert_chat_member(chat_id: int, user_id: int, first_name: str, username: st
     fresh and the member is (re-)marked active.
     """
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
@@ -3129,7 +3217,8 @@ def upsert_chat_member(chat_id: int, user_id: int, first_name: str, username: st
     except Exception as e:
         logging.error(f"Error upserting chat member: {e}")
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -3137,6 +3226,7 @@ def upsert_chat_member(chat_id: int, user_id: int, first_name: str, username: st
 def mark_member_inactive(chat_id: int, user_id: int) -> None:
     """Mark a member as no longer in the group (left or kicked)."""
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
@@ -3149,7 +3239,8 @@ def mark_member_inactive(chat_id: int, user_id: int) -> None:
     except Exception as e:
         logging.error(f"Error marking member inactive: {e}")
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 
@@ -3161,6 +3252,7 @@ def get_active_members(chat_id: int) -> List[Dict]:
     once and have not been detected as having left the group.
     """
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
@@ -3176,7 +3268,8 @@ def get_active_members(chat_id: int) -> List[Dict]:
         logging.error(f"Error getting active members: {e}")
         return []
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
 

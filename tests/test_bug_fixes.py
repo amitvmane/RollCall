@@ -599,6 +599,55 @@ class TestDbCursorSafety(unittest.TestCase):
             src = inspect.getsource(db_mod.add_or_update_proxy_user)
             self.assertIn("cursor = None", src)
 
+    def test_every_db_finally_cursor_close_is_guarded(self):
+        """
+        SEC-1 sweep coverage: every `cursor.close()` line in rollCall/db.py
+        must either:
+          (a) be guarded by `if cursor is not None:` (added by the sweep
+              of all functions that assign cursor INSIDE the try block); OR
+          (b) live in a function that assigns cursor BEFORE the try, in
+              which case UnboundLocalError can never reach finally.
+
+        Locks in the cleanup of /buzz's "Something went wrong" symptom across
+        every db helper, not just log_admin_action where it surfaced.
+        """
+        import os
+        path = os.path.join(os.path.dirname(__file__), "..", "rollCall", "db.py")
+        with open(path) as f:
+            lines = f.read().split("\n")
+        unguarded = []
+        for i, line in enumerate(lines):
+            if line.strip() != "cursor.close()":
+                continue
+            # (a) guarded immediately by an `if cursor is not None:`
+            if any("if cursor is not None" in lines[j] for j in range(max(0, i-3), i)):
+                continue
+            # (b) cursor assigned before the enclosing try — walk back to the
+            # nearest `try:` and check whether cursor was assigned ABOVE it
+            # within the same function. The relevant pattern is
+            # `cursor = conn.cursor()` appearing before `try:`.
+            tried_already = False
+            for j in range(i, -1, -1):
+                if lines[j].strip().startswith("def "):
+                    break  # left the function without finding try
+                if lines[j].strip() == "try:":
+                    for k in range(j - 1, -1, -1):
+                        if lines[k].strip().startswith("def "):
+                            break
+                        if "cursor = conn.cursor" in lines[k]:
+                            tried_already = True
+                            break
+                    break
+            if tried_already:
+                continue
+            unguarded.append(i + 1)
+        self.assertEqual(unguarded, [],
+            f"Unguarded cursor.close() in db.py at line(s) {unguarded}. "
+            "Add `cursor = None` before the try block and guard the "
+            "finally with `if cursor is not None:`. See SEC-1 sweep "
+            "(commits 7ff985b, d9c2793, and the bulk sweep that "
+            "followed).")
+
     def test_log_admin_action_guard_present(self):
         """
         log_admin_action must also have the cursor=None guard.

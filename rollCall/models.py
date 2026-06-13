@@ -73,7 +73,7 @@ class RollCall:
             self.inListLimit = None
             self.reminder = None
             self.finalizeDate = None
-            self.timezone = "Asia/Calcutta"
+            self.timezone = "Asia/Kolkata"
             self.location = None
             self.event_fee = None
             self.createdDate = _utcnow_naive()

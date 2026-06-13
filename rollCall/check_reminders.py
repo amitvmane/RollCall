@@ -202,7 +202,7 @@ async def resume_reminder_loops():
             chat = manager.get_chat(chat_id)
             rollcalls = manager.get_rollcalls(chat_id)
             if any(rc.finalizeDate is not None for rc in rollcalls):
-                tzname = chat.get("timezone", "Asia/Calcutta")
+                tzname = chat.get("timezone", "Asia/Kolkata")
                 asyncio.create_task(start(rollcalls, tzname, chat_id))
                 resumed += 1
                 logging.info(
@@ -223,12 +223,12 @@ async def _auto_start_from_template(chat_id: int, tmpl: dict):
     from functions import get_next_weekday_datetime
 
     chat = manager.get_chat(chat_id)
-    tzname = chat.get("timezone", "Asia/Calcutta")
+    tzname = chat.get("timezone", "Asia/Kolkata")
     try:
         tz = pytz.timezone(tzname)
     except Exception:
-        tz = pytz.timezone("Asia/Calcutta")
-        tzname = "Asia/Calcutta"
+        tz = pytz.timezone("Asia/Kolkata")
+        tzname = "Asia/Kolkata"
 
     rollcalls = manager.get_rollcalls(chat_id)
     if len(rollcalls) >= 3:
@@ -410,9 +410,9 @@ async def check_template_schedules():
                 try:
                     from rollcall_manager import manager
                     chat = manager.get_chat(chat_id)
-                    tz = pytz.timezone(chat.get("timezone", "Asia/Calcutta"))
+                    tz = pytz.timezone(chat.get("timezone", "Asia/Kolkata"))
                 except Exception:
-                    tz = pytz.timezone("Asia/Calcutta")
+                    tz = pytz.timezone("Asia/Kolkata")
 
                 now = datetime.now(tz)
                 today_date = now.strftime("%Y-%m-%d")

@@ -168,7 +168,7 @@ def create_tables():
                     chat_id BIGINT PRIMARY KEY,
                     shh_mode BOOLEAN DEFAULT FALSE,
                     admin_rights BOOLEAN DEFAULT FALSE,
-                    timezone VARCHAR(100) DEFAULT 'Asia/Calcutta',
+                    timezone VARCHAR(100) DEFAULT 'Asia/Kolkata',
                     absent_limit INTEGER DEFAULT 1,
                     ghost_tracking_enabled BOOLEAN DEFAULT TRUE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -184,7 +184,7 @@ def create_tables():
                     in_list_limit INTEGER,
                     reminder_hours INTEGER,
                     finalize_date TIMESTAMP,
-                    timezone VARCHAR(100) DEFAULT 'Asia/Calcutta',
+                    timezone VARCHAR(100) DEFAULT 'Asia/Kolkata',
                     location TEXT,
                     event_fee TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -305,7 +305,7 @@ def create_tables():
                     chat_id INTEGER PRIMARY KEY,
                     shh_mode INTEGER DEFAULT 0,
                     admin_rights INTEGER DEFAULT 0,
-                    timezone TEXT DEFAULT 'Asia/Calcutta',
+                    timezone TEXT DEFAULT 'Asia/Kolkata',
                     absent_limit INTEGER DEFAULT 1,
                     ghost_tracking_enabled INTEGER DEFAULT 1,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -321,7 +321,7 @@ def create_tables():
                     in_list_limit INTEGER,
                     reminder_hours INTEGER,
                     finalize_date TIMESTAMP,
-                    timezone TEXT DEFAULT 'Asia/Calcutta',
+                    timezone TEXT DEFAULT 'Asia/Kolkata',
                     location TEXT,
                     event_fee TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -819,14 +819,14 @@ def get_or_create_chat(chat_id: int) -> Dict:
                 cursor.execute(
                     """INSERT INTO chats (chat_id, shh_mode, admin_rights, timezone, absent_limit, ghost_tracking_enabled)
                     VALUES (%s, %s, %s, %s, %s, %s) RETURNING *""",
-                    (chat_id, False, False, 'Asia/Calcutta', 1, True)
+                    (chat_id, False, False, 'Asia/Kolkata', 1, True)
                 )
                 result = dict(cursor.fetchone())
             else:
                 cursor.execute(
                     """INSERT INTO chats (chat_id, shh_mode, admin_rights, timezone, absent_limit, ghost_tracking_enabled)
                     VALUES (?, ?, ?, ?, ?, ?)""",
-                    (chat_id, 0, 0, 'Asia/Calcutta', 1, 1)
+                    (chat_id, 0, 0, 'Asia/Kolkata', 1, 1)
                 )
                 # Re-query to get actual DB values instead of hardcoding
                 cursor.execute(
@@ -883,7 +883,7 @@ def update_chat_settings(chat_id: int, **kwargs) -> bool:
         if db_type == 'postgresql':
             release_connection(conn)
 
-def create_rollcall(chat_id: int, title: str, timezone: str = 'Asia/Calcutta') -> int:
+def create_rollcall(chat_id: int, title: str, timezone: str = 'Asia/Kolkata') -> int:
     """Create a new rollcall and return its ID"""
     conn = get_connection()
     try:

@@ -373,12 +373,12 @@ async def start_template(message):
     event_time = tmpl.get("event_time")
 
     chat = manager.get_chat(cid)
-    tzname = chat.get("timezone", "Asia/Calcutta")
+    tzname = chat.get("timezone", "Asia/Kolkata")
     try:
         tz = pytz.timezone(tzname)
     except Exception:
-        tz = pytz.timezone("Asia/Calcutta")
-        tzname = "Asia/Calcutta"
+        tz = pytz.timezone("Asia/Kolkata")
+        tzname = "Asia/Kolkata"
 
     rc.timezone = tzname
     rc.finalizeDate = None

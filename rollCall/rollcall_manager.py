@@ -68,7 +68,7 @@ class RollCallManager:
                 'rollCalls': rollcalls,
                 'shh': chat_settings.get('shh_mode', False),
                 'adminRights': chat_settings.get('admin_rights', False),
-                'timezone': chat_settings.get('timezone', 'Asia/Calcutta'),
+                'timezone': chat_settings.get('timezone', 'Asia/Kolkata'),
                 'absentLimit': chat_settings.get('absent_limit', 1),
                 'ghostTrackingEnabled': bool(chat_settings.get('ghost_tracking_enabled', True))
             }

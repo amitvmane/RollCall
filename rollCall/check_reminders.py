@@ -22,12 +22,57 @@ _active_loops = set()
 
 
 def _ensure_aware(dt, tz):
-    """Return dt as tz-aware; localize naive datetimes using the given tz."""
+    """Return dt as tz-aware; localize naive datetimes using the given tz.
+
+    DST cutover handling (matters for chats in DST-observing zones —
+    Europe, parts of North America, etc.; harmless no-op for India and
+    other no-DST zones):
+
+      - Unambiguous time: localize directly. ~99.99% of cases.
+      - Ambiguous fall-back time (e.g. 1:30am on the day clocks fall back
+        from 2:00am to 1:00am — 1:30am occurs twice):
+          pytz raises AmbiguousTimeError on is_dst=None. We pick
+          is_dst=True, which corresponds to the EARLIER wall-time
+          occurrence (still in daylight time, before the clock change).
+          Matches a user's natural reading of "1:30am Sunday" as the
+          first 1:30am they'd encounter that morning.
+      - Non-existent spring-forward time (e.g. 2:30am on the day clocks
+        skip from 2:00am to 3:00am — 2:30am never exists):
+          pytz raises NonExistentTimeError on is_dst=None. We pick
+          is_dst=False, which interprets the time as standard, giving
+          the post-jump real moment (effectively maps 2:30am → 3:30am
+          local wall time on that day). The "missing" hour was skipped,
+          so fire at the next real wall-time slot rather than silently
+          dropping the run.
+
+    Old behavior was a bare-except → is_dst=False fallback for both
+    cases, which firstly fired ambiguous times at the LATER occurrence
+    (off by an hour from user expectation) and obscured what was
+    actually happening. Now each case is handled by its own typed
+    exception and documented.
+    """
     if dt is None or dt.tzinfo is not None:
         return dt
     try:
         return tz.localize(dt, is_dst=None)
+    except pytz.AmbiguousTimeError:
+        # Fall-back cutover — pick the earlier of the two valid
+        # interpretations so a scheduled 1:30am rollcall fires at the
+        # first 1:30am of the day, not the second.
+        return tz.localize(dt, is_dst=True)
+    except pytz.NonExistentTimeError:
+        # Spring-forward — the wall time the user typed never happened.
+        # is_dst=False maps it to the equivalent post-jump moment so we
+        # fire at the next real time slot instead of skipping the run.
+        logging.warning(
+            f"[_ensure_aware] non-existent local time {dt.isoformat()} in {tz}; "
+            "interpreting as standard-time equivalent (post-DST-jump)"
+        )
+        return tz.localize(dt, is_dst=False)
     except Exception:
+        # Defensive last-resort — same fallback the old code used.
+        # Should never reach here in practice.
+        logging.exception(f"[_ensure_aware] unexpected localize failure for {dt} in {tz}")
         return tz.localize(dt, is_dst=False)
 
 

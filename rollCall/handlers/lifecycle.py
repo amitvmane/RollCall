@@ -26,6 +26,7 @@ from rollcall_manager import manager
 from db import (
     update_rollcall, log_admin_action, increment_user_stat, increment_rollcall_stat,
     update_streak_on_checkin, reset_user_streak, upsert_chat_member,
+    update_proxy_streak_on_checkin, reset_proxy_streak,
 )
 
 
@@ -246,6 +247,20 @@ async def end_roll_call(message):
                 reset_user_streak(cid, uid)
             for uid in participants:
                 increment_user_stat(cid, uid, "total_rollcalls")
+
+            # Proxy streaks — same semantics as real-user streaks, just keyed
+            # on proxy.name and stored in the parallel proxy_stats table.
+            # Proxies have string user_ids so they fall through every
+            # `isinstance(u.user_id, int)` filter above.
+            proxy_participants = {
+                u.name for u in (rc.inList + rc.outList + rc.maybeList + rc.waitList)
+                if not isinstance(u.user_id, int)
+            }
+            proxy_in_names = {u.name for u in in_users if not isinstance(u.user_id, int)}
+            for name in proxy_in_names:
+                update_proxy_streak_on_checkin(cid, name)
+            for name in proxy_participants - proxy_in_names:
+                reset_proxy_streak(cid, name)
 
             ended_by = message.from_user.first_name or message.from_user.username or "someone"
             finish_text = rc.finishList().replace("__RCID__", str(rc_number + 1))
@@ -646,6 +661,17 @@ async def callback_handler(call):
                     reset_user_streak(cid, uid)
                 for uid in participants:
                     increment_user_stat(cid, uid, "total_rollcalls")
+
+                # Proxy streaks — parallel to the real-user path above.
+                proxy_participants = {
+                    u.name for u in (rc.inList + rc.outList + rc.maybeList + rc.waitList)
+                    if not isinstance(u.user_id, int)
+                }
+                proxy_in_names = {u.name for u in rc.inList if not isinstance(u.user_id, int)}
+                for name in proxy_in_names:
+                    update_proxy_streak_on_checkin(cid, name)
+                for name in proxy_participants - proxy_in_names:
+                    reset_proxy_streak(cid, name)
 
                 await bot.answer_callback_query(call.id, "Rollcall ended")
                 ended_by = call.from_user.first_name or call.from_user.username or "someone"

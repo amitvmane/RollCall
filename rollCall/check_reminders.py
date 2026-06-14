@@ -10,6 +10,7 @@ from db import (
     end_rollcall, update_streak_on_checkin, reset_user_streak, get_all_scheduled_templates,
     update_template_last_scheduled_date, get_all_chat_ids, increment_user_stat,
     clear_rollcall_reminder,
+    update_proxy_streak_on_checkin, reset_proxy_streak,
 )
 
 logging.basicConfig(
@@ -182,6 +183,29 @@ async def check(rollcalls, timezone, chat_id):
                                     increment_user_stat(chat_id, uid, "total_rollcalls")
                                 except Exception:
                                     logging.warning(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to increment total_rollcalls for user {uid}")
+
+                            # Proxy streaks — parallel to the real-user paths
+                            # above. Proxies have string user_ids so they fall
+                            # through every isinstance(int) filter; we key on
+                            # u.name and store in the proxy_stats table.
+                            proxy_in_names = {
+                                u.name for u in rollcall.inList
+                                if not isinstance(u.user_id, int)
+                            }
+                            proxy_participants = {
+                                u.name for u in (rollcall.inList + rollcall.outList + rollcall.maybeList + rollcall.waitList)
+                                if not isinstance(u.user_id, int)
+                            }
+                            for name in proxy_in_names:
+                                try:
+                                    update_proxy_streak_on_checkin(chat_id, name)
+                                except Exception:
+                                    logging.exception(f"Failed to update proxy streak for {name} in chat {chat_id}")
+                            for name in proxy_participants - proxy_in_names:
+                                try:
+                                    reset_proxy_streak(chat_id, name)
+                                except Exception:
+                                    logging.exception(f"Failed to reset proxy streak for {name} in chat {chat_id}")
 
                             if rc_db_id is not None:
                                 end_rollcall(rc_db_id)

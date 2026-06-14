@@ -268,6 +268,28 @@ def create_tables():
                 )
            """)
 
+            # proxy_stats — parallel to user_stats but keyed on the proxy's
+            # TEXT name rather than an integer user_id. Lets us track streaks
+            # and per-proxy aggregates for /sif /sof /smf entries; previously
+            # proxies were excluded from streak tracking because user_stats
+            # can't accommodate string keys.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS proxy_stats (
+                    id SERIAL PRIMARY KEY,
+                    chat_id BIGINT NOT NULL,
+                    proxy_name TEXT NOT NULL,
+                    total_in INTEGER DEFAULT 0,
+                    total_out INTEGER DEFAULT 0,
+                    total_maybe INTEGER DEFAULT 0,
+                    total_rollcalls INTEGER DEFAULT 0,
+                    best_streak INTEGER DEFAULT 0,
+                    current_streak INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(chat_id, proxy_name)
+                )
+            """)
+
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS templates (
                 id SERIAL PRIMARY KEY,
@@ -403,6 +425,24 @@ def create_tables():
                 FOREIGN KEY (rollcall_id) REFERENCES rollcalls(id) ON DELETE CASCADE,
                 UNIQUE(rollcall_id)
             )
+            """)
+
+            # proxy_stats — see PG version above for rationale.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS proxy_stats (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id INTEGER NOT NULL,
+                    proxy_name TEXT NOT NULL,
+                    total_in INTEGER DEFAULT 0,
+                    total_out INTEGER DEFAULT 0,
+                    total_maybe INTEGER DEFAULT 0,
+                    total_rollcalls INTEGER DEFAULT 0,
+                    best_streak INTEGER DEFAULT 0,
+                    current_streak INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(chat_id, proxy_name)
+                )
             """)
 
             cursor.execute("""
@@ -2610,6 +2650,108 @@ def reset_user_streak(chat_id: int, user_id: int) -> None:
         except Exception:
             pass
         logging.error(f"Error resetting streak: {e}")
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def update_proxy_streak_on_checkin(chat_id: int, proxy_name: str) -> None:
+    """Increment current_streak by 1 for a proxy at rollcall end; update
+    best_streak if exceeded. Mirrors update_streak_on_checkin for real users
+    but keyed on proxy_name and stored in the parallel proxy_stats table."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        if db_type == 'postgresql':
+            cursor.execute(f"""
+                INSERT INTO proxy_stats (chat_id, proxy_name, current_streak, best_streak)
+                VALUES ({ph}, {ph}, 1, 1)
+                ON CONFLICT (chat_id, proxy_name) DO UPDATE SET
+                    current_streak = proxy_stats.current_streak + 1,
+                    best_streak    = GREATEST(proxy_stats.best_streak, proxy_stats.current_streak + 1),
+                    updated_at     = CURRENT_TIMESTAMP
+            """, (chat_id, proxy_name))
+        else:
+            cursor.execute(f"""
+                INSERT OR IGNORE INTO proxy_stats (chat_id, proxy_name) VALUES ({ph}, {ph})
+            """, (chat_id, proxy_name))
+            cursor.execute(f"""
+                UPDATE proxy_stats
+                SET current_streak = current_streak + 1,
+                    best_streak    = MAX(best_streak, current_streak + 1),
+                    updated_at     = CURRENT_TIMESTAMP
+                WHERE chat_id = {ph} AND proxy_name = {ph}
+            """, (chat_id, proxy_name))
+        conn.commit()
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logging.error(f"Error updating proxy streak on checkin: {e}")
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def reset_proxy_streak(chat_id: int, proxy_name: str) -> None:
+    """Reset a proxy's current_streak to 0 — called when a proxy's final
+    status at /erc is OUT or MAYBE (mirrors reset_user_streak for real
+    users)."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(f"""
+            UPDATE proxy_stats SET current_streak = 0, updated_at = CURRENT_TIMESTAMP
+            WHERE chat_id = {ph} AND proxy_name = {ph}
+        """, (chat_id, proxy_name))
+        conn.commit()
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logging.error(f"Error resetting proxy streak: {e}")
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def get_proxy_streaks(chat_id: int, proxy_name: str) -> Dict:
+    """Return {current_streak, best_streak} for a proxy. Both default to 0
+    if the proxy has no proxy_stats row yet (i.e. hasn't been through an
+    /erc since proxy_stats was introduced)."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(f"""
+            SELECT current_streak, best_streak
+            FROM proxy_stats WHERE chat_id = {ph} AND proxy_name = {ph}
+        """, (chat_id, proxy_name))
+        row = cursor.fetchone()
+        if row is None:
+            return {'current_streak': 0, 'best_streak': 0}
+        if isinstance(row, dict):
+            return {
+                'current_streak': int(row.get('current_streak') or 0),
+                'best_streak':    int(row.get('best_streak') or 0),
+            }
+        return {'current_streak': int(row[0] or 0), 'best_streak': int(row[1] or 0)}
+    except Exception as e:
+        logging.error(f"Error fetching proxy streaks: {e}")
+        return {'current_streak': 0, 'best_streak': 0}
     finally:
         if cursor is not None:
             cursor.close()

@@ -21,7 +21,7 @@ from db import (
     get_chat_ended_rollcall_count,
     get_proxy_attendance_count, get_proxy_stats,
     get_group_attendance_totals, get_bot_attendance_totals,
-    find_proxy_in_chat,
+    find_proxy_in_chat, get_proxy_streaks,
 )
 from rollcall_manager import manager
 
@@ -379,9 +379,9 @@ async def build_user_stats_text(chat_id: int, user_id: int, first_name: str) -> 
 
 
 async def build_proxy_stats_text(chat_id: int, proxy_name: str, display_name: str) -> str:
-    """Per-proxy stats. No streak (proxies have no streak counter — out of
-    scope for this PR). Vote breakdown is per-rollcall final status (not
-    per-vote like real users)."""
+    """Per-proxy stats including streaks. Streaks live in the parallel
+    proxy_stats table (keyed on chat_id + proxy_name) — added so proxies
+    are first-class citizens for streak tracking alongside real users."""
     stats = get_proxy_stats(chat_id, proxy_name)
     voted = stats['total_rollcalls']
     attended = stats['attended']
@@ -390,13 +390,15 @@ async def build_proxy_stats_text(chat_id: int, proxy_name: str, display_name: st
     if voted == 0:
         return f"*Stats for {_esc(display_name)} (via /sif):*\n\nNo data yet for this proxy."
 
+    streaks = get_proxy_streaks(chat_id, proxy_name)
     return "\n".join([
         f"*Stats for {_esc(display_name)} (via /sif):*", "",
         f"🗳 Voted in: {voted} of {total_rcs} rollcalls ({_pct(voted, total_rcs)})",
         f"✅ Attended: {attended} of {total_rcs} rollcalls ({_pct(attended, total_rcs)})",
         f"📊 Per-session breakdown — IN: {stats['total_in']}  OUT: {stats['total_out']}  MAYBE: {stats['total_maybe']}",
         "",
-        "_Proxies are tracked per session — no streak counter._",
+        f"🔥 Current streak: {streaks['current_streak']} session(s)",
+        f"🏆 Best streak: {streaks['best_streak']} session(s)",
     ])
 
 

@@ -272,6 +272,75 @@ class TestProxyCountedInStats(IntegrationBase):
 # A.4 — Proxy resolved by name via /stats <name>
 # =========================================================================
 
+class TestProxyStreaks(IntegrationBase):
+    """v8.1's documented limitation — proxies had no streak counter — is
+    now closed. The new proxy_stats table tracks current_streak and
+    best_streak per (chat_id, proxy_name), bumped on /erc when the proxy
+    is in the IN list and reset when their final status is OUT or MAYBE.
+
+    Same semantics as real-user streaks; no-vote (proxy never set this
+    session) does NOT reset because there's no proxy_user row to count
+    as "deliberate non-participation" — only ghost-marking does that."""
+
+    async def test_proxy_in_at_erc_increments_streak(self):
+        await self.start_rc("RC1")
+        await self.set_in_for(self.msg("/sif Alice", ADMIN_USER))
+        await self.end_roll_call(self.msg("/erc", ADMIN_USER))
+
+        streaks = db.get_proxy_streaks(CHAT_ID, "Alice")
+        self.assertEqual(streaks['current_streak'], 1)
+        self.assertEqual(streaks['best_streak'], 1)
+
+    async def test_proxy_out_at_erc_resets_streak(self):
+        # Build a streak of 1
+        await self.start_rc("RC1")
+        await self.set_in_for(self.msg("/sif Alice", ADMIN_USER))
+        await self.end_roll_call(self.msg("/erc", ADMIN_USER))
+
+        # Next session: end OUT, streak should reset
+        await self.start_rc("RC2")
+        await self.set_out_for(self.msg("/sof Alice", ADMIN_USER))
+        await self.end_roll_call(self.msg("/erc", ADMIN_USER))
+
+        streaks = db.get_proxy_streaks(CHAT_ID, "Alice")
+        self.assertEqual(streaks['current_streak'], 0,
+            "proxy ending OUT at /erc must reset current_streak (same as real users)")
+        self.assertEqual(streaks['best_streak'], 1, "best_streak preserved")
+
+    async def test_proxy_maybe_at_erc_resets_streak(self):
+        await self.start_rc("RC1")
+        await self.set_in_for(self.msg("/sif Alice", ADMIN_USER))
+        await self.end_roll_call(self.msg("/erc", ADMIN_USER))
+
+        await self.start_rc("RC2")
+        await self.set_maybe_for(self.msg("/smf Alice", ADMIN_USER))
+        await self.end_roll_call(self.msg("/erc", ADMIN_USER))
+
+        streaks = db.get_proxy_streaks(CHAT_ID, "Alice")
+        self.assertEqual(streaks['current_streak'], 0)
+
+    async def test_proxy_consecutive_ins_grow_streak(self):
+        for i in range(3):
+            await self.start_rc(f"RC{i+1}")
+            await self.set_in_for(self.msg("/sif Alice", ADMIN_USER))
+            await self.end_roll_call(self.msg("/erc", ADMIN_USER))
+        streaks = db.get_proxy_streaks(CHAT_ID, "Alice")
+        self.assertEqual(streaks['current_streak'], 3)
+        self.assertEqual(streaks['best_streak'], 3)
+
+    async def test_proxy_stats_text_shows_streaks(self):
+        await self.start_rc("RC1")
+        await self.set_in_for(self.msg("/sif Alice", ADMIN_USER))
+        await self.end_roll_call(self.msg("/erc", ADMIN_USER))
+
+        from handlers.stats import build_proxy_stats_text
+        text = await build_proxy_stats_text(CHAT_ID, "Alice", "Alice")
+        self.assertIn("Current streak: 1", text)
+        self.assertIn("Best streak: 1", text)
+        # The old "no streak counter" disclaimer must be gone
+        self.assertNotIn("no streak counter", text.lower())
+
+
 class TestProxyResolution(IntegrationBase):
     """resolve_user_for_stats falls through to proxy_users when the name
     doesn't match any real user."""

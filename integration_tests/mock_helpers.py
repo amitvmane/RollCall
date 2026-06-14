@@ -73,6 +73,7 @@ def reset_db():
     for tbl in [
         "admin_actions", "ghost_events", "ghost_records", "ghost_selections",
         "chat_members", "proxy_users", "rollcall_stats", "user_stats",
+        "proxy_stats",
         "users", "rollcalls", "templates", "chats",
     ]:
         try:

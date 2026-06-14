@@ -1173,6 +1173,41 @@ def create_or_update_template(
             release_connection(conn)
 
 
+def clear_rollcall_reminder(rollcall_id: int) -> bool:
+    """Persist `reminder_hours = NULL` for a rollcall — call this RIGHT AFTER
+    the pre-close reminder is sent so a bot restart doesn't re-fire it.
+
+    Before this helper existed, the reminder fire path set
+    `rollcall.reminder = None` in memory only. On bot restart, models.RollCall
+    reloads reminder_hours from the DB row (still set), and the freshly-
+    started check loop sees `now >= reminder_time` and sends the reminder
+    AGAIN. This persists the clear so restart can't double-fire.
+    """
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(
+            f"UPDATE rollcalls SET reminder_hours = NULL WHERE id = {ph}",
+            (rollcall_id,),
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logging.error(f"Error clearing rollcall reminder: {e}")
+        return False
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
 def end_rollcall(rollcall_id: int) -> bool:
     """Mark a rollcall as ended"""
     conn = get_connection()

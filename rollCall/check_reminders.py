@@ -9,6 +9,7 @@ from bot_state import bot
 from db import (
     end_rollcall, update_streak_on_checkin, reset_user_streak, get_all_scheduled_templates,
     update_template_last_scheduled_date, get_all_chat_ids, increment_user_stat,
+    clear_rollcall_reminder,
 )
 
 logging.basicConfig(
@@ -71,6 +72,22 @@ async def check(rollcalls, timezone, chat_id):
                             f"Gentle reminder! event with title - {rollcall.title} is {rollcall.reminder} hour/s away"
                         )
                         rollcall.reminder = None
+                        # Persist the clear so a bot restart between now and
+                        # the rollcall's finalizeDate doesn't re-fire the
+                        # reminder. Before this line existed, the in-memory
+                        # clear was lost on restart and the freshly-loaded
+                        # rollcall.reminder_hours from DB still matched
+                        # "now >= reminder_time" → user got the reminder
+                        # twice.
+                        rc_db_id = getattr(rollcall, "db_id", None) or getattr(rollcall, "id", None)
+                        if rc_db_id is not None:
+                            try:
+                                clear_rollcall_reminder(rc_db_id)
+                            except Exception:
+                                logging.exception(
+                                    f"Failed to persist reminder clear for rollcall {rc_db_id}; "
+                                    "a bot restart before close could re-fire the reminder"
+                                )
                         continue
 
                 if rollcall.finalizeDate is not None and rollcall.reminder is None:

@@ -183,6 +183,39 @@ class TestPendingActionTTL(IntegrationBase):
                       "Fresh pending delete should survive")
 
 
+class TestReminderDoesNotDoubleFire(IntegrationBase):
+    """Before the fix, sending the pre-close reminder cleared
+    rollcall.reminder in MEMORY only — the DB still had reminder_hours set.
+    A bot restart between the reminder fire and the rollcall close would
+    reload the rollcall, see the still-set reminder_hours, and fire it
+    again. The fix calls db.clear_rollcall_reminder right after the in-
+    memory clear so a restart-loaded rollcall sees reminder=None."""
+
+    def test_clear_reminder_persists_to_db(self):
+        import db
+        from models import RollCall
+        # Set up a rollcall with a reminder configured.
+        rc = RollCall("DoubleFireRC", chat_id=CHAT_ID)
+        rc.reminder = 2
+        rc.finalizeDate = datetime.now() + timedelta(hours=3)
+        rc.save()
+        rc_id = rc.id
+
+        # Verify DB has the reminder.
+        data_before = db.get_rollcall(rc_id)
+        self.assertEqual(data_before["reminder_hours"], 2)
+
+        # Simulate the reminder fire path: clear in DB.
+        ok = db.clear_rollcall_reminder(rc_id)
+        self.assertTrue(ok)
+
+        # Now simulate a restart: load the rollcall fresh from DB.
+        rc_after_restart = RollCall(title="", db_id=rc_id)
+        self.assertIsNone(rc_after_restart.reminder,
+            "After restart, the reminder must be None — otherwise the "
+            "reminder loop would fire a second 'Gentle reminder!' message")
+
+
 class TestErcLockSurvivesRestart(IntegrationBase):
     async def test_erc_lock_recreated_per_chat(self):
         # Lock the manager for chat A, then "restart" by clearing all caches.

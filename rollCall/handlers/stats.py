@@ -22,6 +22,7 @@ from db import (
     get_proxy_attendance_count, get_proxy_stats,
     get_group_attendance_totals, get_bot_attendance_totals,
     find_proxy_in_chat, get_proxy_streaks,
+    get_ghost_count, get_ghost_count_by_proxy_name,
 )
 from rollcall_manager import manager
 
@@ -366,11 +367,19 @@ async def build_user_stats_text(chat_id: int, user_id: int, first_name: str) -> 
 
     total_rcs = get_chat_ended_rollcall_count(chat_id)
     attended = get_user_attendance_count(chat_id, user_id)
+    ghost_count = get_ghost_count(chat_id, user_id)
+    absent_limit = manager.get_absent_limit(chat_id)
+    # Surface a ⚠ marker once the user has crossed the reconfirmation
+    # threshold (the same limit that triggers the "are you sure?" prompt
+    # the next time they vote IN). Helps users notice they're at risk
+    # without having to read /stats ghost separately.
+    ghost_warn = " ⚠️ (next /in asks for reconfirmation)" if ghost_count >= absent_limit and ghost_count > 0 else ""
 
     return "\n".join([
         f"*Stats for {_esc(first_name)}:*", "",
         f"🗳 Voted in: {voted_in_rcs} of {total_rcs} rollcalls ({_pct(voted_in_rcs, total_rcs)})",
         f"✅ Attended: {attended} of {total_rcs} rollcalls ({_pct(attended, total_rcs)})",
+        f"👻 Ghosted: {ghost_count} session(s){ghost_warn}",
         f"📊 Vote breakdown — IN: {t_in}  OUT: {t_out}  MAYBE: {t_maybe}",
         f"⏫ Promoted from waitlist: {t_wait}", "",
         f"🔥 Current streak: {streak} session(s)",
@@ -391,10 +400,15 @@ async def build_proxy_stats_text(chat_id: int, proxy_name: str, display_name: st
         return f"*Stats for {_esc(display_name)} (via /sif):*\n\nNo data yet for this proxy."
 
     streaks = get_proxy_streaks(chat_id, proxy_name)
+    ghost_count = get_ghost_count_by_proxy_name(chat_id, proxy_name)
+    absent_limit = manager.get_absent_limit(chat_id)
+    ghost_warn = " ⚠️ (next /sif asks for reconfirmation)" if ghost_count >= absent_limit and ghost_count > 0 else ""
+
     return "\n".join([
         f"*Stats for {_esc(display_name)} (via /sif):*", "",
         f"🗳 Voted in: {voted} of {total_rcs} rollcalls ({_pct(voted, total_rcs)})",
         f"✅ Attended: {attended} of {total_rcs} rollcalls ({_pct(attended, total_rcs)})",
+        f"👻 Ghosted: {ghost_count} session(s){ghost_warn}",
         f"📊 Per-session breakdown — IN: {stats['total_in']}  OUT: {stats['total_out']}  MAYBE: {stats['total_maybe']}",
         "",
         f"🔥 Current streak: {streaks['current_streak']} session(s)",

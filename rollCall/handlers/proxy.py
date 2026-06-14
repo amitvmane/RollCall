@@ -193,6 +193,16 @@ async def set_out_for(message):
                     asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
                 from handlers.lifecycle import notify_proxy_owner_wait_to_in
                 await notify_proxy_owner_wait_to_in(rc, result, cid, rc.title, rc_number + 1)
+                # GLITCH FIX: voting.py /out and lifecycle.py panel-OUT both
+                # bump the promoted user's stats here. /sof was the only path
+                # missing it, so a real user promoted from waitlist via a
+                # proxy /sof would never see their total_in / total_in_promotion
+                # counter update. Now consistent.
+                rc_db_id = get_rc_db_id(rc)
+                if rc_db_id is not None and isinstance(result.user_id, int):
+                    increment_user_stat(cid, result.user_id, "total_waiting_to_in")
+                    increment_user_stat(cid, result.user_id, "total_in")
+                    increment_rollcall_stat(rc_db_id, "total_in")
             elif result is None:
                 if not manager.get_shh_mode(cid):
                     if was_in:
@@ -269,6 +279,13 @@ async def set_maybe_for(message):
                     asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
                 from handlers.lifecycle import notify_proxy_owner_wait_to_in
                 await notify_proxy_owner_wait_to_in(rc, result, cid, rc.title, rc_number + 1)
+                # GLITCH FIX: same as /sof above. /smf was also missing the
+                # promotion-counter bump for the real user moved waitlist→IN.
+                rc_db_id = get_rc_db_id(rc)
+                if rc_db_id is not None and isinstance(result.user_id, int):
+                    increment_user_stat(cid, result.user_id, "total_waiting_to_in")
+                    increment_user_stat(cid, result.user_id, "total_in")
+                    increment_rollcall_stat(rc_db_id, "total_in")
             elif result is None:
                 if not manager.get_shh_mode(cid):
                     await bot.send_message(cid, f"{user.name} is now MAYBE!")

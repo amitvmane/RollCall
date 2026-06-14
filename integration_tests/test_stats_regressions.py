@@ -341,6 +341,138 @@ class TestProxyStreaks(IntegrationBase):
         self.assertNotIn("no streak counter", text.lower())
 
 
+class TestGhostCountInPersonalStats(IntegrationBase):
+    """Per-user ghost count is now surfaced in /stats. Before this addition
+    you could only see your ghost count via /stats ghost — and only if
+    you were in the top 10. Anyone outside the top 10 had no way to know
+    they were one missed session from a reconfirmation prompt."""
+
+    async def test_personal_stats_shows_ghost_count_when_zero(self):
+        u = USERS[0]
+        await self.start_rc("RC1")
+        await self.vote_in(u)
+        await self.end_roll_call(self.msg("/erc", ADMIN_USER))
+        from handlers.stats import build_user_stats_text
+        text = await build_user_stats_text(CHAT_ID, u["id"], u["first_name"])
+        self.assertIn("Ghosted: 0 session(s)", text)
+
+    async def test_personal_stats_shows_ghost_count_when_nonzero(self):
+        u = USERS[0]
+        # Run a session and bump ghost_count AFTERWARDS so /erc's confirmed-
+        # attendance decrement doesn't interfere with the count we're
+        # measuring.
+        await self.start_rc("RC1")
+        await self.vote_in(u)
+        await self.end_roll_call(self.msg("/erc", ADMIN_USER))
+        db.increment_ghost_count(CHAT_ID, u["id"], u["first_name"])
+        db.increment_ghost_count(CHAT_ID, u["id"], u["first_name"])
+        from handlers.stats import build_user_stats_text
+        text = await build_user_stats_text(CHAT_ID, u["id"], u["first_name"])
+        self.assertIn("Ghosted: 2 session(s)", text)
+
+    async def test_personal_stats_warns_when_at_reconf_threshold(self):
+        """If ghost_count >= absent_limit, show a ⚠ marker — user is one
+        IN away from the reconfirmation prompt."""
+        u = USERS[0]
+        await self.set_absent_limit(self.msg("/absent 2", ADMIN_USER))
+        # Seed ghost count AFTER the session so confirmed-attendance
+        # decrement doesn't undo our setup.
+        await self.start_rc("RC1")
+        await self.vote_in(u)
+        await self.end_roll_call(self.msg("/erc", ADMIN_USER))
+        for _ in range(2):
+            db.increment_ghost_count(CHAT_ID, u["id"], u["first_name"])
+        from handlers.stats import build_user_stats_text
+        text = await build_user_stats_text(CHAT_ID, u["id"], u["first_name"])
+        self.assertIn("reconfirmation", text)
+
+    async def test_proxy_stats_shows_ghost_count(self):
+        await self.start_rc("RC1")
+        await self.set_in_for(self.msg("/sif Alice", ADMIN_USER))
+        await self.end_roll_call(self.msg("/erc", ADMIN_USER))
+        db.increment_ghost_count(CHAT_ID, -1, "Alice", proxy_name="Alice")
+        from handlers.stats import build_proxy_stats_text
+        text = await build_proxy_stats_text(CHAT_ID, "Alice", "Alice")
+        self.assertIn("Ghosted: 1 session(s)", text)
+
+
+class TestProxySofPromotesCountersForRealUser(IntegrationBase):
+    """Bug found in stats audit 2026-06-14: /sof and /smf with a proxy
+    that frees an IN slot would auto-promote a real user from waitlist
+    to IN — but the promoted user's total_in / total_waiting_to_in /
+    rollcall_stats.total_in counters DID NOT bump.
+
+    voting.py /out, lifecycle.py panel-OUT, and settings.py /set_limit
+    all bump these counters when they cause a promotion. /sof and /smf
+    were the only paths missing it, so admins using proxy commands to
+    free slots would silently lose vote-count accuracy for the promoted
+    user.
+    """
+
+    async def test_sof_proxy_freeing_in_slot_bumps_promoted_user_stats(self):
+        # Limit IN list to 1 so we can force a waitlist scenario.
+        await self.start_rc("RC1")
+        rc = self.rc(0)
+        rc.inListLimit = 1
+        rc.save()
+        # First fill the IN slot with a proxy.
+        await self.set_in_for(self.msg("/sif Proxy1", ADMIN_USER))
+        # USERS[0] votes IN → goes to waitlist (IN is full).
+        await self.vote_in(USERS[0])
+        self.assertIn(USERS[0]["first_name"], [u.name for u in self.rc(0).waitList])
+
+        # /sof Proxy1 — should free the IN slot AND promote USERS[0].
+        await self.set_out_for(self.msg("/sof Proxy1", ADMIN_USER))
+
+        # USERS[0] should now be in IN.
+        self.assertIn(USERS[0]["first_name"], [u.name for u in self.rc(0).inList])
+
+        # Stats counters for the promoted user must reflect the promotion.
+        conn = db.get_connection()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT total_in, total_waiting_to_in FROM user_stats "
+            "WHERE chat_id = ? AND user_id = ?",
+            (CHAT_ID, USERS[0]["id"]),
+        )
+        row = cur.fetchone()
+        cur.close()
+        # The user voted IN once (waitlist), then was promoted. Expected:
+        #   total_in = 2 (original vote + promotion increment)
+        #   total_waiting_to_in = 1 (the promotion increment)
+        self.assertIsNotNone(row, "promoted user must have a user_stats row")
+        # When user votes IN and immediately goes to waitlist (result='AC'),
+        # voting.py does NOT bump total_in (the 'AC' filter). So total_in
+        # only bumps from our promotion fix → expected 1.
+        self.assertEqual(row[0], 1, "total_in must bump on /sof-triggered waitlist promotion")
+        self.assertEqual(row[1], 1, "total_waiting_to_in must bump on promotion via /sof")
+
+    async def test_smf_proxy_freeing_in_slot_bumps_promoted_user_stats(self):
+        """Same bug as /sof — /smf was also missing the promotion bump."""
+        await self.start_rc("RC1")
+        rc = self.rc(0)
+        rc.inListLimit = 1
+        rc.save()
+        await self.set_in_for(self.msg("/sif Proxy1", ADMIN_USER))
+        await self.vote_in(USERS[0])
+        await self.set_maybe_for(self.msg("/smf Proxy1", ADMIN_USER))
+
+        self.assertIn(USERS[0]["first_name"], [u.name for u in self.rc(0).inList])
+
+        conn = db.get_connection()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT total_in, total_waiting_to_in FROM user_stats "
+            "WHERE chat_id = ? AND user_id = ?",
+            (CHAT_ID, USERS[0]["id"]),
+        )
+        row = cur.fetchone()
+        cur.close()
+        self.assertIsNotNone(row)
+        self.assertEqual(row[0], 1)  # same reasoning as /sof test above
+        self.assertEqual(row[1], 1)
+
+
 class TestProxyResolution(IntegrationBase):
     """resolve_user_for_stats falls through to proxy_users when the name
     doesn't match any real user."""

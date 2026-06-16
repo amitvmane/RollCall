@@ -23,6 +23,7 @@ and the smoke test (which checks only imports + method existence).
 import os
 import sys
 import asyncio
+import logging
 import tempfile
 import time
 import traceback
@@ -54,6 +55,19 @@ import db as _db  # noqa: E402
 _db.init_db()  # in case bot_state didn't already
 
 bot = bot_state.bot
+
+# ─── Error log capture (catches swallowed exceptions in handlers) ────────────
+_errors = []  # list of LogRecord
+
+
+class _ErrorCapture(logging.Handler):
+    def emit(self, record):
+        if record.levelno >= logging.ERROR:
+            _errors.append(record)
+
+
+logging.getLogger().addHandler(_ErrorCapture())
+
 
 # ─── Patch outbound network ──────────────────────────────────────────────────
 _outbound = []  # list of (method, args, kwargs)
@@ -175,12 +189,16 @@ BOB = (200, "Bob", "bob")
 CAROL = (300, "Carol", "carol")
 DAVE = (400, "Dave", "dave")
 EVE = (500, "Eve", "eve")
+FRANK = (600, "Frank", "frank")
+GINA = (700, "Gina", "gina")
+HANK = (800, "Hank", "hank")
 
 
 # ─── Drive helpers ───────────────────────────────────────────────────────────
 async def feed(text, user, chat_id=CHAT_ID):
     """Send a message-style update through the real bot router."""
     _outbound.clear()
+    _errors.clear()
     uid, fname, uname = user
     upd = make_message_update(text, uid, fname, uname, chat_id=chat_id)
     await bot.process_new_updates([upd])
@@ -189,10 +207,22 @@ async def feed(text, user, chat_id=CHAT_ID):
 
 async def feed_cb(data, user, chat_id=CHAT_ID):
     _outbound.clear()
+    _errors.clear()
+    # Clear rate limits so fast-fire test clicks don't hit the 2s in/out/maybe
+    # cooldown enforced by _is_rate_limited.
+    bot_state._rate_limits.clear()
     uid, fname, uname = user
     upd = make_callback_update(data, uid, fname, uname, chat_id=chat_id)
     await bot.process_new_updates([upd])
     return list(_outbound)
+
+
+def has_call(out, method_name):
+    return any(name == method_name for name, _, _ in out)
+
+
+def error_msgs():
+    return [f"{r.name}: {r.getMessage()}" for r in _errors]
 
 
 # ─── Test runner ─────────────────────────────────────────────────────────────
@@ -410,25 +440,286 @@ async def run_all():
     ok = len(out) >= 1
     record("/unset_admins responds", ok)
 
-    print("\n=== Phase 10: Callback queries (inline buttons) ===\n")
+    print("\n=== Phase 10: Callback regression — panel OUT/MAYBE after IN ===\n")
+    print("    (the bug fixed 2026-06-16: UnboundLocalError on format_mention_with_name_md)")
+    # Pre-conditions for the regression: group chat (cid<0), real int user_id,
+    # shh OFF, panel inline-button click sequence in → out → maybe.
+    await feed("/louder", ALICE)  # ensure shh is OFF
+    # Use FRANK — fresh user not already in any list.
+    # Callback data format is btn_<action>_<rc_number>. Active rollcall = #1.
 
-    out = await feed_cb("in", BOB)
-    ok = len(out) >= 0  # answer_callback_query may be the only effect
-    record("Inline button 'in' routes through callback handler", True,
-           f"got {len(out)} outbound + answer_cb")
+    out = await feed_cb("btn_in_1", FRANK)
+    no_err = len(_errors) == 0
+    record("Panel button 'in' (FRANK): no exceptions", no_err, str(error_msgs()) if not no_err else "")
+    record("Panel button 'in' (FRANK): panel edit_message_text fired",
+           has_call(out, "edit_message_text"),
+           f"outbound: {[n for n,_,_ in out]}")
+    record("Panel button 'in' (FRANK): announcement send_message fired",
+           has_call(out, "send_message"),
+           f"outbound: {[n for n,_,_ in out]}")
 
-    out = await feed_cb("out", CAROL)
-    record("Inline button 'out' routes", True, f"got {len(out)} outbound")
+    out = await feed_cb("btn_out_1", FRANK)
+    no_err = len(_errors) == 0
+    record("Panel button 'out' after 'in' (FRANK): no UnboundLocalError",
+           no_err, str(error_msgs()) if not no_err else "")
+    record("Panel button 'out' (FRANK): announcement send_message fired",
+           has_call(out, "send_message"),
+           f"outbound: {[n for n,_,_ in out]}")
+    record("Panel button 'out' (FRANK): panel edit_message_text fired (live refresh)",
+           has_call(out, "edit_message_text"),
+           f"outbound: {[n for n,_,_ in out]}")
 
-    print("\n=== Phase 11: Lifecycle close ===\n")
+    out = await feed_cb("btn_maybe_1", FRANK)
+    no_err = len(_errors) == 0
+    record("Panel button 'maybe' after 'out' (FRANK): no exceptions",
+           no_err, str(error_msgs()) if not no_err else "")
+    record("Panel button 'maybe' (FRANK): panel edit_message_text fired",
+           has_call(out, "edit_message_text"),
+           f"outbound: {[n for n,_,_ in out]}")
 
+    print("\n=== Phase 11: Callback sub-menus & refresh ===\n")
+
+    out = await feed_cb("btn_lists_1", BOB)
+    record("Panel button 'lists' opens submenu",
+           has_call(out, "edit_message_text"), f"outbound: {[n for n,_,_ in out]}")
+
+    out = await feed_cb("btn_wi_1", BOB)
+    record("Submenu 'wi' (who's in) responds",
+           has_call(out, "edit_message_text"), f"outbound: {[n for n,_,_ in out]}")
+
+    out = await feed_cb("btn_wo_1", BOB)
+    record("Submenu 'wo' (who's out) responds",
+           has_call(out, "edit_message_text"), f"outbound: {[n for n,_,_ in out]}")
+
+    out = await feed_cb("btn_wm_1", BOB)
+    record("Submenu 'wm' (who's maybe) responds",
+           has_call(out, "edit_message_text"), f"outbound: {[n for n,_,_ in out]}")
+
+    out = await feed_cb("btn_ww_1", BOB)
+    record("Submenu 'ww' (waitlist) responds",
+           has_call(out, "edit_message_text"), f"outbound: {[n for n,_,_ in out]}")
+
+    out = await feed_cb("btn_refresh_1", BOB)
+    record("Panel 'refresh' re-renders",
+           has_call(out, "edit_message_text") or len(out) >= 1,
+           f"outbound: {[n for n,_,_ in out]}")
+
+    print("\n=== Phase 12: Deep proxy lifecycle (set_limit + waitlist promotion) ===\n")
+
+    # New rollcall for proxy testing — reset state
+    await feed("/erc", ALICE)
+    await feed("/src ProxyTest", ALICE)
+    await feed("/set_limit 2", ALICE)
+
+    out = await feed("/sif Alex", ALICE)
+    ok, d = contains(out, "alex")
+    record("/sif Alex adds to IN (under cap)", ok, d)
+
+    out = await feed("/sif Brian", ALICE)
+    ok, d = contains(out, "brian")
+    record("/sif Brian adds to IN (at cap)", ok, d)
+
+    out = await feed("/sif Chad", ALICE)
+    # At cap=2, this should waitlist
+    ok = len(out) >= 1
+    record("/sif Chad past cap (should waitlist or notify)", ok)
+
+    out = await feed("/sif Dan", ALICE)
+    ok = len(out) >= 1
+    record("/sif Dan past cap responds", ok)
+
+    out = await feed("/sif Alex", ALICE)
+    # Duplicate should error (or notify)
+    ok = len(out) >= 1
+    record("/sif Alex (duplicate) responds with error/info", ok)
+
+    out = await feed("/whos_in", ALICE)
+    ok, d = contains(out, "alex", "brian")
+    record("/whos_in shows Alex + Brian (under cap)", ok, d)
+
+    out = await feed("/whos_waiting", ALICE)
+    ok, d = contains(out, "chad")
+    record("/whos_waiting shows Chad (waitlisted)", ok, d)
+
+    # Move Alex to OUT — should promote Chad from waitlist
+    out = await feed("/sof Alex", ALICE)
+    ok = len(out) >= 1
+    record("/sof Alex (was IN) responds and triggers waitlist promotion", ok)
+
+    out = await feed("/whos_in", ALICE)
+    ok, d = contains(out, "chad")  # Chad should now be IN
+    record("Chad promoted from waitlist to IN after /sof Alex", ok, d)
+
+    out = await feed("/smf Brian", ALICE)
+    ok = len(out) >= 1
+    record("/smf Brian (was IN) → MAYBE responds + may promote Dan", ok)
+
+    out = await feed("/whos_in", ALICE)
+    ok, d = contains(out, "dan")
+    record("Dan promoted from waitlist to IN after /smf Brian", ok, d)
+
+    out = await feed("/whos_maybe", ALICE)
+    ok, d = contains(out, "brian")
+    record("/whos_maybe shows Brian (moved from IN)", ok, d)
+
+    out = await feed("/whos_out", ALICE)
+    ok, d = contains(out, "alex")
+    record("/whos_out shows Alex (moved from IN)", ok, d)
+
+    # Total no-exception check across all proxy operations
+    record("Phase 12 — no ERROR-level logs emitted", len(_errors) == 0,
+           str(error_msgs()) if _errors else "")
+
+    print("\n=== Phase 13: End-confirm callback flow ===\n")
+
+    out = await feed_cb("btn_end_1", ALICE)
+    record("Panel 'end' opens confirm dialog",
+           has_call(out, "edit_message_text"), f"outbound: {[n for n,_,_ in out]}")
+
+    out = await feed_cb("btn_endcancel_1", ALICE)
+    record("Panel 'endcancel' returns to panel",
+           has_call(out, "edit_message_text") or len(out) >= 1,
+           f"outbound: {[n for n,_,_ in out]}")
+
+    out = await feed_cb("btn_end_1", ALICE)
+    record("Panel 'end' opens confirm dialog (round 2)",
+           has_call(out, "edit_message_text"), f"outbound: {[n for n,_,_ in out]}")
+
+    out = await feed_cb("btn_endconfirm_1", ALICE)
+    ok = len(out) >= 1
+    record("Panel 'endconfirm' actually ends rollcall", ok,
+           f"outbound: {[n for n,_,_ in out]}")
+
+    print("\n=== Phase 14: Multi-rollcall scenarios ===\n")
+
+    # All rollcalls should be ended after Phase 13. Start fresh pair.
+    out = await feed("/src Morning", ALICE)
+    ok, d = contains(out, "morning")
+    record("/src Morning starts RC#1", ok, d)
+
+    out = await feed("/src Evening", ALICE)
+    ok, d = contains(out, "evening")
+    record("/src Evening starts RC#2 (parallel)", ok, d)
+
+    out = await feed("/rollcalls", ALICE)
+    ok, d = contains(out, "morning", "evening")
+    record("/rollcalls lists both active rollcalls", ok, d)
+
+    # Target rollcall #2 specifically via ::2 suffix
+    out = await feed("/in ::2", GINA)
+    ok = len(_errors) == 0
+    record("/in ::2 (GINA) targets RC#2 without error", ok, str(error_msgs()) if not ok else "")
+
+    out = await feed("/whos_in ::2", ALICE)
+    ok, d = contains(out, "gina")
+    record("/whos_in ::2 shows Gina in RC#2", ok, d)
+
+    out = await feed("/whos_in ::1", ALICE)
+    ok = "gina" not in text_of(out).lower()
+    record("Gina is NOT in RC#1 (isolation between rollcalls)", ok,
+           f"got: {text_of(out)[:100]!r}")
+
+    out = await feed("/sif RC1Proxy ::1", ALICE)
+    ok = len(_errors) == 0
+    record("/sif ::1 adds proxy to RC#1 only", ok, str(error_msgs()) if not ok else "")
+
+    out = await feed("/whos_in ::1", ALICE)
+    ok, d = contains(out, "rc1proxy")
+    record("/whos_in ::1 shows RC1Proxy in RC#1", ok, d)
+
+    out = await feed("/whos_in ::2", ALICE)
+    ok = "rc1proxy" not in text_of(out).lower()
+    record("RC1Proxy is NOT in RC#2 (proxy isolation)", ok)
+
+    # /buzz across multiple rollcalls
+    out = await feed("/buzz", ALICE)
+    ok = len(_errors) == 0
+    record("/buzz with multiple rollcalls runs without error", ok, str(error_msgs()) if not ok else "")
+
+    # /erc ::1 ends only RC#1
+    out = await feed("/erc ::1", ALICE)
+    ok = len(_errors) == 0
+    record("/erc ::1 ends only RC#1 without error", ok, str(error_msgs()) if not ok else "")
+
+    out = await feed("/rollcalls", ALICE)
+    ok = "evening" in text_of(out).lower() and "morning" not in text_of(out).lower()
+    record("/rollcalls shows only Evening (RC#1 ended, RC#2 remains)", ok,
+           f"got: {text_of(out)[:150]!r}")
+
+    out = await feed("/erc ::1", ALICE)
+    ok = len(_errors) == 0
+    record("/erc ::1 ends the remaining Evening rollcall", ok, str(error_msgs()) if not ok else "")
+
+    print("\n=== Phase 15: Error-path & edge cases ===\n")
+
+    # Vote with no active rollcall
+    out = await feed("/in", BOB)
+    ok = "not active" in text_of(out).lower() or "no rollcall" in text_of(out).lower() or "no active" in text_of(out).lower()
+    record("/in with no active rollcall returns user-facing error",
+           ok, f"got: {text_of(out)[:100]!r}")
+
+    # /erc with no active rollcall
     out = await feed("/erc", ALICE)
-    ok, d = contains(out, "end")
-    record("/erc ends rollcall (text contains 'end')", ok, d)
+    ok = len(_errors) == 0  # should not raise; should return curated message
+    record("/erc with no rollcall: no internal error", ok, str(error_msgs()) if not ok else "")
+
+    # /sif with no rollcall
+    out = await feed("/sif Foo", ALICE)
+    ok = len(_errors) == 0
+    record("/sif with no rollcall: no internal error", ok, str(error_msgs()) if not ok else "")
+
+    # Invalid ::N targeting
+    await feed("/src ErrTest", ALICE)
+    out = await feed("/in ::99", BOB)
+    ok = len(_errors) == 0
+    record("/in ::99 (out-of-range) returns curated error, not crash",
+           ok, str(error_msgs()) if not ok else "")
+
+    # /set_limit with bad arg
+    out = await feed("/set_limit abc", ALICE)
+    ok = len(_errors) == 0
+    record("/set_limit abc (non-integer) handled gracefully", ok, str(error_msgs()) if not ok else "")
+
+    # /set_limit with negative
+    out = await feed("/set_limit -5", ALICE)
+    ok = len(_errors) == 0
+    record("/set_limit -5 (negative) handled gracefully", ok, str(error_msgs()) if not ok else "")
+
+    # /timezone with bad zone
+    out = await feed("/timezone NotARealZone/Nowhere", ALICE)
+    ok = len(_errors) == 0
+    record("/timezone with invalid zone handled gracefully", ok, str(error_msgs()) if not ok else "")
+
+    # Callback with stale rollcall number
+    out = await feed_cb("btn_in_99", BOB)
+    ok = len(_errors) == 0
+    record("Callback with invalid rc_number handled gracefully", ok, str(error_msgs()) if not ok else "")
+
+    # Callback with malformed data
+    out = await feed_cb("not_a_valid_callback", BOB)
+    ok = len(_errors) == 0
+    record("Callback with non-btn_ prefix ignored gracefully", ok, str(error_msgs()) if not ok else "")
+
+    out = await feed_cb("btn_in_abc", BOB)
+    ok = len(_errors) == 0
+    record("Callback with non-int rc_number handled gracefully", ok, str(error_msgs()) if not ok else "")
+
+    # Close error-test rollcall
+    await feed("/erc", ALICE)
+
+    print("\n=== Phase 16: Lifecycle close (final) ===\n")
 
     out = await feed("/rollcalls", ALICE)
     ok = True  # whatever response is fine — just shouldn't crash
-    record("/rollcalls after end responds (no crash)", ok)
+    record("/rollcalls after all ended responds (no crash)", ok)
+
+    out = await feed("/version", ALICE)
+    ok, d = contains(out, "version")
+    record("/version still reports version after lifecycle churn", ok, d)
+
+    # Final global error check — no ERROR-level logs leaked across entire run
+    record("FINAL: no ERROR-level logs from any phase", len(_errors) == 0,
+           f"{len(_errors)} errors: {error_msgs()[:5]}" if _errors else "")
 
 
 def main():

@@ -62,7 +62,12 @@ async def set_rollcall_time(message):
 
         input_datetime = " ".join(pmts).strip()
         tz = pytz.timezone(rc.timezone)
-        date = datetime.strptime(input_datetime, "%d-%m-%Y %H:%M")
+        try:
+            date = datetime.strptime(input_datetime, "%d-%m-%Y %H:%M")
+        except ValueError:
+            raise incorrectParameter(
+                f"'{input_datetime}' is not a valid datetime. Use DD-MM-YYYY HH:MM (e.g. 25-12-2026 18:30)."
+            )
         date = tz.localize(date)
         now_date_string = datetime.now(pytz.timezone(rc.timezone)).strftime("%d-%m-%Y %H:%M")
         now_date = datetime.strptime(now_date_string, "%d-%m-%Y %H:%M")
@@ -89,7 +94,12 @@ async def set_rollcall_time(message):
         asyncio.create_task(start(rollcalls, rc.timezone, cid)).add_done_callback(_log_task_exc)
 
     except Exception as e:
-        logging.exception("[set_rollcall_time] Unexpected error")
+        # Only log as a bug if it's not a curated user-input exception —
+        # reply_error already passes user-facing exceptions through verbatim
+        # without logging.
+        from bot_state import _USER_FACING_EXCEPTIONS
+        if not isinstance(e, _USER_FACING_EXCEPTIONS):
+            logging.exception("[set_rollcall_time] Unexpected error")
         await reply_error(message, e)
 
 
@@ -158,8 +168,9 @@ async def reminder(message):
         from handlers.lifecycle import _update_panel
         await _update_panel(cid, rc_number + 1, rc)
 
-    except ValueError as e:
-        logging.exception("[reminder] Invalid value")
+    except ValueError:
+        # Normal user-input error — curated message, no traceback in logs.
+        logging.info(f"[{_ts()}] [reminder] invalid value from user")
         await bot.send_message(cid, 'The correct format is /set_rollcall_reminder HH')
     except Exception as e:
         await reply_error(cid, e)
@@ -453,7 +464,9 @@ async def wait_limit(message):
     except rollCallNotStarted as e:
         await reply_error(message, e)
     except Exception as e:
-        logging.exception("[wait_limit] Unexpected error")
+        from bot_state import _USER_FACING_EXCEPTIONS
+        if not isinstance(e, _USER_FACING_EXCEPTIONS):
+            logging.exception("[wait_limit] Unexpected error")
         await reply_error(message, e)
 
 

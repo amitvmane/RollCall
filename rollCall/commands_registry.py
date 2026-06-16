@@ -257,7 +257,7 @@ COMMANDS = [
     {
         "name": "schedule_template", "aliases": [], "scope": "admin", "category": "Templates",
         "args": "name <weekday|monthly|biweekly|off> <HH:MM>",
-        "sample": "/schedule_template friday fri 18:00",
+        "sample": "/schedule_template friday friday 18:00",
         "summary": "Schedule auto-start for a template",
         "details": (
             "Weekly:    /schedule_template name <weekday> <HH:MM>\n"

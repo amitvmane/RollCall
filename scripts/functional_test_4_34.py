@@ -408,19 +408,177 @@ async def run_all():
     ok = len(out) >= 1
     record("/clear_absent responds", ok)
 
-    print("\n=== Phase 8: Templates ===\n")
+    print("\n=== Phase 8: Templates (deep) ===\n")
 
-    out = await feed("/set_template practice Mon practice", ALICE)
-    ok = len(out) >= 1
-    record("/set_template responds", ok)
+    # /set_template syntax: name "Title" [limit=N] [location=X] [fee=X]
+    out = await feed('/set_template friday "Friday Football" limit=14 location="Turf 3" fee=200', ALICE)
+    ok = len(_errors) == 0 and len(out) >= 1
+    record("/set_template friday with title/limit/location/fee creates template",
+           ok, str(error_msgs()) if not ok else "")
+
+    out = await feed('/set_template practice "Tue Practice" limit=10', ALICE)
+    ok = len(_errors) == 0 and len(out) >= 1
+    record("/set_template practice (second template) creates", ok, str(error_msgs()) if not ok else "")
 
     out = await feed("/templates", ALICE)
-    ok = len(out) >= 1
-    record("/templates responds", ok)
+    ok, d = contains(out, "friday", "practice")
+    record("/templates lists both templates (friday + practice)", ok, d)
+
+    # /set_template with existing name should update
+    out = await feed('/set_template friday "Friday FC" limit=16', ALICE)
+    ok = len(_errors) == 0
+    record("/set_template friday (update existing) handled without error",
+           ok, str(error_msgs()) if not ok else "")
+
+    out = await feed("/templates", ALICE)
+    ok = "friday fc" in text_of(out).lower() or "friday" in text_of(out).lower()
+    record("/templates reflects updated friday title", ok,
+           f"got: {text_of(out)[:200]!r}")
+
+    # /start_template — must run with no active rollcall (Phase 1's rollcall
+    # was ended in Phase 13's endconfirm; if still active, this gets queued
+    # depending on the bot's max-rollcall policy)
+    # Ensure clean state first
+    await feed("/erc", ALICE)
+    await feed("/erc", ALICE)
+    _errors.clear()
+
+    out = await feed("/start_template practice", ALICE)
+    ok = len(_errors) == 0
+    record("/start_template practice spawns a rollcall without error",
+           ok, str(error_msgs()) if not ok else "")
+
+    out = await feed("/rollcalls", ALICE)
+    ok = "practice" in text_of(out).lower() or "tue" in text_of(out).lower()
+    record("/rollcalls shows the template-started rollcall", ok,
+           f"got: {text_of(out)[:200]!r}")
+
+    # /start_template with title override
+    out = await feed("/start_template friday Custom Title", ALICE)
+    ok = len(_errors) == 0
+    record("/start_template friday with title override", ok, str(error_msgs()) if not ok else "")
+
+    out = await feed("/rollcalls", ALICE)
+    ok = "custom title" in text_of(out).lower() or "friday" in text_of(out).lower()
+    record("/rollcalls shows overridden title from /start_template", ok,
+           f"got: {text_of(out)[:200]!r}")
+
+    # Clean up template-started rollcalls
+    await feed("/erc", ALICE)
+    await feed("/erc", ALICE)
+    _errors.clear()
+
+    # /delete_template
+    out = await feed("/delete_template practice", ALICE)
+    ok = len(_errors) == 0
+    record("/delete_template practice removes template", ok, str(error_msgs()) if not ok else "")
+
+    out = await feed("/templates", ALICE)
+    ok = "practice" not in text_of(out).lower() or "tue practice" not in text_of(out).lower()
+    record("/templates no longer shows deleted 'practice'", ok,
+           f"got: {text_of(out)[:200]!r}")
+
+    # /delete_template with bad name
+    out = await feed("/delete_template doesnotexist", ALICE)
+    ok = len(_errors) == 0
+    record("/delete_template <nonexistent> handled gracefully", ok, str(error_msgs()) if not ok else "")
+
+    # /start_template with bad name
+    out = await feed("/start_template doesnotexist", ALICE)
+    ok = len(_errors) == 0
+    record("/start_template <nonexistent> handled gracefully", ok, str(error_msgs()) if not ok else "")
+
+    # /set_template with bad syntax (missing title)
+    out = await feed("/set_template badone", ALICE)
+    ok = len(_errors) == 0
+    record("/set_template with missing title handled gracefully", ok, str(error_msgs()) if not ok else "")
+
+    print("\n=== Phase 8b: Schedules (deep) ===\n")
+
+    # Templates need event_day + event_time before scheduling. Set them first
+    # on the 'friday' template (created earlier in Phase 8).
+    out = await feed('/set_template friday "Friday FC" limit=16 event_day=sunday event_time=17:00', ALICE)
+    ok = len(_errors) == 0
+    record("/set_template friday with event_day/event_time", ok, str(error_msgs()) if not ok else "")
+
+    # /schedule_template syntax: name <weekday> <HH:MM> [biweekly]
+    # weekday must be full name (monday..sunday), NOT 3-letter abbreviation.
+    out = await feed("/schedule_template friday friday 18:00", ALICE)
+    ok = len(_errors) == 0 and "schedule" in text_of(out).lower()
+    record("/schedule_template friday friday 18:00 (weekly) accepted",
+           ok, f"got: {text_of(out)[:150]!r}")
 
     out = await feed("/schedules", ALICE)
-    ok = len(out) >= 1
-    record("/schedules responds", ok)
+    ok = "friday" in text_of(out).lower()
+    record("/schedules lists the scheduled template", ok,
+           f"got: {text_of(out)[:200]!r}")
+
+    # Biweekly variant
+    out = await feed("/schedule_template friday friday 18:00 biweekly", ALICE)
+    ok = len(_errors) == 0
+    record("/schedule_template biweekly variant accepted", ok,
+           f"got: {text_of(out)[:150]!r}")
+
+    # Monthly variant
+    out = await feed("/schedule_template friday monthly 15 09:00", ALICE)
+    ok = len(_errors) == 0
+    record("/schedule_template monthly variant accepted", ok,
+           f"got: {text_of(out)[:150]!r}")
+
+    # Status query (no args after name) — should print current schedule
+    out = await feed("/schedule_template friday", ALICE)
+    ok = "schedule" in text_of(out).lower() or "enabled" in text_of(out).lower()
+    record("/schedule_template friday (status query)", ok,
+           f"got: {text_of(out)[:150]!r}")
+
+    # Off variant — unschedule
+    out = await feed("/schedule_template friday off", ALICE)
+    ok = "disabled" in text_of(out).lower() or len(_errors) == 0
+    record("/schedule_template friday off (cancel schedule) accepted", ok,
+           f"got: {text_of(out)[:150]!r}")
+
+    # Bad day name
+    out = await feed("/schedule_template friday notaday 18:00", ALICE)
+    ok = "not a valid weekday" in text_of(out).lower() or "invalid" in text_of(out).lower()
+    record("/schedule_template with bad day returns user-facing error", ok,
+           f"got: {text_of(out)[:150]!r}")
+
+    # Bad time format
+    out = await feed("/schedule_template friday friday 25:99", ALICE)
+    ok = "not a valid time" in text_of(out).lower() or "invalid" in text_of(out).lower()
+    record("/schedule_template with bad time returns user-facing error", ok,
+           f"got: {text_of(out)[:150]!r}")
+
+    # /schedule_template on nonexistent template
+    out = await feed("/schedule_template ghost friday 18:00", ALICE)
+    ok = "not found" in text_of(out).lower()
+    record("/schedule_template on nonexistent template returns 'not found'", ok,
+           f"got: {text_of(out)[:150]!r}")
+
+    # Re-add schedule for callback path
+    out = await feed("/schedule_template friday friday 18:00", ALICE)
+    ok = len(_errors) == 0
+    record("/schedule_template re-scheduled friday for callback test", ok,
+           str(error_msgs()) if not ok else "")
+
+    # /schedules has interactive toggle buttons — verify markup attached
+    out = await feed("/schedules", ALICE)
+    has_markup = False
+    for _name, _args, _kwargs in out:
+        if isinstance(_kwargs, dict) and _kwargs.get("reply_markup") is not None:
+            has_markup = True
+            break
+    record("/schedules emits an inline-keyboard reply_markup", has_markup,
+           f"outbound: {[(n, list(k.keys())) for n,_,k in out if isinstance(k, dict)]}")
+
+    # /set_template within already-running rollcall
+    await feed("/src TemplateContextTest", ALICE)
+    out = await feed('/set_template inside "Inside Title" limit=5', ALICE)
+    ok = len(_errors) == 0
+    record("/set_template can be created while a rollcall is active", ok,
+           str(error_msgs()) if not ok else "")
+    await feed("/erc", ALICE)
+    _errors.clear()
 
     print("\n=== Phase 9: Admin overrides ===\n")
 
@@ -442,8 +600,11 @@ async def run_all():
 
     print("\n=== Phase 10: Callback regression — panel OUT/MAYBE after IN ===\n")
     print("    (the bug fixed 2026-06-16: UnboundLocalError on format_mention_with_name_md)")
-    # Pre-conditions for the regression: group chat (cid<0), real int user_id,
-    # shh OFF, panel inline-button click sequence in → out → maybe.
+    # Pre-conditions: ensure a clean active rollcall (Phase 8b's lifecycle
+    # churn may have left zero active). shh OFF, real int user_id, group chat.
+    await feed("/erc", ALICE)  # clear any leftover
+    _errors.clear()
+    await feed("/src CallbackRegression", ALICE)
     await feed("/louder", ALICE)  # ensure shh is OFF
     # Use FRANK — fresh user not already in any list.
     # Callback data format is btn_<action>_<rc_number>. Active rollcall = #1.

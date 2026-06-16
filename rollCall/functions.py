@@ -27,7 +27,7 @@ def roll_call_already_started(message, manager):
     try:
         rollcalls = manager.get_rollcalls(message.chat.id)
         if len(rollcalls) == 1:
-            logging.error(f"[{_ts()}] Roll call with title {rollcalls[0].title} is still in progress")
+            logging.info(f"[{_ts()}] Roll call with title {rollcalls[0].title} is still in progress")
             return False
         else:
             return True
@@ -41,7 +41,7 @@ def roll_call_not_started(message, manager):
     try:
         rollcalls = manager.get_rollcalls(message.chat.id)
         if len(rollcalls) == 0:
-            logging.error(f"[{_ts()}] Roll call is not active")
+            logging.info(f"[{_ts()}] Roll call is not active")
             return False
         else:
             return True
@@ -63,7 +63,7 @@ async def admin_rights(message, manager):
 
         member = await _bot().get_chat_member(chat_id, message.from_user.id)
         if member.status not in ['administrator', 'creator']:
-            logging.error(f"[{_ts()}] Error - user does not have sufficient permissions for this operation")
+            logging.info(f"[{_ts()}] User {message.from_user.id} attempted admin-only command without permissions")
             return False
 
         return True

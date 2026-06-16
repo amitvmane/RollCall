@@ -431,7 +431,6 @@ async def callback_handler(call):
             if action == "in" and isinstance(user.user_id, int) and manager.get_ghost_tracking_enabled(cid):
                 from db import get_ghost_count
                 from bot_state import _pending_reconf
-                from bot_state import format_mention_with_name_md
                 ghost_count = get_ghost_count(cid, user.user_id)
                 absent_limit = manager.get_absent_limit(cid)
                 already_in = any(u.user_id == user.user_id for u in rc.inList)

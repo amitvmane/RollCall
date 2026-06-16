@@ -230,7 +230,13 @@
     {
         "Version": 8.1,
         "Description": "🧹 Python 3.12 deprecation cleanup — pure hygiene PR, zero behavior change. (1) datetime.utcnow() replaced everywhere in production code (rollCall/db.py, rollCall/models.py — 3 call sites) with a local _utcnow_naive() helper that returns datetime.now(timezone.utc).replace(tzinfo=None). Same naive-UTC value the bot has always used, just without the 3.12 deprecation warning that will become an error in a future Python release. (2) sqlite3 default datetime adapter (also deprecated in 3.12) replaced with an explicit register_adapter at db.py module import; produces byte-identical 'YYYY-MM-DD HH:MM:SS[.ffffff]' output that the existing _parse_db_datetime reader already handles, so DB round-trips are unchanged and existing rows still parse cleanly. Result: deprecation warning count from the full test suite dropped from ~1500 → 1 (the lone remaining warning is asyncio.get_event_loop() inside test code, out of scope). Full suite still green: smoke + 295 unit + 315 integration on locked Python 3.12, plus smoke inside the Docker image. Future-proofs the bot for Python 3.13/3.14 where these deprecations become hard errors. Also bundles same-day fixes shipped under the v8.1 train: (a) /buzz no longer surfaces UnboundLocalError from log_admin_action's finally block (d9c2793); (b) /stats Voting% + Attendance% split with real attendance, leaderboard ranks by actual attendance, streak resets on OUT/MAYBE (bd43d4b); (c) /stats correctness for /stats group, /stats bot, /stats <name> resolver (incl. proxy fallback + ambiguous-name hint), proxy users counted as first-class participants in personal/leaderboard/group stats, and /help refactor with COMMANDS-driven single source of truth + /help <name> detail view (0330011). Full test suite at deploy time: smoke 9/9, unit 296/296, integration 341/341 on Python 3.12 + locked deps; docker build + in-image smoke also green.",
-        "DeployedOnProd": "Y",
+        "DeployedOnProd": "N",
         "DeployedDatetime": "12-06-2026 13:00 UTC"
+    },
+    {
+        "Version": 8.2,
+        "Description": "bump pyTelegramBotAPI 4.14.1 → 4.34.0 (Bot API 6.x → 10.0) (#15)",
+        "DeployedOnProd": "Y",
+        "DeployedDatetime": "16-06-2026 12:29 UTC"
     }
 ]

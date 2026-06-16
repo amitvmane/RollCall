@@ -236,7 +236,9 @@ async def config_timezone(message):
             await bot.send_message(cid, f"Given timezone is invalid , check this <a href='https://gist.github.com/heyalexej/8bf688fd67d7199be4a1682b3eec7568'>website</a>", parse_mode='HTML')
 
     except Exception as e:
-        logging.exception("[config_timezone] Unexpected error")
+        from bot_state import _USER_FACING_EXCEPTIONS
+        if not isinstance(e, _USER_FACING_EXCEPTIONS):
+            logging.exception("[config_timezone] Unexpected error")
         await reply_error(message, e)
 
 

@@ -534,7 +534,9 @@ async def set_template(message):
             await bot.send_message(cid, "Failed to save template. Please try again.")
 
     except Exception as e:
-        logging.exception("[set_template] Unexpected error")
+        from bot_state import _USER_FACING_EXCEPTIONS
+        if not isinstance(e, _USER_FACING_EXCEPTIONS):
+            logging.exception("[set_template] Unexpected error")
         await reply_error(message, e)
 
 

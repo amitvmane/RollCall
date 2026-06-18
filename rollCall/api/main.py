@@ -26,6 +26,7 @@ from exceptions import (
     rollCallAlreadyStarted,
     rollCallNotStarted,
 )
+from api.rate_limit import rate_limit_middleware
 from api.routes import health, rollcalls, votes
 from api.schemas.common import ErrorResponse
 
@@ -89,6 +90,9 @@ def create_app() -> FastAPI:
                 detail=str(exc) or type(exc).__name__,
             ).model_dump(),
         )
+
+    # Rate-limit middleware. Runs before routes; skips /health.
+    app.middleware("http")(rate_limit_middleware)
 
     # Route mounting
     app.include_router(health.router, prefix=API_PREFIX, tags=["health"])

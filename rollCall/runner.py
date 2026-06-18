@@ -168,9 +168,46 @@ def validate_environment():
 _health_state = {
     "scheduler_task": None,        # asyncio.Task for check_template_schedules
     "prune_task": None,            # asyncio.Task for memory_prune_loop
+    "api_task": None,              # asyncio.Task for REST API uvicorn server (opt-in)
     "last_error_at": None,         # ISO timestamp of last unhandled exception
     "last_error_msg": None,        # one-line summary
 }
+
+
+def _rest_api_enabled() -> bool:
+    """Whether to spin up the REST API alongside the bot.
+
+    Default OFF — the API has no authentication yet (PR 3 adds it), so
+    we don't expose it unless the operator explicitly opts in via
+    `REST_API_ENABLED=true`. When enabled, it binds to localhost only;
+    use a reverse proxy or SSH tunnel for access until auth lands.
+    """
+    return os.environ.get("REST_API_ENABLED", "").strip().lower() in ("true", "1", "yes", "on")
+
+
+async def _run_rest_api_server():
+    """Start the FastAPI app under uvicorn on a separate port.
+
+    Binds to 127.0.0.1 by default. The port is configurable via
+    REST_API_PORT (default 8081 — distinct from the existing /health
+    server on 8080).
+    """
+    import uvicorn
+
+    from api.main import app as api_app
+
+    port = int(os.environ.get("REST_API_PORT", "8081"))
+    host = os.environ.get("REST_API_HOST", "127.0.0.1")
+    config = uvicorn.Config(
+        api_app,
+        host=host,
+        port=port,
+        lifespan="on",
+        log_level="info",
+        access_log=False,  # the FastAPI app already logs; access log is noisy here
+    )
+    server = uvicorn.Server(config)
+    await server.serve()
 
 
 def _task_alive(task) -> bool:
@@ -441,6 +478,16 @@ async def main():
     _prune_task.add_done_callback(_log_task_exc)
     _health_state["prune_task"] = _prune_task
     logger.info("✅ Memory prune loop started")
+
+    # Start REST API if explicitly enabled. Default OFF — no exposure unless
+    # the operator opts in. See _rest_api_enabled() docstring for why.
+    if _rest_api_enabled():
+        _api_task = asyncio.create_task(_run_rest_api_server())
+        _api_task.add_done_callback(_log_task_exc)
+        _health_state["api_task"] = _api_task
+        _api_port = int(os.environ.get("REST_API_PORT", "8081"))
+        _api_host = os.environ.get("REST_API_HOST", "127.0.0.1")
+        logger.info(f"✅ REST API server started on http://{_api_host}:{_api_port}/api/v1 (docs: /api/docs)")
 
     # Resume reminder/auto-close loops for rollcalls already in DB with a finalizeDate.
     # Without this, any rollcall created before a bot restart would never auto-close.

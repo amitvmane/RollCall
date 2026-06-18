@@ -595,6 +595,46 @@ def create_tables():
                 )
             """)
 
+        # api_tokens: bearer tokens for REST API auth (PR 3).
+        # Only the SHA-256 hash of the token is stored — plaintext is
+        # shown to the issuer exactly once at creation and discarded.
+        if db_type == 'postgresql':
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS api_tokens (
+                    token_hash TEXT PRIMARY KEY,
+                    chat_id BIGINT NOT NULL,
+                    issued_by_user_id BIGINT,
+                    scopes TEXT NOT NULL,
+                    label TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP,
+                    last_used_at TIMESTAMP,
+                    revoked_at TIMESTAMP
+                )
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_api_tokens_chat
+                ON api_tokens(chat_id)
+            """)
+        else:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS api_tokens (
+                    token_hash TEXT PRIMARY KEY,
+                    chat_id INTEGER NOT NULL,
+                    issued_by_user_id INTEGER,
+                    scopes TEXT NOT NULL,
+                    label TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP,
+                    last_used_at TIMESTAMP,
+                    revoked_at TIMESTAMP
+                )
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_api_tokens_chat
+                ON api_tokens(chat_id)
+            """)
+
         conn.commit()
         logging.debug("Database tables created successfully")
 
@@ -3444,6 +3484,173 @@ def get_active_members(chat_id: int) -> List[Dict]:
     except Exception as e:
         logging.error(f"Error getting active members: {e}")
         return []
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+# ────────────────────────────────────────────────────────────────────────
+# api_tokens CRUD (REST API auth — PR 3)
+# ────────────────────────────────────────────────────────────────────────
+
+import hashlib  # noqa: E402
+import secrets  # noqa: E402
+
+
+def _hash_token(token: str) -> str:
+    """SHA-256 hex digest of an API token. The plaintext is never stored;
+    callers verify by hashing the inbound token and looking up by hash.
+    Token entropy is high enough (>=128 bits) that no salt is needed.
+    """
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def generate_api_token() -> str:
+    """Generate a new opaque API token. Format: `rc_<32 hex>` (132 bits
+    of entropy from secrets). Plaintext is shown to the issuer once."""
+    return f"rc_{secrets.token_hex(16)}"
+
+
+def insert_api_token(
+    token_hash: str,
+    chat_id: int,
+    scopes: str,
+    label: str | None = None,
+    issued_by_user_id: int | None = None,
+    expires_at=None,
+) -> None:
+    """Persist an issued token's hash, scopes, and metadata. The plaintext
+    must NOT be passed here — it's the caller's responsibility to hash."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(f"""
+            INSERT INTO api_tokens (token_hash, chat_id, issued_by_user_id,
+                                    scopes, label, expires_at)
+            VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph})
+        """, (token_hash, chat_id, issued_by_user_id, scopes, label, expires_at))
+        conn.commit()
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def lookup_api_token(token_hash: str) -> Optional[Dict]:
+    """Look up a token by its hash. Returns a dict with chat_id, scopes
+    (parsed to a list), label, expires_at, revoked_at — or None if no
+    matching token, the token is revoked, or it has expired.
+
+    Also bumps `last_used_at` as a side effect when a hit is returned, so
+    operators can audit token activity via the same row."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(f"""
+            SELECT chat_id, issued_by_user_id, scopes, label,
+                   created_at, expires_at, last_used_at, revoked_at
+            FROM api_tokens
+            WHERE token_hash = {ph}
+        """, (token_hash,))
+        row = cursor.fetchone()
+        if row is None:
+            return None
+
+        d = dict(row)
+        # Revoked or expired tokens act as non-existent for auth purposes.
+        if d.get("revoked_at") is not None:
+            return None
+        expires_at = d.get("expires_at")
+        if expires_at is not None:
+            # PG returns datetime; SQLite returns string. Coerce to compare.
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            try:
+                if isinstance(expires_at, str):
+                    parsed = _parse_db_datetime(expires_at)
+                else:
+                    parsed = expires_at
+                if parsed is not None and parsed < now:
+                    return None
+            except Exception:
+                logging.exception("api_token expiry parse failed; treating as expired")
+                return None
+
+        # Bump last_used_at. Best-effort — don't fail the lookup if it fails.
+        try:
+            cursor.execute(f"""
+                UPDATE api_tokens SET last_used_at = CURRENT_TIMESTAMP
+                WHERE token_hash = {ph}
+            """, (token_hash,))
+            conn.commit()
+        except Exception:
+            logging.exception("api_token last_used_at update failed")
+
+        d["scopes"] = [s.strip() for s in (d.get("scopes") or "").split(",") if s.strip()]
+        return d
+    except Exception:
+        logging.exception("lookup_api_token failed")
+        return None
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def list_api_tokens(chat_id: int) -> List[Dict]:
+    """List all tokens issued for a chat (active + revoked + expired).
+    Useful for the admin token-management surface. token_hash is included
+    so revocation by hash works."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(f"""
+            SELECT token_hash, issued_by_user_id, scopes, label,
+                   created_at, expires_at, last_used_at, revoked_at
+            FROM api_tokens
+            WHERE chat_id = {ph}
+            ORDER BY created_at DESC
+        """, (chat_id,))
+        return [dict(row) for row in cursor.fetchall()]
+    except Exception:
+        logging.exception("list_api_tokens failed")
+        return []
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def revoke_api_token(token_hash: str) -> bool:
+    """Mark a token as revoked (sets revoked_at). Returns True if a row
+    was modified, False if no such token (or already revoked)."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(f"""
+            UPDATE api_tokens
+            SET revoked_at = CURRENT_TIMESTAMP
+            WHERE token_hash = {ph} AND revoked_at IS NULL
+        """, (token_hash,))
+        affected = cursor.rowcount
+        conn.commit()
+        return bool(affected)
+    except Exception:
+        logging.exception("revoke_api_token failed")
+        return False
     finally:
         if cursor is not None:
             cursor.close()

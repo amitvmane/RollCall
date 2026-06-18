@@ -13,7 +13,14 @@ def _import():
     import bot_state  # noqa: F401  warm conftest mocks
     import rollcall_manager
     from api.main import app
-    return {"app": app, "manager": rollcall_manager.manager}
+    from db import _hash_token, generate_api_token, insert_api_token
+    return {
+        "app": app,
+        "manager": rollcall_manager.manager,
+        "generate_api_token": generate_api_token,
+        "insert_api_token": insert_api_token,
+        "_hash_token": _hash_token,
+    }
 
 
 CHAT_ID = -1001999000601
@@ -35,6 +42,14 @@ class VotesAPIBase(unittest.TestCase):
     def setUp(self):
         reset_db()
         self.manager.clear_cache()
+        from api.rate_limit import reset_buckets_for_tests
+        reset_buckets_for_tests()
+        # Auto-auth all requests for this base
+        from db import _hash_token, generate_api_token, insert_api_token
+        token = generate_api_token()
+        insert_api_token(_hash_token(token), CHAT_ID, "read,vote,admin",
+                         label="test", issued_by_user_id=ALICE["id"])
+        self.client.headers["Authorization"] = f"Bearer {token}"
         # Start a rollcall for every test
         self.client.post(
             f"/api/v1/chats/{CHAT_ID}/rollcalls",

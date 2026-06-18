@@ -10,10 +10,11 @@ service which expects 0-based.
 
 from typing import List
 
-from fastapi import APIRouter, Path, status
+from fastapi import APIRouter, Depends, Path, status
 
 from services import rollcalls as rc_svc
 
+from api.auth import AuthedToken, require_scope
 from api.schemas.rollcalls import (
     EndRollcallRequest,
     EndRollcallResponse,
@@ -34,6 +35,7 @@ router = APIRouter()
 async def start_rollcall(
     body: StartRollcallRequest,
     chat_id: int = Path(..., description="Telegram chat id"),
+    _token: AuthedToken = Depends(require_scope("vote")),
 ) -> RollcallResponse:
     result = await rc_svc.start_rollcall(
         chat_id=chat_id,
@@ -52,6 +54,7 @@ async def start_rollcall(
 )
 async def list_rollcalls(
     chat_id: int = Path(..., description="Telegram chat id"),
+    _token: AuthedToken = Depends(require_scope("read")),
 ) -> List[RollcallResponse]:
     return [RollcallResponse(**r) for r in rc_svc.list_rollcalls(chat_id)]
 
@@ -64,6 +67,7 @@ async def list_rollcalls(
 async def get_rollcall(
     chat_id: int = Path(..., description="Telegram chat id"),
     rc_number: int = Path(..., ge=1, description="1-based rollcall number"),
+    _token: AuthedToken = Depends(require_scope("read")),
 ) -> RollcallResponse:
     return RollcallResponse(**rc_svc.get_rollcall(chat_id, rc_number - 1))
 
@@ -77,6 +81,7 @@ async def end_rollcall(
     body: EndRollcallRequest,
     chat_id: int = Path(..., description="Telegram chat id"),
     rc_number: int = Path(..., ge=1, description="1-based rollcall number"),
+    _token: AuthedToken = Depends(require_scope("admin")),
 ) -> EndRollcallResponse:
     result = await rc_svc.end_rollcall(
         chat_id=chat_id,

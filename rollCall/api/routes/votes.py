@@ -7,10 +7,11 @@ simple (no /vote-in, /vote-out, etc.) while still letting clients
 explicitly express what they want.
 """
 
-from fastapi import APIRouter, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, status
 
 from services import voting as vote_svc
 
+from api.auth import AuthedToken, require_scope
 from api.schemas.votes import VoteRequest, VoteResponse
 
 
@@ -27,6 +28,7 @@ async def cast_vote(
     body: VoteRequest,
     chat_id: int = Path(..., description="Telegram chat id"),
     rc_number: int = Path(..., ge=1, description="1-based rollcall number"),
+    _token: AuthedToken = Depends(require_scope("vote")),
 ) -> VoteResponse:
     common_args = dict(
         chat_id=chat_id,

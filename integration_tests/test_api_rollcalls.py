@@ -21,7 +21,14 @@ def _import():
     import bot_state  # noqa: F401  warm conftest's mock graph
     import rollcall_manager
     from api.main import app
-    return {"app": app, "manager": rollcall_manager.manager}
+    from db import _hash_token, generate_api_token, insert_api_token
+    return {
+        "app": app,
+        "manager": rollcall_manager.manager,
+        "generate_api_token": generate_api_token,
+        "insert_api_token": insert_api_token,
+        "_hash_token": _hash_token,
+    }
 
 
 CHAT_ID = -1001999000701
@@ -40,6 +47,18 @@ class APIBase(unittest.TestCase):
     def setUp(self):
         reset_db()
         self.manager.clear_cache()
+        # Reset rate-limit buckets so test order doesn't pollute counts.
+        from api.rate_limit import reset_buckets_for_tests
+        reset_buckets_for_tests()
+        # Issue a full-scope token for CHAT_ID and set it as the
+        # client's default header so every existing test request
+        # auto-authenticates. Tests that want to override (or omit)
+        # auth set/clear `self.client.headers["Authorization"]`.
+        from db import _hash_token, generate_api_token, insert_api_token
+        token = generate_api_token()
+        insert_api_token(_hash_token(token), CHAT_ID, "read,vote,admin",
+                         label="test", issued_by_user_id=ALICE["id"])
+        self.client.headers["Authorization"] = f"Bearer {token}"
 
 
 class TestHealthRoute(APIBase):

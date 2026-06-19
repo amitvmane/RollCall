@@ -935,8 +935,10 @@ class TestSifDuplicateProxyGuard(unittest.IsolatedAsyncioTestCase):
         m.get_absent_limit.return_value = 1
 
         with patch('handlers.proxy.manager', m), \
+             patch('rollcall_manager.manager', m), \
+             patch('services.proxy.manager', m), \
              patch('handlers.proxy.admin_rights', new=AsyncMock(return_value=True)), \
-             patch('handlers.proxy.get_ghost_count_by_proxy_name', return_value=0):
+             patch('services.proxy.get_ghost_count_by_proxy_name', return_value=0):
             msg = self._make_message("/sif Charlie")
             await self.set_in_for(msg)
 
@@ -965,8 +967,10 @@ class TestSifDuplicateProxyGuard(unittest.IsolatedAsyncioTestCase):
         m.get_absent_limit.return_value = 1
 
         with patch('handlers.proxy.manager', m), \
+             patch('rollcall_manager.manager', m), \
+             patch('services.proxy.manager', m), \
              patch('handlers.proxy.admin_rights', new=AsyncMock(return_value=True)), \
-             patch('handlers.proxy.get_ghost_count_by_proxy_name', return_value=0):
+             patch('services.proxy.get_ghost_count_by_proxy_name', return_value=0):
             msg = self._make_message("/sif Dave")
             await self.set_in_for(msg)
 
@@ -997,8 +1001,11 @@ class TestSifDuplicateProxyGuard(unittest.IsolatedAsyncioTestCase):
         m.get_absent_limit.return_value = 1
 
         with patch('handlers.proxy.manager', m), \
+             patch('rollcall_manager.manager', m), \
+             patch('services.proxy.manager', m), \
              patch('handlers.proxy.admin_rights', new=AsyncMock(return_value=True)), \
-             patch('handlers.proxy.get_ghost_count_by_proxy_name', return_value=0):
+             patch('services.proxy.get_ghost_count_by_proxy_name', return_value=0), \
+             patch('handlers.lifecycle.show_panel_for_rollcall', new=AsyncMock()):
             msg = self._make_message("/sif Eve")
             await self.set_in_for(msg)
 

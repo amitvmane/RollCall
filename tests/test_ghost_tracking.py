@@ -265,9 +265,9 @@ class TestInReconfirmation(GhostTestBase):
     async def test_reconfirmation_sent_when_ghost_count_at_limit(self):
         with self._rc_started_voting(), \
              patch('handlers.voting.manager', self.manager), \
-             patch('handlers.voting.get_ghost_count', return_value=1), \
-             patch('handlers.voting.asyncio') as mock_asyncio:
-            mock_asyncio.create_task = MagicMock()
+             patch('rollcall_manager.manager', self.manager), \
+             patch('services.voting.manager', self.manager), \
+             patch('services.voting.get_ghost_count', return_value=1):
             await self.in_user(self._make_message("/in"))
 
         self.assertEqual(self._sent_count(), 1)
@@ -278,12 +278,10 @@ class TestInReconfirmation(GhostTestBase):
     async def test_no_reconfirmation_when_ghost_count_below_limit(self):
         with self._rc_started_voting(), \
              patch('handlers.voting.manager', self.manager), \
-             patch('handlers.voting.get_ghost_count', return_value=0), \
-             patch('handlers.voting.get_rc_db_id', return_value=1), \
-             patch('handlers.voting.increment_user_stat'), \
-             patch('handlers.voting.increment_rollcall_stat'), \
-             patch('handlers.voting.asyncio') as mock_asyncio:
-            mock_asyncio.create_task = MagicMock()
+             patch('rollcall_manager.manager', self.manager), \
+             patch('services.voting.manager', self.manager), \
+             patch('services.voting.get_ghost_count', return_value=0), \
+             patch('handlers.lifecycle._update_panel', return_value=False):
             await self.in_user(self._make_message("/in"))
 
         # Should proceed normally — rc.addIn was called
@@ -294,12 +292,9 @@ class TestInReconfirmation(GhostTestBase):
 
         with self._rc_started_voting(), \
              patch('handlers.voting.manager', self.manager), \
-             patch('handlers.voting.get_ghost_count', return_value=5), \
-             patch('handlers.voting.get_rc_db_id', return_value=1), \
-             patch('handlers.voting.increment_user_stat'), \
-             patch('handlers.voting.increment_rollcall_stat'), \
-             patch('handlers.voting.asyncio') as mock_asyncio:
-            mock_asyncio.create_task = MagicMock()
+             patch('rollcall_manager.manager', self.manager), \
+             patch('services.voting.manager', self.manager), \
+             patch('handlers.lifecycle._update_panel', return_value=False):
             await self.in_user(self._make_message("/in"))
 
         self.rc.addIn.assert_called_once()
@@ -307,9 +302,9 @@ class TestInReconfirmation(GhostTestBase):
     async def test_pending_reconf_stored(self):
         with self._rc_started_voting(), \
              patch('handlers.voting.manager', self.manager), \
-             patch('handlers.voting.get_ghost_count', return_value=2), \
-             patch('handlers.voting.asyncio') as mock_asyncio:
-            mock_asyncio.create_task = MagicMock()
+             patch('rollcall_manager.manager', self.manager), \
+             patch('services.voting.manager', self.manager), \
+             patch('services.voting.get_ghost_count', return_value=2):
             await self.in_user(self._make_message("/in hello", user_id=1))
 
         self.assertIn((100, 1), self.bot_state._pending_reconf)

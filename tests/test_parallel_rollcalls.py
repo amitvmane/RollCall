@@ -151,6 +151,9 @@ class TestParallelRollcallsBase(unittest.IsolatedAsyncioTestCase):
             patch('handlers.lists.manager', self.manager),
             patch('handlers.admin.manager', self.manager),
             patch('handlers.settings.manager', self.manager),
+            patch('rollcall_manager.manager', self.manager),
+            patch('services.voting.manager', self.manager),
+            patch('services.proxy.manager', self.manager),
         ])
 
 
@@ -210,10 +213,9 @@ class TestRollcallSelectionByIndex(TestParallelRollcallsBase):
 
         msg = self._make_message("/in ::2")
         with self._rc_started(), patch('handlers.voting.manager', mgr), \
-             patch('handlers.lifecycle._update_panel', return_value=False), \
-             patch('handlers.voting.increment_user_stat'), \
-             patch('handlers.voting.increment_rollcall_stat'), \
-             patch('handlers.voting.get_rc_db_id', return_value=2):
+             patch('rollcall_manager.manager', mgr), \
+             patch('services.voting.manager', mgr), \
+             patch('handlers.lifecycle._update_panel', return_value=False):
             await self.in_user(msg)
 
         mgr.get_rollcall.assert_called_with(100, 1)
@@ -233,10 +235,9 @@ class TestRollcallSelectionByIndex(TestParallelRollcallsBase):
 
         msg = self._make_message("/out ::3")
         with self._rc_started(), patch('handlers.voting.manager', mgr), \
+             patch('rollcall_manager.manager', mgr), \
+             patch('services.voting.manager', mgr), \
              patch('handlers.lifecycle._update_panel', return_value=False), \
-             patch('handlers.voting.increment_user_stat'), \
-             patch('handlers.voting.increment_rollcall_stat'), \
-             patch('handlers.voting.get_rc_db_id', return_value=3), \
              patch('handlers.lifecycle.notify_proxy_owner_wait_to_in', new=AsyncMock()):
             await self.out_user(msg)
 
@@ -352,8 +353,9 @@ class TestProxyUserWithParallel(TestParallelRollcallsBase):
 
         msg = self._make_message("/set_in_for Bob ::2")
         with self._rc_started(), patch('handlers.proxy.manager', mgr), \
-             patch('handlers.lifecycle.show_panel_for_rollcall', new=AsyncMock()), \
-             patch('handlers.proxy.add_or_update_proxy_user'):
+             patch('rollcall_manager.manager', mgr), \
+             patch('services.proxy.manager', mgr), \
+             patch('handlers.lifecycle.show_panel_for_rollcall', new=AsyncMock()):
             await self.set_in_for(msg)
 
         mgr.get_rollcall.assert_called_with(100, 1)

@@ -246,6 +246,9 @@ class HandlerTestBase(unittest.IsolatedAsyncioTestCase):
             patch('handlers.core.manager', self.manager),
             patch('handlers.templates.manager', self.manager),
             patch('handlers.stats.manager', self.manager),
+            patch('rollcall_manager.manager', self.manager),
+            patch('services.voting.manager', self.manager),
+            patch('services.proxy.manager', self.manager),
         ])
 
 
@@ -510,10 +513,7 @@ class TestInUser(HandlerTestBase):
         self.rc.addIn.return_value = None
         msg = self._make_message("/in")
         with self._rc_started(), self._patch_manager(), \
-             patch('handlers.lifecycle._update_panel', return_value=False), \
-             patch('handlers.voting.increment_user_stat'), \
-             patch('handlers.voting.increment_rollcall_stat'), \
-             patch('handlers.voting.get_rc_db_id', return_value=1):
+             patch('handlers.lifecycle._update_panel', return_value=False):
             await self.in_user(msg)
         self.rc.addIn.assert_called_once()
 
@@ -527,10 +527,7 @@ class TestInUser(HandlerTestBase):
         self.rc.addIn.return_value = None
         msg = self._make_message("/in running late")
         with self._rc_started(), self._patch_manager(), \
-             patch('handlers.lifecycle._update_panel', return_value=False), \
-             patch('handlers.voting.increment_user_stat'), \
-             patch('handlers.voting.increment_rollcall_stat'), \
-             patch('handlers.voting.get_rc_db_id', return_value=1):
+             patch('handlers.lifecycle._update_panel', return_value=False):
             await self.in_user(msg)
         # User object should have comment set
         self.rc.addIn.assert_called_once()
@@ -539,10 +536,7 @@ class TestInUser(HandlerTestBase):
         self.rc.addIn.return_value = 'AB'
         msg = self._make_message("/in")
         with self._rc_started(), self._patch_manager(), \
-             patch('handlers.lifecycle._update_panel', return_value=False), \
-             patch('handlers.voting.increment_user_stat'), \
-             patch('handlers.voting.increment_rollcall_stat'), \
-             patch('handlers.voting.get_rc_db_id', return_value=1):
+             patch('handlers.lifecycle._update_panel', return_value=False):
             await self.in_user(msg)
         self.assertGreater(self._sent_count(), 0)
 
@@ -550,10 +544,7 @@ class TestInUser(HandlerTestBase):
         self.rc.addIn.return_value = 'AC'
         msg = self._make_message("/in")
         with self._rc_started(), self._patch_manager(), \
-             patch('handlers.lifecycle._update_panel', return_value=False), \
-             patch('handlers.voting.increment_user_stat'), \
-             patch('handlers.voting.increment_rollcall_stat'), \
-             patch('handlers.voting.get_rc_db_id', return_value=1):
+             patch('handlers.lifecycle._update_panel', return_value=False):
             await self.in_user(msg)
         sent = self._sent_text()
         self.assertIn("waitlist", sent.lower())
@@ -564,10 +555,9 @@ class TestInUser(HandlerTestBase):
         multi_manager.get_rollcall.return_value = rc2
         msg = self._make_message("/in ::2")
         with self._rc_started(), patch('handlers.voting.manager', multi_manager), \
-             patch('handlers.lifecycle._update_panel', return_value=False), \
-             patch('handlers.voting.increment_user_stat'), \
-             patch('handlers.voting.increment_rollcall_stat'), \
-             patch('handlers.voting.get_rc_db_id', return_value=2):
+             patch('rollcall_manager.manager', multi_manager), \
+             patch('services.voting.manager', multi_manager), \
+             patch('handlers.lifecycle._update_panel', return_value=False):
             await self.in_user(msg)
         multi_manager.get_rollcall.assert_called_with(100, 1)  # index 1 = RC #2
 
@@ -589,9 +579,6 @@ class TestOutUser(HandlerTestBase):
         msg = self._make_message("/out")
         with self._rc_started(), self._patch_manager(), \
              patch('handlers.lifecycle._update_panel', return_value=False), \
-             patch('handlers.voting.increment_user_stat'), \
-             patch('handlers.voting.increment_rollcall_stat'), \
-             patch('handlers.voting.get_rc_db_id', return_value=1), \
              patch('handlers.lifecycle.notify_proxy_owner_wait_to_in', new=AsyncMock()):
             await self.out_user(msg)
         self.rc.addOut.assert_called_once()
@@ -607,9 +594,6 @@ class TestOutUser(HandlerTestBase):
         msg = self._make_message("/out")
         with self._rc_started(), self._patch_manager(), \
              patch('handlers.lifecycle._update_panel', return_value=False), \
-             patch('handlers.voting.increment_user_stat'), \
-             patch('handlers.voting.increment_rollcall_stat'), \
-             patch('handlers.voting.get_rc_db_id', return_value=1), \
              patch('handlers.lifecycle.notify_proxy_owner_wait_to_in', new=AsyncMock()):
             await self.out_user(msg)
         self.assertGreater(self._sent_count(), 0)
@@ -621,11 +605,7 @@ class TestOutUser(HandlerTestBase):
         msg = self._make_message("/out")
         with self._rc_started(), self._patch_manager(), \
              patch('handlers.lifecycle._update_panel', return_value=False), \
-             patch('handlers.voting.increment_user_stat'), \
-             patch('handlers.voting.increment_rollcall_stat'), \
-             patch('handlers.voting.get_rc_db_id', return_value=1), \
-             patch('handlers.lifecycle.notify_proxy_owner_wait_to_in', new=AsyncMock()), \
-             patch('handlers.voting.format_mention_with_name', return_value="Dave"):
+             patch('handlers.lifecycle.notify_proxy_owner_wait_to_in', new=AsyncMock()):
             await self.out_user(msg)
         # A "→ IN" message must have been sent for the promoted user
         texts = [c[0][1] for c in self.bot_state.bot.send_message.call_args_list]
@@ -642,10 +622,7 @@ class TestMaybeUser(HandlerTestBase):
         self.rc.addMaybe.return_value = None
         msg = self._make_message("/maybe")
         with self._rc_started(), self._patch_manager(), \
-             patch('handlers.lifecycle._update_panel', return_value=False), \
-             patch('handlers.voting.increment_user_stat'), \
-             patch('handlers.voting.increment_rollcall_stat'), \
-             patch('handlers.voting.get_rc_db_id', return_value=1):
+             patch('handlers.lifecycle._update_panel', return_value=False):
             await self.maybe_user(msg)
         self.rc.addMaybe.assert_called_once()
 
@@ -659,10 +636,7 @@ class TestMaybeUser(HandlerTestBase):
         self.rc.addMaybe.return_value = 'AB'
         msg = self._make_message("/maybe")
         with self._rc_started(), self._patch_manager(), \
-             patch('handlers.lifecycle._update_panel', return_value=False), \
-             patch('handlers.voting.increment_user_stat'), \
-             patch('handlers.voting.increment_rollcall_stat'), \
-             patch('handlers.voting.get_rc_db_id', return_value=1):
+             patch('handlers.lifecycle._update_panel', return_value=False):
             await self.maybe_user(msg)
         self.assertGreater(self._sent_count(), 0)
 
@@ -676,8 +650,7 @@ class TestSetInFor(HandlerTestBase):
     async def test_proxy_in_happy_path(self):
         self.rc.addIn.return_value = None
         msg = self._make_message("/set_in_for Bob")
-        with self._rc_started(), self._patch_manager(), self._panel(), \
-             patch('handlers.proxy.add_or_update_proxy_user'):
+        with self._rc_started(), self._patch_manager(), self._panel():
             await self.set_in_for(msg)
         self.rc.addIn.assert_called_once()
 
@@ -696,16 +669,14 @@ class TestSetInFor(HandlerTestBase):
     async def test_proxy_in_duplicate_sends_error(self):
         self.rc.addIn.return_value = 'AB'
         msg = self._make_message("/set_in_for Bob")
-        with self._rc_started(), self._patch_manager(), self._panel(), \
-             patch('handlers.proxy.add_or_update_proxy_user'):
+        with self._rc_started(), self._patch_manager(), self._panel():
             await self.set_in_for(msg)
         self.assertGreater(self._sent_count(), 0)
 
     async def test_proxy_in_waitlist_sends_message(self):
         self.rc.addIn.return_value = 'AC'
         msg = self._make_message("/set_in_for Bob")
-        with self._rc_started(), self._patch_manager(), self._panel(), \
-             patch('handlers.proxy.add_or_update_proxy_user'):
+        with self._rc_started(), self._patch_manager(), self._panel():
             await self.set_in_for(msg)
         sent = self._sent_text()
         self.assertIn("waitlist", sent.lower())
@@ -721,7 +692,6 @@ class TestSetOutFor(HandlerTestBase):
         self.rc.addOut.return_value = None
         msg = self._make_message("/set_out_for Bob")
         with self._rc_started(), self._patch_manager(), self._panel(), \
-             patch('handlers.proxy.add_or_update_proxy_user'), \
              patch('handlers.lifecycle.notify_proxy_owner_wait_to_in', new=AsyncMock()):
             await self.set_out_for(msg)
         self.rc.addOut.assert_called_once()
@@ -748,8 +718,7 @@ class TestSetMaybeFor(HandlerTestBase):
     async def test_proxy_maybe_happy_path(self):
         self.rc.addMaybe.return_value = None
         msg = self._make_message("/set_maybe_for Bob")
-        with self._rc_started(), self._patch_manager(), self._panel(), \
-             patch('handlers.proxy.add_or_update_proxy_user'):
+        with self._rc_started(), self._patch_manager(), self._panel():
             await self.set_maybe_for(msg)
         self.rc.addMaybe.assert_called_once()
 

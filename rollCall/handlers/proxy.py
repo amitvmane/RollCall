@@ -1,29 +1,64 @@
 """
 Proxy handlers: /set_in_for (/sif), /set_out_for (/sof), /set_maybe_for (/smf)
+
+Thin Telegram adapters over services/proxy.py:
+  1. Parse message (name, comment, ::N suffix)
+  2. Ghost reconfirmation check (Telegram inline-button UI)
+  3. Call proxy service
+  4. Format result → send Telegram messages
+  5. Update panel
 """
+import asyncio
 import logging
-
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-
 from datetime import datetime
 
 from bot_state import (
-    bot, format_mention_with_name, format_mention_with_name_md, _esc_md,
-    _dm_promoted_real_user, _log_task_exc, get_rc_db_id,
-    _pending_proxy_add, _prune_pending, reply_error,
+    bot, _log_task_exc, _pending_proxy_add, _prune_pending,
+    format_mention_with_name_md, _esc_md,
+    _dm_promoted_real_user, reply_error,
 )
 from exceptions import (
     rollCallNotStarted, insufficientPermissions, parameterMissing, incorrectParameter,
-    duplicateProxy, repeatlyName,
 )
 from functions import admin_rights, roll_call_not_started
-from models import User
 from rollcall_manager import manager
-from db import (
-    add_or_update_proxy_user, log_admin_action, get_ghost_count_by_proxy_name,
-    increment_user_stat, increment_rollcall_stat,
-)
-import asyncio
+from services import proxy as proxy_svc
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+
+def _parse_proxy_args(text: str) -> tuple[int, str, str]:
+    """Return (rc_number_0based, proxy_name, comment)."""
+    parts = text.split()
+    rc_number = 0
+    if len(parts) > 1 and "::" in parts[-1]:
+        try:
+            rc_number = int(parts[-1].replace("::", "")) - 1
+            parts = parts[:-1]
+        except ValueError:
+            raise incorrectParameter("The rollcall number must be a positive integer")
+    if len(parts) < 2:
+        raise parameterMissing("Input username is missing")
+    proxy_name = parts[1]
+    comment = " ".join(parts[2:]) if len(parts) > 2 else ""
+    return rc_number, proxy_name, comment
+
+
+async def _send_promoted_proxy(cid: int, promoted: dict, rc_title: str, rc_number_1based: int):
+    """Announce and optionally DM a user promoted waitlist→IN via proxy command."""
+    if promoted["is_proxy"]:
+        if not manager.get_shh_mode(cid):
+            await bot.send_message(cid, f"{promoted['name']} → IN")
+    else:
+        if not manager.get_shh_mode(cid):
+            from models import User
+            u = User(promoted["name"], promoted.get("username"), promoted["user_id"], [])
+            await bot.send_message(
+                cid,
+                f"{format_mention_with_name_md(u)} → IN",
+                parse_mode="Markdown",
+            )
+        _t = asyncio.create_task(_dm_promoted_real_user(promoted["user_id"], rc_title, rc_number_1based))
+        _t.add_done_callback(_log_task_exc)
 
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/set_in_for")
@@ -34,96 +69,49 @@ async def set_in_for(message):
             raise rollCallNotStarted("Roll call is not active")
         if await admin_rights(message, manager) == False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
-        if len(message.text.split(" ")) <= 1:
-            raise parameterMissing("Input username is missing")
 
-        msg = message.text
-        pmts = msg.split(" ")
         cid = message.chat.id
-        rc_number = 0
+        rc_number, proxy_name, comment = _parse_proxy_args(message.text)
 
-        if len(pmts) > 0 and "::" in pmts[-1]:
-            try:
-                rc_number = int(pmts[-1].replace("::", "")) - 1
-                del pmts[-1]
-                msg = " ".join(pmts)
-            except Exception:
-                raise incorrectParameter("The rollcall number must be a positive integer")
-
-        rollcalls = manager.get_rollcalls(cid)
-        if rc_number < 0 or len(rollcalls) < rc_number + 1:
-            raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
-
-        rc = manager.get_rollcall(cid, rc_number)
-
-        arr = msg.split(" ")
-        if len(arr) > 1:
-            proxy_name = arr[1]
-
-            if len(proxy_name) > 40:
-                await bot.send_message(cid, f"⚠️ Proxy name is too long (max 40 characters). Got {len(proxy_name)}.")
-                return
-
-            already_present = any(
-                u.name == proxy_name and isinstance(u.user_id, str)
-                for u in rc.inList + rc.waitList
+        # Ghost reconfirmation for proxy (Telegram inline-button UI)
+        reconf = proxy_svc.check_proxy_ghost_reconfirmation_needed(cid, proxy_name)
+        if reconf["needed"]:
+            _prune_pending(_pending_proxy_add)
+            _pending_proxy_add[(cid, message.from_user.id, proxy_name)] = {
+                "comment": comment,
+                "_ts": datetime.now().timestamp(),
+            }
+            rc = manager.get_rollcall(cid, rc_number)
+            rc_title = rc.title if rc else ""
+            markup = InlineKeyboardMarkup(row_width=2)
+            markup.add(
+                InlineKeyboardButton("✅ Yes, add anyway", callback_data=f"proxy_add_{rc_number}_{proxy_name}"),
+                InlineKeyboardButton("❌ Cancel", callback_data=f"proxy_cancel_{rc_number}_{proxy_name}"),
             )
-            if already_present:
-                await bot.send_message(cid, f"⚠️ '{proxy_name}' is already IN or WAITING for '{rc.title}'.")
-                return
+            await bot.send_message(
+                cid,
+                f"👻 *Warning:* *{_esc_md(proxy_name)}* has ghosted *{reconf['ghost_count']}* session(s) before.\n"
+                f"⚠️ Absent Limit: *{reconf['absent_limit']}*\n\n"
+                f"Still add to *{_esc_md(rc_title)}*?",
+                parse_mode="Markdown",
+                reply_markup=markup,
+            )
+            return
 
-            user = User(proxy_name, None, proxy_name, rc.allNames)
-            comment = " ".join(arr[2:]) if len(arr) > 2 else ""
-            user.comment = comment
+        result = await proxy_svc.set_in_for(
+            cid, message.from_user.id, message.from_user.first_name,
+            proxy_name, comment, rc_number
+        )
 
-            ghost_count = get_ghost_count_by_proxy_name(cid, proxy_name)
-            if ghost_count > 0:
-                limit = manager.get_absent_limit(cid)
-                if ghost_count >= limit:
-                    _prune_pending(_pending_proxy_add)
-                    _pending_proxy_add[(cid, message.from_user.id, proxy_name)] = {
-                        'comment': comment,
-                        '_ts': datetime.now().timestamp(),
-                    }
-                    markup = InlineKeyboardMarkup(row_width=2)
-                    markup.add(
-                        InlineKeyboardButton("✅ Yes, add anyway", callback_data=f"proxy_add_{rc_number}_{proxy_name}"),
-                        InlineKeyboardButton("❌ Cancel", callback_data=f"proxy_cancel_{rc_number}_{proxy_name}"),
-                    )
-                    await bot.send_message(
-                        cid,
-                        f"👻 *Warning:* *{_esc_md(proxy_name)}* has ghosted *{ghost_count}* session(s) before.\n"
-                        f"⚠️ Absent Limit: *{limit}*\n\n"
-                        f"Still add to *{_esc_md(rc.title)}*?",
-                        parse_mode="Markdown",
-                        reply_markup=markup
-                    )
-                    return
+        if result["action"] == "waitlisted":
+            if not manager.get_shh_mode(cid):
+                await bot.send_message(cid, f"Event max limit is reached, {proxy_name} was added in waitlist")
+        elif result["action"] == "added":
+            if not manager.get_shh_mode(cid):
+                await bot.send_message(cid, f"{proxy_name} is now IN!")
 
-            proxy_owner_id = message.from_user.id
-            rc.set_proxy_owner(user.user_id, proxy_owner_id)
-
-            # rc.addIn → _save_user_to_db already writes the proxy row with
-            # the correct status (in or waitlist), so no separate
-            # add_or_update_proxy_user call is needed here.
-            result = rc.addIn(user)
-            rc.save()
-
-            log_admin_action(cid, message.from_user.id, message.from_user.first_name, "sif", target_name=proxy_name, rollcall_id=rc.id, details=rc.title)
-
-            if result == 'AB':
-                raise duplicateProxy("No duplicate proxy please :-), Thanks!")
-            elif result == 'AC':
-                if not manager.get_shh_mode(cid):
-                    await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
-            elif result == 'AA':
-                raise repeatlyName("That name already exists!")
-            elif result is None:
-                if not manager.get_shh_mode(cid):
-                    await bot.send_message(cid, f"{user.name} is now IN!")
-
-            from handlers.lifecycle import show_panel_for_rollcall
-            await show_panel_for_rollcall(cid, rc_number + 1)
+        from handlers.lifecycle import show_panel_for_rollcall
+        await show_panel_for_rollcall(cid, result["rc_number_1based"])
 
     except Exception as e:
         await reply_error(message, e)
@@ -137,81 +125,37 @@ async def set_out_for(message):
             raise rollCallNotStarted("Roll call is not active")
         if await admin_rights(message, manager) == False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
-        if len(message.text.split(" ")) <= 1:
-            raise parameterMissing("Input username is missing")
 
-        msg = message.text
-        pmts = msg.split(" ")
         cid = message.chat.id
-        rc_number = 0
+        rc_number, proxy_name, comment = _parse_proxy_args(message.text)
 
-        if len(pmts) > 0 and "::" in pmts[-1]:
-            try:
-                rc_number = int(pmts[-1].replace("::", "")) - 1
-                del pmts[-1]
-                msg = " ".join(pmts)
-            except Exception:
-                raise incorrectParameter("The rollcall number must be a positive integer")
+        result = await proxy_svc.set_out_for(
+            cid, message.from_user.id, message.from_user.first_name,
+            proxy_name, comment, rc_number
+        )
 
-        rollcalls = manager.get_rollcalls(cid)
-        if rc_number < 0 or len(rollcalls) < rc_number + 1:
-            raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+        rc_title = result["rollcall"]["title"]
+        rc_number_1based = result["rc_number_1based"]
 
-        rc = manager.get_rollcall(cid, rc_number)
-        arr = msg.split(" ")
-
-        if len(arr) > 1:
-            user = User(arr[1], None, arr[1], rc.allNames)
-            comment = " ".join(arr[2:]) if len(arr) > 2 else ""
-            user.comment = comment
-
-            was_in = any((u.user_id == user.user_id or u.name == user.name) for u in rc.inList)
-
-            result = rc.addOut(user)
-            rc.save()
-
-            log_admin_action(cid, message.from_user.id, message.from_user.first_name, "sof", target_name=arr[1], rollcall_id=rc.id, details=rc.title)
-
-            if result == 'AB':
-                raise duplicateProxy("No duplicate proxy please :-), Thanks!")
-            elif result == 'AC':
-                if not manager.get_shh_mode(cid):
-                    await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
-            elif result == 'AA':
-                raise repeatlyName("That name already exists!")
-            elif isinstance(result, User):
-                if not manager.get_shh_mode(cid):
-                    if isinstance(result.user_id, int):
-                        await bot.send_message(
-                            cid,
-                            f"{format_mention_with_name_md(result)} → IN",
-                            parse_mode="Markdown",
-                        )
-                    else:
-                        await bot.send_message(cid, f"{result.name} → IN")
-                if isinstance(result.user_id, int):
-                    asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
+        if result["promoted"]:
+            await _send_promoted_proxy(cid, result["promoted"], rc_title, rc_number_1based)
+            rc = manager.get_rollcall(cid, rc_number)
+            if rc:
                 from handlers.lifecycle import notify_proxy_owner_wait_to_in
-                await notify_proxy_owner_wait_to_in(rc, result, cid, rc.title, rc_number + 1)
-                # GLITCH FIX: voting.py /out and lifecycle.py panel-OUT both
-                # bump the promoted user's stats here. /sof was the only path
-                # missing it, so a real user promoted from waitlist via a
-                # proxy /sof would never see their total_in / total_in_promotion
-                # counter update. Now consistent.
-                rc_db_id = get_rc_db_id(rc)
-                if rc_db_id is not None and isinstance(result.user_id, int):
-                    increment_user_stat(cid, result.user_id, "total_waiting_to_in")
-                    increment_user_stat(cid, result.user_id, "total_in")
-                    increment_rollcall_stat(rc_db_id, "total_in")
-            elif result is None:
-                if not manager.get_shh_mode(cid):
-                    if was_in:
-                        await bot.send_message(cid, f"{user.name} → OUT for '{rc.title}' (#{rc_number + 1})")
-                    else:
-                        await bot.send_message(cid, f"{user.name} is now OUT!")
+                from models import User
+                promoted = result["promoted"]
+                promo_user = User(promoted["name"], promoted.get("username"),
+                                  promoted["user_id"], [])
+                await notify_proxy_owner_wait_to_in(rc, promo_user, cid, rc_title, rc_number_1based)
+        else:
+            if not manager.get_shh_mode(cid):
+                if result["was_in"]:
+                    await bot.send_message(cid, f"{proxy_name} → OUT for '{rc_title}' (#{rc_number_1based})")
+                else:
+                    await bot.send_message(cid, f"{proxy_name} is now OUT!")
 
-            from handlers.lifecycle import show_panel_for_rollcall
-            await show_panel_for_rollcall(cid, rc_number + 1)
+        from handlers.lifecycle import show_panel_for_rollcall
+        await show_panel_for_rollcall(cid, rc_number_1based)
 
     except Exception as e:
         await reply_error(message, e)
@@ -225,73 +169,34 @@ async def set_maybe_for(message):
             raise rollCallNotStarted("Roll call is not active")
         if await admin_rights(message, manager) == False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
-        if len(message.text.split(" ")) <= 1:
-            raise parameterMissing("Input username is missing")
 
-        msg = message.text
-        pmts = msg.split(" ")
         cid = message.chat.id
-        rc_number = 0
+        rc_number, proxy_name, comment = _parse_proxy_args(message.text)
 
-        if len(pmts) > 0 and "::" in pmts[-1]:
-            try:
-                rc_number = int(pmts[-1].replace("::", "")) - 1
-                del pmts[-1]
-                msg = " ".join(pmts)
-            except Exception:
-                raise incorrectParameter("The rollcall number must be a positive integer")
+        result = await proxy_svc.set_maybe_for(
+            cid, message.from_user.id, message.from_user.first_name,
+            proxy_name, comment, rc_number
+        )
 
-            rollcalls = manager.get_rollcalls(cid)
-            if rc_number < 0 or len(rollcalls) < rc_number + 1:
-                raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+        rc_title = result["rollcall"]["title"]
+        rc_number_1based = result["rc_number_1based"]
 
-        rc = manager.get_rollcall(cid, rc_number)
-        arr = msg.split(" ")
-
-        if len(arr) > 1:
-            user = User(arr[1], None, arr[1], rc.allNames)
-            comment = " ".join(arr[2:]) if len(arr) > 2 else ""
-            user.comment = comment
-
-            result = rc.addMaybe(user)
-            rc.save()
-
-            log_admin_action(cid, message.from_user.id, message.from_user.first_name, "smf", target_name=arr[1], rollcall_id=rc.id, details=rc.title)
-
-            if result == 'AB':
-                raise duplicateProxy("No duplicate proxy please :-), Thanks!")
-            elif result == 'AC':
-                if not manager.get_shh_mode(cid):
-                    await bot.send_message(cid, f"Event max limit is reached, {user.name} was added in waitlist")
-            elif result == 'AA':
-                raise repeatlyName("That name already exists!")
-            elif isinstance(result, User):
-                if not manager.get_shh_mode(cid):
-                    if isinstance(result.user_id, int):
-                        await bot.send_message(
-                            cid,
-                            f"{format_mention_with_name_md(result)} → IN (from WAITING) for '{_esc_md(rc.title)}' (#{rc_number + 1})",
-                            parse_mode="Markdown",
-                        )
-                    else:
-                        await bot.send_message(cid, f"{result.name} → IN (from WAITING) for '{rc.title}' (#{rc_number + 1})")
-                if isinstance(result.user_id, int):
-                    asyncio.create_task(_dm_promoted_real_user(result.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
+        if result["promoted"]:
+            await _send_promoted_proxy(cid, result["promoted"], rc_title, rc_number_1based)
+            rc = manager.get_rollcall(cid, rc_number)
+            if rc:
                 from handlers.lifecycle import notify_proxy_owner_wait_to_in
-                await notify_proxy_owner_wait_to_in(rc, result, cid, rc.title, rc_number + 1)
-                # GLITCH FIX: same as /sof above. /smf was also missing the
-                # promotion-counter bump for the real user moved waitlist→IN.
-                rc_db_id = get_rc_db_id(rc)
-                if rc_db_id is not None and isinstance(result.user_id, int):
-                    increment_user_stat(cid, result.user_id, "total_waiting_to_in")
-                    increment_user_stat(cid, result.user_id, "total_in")
-                    increment_rollcall_stat(rc_db_id, "total_in")
-            elif result is None:
-                if not manager.get_shh_mode(cid):
-                    await bot.send_message(cid, f"{user.name} is now MAYBE!")
+                from models import User
+                promoted = result["promoted"]
+                promo_user = User(promoted["name"], promoted.get("username"),
+                                  promoted["user_id"], [])
+                await notify_proxy_owner_wait_to_in(rc, promo_user, cid, rc_title, rc_number_1based)
+        else:
+            if not manager.get_shh_mode(cid):
+                await bot.send_message(cid, f"{proxy_name} is now MAYBE!")
 
-            from handlers.lifecycle import show_panel_for_rollcall
-            await show_panel_for_rollcall(cid, rc_number + 1)
+        from handlers.lifecycle import show_panel_for_rollcall
+        await show_panel_for_rollcall(cid, rc_number_1based)
 
     except Exception as e:
         await reply_error(message, e)

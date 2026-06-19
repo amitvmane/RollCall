@@ -19,7 +19,7 @@ from exceptions import (
 )
 from functions import admin_rights, roll_call_not_started
 from rollcall_manager import manager
-from db import log_admin_action, increment_user_stat, increment_rollcall_stat
+from db import log_admin_action
 from services import settings as settings_svc
 
 
@@ -369,94 +369,76 @@ async def wait_limit(message):
         if rc_number < 0 or len(rollcalls) < rc_number + 1:
             raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
+        async with manager.get_chat_write_lock(cid):
+            result = settings_svc.set_wait_limit(
+                cid, limit,
+                message.from_user.id, message.from_user.first_name,
+                rc_number=rc_number,
+            )
+
         rc = manager.get_rollcall(cid, rc_number)
+        rc_title = result["rollcall"]["title"]
+        rc_number_1 = rc_number + 1
+        shh = manager.get_shh_mode(cid)
 
-        old_limit = rc.inListLimit
-        was_full = old_limit is not None and len(rc.inList) >= int(old_limit)
-
-        rc.inListLimit = limit
-        rc.save()
         logging.info(f"[{_ts()}] Max limit of attendees is set to {limit}")
-        if not manager.get_shh_mode(cid):
+        if not shh:
             await bot.send_message(cid, f"Max limit of attendees is set to {limit}")
 
-        moved_from_in_to_wait = []
-        moved_from_wait_to_in = []
-
-        if len(rc.inList) > limit:
-            moved_from_in_to_wait = rc.inList[limit:]
-            rc.waitList.extend(rc.inList[limit:])
-            rc.inList = rc.inList[:limit]
-            for u in moved_from_in_to_wait:
-                rc._save_user_to_db(u, 'waitlist')
-            rc.save()
-        elif len(rc.inList) < limit:
-            available_slots = limit - len(rc.inList)
-            moved_from_wait_to_in = rc.waitList[:available_slots]
-            rc.inList.extend(rc.waitList[:available_slots])
-            rc.waitList = rc.waitList[available_slots:]
-            for u in moved_from_wait_to_in:
-                rc._save_user_to_db(u, 'in')
-            rc.save()
-
-        if moved_from_in_to_wait:
-            if not manager.get_shh_mode(cid):
-                names = ", ".join(u.name for u in moved_from_in_to_wait)
+        for u in result["demoted"]:
+            uid = u["user_id"]
+            name = u["name"]
+            if not shh:
                 await bot.send_message(
                     cid,
-                    f"{names} moved from IN to WAITING because limit was set to {limit} for '{rc.title}' (ID: {rc_number + 1})."
+                    f"{name} moved from IN to WAITING because limit was set to {limit} for '{rc_title}' (ID: {rc_number_1})."
                 )
-            # DM each real user who was demoted so they know they're now in
-            # the waitlist (we already DM the wait→in direction; symmetric).
-            for u in moved_from_in_to_wait:
-                if isinstance(u.user_id, int):
-                    async def _dm(uid, title, rcn):
-                        try:
-                            await bot.send_message(
-                                uid,
-                                f"⚠️ A new attendance limit was set for *{_esc_md(title)}* (#{rcn}) and you've been moved from IN to the WAITLIST.",
-                                parse_mode="Markdown",
-                            )
-                        except Exception:
-                            logging.warning(f"Could not DM demoted user {uid}")
-                    asyncio.create_task(_dm(u.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
+            async def _dm_demoted(uid=uid, title=rc_title, rcn=rc_number_1):
+                try:
+                    await bot.send_message(
+                        uid,
+                        f"⚠️ A new attendance limit was set for *{_esc_md(title)}* (#{rcn}) and you've been moved from IN to the WAITLIST.",
+                        parse_mode="Markdown",
+                    )
+                except Exception:
+                    logging.warning(f"Could not DM demoted user {uid}")
+            asyncio.create_task(_dm_demoted()).add_done_callback(_log_task_exc)
 
-        if moved_from_wait_to_in:
-            if not manager.get_shh_mode(cid):
-                for u in moved_from_wait_to_in:
-                    if isinstance(u.user_id, int):
+        if result["promoted"]:
+            from handlers.lifecycle import notify_proxy_owner_wait_to_in
+            for u in result["promoted"]:
+                uid = u["user_id"]
+                name = u["name"]
+                is_proxy = u["is_proxy"]
+                if not shh:
+                    if not is_proxy:
                         await bot.send_message(
                             cid,
-                            f"{format_mention_with_name_md(u)} → IN (from WAITING) for '{_esc_md(rc.title)}' (#{rc_number + 1})",
+                            f"[{_esc_md(name)}](tg://user?id={uid}) → IN (from WAITING) for '{_esc_md(rc_title)}' (#{rc_number_1})",
                             parse_mode="Markdown",
                         )
                     else:
                         await bot.send_message(
                             cid,
-                            f"{u.name} → IN (from WAITING) for '{rc.title}' (#{rc_number + 1})",
+                            f"{name} → IN (from WAITING) for '{rc_title}' (#{rc_number_1})",
                         )
+                if not is_proxy:
+                    asyncio.create_task(_dm_promoted_real_user(uid, rc_title, rc_number_1)).add_done_callback(_log_task_exc)
 
-            rc_db_id = get_rc_db_id(rc)
-            from handlers.lifecycle import notify_proxy_owner_wait_to_in
-            for u in moved_from_wait_to_in:
-                if isinstance(u.user_id, int):
-                    asyncio.create_task(_dm_promoted_real_user(u.user_id, rc.title, rc_number + 1)).add_done_callback(_log_task_exc)
-                await notify_proxy_owner_wait_to_in(rc, u, cid, rc.title, rc_number + 1)
+                # find the actual User object from the rc for notify_proxy_owner
+                rc_user = next((x for x in rc.inList if (x.user_id == uid or x.name == name)), None)
+                if rc_user is not None:
+                    await notify_proxy_owner_wait_to_in(rc, rc_user, cid, rc_title, rc_number_1)
 
-                if rc_db_id is not None and isinstance(u.user_id, int):
-                    increment_user_stat(cid, u.user_id, "total_waiting_to_in")
-                    increment_user_stat(cid, u.user_id, "total_in")
-                    increment_rollcall_stat(rc_db_id, "total_in")
-
-        if len(rc.inList) == limit and not was_full:
-            if not manager.get_shh_mode(cid):
+        if len(rc.inList) == limit and not result["was_full"]:
+            if not shh:
                 await bot.send_message(
                     cid,
-                    f"Rollcall '{rc.title}' (ID: {rc_number + 1}) has reached its max limit ({limit}). New IN will go to WAITING."
+                    f"Rollcall '{rc_title}' (ID: {rc_number_1}) has reached its max limit ({limit}). New IN will go to WAITING."
                 )
 
         from handlers.lifecycle import _update_panel
-        await _update_panel(cid, rc_number + 1, rc)
+        await _update_panel(cid, rc_number_1, rc)
 
     except parameterMissing as e:
         await reply_error(message, e)

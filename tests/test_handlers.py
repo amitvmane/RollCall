@@ -417,14 +417,16 @@ class TestListTemplates(HandlerTestBase):
 
     async def test_no_templates_sends_notice(self):
         msg = self._make_message("/templates")
-        with patch('handlers.templates.get_templates', return_value=[]):
+        with patch('handlers.templates.templates_svc.list_templates', return_value=[]):
             await self.list_templates(msg)
         self.assertIn("no templates", self._sent_text().lower())
 
     async def test_with_templates_sends_list(self):
-        templates = [MagicMock(name="t1")]
+        templates = [{"name": "t1", "title": "T1", "schedule_enabled": False,
+                      "schedule_day": None, "schedule_time": None,
+                      "event_day": None, "event_time": None, "last_scheduled_date": None}]
         msg = self._make_message("/templates")
-        with patch('handlers.templates.get_templates', return_value=templates):
+        with patch('handlers.templates.templates_svc.list_templates', return_value=templates):
             await self.list_templates(msg)
         self.assertGreater(self._sent_count(), 0)
 
@@ -987,14 +989,15 @@ class TestDeleteTemplate(HandlerTestBase):
     async def test_deletes_existing_template(self):
         msg = self._make_message("/delete_template sunday")
         with self._admin_ok(), self._patch_manager(), \
-             patch('handlers.templates.delete_template', return_value=True):
+             patch('handlers.templates.templates_svc.delete_one_template', return_value={"name": "sunday", "deleted": True}):
             await self.delete_template_command(msg)
         self.assertIn("deleted", self._sent_text().lower())
 
     async def test_template_not_found(self):
+        from exceptions import incorrectParameter
         msg = self._make_message("/delete_template ghost")
         with self._admin_ok(), self._patch_manager(), \
-             patch('handlers.templates.delete_template', return_value=False):
+             patch('handlers.templates.templates_svc.delete_one_template', side_effect=incorrectParameter("Template 'ghost' not found.")):
             await self.delete_template_command(msg)
         self.assertIn("not found", self._sent_text().lower())
 

@@ -23,11 +23,7 @@ from exceptions import (
 from functions import admin_rights, roll_call_not_started
 from models import User
 from rollcall_manager import manager
-from db import (
-    update_rollcall, log_admin_action, increment_user_stat, increment_rollcall_stat,
-    update_streak_on_checkin, reset_user_streak, upsert_chat_member,
-    update_proxy_streak_on_checkin, reset_proxy_streak,
-)
+from db import update_rollcall
 from services import rollcalls as rollcalls_svc
 from services import voting as voting_svc
 
@@ -221,70 +217,41 @@ async def end_roll_call(message):
             if rc_number < 0 or len(rollcalls) < rc_number + 1:
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
             rc = manager.get_rollcall(cid, rc_number)
-            rc_db_id = rc.id
-            ghost_tracking_on = manager.get_ghost_tracking_enabled(cid)
             ended_number = rc_number + 1
-
-            in_users = rc.inList
-            has_any_users = len(in_users) > 0
-
-            participants = set(
-                u.user_id for u in (rc.inList + rc.outList + rc.maybeList + rc.waitList)
-                if isinstance(u.user_id, int)
-            )
-            in_user_ids = {u.user_id for u in in_users if isinstance(u.user_id, int)}
-            for uid in in_user_ids:
-                update_streak_on_checkin(cid, uid)
-            # Streak resets for participants who voted but didn't end up IN
-            # (OUT or MAYBE). No-shows (never voted) are not penalised here —
-            # the ghost-mark flow handles those deliberately.
-            for uid in participants - in_user_ids:
-                reset_user_streak(cid, uid)
-            for uid in participants:
-                increment_user_stat(cid, uid, "total_rollcalls")
-
-            # Proxy streaks — same semantics as real-user streaks, just keyed
-            # on proxy.name and stored in the parallel proxy_stats table.
-            # Proxies have string user_ids so they fall through every
-            # `isinstance(u.user_id, int)` filter above.
-            proxy_participants = {
-                u.name for u in (rc.inList + rc.outList + rc.maybeList + rc.waitList)
-                if not isinstance(u.user_id, int)
-            }
-            proxy_in_names = {u.name for u in in_users if not isinstance(u.user_id, int)}
-            for name in proxy_in_names:
-                update_proxy_streak_on_checkin(cid, name)
-            for name in proxy_participants - proxy_in_names:
-                reset_proxy_streak(cid, name)
-
             ended_by = message.from_user.first_name or message.from_user.username or "someone"
-            finish_text = rc.finishList().replace("__RCID__", str(rc_number + 1))
-            finish_text = f"{finish_text}\n\n🎉 Ended by {ended_by}"
-            await bot.send_message(cid, finish_text)
-            logging.info(f"[{_ts()}] Rollcall ended: '{rc.title}' (RC #{rc_number+1})")
-            _panel_msg_ids.pop((cid, rc_number + 1), None)
-            manager.remove_rollcall(cid, rc_number)
-            for num in sorted(n for (c, n) in list(_panel_msg_ids) if c == cid and n > rc_number + 1):
-                _panel_msg_ids[(cid, num - 1)] = _panel_msg_ids.pop((cid, num))
-            logging.info(f"[{_ts()}] [CHAT {cid}] Rollcall ended: '{rc.title}' by {message.from_user.first_name} (@{message.from_user.username})")
-            log_admin_action(cid, message.from_user.id, message.from_user.first_name, "end_rollcall", target_name=rc.title)
 
-            if ghost_tracking_on and has_any_users and rc_db_id and not rc.absent_marked:
-                markup = InlineKeyboardMarkup(row_width=2)
-                markup.add(
-                    InlineKeyboardButton("👻 Yes, select ghosts", callback_data=f"ghost_yes_{rc_db_id}"),
-                    InlineKeyboardButton("✅ No, all showed up", callback_data=f"ghost_no_{rc_db_id}")
+            # Capture finish text before the service removes the rollcall
+            finish_text = rc.finishList().replace("__RCID__", str(ended_number))
+            finish_text = f"{finish_text}\n\n🎉 Ended by {ended_by}"
+
+            result = await rollcalls_svc.end_rollcall(
+                cid, rc_number,
+                message.from_user.id, message.from_user.first_name,
+                message.from_user.username,
+            )
+
+            await bot.send_message(cid, finish_text)
+
+            # Update panel IDs: remove ended slot, shift renumbered ones down
+            _panel_msg_ids.pop((cid, ended_number), None)
+            for entry in sorted(result["renumbered"], key=lambda x: x["old"]):
+                old_key = (cid, entry["old"])
+                if old_key in _panel_msg_ids:
+                    _panel_msg_ids[(cid, entry["new"])] = _panel_msg_ids.pop(old_key)
+
+            if result["ghost_eligible"]:
+                ghost_markup = InlineKeyboardMarkup(row_width=2)
+                ghost_markup.add(
+                    InlineKeyboardButton("👻 Yes, select ghosts", callback_data=f"ghost_yes_{result['ghost_rc_db_id']}"),
+                    InlineKeyboardButton("✅ No, all showed up", callback_data=f"ghost_no_{result['ghost_rc_db_id']}")
                 )
-                await bot.send_message(cid, "👻 Did anyone ghost today's session?", reply_markup=markup)
+                await bot.send_message(cid, "👻 Did anyone ghost today's session?", reply_markup=ghost_markup)
 
             updated_rollcalls = manager.get_rollcalls(cid)
-            if len(updated_rollcalls) > 0:
+            if updated_rollcalls:
                 lines = [f"⚠️ Rollcall #{ended_number} ended. IDs updated:"]
-                for idx, rollcall in enumerate(updated_rollcalls):
-                    new_id = idx + 1
-                    old_id = new_id if new_id < ended_number else new_id + 1
-                    if old_id != new_id:
-                        lines.append(f"  #{old_id} '{rollcall.title}' → #{new_id}")
+                for entry in result["renumbered"]:
+                    lines.append(f"  #{entry['old']} '{entry['title']}' → #{entry['new']}")
                 if not manager.get_shh_mode(cid):
                     await bot.send_message(cid, "\n".join(lines))
                     for idx, rollcall in enumerate(updated_rollcalls):
@@ -619,45 +586,10 @@ async def callback_handler(call):
                     await bot.answer_callback_query(call.id, "Rollcall already ended.")
                     return
 
-                rc_db_id = rc.id
-                rc_title = rc.title  # capture before manager.remove_rollcall pops it
-                ghost_tracking_on = manager.get_ghost_tracking_enabled(cid)
-                has_any_users = len(rc.inList) > 0
-                absent_already_marked = rc.absent_marked
+                ended_by = call.from_user.first_name or call.from_user.username or "someone"
                 ended_number = rc_number
 
-                participants = set(
-                    u.user_id for u in (rc.inList + rc.outList + rc.maybeList + rc.waitList)
-                    if isinstance(u.user_id, int)
-                )
-                in_user_ids = {u.user_id for u in rc.inList if isinstance(u.user_id, int)}
-                for uid in in_user_ids:
-                    update_streak_on_checkin(cid, uid)
-                # Same streak-reset rule as the /erc command path above.
-                for uid in participants - in_user_ids:
-                    reset_user_streak(cid, uid)
-                for uid in participants:
-                    increment_user_stat(cid, uid, "total_rollcalls")
-
-                # Proxy streaks — parallel to the real-user path above.
-                proxy_participants = {
-                    u.name for u in (rc.inList + rc.outList + rc.maybeList + rc.waitList)
-                    if not isinstance(u.user_id, int)
-                }
-                proxy_in_names = {u.name for u in rc.inList if not isinstance(u.user_id, int)}
-                for name in proxy_in_names:
-                    update_proxy_streak_on_checkin(cid, name)
-                for name in proxy_participants - proxy_in_names:
-                    reset_proxy_streak(cid, name)
-
-                await bot.answer_callback_query(call.id, "Rollcall ended")
-                ended_by = call.from_user.first_name or call.from_user.username or "someone"
-                log_admin_action(cid, call.from_user.id, ended_by, "end_rollcall", target_name=rc_title, rollcall_id=rc_db_id, details="via panel")
-
-                # Build the final list. If finishList() raises (e.g. unexpected
-                # rc state), fall back to a short "ended by" notice rather than
-                # silently leaving the user staring at the stranded "Are you
-                # sure?" prompt — that was the original bug.
+                # Capture finish text before the service removes the rollcall.
                 try:
                     final_text = rc.finishList().replace("__RCID__", str(rc_number))
                     final_text = f"{final_text}\n\n🎉 Ended by {ended_by}"
@@ -665,21 +597,20 @@ async def callback_handler(call):
                     logging.exception(f"Failed to build finish list for rollcall #{rc_number}")
                     final_text = f"Rollcall #{rc_number} ended by {ended_by}."
 
-                # Replace the "Are you sure?" prompt IN PLACE with the final
-                # text — this dismisses the confirmation message and the Yes/No
-                # buttons in one edit, exactly where the user clicked Yes. The
-                # original code did neither: prompt stayed on screen with stale
-                # buttons, and any failure when sending a new finish-list
-                # message was silently swallowed.
+                result = await rollcalls_svc.end_rollcall(
+                    cid, rc_number - 1,
+                    call.from_user.id, ended_by,
+                    getattr(call.from_user, "username", None),
+                )
+
+                await bot.answer_callback_query(call.id, "Rollcall ended")
+
+                # Replace the "Are you sure?" prompt in-place with the finish list.
                 try:
                     await bot.edit_message_text(
                         final_text, cid, call.message.message_id, reply_markup=None,
                     )
                 except Exception:
-                    # Edit can fail legitimately (message too old, deleted,
-                    # text >4096 chars). Fall back: strip the inline keyboard
-                    # so Yes/No can't be clicked again, then send the finish
-                    # list as a new message.
                     logging.exception(f"Failed to edit end-confirm message for chat {cid}")
                     try:
                         await bot.edit_message_reply_markup(cid, call.message.message_id, reply_markup=None)
@@ -690,34 +621,32 @@ async def callback_handler(call):
                     except Exception:
                         logging.exception(f"Failed to send finish list for chat {cid}")
 
-                logging.info(f"[{_ts()}] [CHAT {cid}] Rollcall ended: '{rc_title}' by {ended_by} (panel)")
-                _panel_msg_ids.pop((cid, rc_number), None)
-                manager.remove_rollcall(cid, rc_number - 1)
-                for num in sorted(n for (c, n) in list(_panel_msg_ids) if c == cid and n > rc_number):
-                    _panel_msg_ids[(cid, num - 1)] = _panel_msg_ids.pop((cid, num))
+                # Update panel IDs
+                _panel_msg_ids.pop((cid, ended_number), None)
+                for entry in sorted(result["renumbered"], key=lambda x: x["old"]):
+                    old_key = (cid, entry["old"])
+                    if old_key in _panel_msg_ids:
+                        _panel_msg_ids[(cid, entry["new"])] = _panel_msg_ids.pop(old_key)
 
-                if ghost_tracking_on and has_any_users and rc_db_id and not absent_already_marked:
-                    markup = InlineKeyboardMarkup(row_width=2)
-                    markup.add(
-                        InlineKeyboardButton("👻 Yes, select ghosts", callback_data=f"ghost_yes_{rc_db_id}"),
-                        InlineKeyboardButton("✅ No, all showed up", callback_data=f"ghost_no_{rc_db_id}")
+                if result["ghost_eligible"]:
+                    ghost_markup = InlineKeyboardMarkup(row_width=2)
+                    ghost_markup.add(
+                        InlineKeyboardButton("👻 Yes, select ghosts", callback_data=f"ghost_yes_{result['ghost_rc_db_id']}"),
+                        InlineKeyboardButton("✅ No, all showed up", callback_data=f"ghost_no_{result['ghost_rc_db_id']}")
                     )
-                    await bot.send_message(cid, "👻 Did anyone ghost today's session?", reply_markup=markup)
+                    await bot.send_message(cid, "👻 Did anyone ghost today's session?", reply_markup=ghost_markup)
 
                 updated_rollcalls = manager.get_rollcalls(cid)
-                if len(updated_rollcalls) > 0 and not manager.get_shh_mode(cid):
+                if updated_rollcalls and not manager.get_shh_mode(cid):
                     lines = [f"⚠️ Rollcall #{ended_number} ended. IDs updated:"]
-                    for idx, rollcall in enumerate(updated_rollcalls):
-                        new_id = idx + 1
-                        old_id = new_id if new_id < ended_number else new_id + 1
-                        if old_id != new_id:
-                            lines.append(f"  #{old_id} '{rollcall.title}' → #{new_id}")
+                    for entry in result["renumbered"]:
+                        lines.append(f"  #{entry['old']} '{entry['title']}' → #{entry['new']}")
                     await bot.send_message(cid, "\n".join(lines))
                     for idx, rollcall in enumerate(updated_rollcalls):
                         new_id = idx + 1
                         text = rollcall.allList().replace("__RCID__", str(new_id))
-                        markup = await get_status_keyboard(new_id)
-                        sent = await bot.send_message(cid, text, reply_markup=markup)
+                        panel_markup = await get_status_keyboard(new_id)
+                        sent = await bot.send_message(cid, text, reply_markup=panel_markup)
                         _panel_msg_ids[(cid, new_id)] = sent.message_id
                         _persist_panel_msg_id(rollcall, sent.message_id)
             return

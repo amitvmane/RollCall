@@ -5,20 +5,15 @@ Template handlers: /templates, /set_template, /start_template, /delete_template,
 import asyncio
 import html
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 
-import pytz
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot_state import bot, _sched_selection, _log_task_exc, _esc_md, reply_error
-from exceptions import insufficientPermissions
-from functions import admin_rights, get_next_weekday_datetime, weekly_minutes, WEEKDAY_MAP
+from exceptions import insufficientPermissions, incorrectParameter, parameterMissing
+from functions import admin_rights, weekly_minutes, WEEKDAY_MAP
 from rollcall_manager import manager
-from db import (
-    create_or_update_template, get_templates, get_template, delete_template,
-    set_template_schedule, disable_template_schedule, enable_template_schedule,
-    log_admin_action,
-)
+from services import templates as templates_svc
 
 
 def _ts() -> str:
@@ -31,7 +26,7 @@ async def list_templates(message):
     if not await admin_rights(message, manager):
         await bot.send_message(cid, "You don't have permission to use this command.")
         return
-    templates = get_templates(cid)
+    templates = templates_svc.list_templates(cid)
 
     if not templates:
         await bot.send_message(cid, "No templates defined for this chat.")
@@ -124,7 +119,7 @@ def _build_schedules_keyboard(templates: list, cid: int) -> InlineKeyboardMarkup
 
 
 async def _send_schedules(cid: int, edit_msg_id: int = None):
-    templates = get_templates(cid)
+    templates = templates_svc.list_templates(cid)
     scheduled = [t for t in templates if t.get("schedule_day") and t.get("schedule_time")]
 
     if not scheduled:
@@ -196,8 +191,9 @@ async def schedule_template_cmd(message):
             return
 
         name = parts[1]
-        tmpl = get_template(cid, name)
-        if not tmpl:
+        try:
+            tmpl = templates_svc.get_one_template(cid, name)
+        except (incorrectParameter, parameterMissing):
             await bot.send_message(cid, f"Template '{name}' not found. Use /templates to list available templates.")
             return
 
@@ -226,10 +222,10 @@ async def schedule_template_cmd(message):
             return
 
         if parts[2].lower() == "off":
-            ok = disable_template_schedule(cid, name)
-            if ok:
+            try:
+                templates_svc.disable_schedule(cid, name, message.from_user.id, message.from_user.first_name)
                 await bot.send_message(cid, f"🔴 Schedule disabled for template '{name}'.")
-            else:
+            except Exception:
                 await bot.send_message(cid, f"Failed to update template '{name}'.")
             return
 
@@ -305,8 +301,14 @@ async def schedule_template_cmd(message):
                 )
                 return
 
-        ok = set_template_schedule(cid, name, sched_day, sched_time, recurrence_type)
-        if ok:
+        try:
+            templates_svc.set_schedule(
+                cid, name, message.from_user.id, message.from_user.first_name,
+                recurrence_type=recurrence_type,
+                schedule_day=sched_day if recurrence_type != "monthly" else None,
+                schedule_time=sched_time,
+                monthly_day=day_num if recurrence_type == "monthly" else None,
+            )
             recurrence_label = {"weekly": "weekly", "biweekly": "every 2 weeks", "monthly": "monthly"}.get(recurrence_type, recurrence_type)
             if recurrence_type == "monthly":
                 opens_str = f"day {sched_day} of each month at {sched_time}"
@@ -319,7 +321,7 @@ async def schedule_template_cmd(message):
                 f"Closes: {event_day.capitalize()} at {event_time}",
                 parse_mode="Markdown"
             )
-        else:
+        except Exception:
             await bot.send_message(cid, f"Failed to save schedule for '{name}'.")
 
     except Exception as e:
@@ -346,63 +348,23 @@ async def start_template(message):
     template_name = parts[1]
     extra = parts[2].strip() if len(parts) > 2 else ""
 
-    tmpl = get_template(cid, template_name)
-    if not tmpl:
-        await bot.send_message(cid, f"Template '{template_name}' not found.")
+    try:
+        result = await templates_svc.start_template(
+            cid, template_name,
+            message.from_user.id, message.from_user.first_name,
+            extra_title=extra or None,
+        )
+    except (incorrectParameter, parameterMissing) as e:
+        await reply_error(message, e)
         return
 
-    base_title = tmpl.get("title") or ""
-    if extra:
-        title = (base_title + " – " + extra).strip(" –")
-    else:
-        title = base_title or template_name
-
-    rc = manager.add_rollcall(cid, title)
-
-    if tmpl.get("inlistlimit") is not None:
-        rc.inListLimit = tmpl["inlistlimit"]
-    if tmpl.get("location"):
-        rc.location = tmpl["location"]
-    if tmpl.get("eventfee"):
-        rc.event_fee = tmpl["eventfee"]
-
-    days = tmpl.get("offsetdays")
-    hours = tmpl.get("offsethours")
-    minutes = tmpl.get("offsetminutes")
-    event_day = tmpl.get("event_day")
-    event_time = tmpl.get("event_time")
-
-    chat = manager.get_chat(cid)
-    tzname = chat.get("timezone", "Asia/Kolkata")
-    try:
-        tz = pytz.timezone(tzname)
-    except Exception:
-        tz = pytz.timezone("Asia/Kolkata")
-        tzname = "Asia/Kolkata"
-
-    rc.timezone = tzname
-    rc.finalizeDate = None
-
-    if event_day and event_time:
-        dt = get_next_weekday_datetime(tz, event_day, event_time)
-        if dt:
-            rc.finalizeDate = dt
-
-    if rc.finalizeDate is None and any(v is not None for v in (days, hours, minutes)):
-        now = datetime.now(tz)
-        delta = timedelta(days=days or 0, hours=hours or 0, minutes=minutes or 0)
-        rc.finalizeDate = now + delta
-
-    rc.save()
-
-    rollcalls = manager.get_rollcalls(cid)
-    rc_number = len(rollcalls)
     from handlers.lifecycle import show_panel_for_rollcall
-    await show_panel_for_rollcall(cid, rc_number)
+    await show_panel_for_rollcall(cid, result["number"])
 
-    if rc.finalizeDate:
+    if result.get("finalize_date"):
         from check_reminders import start
-        asyncio.create_task(start(rollcalls, rc.timezone, cid)).add_done_callback(_log_task_exc)
+        rollcalls = manager.get_rollcalls(cid)
+        asyncio.create_task(start(rollcalls, result["timezone"], cid)).add_done_callback(_log_task_exc)
 
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/set_template")
@@ -441,21 +403,19 @@ async def set_template(message):
         else:
             tail = parts[2].strip()
 
-        existing = get_template(cid, name)
-        if existing:
-            title       = existing.get('title')
-            inlistlimit = existing.get('inlistlimit')
-            location    = existing.get('location')
-            eventfee    = existing.get('eventfee')
-            offsetdays  = existing.get('offsetdays')
-            offsethours = existing.get('offsethours')
-            offsetminutes = existing.get('offsetminutes')
-            event_day   = existing.get('event_day')
-            event_time  = existing.get('event_time')
-        else:
-            title = inlistlimit = location = eventfee = None
-            offsetdays = offsethours = offsetminutes = None
-            event_day = event_time = None
+        try:
+            existing = templates_svc.get_one_template(cid, name)
+        except Exception:
+            existing = {}
+        title       = existing.get('title')
+        inlistlimit = existing.get('limit')
+        location    = existing.get('location')
+        eventfee    = existing.get('fee')
+        offsetdays  = existing.get('offset_days')
+        offsethours = existing.get('offset_hours')
+        offsetminutes = existing.get('offset_minutes')
+        event_day   = existing.get('event_day')
+        event_time  = existing.get('event_time')
 
         if tail.startswith('"'):
             end_quote = tail.find('"', 1)
@@ -511,14 +471,13 @@ async def set_template(message):
                 f"⚠️ Ignored non-integer value(s): {', '.join(bad_values)}. Existing values preserved.",
             )
 
-        ok = create_or_update_template(
-            chatid=cid, name=name, title=title,
-            inlistlimit=inlistlimit, location=location, eventfee=eventfee,
-            offsetdays=offsetdays, offsethours=offsethours, offsetminutes=offsetminutes,
-            event_day=event_day, event_time=event_time,
-        )
-
-        if ok:
+        try:
+            templates_svc.upsert_template(
+                cid, name, message.from_user.id, message.from_user.first_name,
+                title=title, limit=inlistlimit, location=location, fee=eventfee,
+                offset_days=offsetdays, offset_hours=offsethours, offset_minutes=offsetminutes,
+                event_day=event_day, event_time=event_time,
+            )
             if not manager.get_shh_mode(cid):
                 await bot.send_message(
                     cid,
@@ -530,7 +489,7 @@ async def set_template(message):
                     f"Offsets: days={offsetdays}, hours={offsethours}, minutes={offsetminutes}\n"
                     f"Event_Day={event_day}, Event_Time={event_time}"
                 )
-        else:
+        except Exception:
             await bot.send_message(cid, "Failed to save template. Please try again.")
 
     except Exception as e:
@@ -554,13 +513,12 @@ async def delete_template_command(message):
         return
 
     name = parts[1].strip()
-    ok = delete_template(cid, name)
-    if ok:
-        log_admin_action(cid, message.from_user.id, message.from_user.first_name, "delete_template", target_name=name)
+    try:
+        templates_svc.delete_one_template(cid, name, message.from_user.id, message.from_user.first_name)
         if not manager.get_shh_mode(cid):
             await bot.send_message(cid, f"Template '{name}' deleted.")
-    else:
-        await bot.send_message(cid, f"Template '{name}' not found or could not be deleted.")
+    except (incorrectParameter, parameterMissing) as e:
+        await reply_error(message, e)
 
 
 @bot.callback_query_handler(func=lambda call: call.data and (
@@ -586,7 +544,7 @@ async def schedules_toggle_callback(call):
             return
 
         if data == "sched_selall":
-            templates = get_templates(cid)
+            templates = templates_svc.list_templates(cid)
             scheduled = [t for t in templates if t.get("schedule_day") and t.get("schedule_time")]
             _sched_selection[cid] = {t.get("name", "") for t in scheduled}
             await bot.answer_callback_query(call.id, "✅ All selected")
@@ -604,8 +562,20 @@ async def schedules_toggle_callback(call):
             if not sel:
                 await bot.answer_callback_query(call.id, "Nothing selected")
                 return
-            action = enable_template_schedule if data == "sched_apply_on" else disable_template_schedule
-            done = sum(1 for name in sel if action(cid, name))
+            uid = call.from_user.id
+            fname = call.from_user.first_name
+
+            def _toggle(name):
+                try:
+                    if data == "sched_apply_on":
+                        templates_svc.enable_schedule(cid, name, uid, fname)
+                    else:
+                        templates_svc.disable_schedule(cid, name, uid, fname)
+                    return True
+                except Exception:
+                    return False
+
+            done = sum(1 for name in sel if _toggle(name))
             verb = "▶️ Resumed" if data == "sched_apply_on" else "⏸ Paused"
             await bot.answer_callback_query(call.id, f"{verb} {done} template(s)")
             await _send_schedules(cid, edit_msg_id=call.message.message_id)

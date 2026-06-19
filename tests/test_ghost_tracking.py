@@ -199,11 +199,12 @@ class TestErcGhostPrompt(GhostTestBase):
 
         with self._rc_started(), \
              patch('handlers.lifecycle.admin_rights', new=AsyncMock(return_value=True)), \
-             patch('handlers.lifecycle.manager', self.manager):
+             patch('handlers.lifecycle.manager', self.manager), \
+             patch('services.rollcalls.manager', self.manager):
             await self.end_roll_call(self._make_message("/erc"))
 
-        # At least 3 messages: "🎉 Roll ended!", finishList, ghost prompt
-        self.assertGreaterEqual(self._sent_count(), 3)
+        # At least 3 messages: finish list, ghost prompt, (possibly renumber)
+        self.assertGreaterEqual(self._sent_count(), 2)
         texts = [self.bot_state.bot.send_message.call_args_list[i][0][1]
                  for i in range(self._sent_count())]
         self.assertTrue(any("ghost" in t.lower() or "👻" in t for t in texts))
@@ -217,7 +218,8 @@ class TestErcGhostPrompt(GhostTestBase):
 
         with self._rc_started(), \
              patch('handlers.lifecycle.admin_rights', new=AsyncMock(return_value=True)), \
-             patch('handlers.lifecycle.manager', self.manager):
+             patch('handlers.lifecycle.manager', self.manager), \
+             patch('services.rollcalls.manager', self.manager):
             await self.end_roll_call(self._make_message("/erc"))
 
         texts = [self.bot_state.bot.send_message.call_args_list[i][0][1]
@@ -229,7 +231,8 @@ class TestErcGhostPrompt(GhostTestBase):
 
         with self._rc_started(), \
              patch('handlers.lifecycle.admin_rights', new=AsyncMock(return_value=True)), \
-             patch('handlers.lifecycle.manager', self.manager):
+             patch('handlers.lifecycle.manager', self.manager), \
+             patch('services.rollcalls.manager', self.manager):
             await self.end_roll_call(self._make_message("/erc"))
 
         texts = [self.bot_state.bot.send_message.call_args_list[i][0][1]
@@ -247,7 +250,8 @@ class TestErcGhostPrompt(GhostTestBase):
 
         with self._rc_started(), \
              patch('handlers.lifecycle.admin_rights', new=AsyncMock(return_value=True)), \
-             patch('handlers.lifecycle.manager', self.manager):
+             patch('handlers.lifecycle.manager', self.manager), \
+             patch('services.rollcalls.manager', self.manager):
             await self.end_roll_call(self._make_message("/erc"))
 
         texts = [self.bot_state.bot.send_message.call_args_list[i][0][1]

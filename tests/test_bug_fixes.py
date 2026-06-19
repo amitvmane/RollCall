@@ -1030,7 +1030,7 @@ class TestSetTemplatePartialUpdate(unittest.TestCase):
     """
 
     def test_source_loads_existing_template_before_overwrite(self):
-        """Source must call get_template to load the existing record."""
+        """Source must call get_one_template to load the existing record."""
         module_path = os.path.join(
             os.path.dirname(__file__), "..", "rollCall", "handlers", "templates.py"
         )
@@ -1038,9 +1038,9 @@ class TestSetTemplatePartialUpdate(unittest.TestCase):
             source = f.read()
 
         self.assertIn(
-            "get_template(cid, name)",
+            "get_one_template(cid, name)",
             source,
-            "/set_template must call get_template to load existing data before overwriting"
+            "/set_template must call get_one_template to load existing data before overwriting"
         )
         self.assertIn(
             "existing.get(",
@@ -1135,9 +1135,29 @@ class TestErcRenumberingMessage(unittest.IsolatedAsyncioTestCase):
         msg.from_user.first_name = "Alice"
         msg.from_user.username = "alice"
 
+        erc_result = {
+            "ended": {"title": "First Game", "number": 1, "rc_index": 0,
+                      "in_list": [], "out_list": [], "maybe_list": [], "wait_list": [],
+                      "in_count": 0, "out_count": 0, "maybe_count": 0, "wait_count": 0,
+                      "id": 1, "limit": None, "location": None, "event_fee": None,
+                      "individual_fee": None, "timezone": None, "finalize_date": None,
+                      "reminder_hours": None},
+            "rc_number_ended_1based": 1,
+            "ghost_eligible": False,
+            "ghost_rc_db_id": None,
+            "ended_by": {"id": 1, "name": "Alice", "username": "alice"},
+            "remaining": [{"title": "Second Game", "number": 1, "rc_index": 0,
+                           "in_list": [], "out_list": [], "maybe_list": [], "wait_list": [],
+                           "in_count": 0, "out_count": 0, "maybe_count": 0, "wait_count": 0,
+                           "id": 2, "limit": None, "location": None, "event_fee": None,
+                           "individual_fee": None, "timezone": None, "finalize_date": None,
+                           "reminder_hours": None}],
+            "renumbered": [{"old": 2, "new": 1, "title": "Second Game"}],
+        }
         with patch('handlers.lifecycle.manager', m), \
+             patch('services.rollcalls.manager', m), \
              patch('handlers.lifecycle.admin_rights', new=AsyncMock(return_value=True)), \
-             patch('handlers.lifecycle.update_streak_on_checkin', return_value=None):
+             patch('handlers.lifecycle.rollcalls_svc.end_rollcall', new=AsyncMock(return_value=erc_result)):
             await self.end_roll_call(msg)
 
         sent_texts = " ".join(

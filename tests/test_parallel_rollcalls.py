@@ -322,7 +322,9 @@ class TestEndRollcallWithParallel(TestParallelRollcallsBase):
         mgr.get_rollcall.return_value = rc2
 
         msg = self._make_message("/end_roll_call ::2")
-        with self._rc_started(), self._admin_ok(), patch('handlers.lifecycle.manager', mgr):
+        with self._rc_started(), self._admin_ok(), \
+             patch('handlers.lifecycle.manager', mgr), \
+             patch('services.rollcalls.manager', mgr):
             await self.end_roll_call(msg)
 
         mgr.remove_rollcall.assert_called_once_with(100, 1)
@@ -336,7 +338,9 @@ class TestEndRollcallWithParallel(TestParallelRollcallsBase):
         mgr = self._make_manager([rc1, rc2, rc3])
 
         msg = self._make_message("/end_roll_call ::1")
-        with self._rc_started(), self._admin_ok(), patch('handlers.lifecycle.manager', mgr):
+        with self._rc_started(), self._admin_ok(), \
+             patch('handlers.lifecycle.manager', mgr), \
+             patch('services.rollcalls.manager', mgr):
             await self.end_roll_call(msg)
 
         mgr.remove_rollcall.assert_called_once_with(100, 0)
@@ -470,6 +474,8 @@ class TestLimitWithParallel(TestParallelRollcallsBase):
 
         msg = self._make_message("/set_limit 5 ::2")
         with self._rc_started(), patch('handlers.settings.manager', mgr), \
+             patch('services.settings.manager', mgr), \
+             patch('rollcall_manager.manager', mgr), \
              patch('handlers.lifecycle.notify_proxy_owner_wait_to_in', new=AsyncMock()), \
              patch('handlers.settings.get_rc_db_id', return_value=2), \
              patch('handlers.settings.format_mention_with_name', return_value="User"):

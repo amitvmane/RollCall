@@ -357,10 +357,10 @@ async def _auto_start_from_template(chat_id: int, tmpl: dict):
     # Both attempts are best-effort: a network outage must not prevent
     # last_scheduled_date from being stamped (which would cause duplicates).
     try:
-        from handlers.lifecycle import get_status_keyboard, _persist_panel_msg_id
+        from handlers.lifecycle import get_status_keyboard, _persist_panel_msg_id, _build_panel_text
         from bot_state import _panel_msg_ids
         markup = await get_status_keyboard(rc_number)
-        text = rc.allList().replace("__RCID__", str(rc_number))
+        text = _build_panel_text(rc, rc_number)
         sent = await bot.send_message(chat_id, text, reply_markup=markup, parse_mode=None)
         _panel_msg_ids[(chat_id, rc_number)] = sent.message_id
         _persist_panel_msg_id(rc, sent.message_id)

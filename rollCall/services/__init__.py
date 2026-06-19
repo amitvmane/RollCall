@@ -15,6 +15,6 @@ up to the adapter, which decides how to surface them (chat reply, HTTP 4xx,
 etc.).
 """
 
-from . import ghost, proxy, rollcalls, settings, stats, templates, voting
+from . import ghost, lists, proxy, rollcalls, settings, stats, templates, voting
 
-__all__ = ["ghost", "proxy", "rollcalls", "settings", "stats", "templates", "voting"]
+__all__ = ["ghost", "lists", "proxy", "rollcalls", "settings", "stats", "templates", "voting"]

@@ -14,9 +14,10 @@ from exceptions import (
 from functions import admin_rights, roll_call_not_started
 from rollcall_manager import manager
 from db import (
-    get_rollcall_history, get_active_members, mark_member_inactive, log_admin_action,
+    get_rollcall_history, mark_member_inactive, log_admin_action,
     upsert_chat_member,
 )
+from services import lists as lists_svc
 from datetime import datetime
 
 
@@ -218,49 +219,38 @@ async def buzz_command(message):
 
         no_rollcall = roll_call_not_started(message, manager) == False
 
-        candidates = get_active_members(cid)
-        if not candidates:
+        svc = lists_svc.get_non_responders(cid, rc_number)
+        candidates = svc["candidates"]
+        rollcall_titles = svc["rollcall_titles"]
+
+        if not no_rollcall and not svc["has_active_rollcall"]:
+            no_rollcall = True  # treat as no-rollcall buzz
+
+        if not candidates and not no_rollcall:
+            # Service reported no active-member candidates at all
             await bot.send_message(
                 cid,
                 "No known group members yet. Members are recorded the first time they vote in any rollcall."
             )
             return
 
-        # rc is set for the message-text path below (per-rollcall title or
-        # union-across-all). voted_ids is what we subtract from candidates.
-        rc = None
-        rollcalls = []
-        if not no_rollcall:
-            rollcalls = manager.get_rollcalls(cid)
-            if rc_number is not None:
-                # Explicit ::N — only that rollcall's voters are spared.
-                if rc_number < 0 or len(rollcalls) <= rc_number:
-                    raise incorrectParameter(f"Rollcall #{rc_number + 1} doesn't exist. Check /rollcalls.")
-                rc = manager.get_rollcall(cid, rc_number)
-                voted_ids = {
-                    u.user_id for u in rc.inList + rc.outList + rc.maybeList + rc.waitList
-                    if isinstance(u.user_id, int)
-                }
-            else:
-                # Default — anyone who voted on ANY active rollcall is already
-                # engaged; don't ping them. rc is set to the first for the
-                # single-rollcall message fallback below.
-                rc = rollcalls[0]
-                voted_ids = set()
-                for r in rollcalls:
-                    voted_ids |= {
-                        u.user_id for u in r.inList + r.outList + r.maybeList + r.waitList
-                        if isinstance(u.user_id, int)
-                    }
-            candidates = [u for u in candidates if u['user_id'] not in voted_ids]
+        if not candidates and no_rollcall:
+            await bot.send_message(
+                cid,
+                "No known group members yet. Members are recorded the first time they vote in any rollcall."
+            )
+            return
 
-            if not candidates:
-                if rc_number is not None or len(rollcalls) == 1:
-                    msg_text = f"✅ Everyone the bot knows has already voted on *{_esc_md(rc.title)}*!"
-                else:
-                    msg_text = "✅ Everyone the bot knows has already voted on at least one active rollcall!"
-                await bot.send_message(cid, msg_text, parse_mode="Markdown")
-                return
+        rollcalls = manager.get_rollcalls(cid)
+
+        if not no_rollcall and not candidates:
+            if rc_number is not None or len(rollcall_titles) == 1:
+                title = rollcall_titles[0] if rollcall_titles else "this rollcall"
+                msg_text = f"✅ Everyone the bot knows has already voted on *{_esc_md(title)}*!"
+            else:
+                msg_text = "✅ Everyone the bot knows has already voted on at least one active rollcall!"
+            await bot.send_message(cid, msg_text, parse_mode="Markdown")
+            return
 
         async def _check_member(u):
             uid = u['user_id']
@@ -295,8 +285,9 @@ async def buzz_command(message):
             if no_rollcall:
                 await bot.send_message(cid, "All known members appear to have left the group.")
             else:
-                if rc_number is not None or len(rollcalls) == 1:
-                    msg_text = f"✅ Everyone the bot knows has already voted on *{_esc_md(rc.title)}*!"
+                if rc_number is not None or len(rollcall_titles) == 1:
+                    title = rollcall_titles[0] if rollcall_titles else "this rollcall"
+                    msg_text = f"✅ Everyone the bot knows has already voted on *{_esc_md(title)}*!"
                 else:
                     msg_text = "✅ Everyone the bot knows has already voted on at least one active rollcall!"
                 await bot.send_message(cid, msg_text, parse_mode="Markdown")
@@ -310,10 +301,11 @@ async def buzz_command(message):
         else:
             if custom_msg:
                 note = custom_msg
-            elif rc_number is not None or len(rollcalls) == 1:
-                note = f"rollcall *{_esc_md(rc.title)}* is open — have you voted?"
+            elif rc_number is not None or len(rollcall_titles) == 1:
+                title = rollcall_titles[0] if rollcall_titles else "this rollcall"
+                note = f"rollcall *{_esc_md(title)}* is open — have you voted?"
             else:
-                titles = ", ".join(f"*{_esc_md(r.title)}*" for r in rollcalls)
+                titles = ", ".join(f"*{_esc_md(t)}*" for t in rollcall_titles)
                 note = f"active rollcalls ({titles}) are open — have you voted?"
             await bot.send_message(cid, f"👋 Hey {mentions}\n\n{note}", parse_mode="Markdown")
         log_admin_action(cid, message.from_user.id, message.from_user.first_name, "buzz",

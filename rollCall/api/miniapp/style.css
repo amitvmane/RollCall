@@ -1,0 +1,236 @@
+/* Telegram Mini App — uses CSS vars injected by the WebApp SDK */
+:root {
+  --tg-bg: var(--tg-theme-bg-color, #ffffff);
+  --tg-text: var(--tg-theme-text-color, #000000);
+  --tg-hint: var(--tg-theme-hint-color, #999999);
+  --tg-link: var(--tg-theme-link-color, #2678b6);
+  --tg-btn: var(--tg-theme-button-color, #2678b6);
+  --tg-btn-text: var(--tg-theme-button-text-color, #ffffff);
+  --tg-secondary-bg: var(--tg-theme-secondary-bg-color, #f0f0f0);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--tg-bg);
+  color: var(--tg-text);
+  font-size: 15px;
+  line-height: 1.4;
+  min-height: 100vh;
+}
+
+.hidden { display: none !important; }
+
+/* ── Loading / Error ─────────────────────────────────────────── */
+.center-fill {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+  color: var(--tg-hint);
+}
+
+.spinner {
+  width: 36px; height: 36px;
+  border: 3px solid var(--tg-secondary-bg);
+  border-top-color: var(--tg-btn);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.error-icon { font-size: 40px; }
+.empty-icon { font-size: 40px; }
+.hint { font-size: 13px; color: var(--tg-hint); margin-top: 4px; }
+.hint code {
+  background: var(--tg-secondary-bg);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+/* ── Header ──────────────────────────────────────────────────── */
+.app-header {
+  position: sticky;
+  top: 0;
+  background: var(--tg-bg);
+  border-bottom: 1px solid var(--tg-secondary-bg);
+  padding: 12px 16px 0;
+  z-index: 10;
+}
+
+h1 { font-size: 18px; font-weight: 600; padding-bottom: 8px; }
+
+/* ── Tab bar (one tab per parallel rollcall) ─────────────────── */
+.tab-bar {
+  display: flex;
+  gap: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tab-bar::-webkit-scrollbar { display: none; }
+
+.tab {
+  padding: 8px 14px;
+  border: none;
+  background: none;
+  color: var(--tg-hint);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s;
+}
+.tab.active {
+  color: var(--tg-btn);
+  border-bottom-color: var(--tg-btn);
+}
+
+/* ── Rollcall card ───────────────────────────────────────────── */
+#rollcall-list { padding: 12px 16px 80px; }
+
+.rc-card { margin-bottom: 16px; }
+
+.rc-meta {
+  font-size: 12px;
+  color: var(--tg-hint);
+  margin-bottom: 10px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.rc-meta span { display: flex; align-items: center; gap: 4px; }
+
+/* ── Vote buttons ────────────────────────────────────────────── */
+.vote-bar {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.btn {
+  padding: 10px 6px;
+  border-radius: 10px;
+  border: 1.5px solid transparent;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+  text-align: center;
+}
+.btn:active { transform: scale(0.96); }
+.btn:disabled { opacity: 0.45; cursor: default; }
+
+.btn-in    { background: #2ecc71; color: #fff; }
+.btn-out   { background: #e74c3c; color: #fff; }
+.btn-maybe { background: #f39c12; color: #fff; }
+
+.btn.selected { box-shadow: 0 0 0 2.5px var(--tg-btn); }
+
+.btn-primary {
+  background: var(--tg-btn);
+  color: var(--tg-btn-text);
+  border-color: var(--tg-btn);
+  padding: 12px 28px;
+  border-radius: 10px;
+}
+
+.vote-status {
+  font-size: 12px;
+  color: var(--tg-hint);
+  text-align: center;
+  margin-bottom: 12px;
+  min-height: 18px;
+}
+
+/* ── Attendee lists ──────────────────────────────────────────── */
+.section-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--tg-hint);
+  margin: 12px 0 6px;
+}
+
+.people-list {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.person-chip {
+  background: var(--tg-secondary-bg);
+  border-radius: 20px;
+  padding: 4px 10px;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 160px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.person-chip.me { background: var(--tg-btn); color: var(--tg-btn-text); }
+
+.count-badge {
+  display: inline-block;
+  background: var(--tg-secondary-bg);
+  color: var(--tg-hint);
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.divider {
+  height: 1px;
+  background: var(--tg-secondary-bg);
+  margin: 14px 0;
+}
+
+/* ── Comment input ───────────────────────────────────────────── */
+.comment-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.comment-input {
+  flex: 1;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1.5px solid var(--tg-secondary-bg);
+  background: var(--tg-bg);
+  color: var(--tg-text);
+  font-size: 14px;
+  outline: none;
+}
+.comment-input:focus { border-color: var(--tg-btn); }
+
+/* ── Limit bar ───────────────────────────────────────────────── */
+.limit-bar {
+  height: 4px;
+  background: var(--tg-secondary-bg);
+  border-radius: 2px;
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+.limit-fill {
+  height: 100%;
+  background: var(--tg-btn);
+  border-radius: 2px;
+  transition: width 0.3s;
+}
+.limit-fill.full { background: #e74c3c; }

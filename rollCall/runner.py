@@ -489,6 +489,22 @@ async def main():
         _api_host = os.environ.get("REST_API_HOST", "127.0.0.1")
         logger.info(f"✅ REST API server started on http://{_api_host}:{_api_port}/api/v1 (docs: /api/docs)")
 
+        # Wire Telegram menu button to Mini App if MINIAPP_URL is configured.
+        # Operators set MINIAPP_URL=https://yourdomain.com/miniapp to enable.
+        _miniapp_url = os.environ.get("MINIAPP_URL", "").strip()
+        if _miniapp_url:
+            try:
+                from telebot.types import MenuButtonWebApp, WebAppInfo
+                await bot.set_chat_menu_button(
+                    menu_button=MenuButtonWebApp(
+                        text="Open RollCall",
+                        web_app=WebAppInfo(url=_miniapp_url),
+                    )
+                )
+                logger.info(f"✅ Mini App menu button set → {_miniapp_url}")
+            except Exception as _e:
+                logger.warning(f"⚠️  Could not set Mini App menu button: {_e}")
+
     # Resume reminder/auto-close loops for rollcalls already in DB with a finalizeDate.
     # Without this, any rollcall created before a bot restart would never auto-close.
     await resume_reminder_loops()

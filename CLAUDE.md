@@ -50,3 +50,7 @@ Prefer `logging.exception("context")` inside `except` blocks — it captures the
 | `SENTRY_DSN` | unset | optional, requires `sentry-sdk` |
 | `SENTRY_TRACES_SAMPLE_RATE` | `0.0` | sentry tracing % |
 | `RELEASE_VERSION`, `ENVIRONMENT` | unset / `production` | sentry tags |
+| `REST_API_ENABLED` | unset | `true`/`1` → start FastAPI on `REST_API_PORT` |
+| `REST_API_PORT` | `8081` | port for REST API + Mini App static files |
+| `REST_API_HOST` | `127.0.0.1` | bind address for REST API |
+| `MINIAPP_URL` | unset | public URL of `/miniapp/` — sets Telegram menu button on startup |

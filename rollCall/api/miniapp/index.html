@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>RollCall</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <div id="loading" class="center-fill">
+      <div class="spinner"></div>
+      <p>Loading…</p>
+    </div>
+    <div id="error-screen" class="center-fill hidden">
+      <div class="error-icon">⚠️</div>
+      <p id="error-msg">Something went wrong.</p>
+      <button id="retry-btn" class="btn btn-primary">Retry</button>
+    </div>
+    <div id="main" class="hidden">
+      <header class="app-header">
+        <h1 id="chat-title">RollCall</h1>
+        <div id="rc-tabs" class="tab-bar"></div>
+      </header>
+      <div id="rollcall-list"></div>
+      <div id="empty-state" class="center-fill hidden">
+        <div class="empty-icon">📋</div>
+        <p>No active rollcalls.</p>
+        <p class="hint">An admin can start one with <code>/src</code> in the group.</p>
+      </div>
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

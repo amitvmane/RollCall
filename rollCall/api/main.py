@@ -12,10 +12,13 @@ each route doesn't need to repeat the same try/except boilerplate.
 """
 
 import logging
+import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from exceptions import (
     alreadyInList,
@@ -27,7 +30,7 @@ from exceptions import (
     rollCallNotStarted,
 )
 from api.rate_limit import rate_limit_middleware
-from api.routes import admin, health, proxy_votes, rollcalls, stats, templates, votes
+from api.routes import admin, auth, health, proxy_votes, rollcalls, stats, templates, votes
 from api.schemas.common import ErrorResponse
 
 
@@ -95,6 +98,7 @@ def create_app() -> FastAPI:
     app.middleware("http")(rate_limit_middleware)
 
     # Route mounting
+    app.include_router(auth.router, prefix=API_PREFIX, tags=["auth"])
     app.include_router(health.router, prefix=API_PREFIX, tags=["health"])
     app.include_router(rollcalls.router, prefix=API_PREFIX, tags=["rollcalls"])
     app.include_router(votes.router, prefix=API_PREFIX, tags=["votes"])
@@ -117,6 +121,12 @@ def create_app() -> FastAPI:
                 detail=str(exc) or type(exc).__name__,
             ).model_dump(),
         )
+
+    # Serve Mini App static files at /miniapp/
+    _miniapp_dir = Path(__file__).parent / "miniapp"
+    if _miniapp_dir.is_dir():
+        app.mount("/miniapp", StaticFiles(directory=str(_miniapp_dir), html=True), name="miniapp")
+        logging.info("[api] Mini App served at /miniapp/")
 
     return app
 

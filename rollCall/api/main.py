@@ -27,7 +27,7 @@ from exceptions import (
     rollCallNotStarted,
 )
 from api.rate_limit import rate_limit_middleware
-from api.routes import health, proxy_votes, rollcalls, templates, votes
+from api.routes import health, proxy_votes, rollcalls, stats, templates, votes
 from api.schemas.common import ErrorResponse
 
 
@@ -100,6 +100,7 @@ def create_app() -> FastAPI:
     app.include_router(votes.router, prefix=API_PREFIX, tags=["votes"])
     app.include_router(proxy_votes.router, prefix=API_PREFIX, tags=["proxy-votes"])
     app.include_router(templates.router, prefix=API_PREFIX, tags=["templates"])
+    app.include_router(stats.router, prefix=API_PREFIX, tags=["stats", "ghost", "settings"])
 
     # Map proxy-specific exceptions to HTTP status codes
     from exceptions import duplicateProxy, repeatlyName

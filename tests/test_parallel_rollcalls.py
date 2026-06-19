@@ -154,6 +154,8 @@ class TestParallelRollcallsBase(unittest.IsolatedAsyncioTestCase):
             patch('rollcall_manager.manager', self.manager),
             patch('services.voting.manager', self.manager),
             patch('services.proxy.manager', self.manager),
+            patch('services.settings.manager', self.manager),
+            patch('services.rollcalls.manager', self.manager),
         ])
 
 
@@ -190,6 +192,7 @@ class TestMultipleRollcallCreation(TestParallelRollcallsBase):
         msg = self._make_message("/start_roll_call Event 3")
         with self._db_json_patch(), self._admin_ok(), \
              patch('handlers.lifecycle.manager', mgr), \
+             patch('services.rollcalls.manager', mgr), \
              patch('handlers.lifecycle.get_status_keyboard', new=AsyncMock(return_value=MagicMock())):
             await self.start_roll_call(msg)
 
@@ -378,7 +381,9 @@ class TestQueriesWithParallel(TestParallelRollcallsBase):
         mgr.get_rollcall.return_value = rc1
 
         msg = self._make_message("/location New Location ::1")
-        with self._rc_started(), patch('handlers.settings.manager', mgr):
+        with self._rc_started(), patch('handlers.settings.manager', mgr), \
+             patch('services.settings.manager', mgr), \
+             patch('rollcall_manager.manager', mgr):
             await self.set_location(msg)
 
         self.assertEqual(rc1.location, "New Location")
@@ -396,7 +401,9 @@ class TestQueriesWithParallel(TestParallelRollcallsBase):
         mgr.get_rollcall.return_value = rc1
 
         msg = self._make_message("/event_fee 500 ::1")
-        with self._rc_started(), patch('handlers.settings.manager', mgr):
+        with self._rc_started(), patch('handlers.settings.manager', mgr), \
+             patch('services.settings.manager', mgr), \
+             patch('rollcall_manager.manager', mgr):
             await self.event_fee(msg)
 
         self.assertEqual(rc1.event_fee, "500")

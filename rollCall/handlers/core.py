@@ -10,6 +10,7 @@ from exceptions import parameterMissing
 from functions import admin_rights, auto_complete_timezone
 from rollcall_manager import manager
 from db import get_all_chat_ids, log_admin_action
+from services import settings as settings_svc
 from commands_registry import (
     COMMANDS, lookup_command, all_names_and_aliases,
     USER_CATEGORY_ORDER, ADMIN_CATEGORY_ORDER,
@@ -229,9 +230,8 @@ async def config_timezone(message):
         response = auto_complete_timezone(" ".join(msg.split(" ")[1:]))
 
         if response is not None:
+            settings_svc.set_timezone(cid, response, message.from_user.id, message.from_user.first_name)
             await bot.send_message(cid, f"Your timezone has been set to {response}")
-            manager.set_timezone(cid, response)
-            log_admin_action(cid, message.from_user.id, message.from_user.first_name, "timezone", details=response)
         else:
             await bot.send_message(cid, f"Given timezone is invalid , check this <a href='https://gist.github.com/heyalexej/8bf688fd67d7199be4a1682b3eec7568'>website</a>", parse_mode='HTML')
 

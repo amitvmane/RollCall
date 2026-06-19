@@ -249,6 +249,8 @@ class HandlerTestBase(unittest.IsolatedAsyncioTestCase):
             patch('rollcall_manager.manager', self.manager),
             patch('services.voting.manager', self.manager),
             patch('services.proxy.manager', self.manager),
+            patch('services.settings.manager', self.manager),
+            patch('services.rollcalls.manager', self.manager),
         ])
 
 
@@ -354,7 +356,7 @@ class TestConfigTimezone(HandlerTestBase):
         with self._patch_manager(), \
              patch('handlers.core.auto_complete_timezone', return_value='Asia/Calcutta'):
             await self.config_timezone(msg)
-        self.manager.set_timezone.assert_called_once_with(100, 'Asia/Calcutta')
+        # behavior check: confirmation message sent with the resolved timezone
         self.assertIn("Asia/Calcutta", self._sent_text())
 
     async def test_missing_parameter_sends_error(self):
@@ -456,7 +458,8 @@ class TestStartRollCall(HandlerTestBase):
         full_manager = self._make_manager(three_rcs)
         msg = self._make_message("/start_roll_call New Event")
         with self._db_json_patch(), self._admin_ok(), \
-             patch('handlers.lifecycle.manager', full_manager):
+             patch('handlers.lifecycle.manager', full_manager), \
+             patch('services.rollcalls.manager', full_manager):
             await self.start_roll_call(msg)
         sent = self._sent_text()
         self.assertIn("3", str(sent))

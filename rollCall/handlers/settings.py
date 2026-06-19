@@ -20,6 +20,7 @@ from exceptions import (
 from functions import admin_rights, roll_call_not_started
 from rollcall_manager import manager
 from db import log_admin_action, increment_user_stat, increment_rollcall_stat
+from services import settings as settings_svc
 
 
 def _ts() -> str:
@@ -200,15 +201,14 @@ async def event_fee(message):
             if rc_number < 0 or len(rollcalls) < rc_number + 1:
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
-        rc = manager.get_rollcall(cid, rc_number)
         event_price = " ".join(pmts)
         event_price_number = re.findall('[0-9]+', event_price)
 
         if len(event_price_number) == 0 or int(event_price_number[0]) <= 0:
             raise incorrectParameter("The correct format is '/event_fee Integer' Where 'Integer' it's up to 0 number")
 
-        rc.event_fee = event_price
-        rc.save()
+        settings_svc.set_event_fee(cid, event_price, message.from_user.id, message.from_user.first_name, rc_number)
+        rc = manager.get_rollcall(cid, rc_number)
 
         if not manager.get_shh_mode(cid):
             await bot.send_message(cid, f"Event Fee set to {event_price}\n\nAdditional unknown/penalty fees are not included and needs to be handled separately.")
@@ -322,9 +322,8 @@ async def set_location(message):
             raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         place = " ".join(pmts)
+        settings_svc.set_location(cid, place, message.from_user.id, message.from_user.first_name, rc_number)
         rc = manager.get_rollcall(cid, rc_number)
-        rc.location = place
-        rc.save()
 
         if not manager.get_shh_mode(cid):
             await bot.send_message(cid, f"Location updated for '{rc.title}' (ID: {rc_number + 1}) → {place}.")
@@ -475,8 +474,7 @@ async def shh(message):
     if not await admin_rights(message, manager):
         await bot.send_message(message.chat.id, "You don't have permission to use this command.")
         return
-    manager.set_shh_mode(message.chat.id, True)
-    log_admin_action(message.chat.id, message.from_user.id, message.from_user.first_name, "shh_on")
+    settings_svc.set_shh_mode(message.chat.id, True, message.from_user.id, message.from_user.first_name)
     await bot.send_message(message.chat.id, "Ok, i will keep quiet!")
 
 
@@ -485,6 +483,5 @@ async def louder(message):
     if not await admin_rights(message, manager):
         await bot.send_message(message.chat.id, "You don't have permission to use this command.")
         return
-    manager.set_shh_mode(message.chat.id, False)
-    log_admin_action(message.chat.id, message.from_user.id, message.from_user.first_name, "shh_off")
+    settings_svc.set_shh_mode(message.chat.id, False, message.from_user.id, message.from_user.first_name)
     await bot.send_message(message.chat.id, "Ok, i can hear you!")

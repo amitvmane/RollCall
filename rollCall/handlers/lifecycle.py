@@ -28,6 +28,7 @@ from db import (
     update_streak_on_checkin, reset_user_streak, upsert_chat_member,
     update_proxy_streak_on_checkin, reset_proxy_streak,
 )
+from services import rollcalls as rollcalls_svc
 
 
 def _ts() -> str:
@@ -169,32 +170,25 @@ async def notify_proxy_owner_wait_to_in(rc, moved_user: User, cid, title: str, r
 async def start_roll_call(message):
     cid = message.chat.id
     msg = message.text
-    title = ''
 
     try:
-        rollcalls = manager.get_rollcalls(cid)
-
-        if len(rollcalls) >= 3:
-            raise amountOfRollCallsReached("Allowed Maximum number of active roll calls per group is 3.")
-
         if await admin_rights(message, manager) == False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
 
         arr = msg.split(" ")
-        if len(arr) > 1:
-            arr.pop(0)
-            title = ' '.join(arr)
-        else:
-            title = '<Empty>'
+        title = ' '.join(arr[1:]) if len(arr) > 1 else None
 
-        rc_index = len(rollcalls)
-        rc = manager.add_rollcall(cid, title)
-        logging.info(f"[{_ts()}] [CHAT {cid}] Rollcall started: '{title}' (RC #{rc_index+1}) by {message.from_user.first_name} (@{message.from_user.username})")
-        log_admin_action(cid, message.from_user.id, message.from_user.first_name, "new_rollcall", target_name=title)
-        markup = await get_status_keyboard(rc_index + 1)
-        text = rc.allList().replace("__RCID__", str(rc_index + 1))
+        result = await rollcalls_svc.start_rollcall(
+            cid, title,
+            message.from_user.id, message.from_user.first_name,
+            message.from_user.username,
+        )
+        rc_number_1based = result["number"]
+        rc = manager.get_rollcall(cid, result["rc_index"])
+        markup = await get_status_keyboard(rc_number_1based)
+        text = rc.allList().replace("__RCID__", str(rc_number_1based))
         sent = await bot.send_message(message.chat.id, text, reply_markup=markup)
-        _panel_msg_ids[(cid, rc_index + 1)] = sent.message_id
+        _panel_msg_ids[(cid, rc_number_1based)] = sent.message_id
         _persist_panel_msg_id(rc, sent.message_id)
 
     except Exception as e:

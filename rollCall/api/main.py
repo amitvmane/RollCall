@@ -27,7 +27,7 @@ from exceptions import (
     rollCallNotStarted,
 )
 from api.rate_limit import rate_limit_middleware
-from api.routes import health, rollcalls, votes
+from api.routes import health, proxy_votes, rollcalls, votes
 from api.schemas.common import ErrorResponse
 
 
@@ -98,6 +98,22 @@ def create_app() -> FastAPI:
     app.include_router(health.router, prefix=API_PREFIX, tags=["health"])
     app.include_router(rollcalls.router, prefix=API_PREFIX, tags=["rollcalls"])
     app.include_router(votes.router, prefix=API_PREFIX, tags=["votes"])
+    app.include_router(proxy_votes.router, prefix=API_PREFIX, tags=["proxy-votes"])
+
+    # Map proxy-specific exceptions to HTTP status codes
+    from exceptions import duplicateProxy, repeatlyName
+    from fastapi import status as _status
+
+    @app.exception_handler(duplicateProxy)
+    @app.exception_handler(repeatlyName)
+    async def _proxy_exception_handler(request, exc):
+        return JSONResponse(
+            status_code=_status.HTTP_409_CONFLICT,
+            content=ErrorResponse(
+                error=type(exc).__name__,
+                detail=str(exc) or type(exc).__name__,
+            ).model_dump(),
+        )
 
     return app
 

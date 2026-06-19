@@ -26,6 +26,7 @@ from db import (
     reset_user_streak, log_admin_action, upsert_chat_member,
     increment_user_stat, increment_rollcall_stat,
 )
+from services import admin as admin_svc
 
 
 def _ts() -> str:
@@ -466,13 +467,13 @@ async def ghost_callback_handler(call):
 
             name = pending['name']
             rc_number = pending['rc_number']
-            rc = manager.get_rollcall(cid, rc_number)
-            if rc and rc.delete_user(name):
-                rc.save()
-                log_admin_action(cid, admin_id, call.from_user.first_name, "delete_user", target_name=name, rollcall_id=getattr(rc, 'db_id', None) or getattr(rc, 'id', None), details=rc.title)
+            try:
+                admin_svc.delete_user_from_rollcall(
+                    cid, rc_number, name, admin_id, call.from_user.first_name
+                )
                 await bot.answer_callback_query(call.id, f"✅ Deleted {name}")
                 await bot.edit_message_text(f"✅ *{_esc_md(name)}* removed from rollcall #{rc_number + 1}.", cid, call.message.message_id, parse_mode="Markdown")
-            else:
+            except incorrectParameter:
                 await bot.answer_callback_query(call.id, "User not found")
                 await bot.edit_message_text(f"⚠️ User *{_esc_md(name)}* not found.", cid, call.message.message_id, parse_mode="Markdown")
             return
@@ -502,24 +503,36 @@ async def ghost_callback_handler(call):
                 await bot.edit_message_text("⚠️ Rollcall not found.", cid, call.message.message_id)
                 return
 
-            from db import delete_user_by_id
-            rc_db_id = get_rc_db_id(rc)
-            if rc_db_id is not None:
-                delete_user_by_id(rc_db_id, user.user_id)
-            rc._load_users_from_db()
-            if status == 'in':
-                result = rc.addIn(user)
-            elif status == 'out':
-                result = rc.addOut(user)
-            else:
-                result = rc.addMaybe(user)
-            rc.save()
+            try:
+                admin_svc.set_user_status(
+                    cid, rc_number, user.name, status, admin_id, call.from_user.first_name
+                )
+            except incorrectParameter:
+                # User may have been in a non-standard list (e.g. waitlist) so fall back
+                # to the direct manipulation path for waitlist entries.
+                from db import delete_user_by_id as _del_by_id
+                rc_db_id = get_rc_db_id(rc)
+                if rc_db_id is not None:
+                    _del_by_id(rc_db_id, user.user_id)
+                rc._load_users_from_db()
+                if status == 'in':
+                    rc.addIn(user)
+                elif status == 'out':
+                    rc.addOut(user)
+                else:
+                    rc.addMaybe(user)
+                rc.save()
+                log_admin_action(cid, admin_id, call.from_user.first_name, "set_status",
+                                 target_name=f"{user.name} → {status}",
+                                 rollcall_id=getattr(rc, 'db_id', None) or getattr(rc, 'id', None),
+                                 details=rc.title)
+
+            rc = manager.get_rollcall(cid, rc_number)
             if not manager.get_shh_mode(cid):
                 await bot.send_message(cid, f"✅ Done! {user.name}'s status for '{rc.title}' updated to {status.upper()}.")
 
             from handlers.lifecycle import _update_panel
             await _update_panel(cid, rc_number + 1, rc)
-            log_admin_action(cid, admin_id, call.from_user.first_name, "set_status", target_name=f"{user.name} → {status}", rollcall_id=getattr(rc, 'db_id', None) or getattr(rc, 'id', None), details=rc.title)
             await bot.answer_callback_query(call.id, f"✅ Moved to {status.upper()}")
             await bot.edit_message_text(
                 f"✅ *{_esc_md(user.name)}* → *{status.upper()}* in rollcall #{rc_number + 1}.",

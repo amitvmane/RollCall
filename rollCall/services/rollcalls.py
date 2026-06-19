@@ -8,6 +8,7 @@ no send_message.
 Adapters (Telegram handlers, future REST API) are responsible for parsing
 their input, calling these services, and formatting the returned dicts.
 """
+from __future__ import annotations
 
 import logging
 from datetime import datetime

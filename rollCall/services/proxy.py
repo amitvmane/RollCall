@@ -8,6 +8,7 @@ A proxy user has a string `user_id` (the proxy's name), distinguishing
 them from real Telegram users whose `user_id` is an int. All waitlist /
 promotion semantics are identical to real voting.
 """
+from __future__ import annotations
 
 import logging
 from datetime import datetime

@@ -2,6 +2,7 @@
 Database layer for RollCall bot
 Supports both PostgreSQL and SQLite
 """
+from __future__ import annotations
 
 import os
 import json

@@ -14,6 +14,7 @@ without the service ever having an opinion about UI.
 internally — same serialization the existing handlers use to prevent
 vote-vs-/erc and vote-vs-vote races.
 """
+from __future__ import annotations
 
 import logging
 from datetime import datetime

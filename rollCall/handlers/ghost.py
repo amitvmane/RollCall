@@ -14,7 +14,7 @@ from bot_state import (
     _esc_md, get_rc_db_id, _build_ghost_select_keyboard, _fmt_ended_at,
     reply_error,
 )
-from exceptions import insufficientPermissions, rollCallNotStarted, incorrectParameter
+from exceptions import insufficientPermissions, rollCallNotStarted, incorrectParameter, alreadyInList
 from functions import admin_rights, roll_call_not_started
 from models import User
 from rollcall_manager import manager
@@ -27,6 +27,7 @@ from db import (
     increment_user_stat, increment_rollcall_stat,
 )
 from services import admin as admin_svc
+from services import voting as voting_svc
 
 
 def _ts() -> str:
@@ -354,21 +355,18 @@ async def ghost_callback_handler(call):
             if rc_number >= len(rollcalls):
                 await bot.answer_callback_query(call.id, "Roll call no longer active.")
                 return
-            rc = rollcalls[rc_number]
             _username = call.from_user.username or None
             _display = _get_display_name(call.from_user)
-            upsert_chat_member(cid, uid, _display, _username)
-            user = User(_display, _username, uid, rc.allNames)
-            user.comment = state.get('comment', '')
-            result = rc.addIn(user)
-            rc.save()
-            rc_db_id = get_rc_db_id(rc)
-            if result not in ('AB', 'AC', 'AU') and rc_db_id and isinstance(uid, int):
-                increment_user_stat(cid, uid, "total_in")
-                increment_rollcall_stat(rc_db_id, "total_in")
+            try:
+                await voting_svc.vote_in(cid, uid, _display, _username,
+                                         comment=state.get('comment', ''),
+                                         rc_number=rc_number)
+            except alreadyInList:
+                pass  # already IN from a concurrent vote — still show confirmation
+            rc = manager.get_rollcall(cid, rc_number)
             await bot.answer_callback_query(call.id, "💪 You're IN!")
             await bot.edit_message_text(
-                f"💪 {user.name} committed to IN!\n\n{rc.allList().replace('__RCID__', str(rc_number + 1))}",
+                f"💪 {_display} committed to IN!\n\n{rc.allList().replace('__RCID__', str(rc_number + 1))}",
                 cid, call.message.message_id
             )
             return
@@ -386,18 +384,16 @@ async def ghost_callback_handler(call):
             if rc_number >= len(rollcalls):
                 await bot.answer_callback_query(call.id, "Roll call no longer active.")
                 return
-            rc = rollcalls[rc_number]
             _username = call.from_user.username or None
-            user = User(_get_display_name(call.from_user), _username, uid, rc.allNames)
-            rc.addOut(user)
-            rc.save()
-            rc_db_id = get_rc_db_id(rc)
-            if rc_db_id and isinstance(uid, int):
-                increment_user_stat(cid, uid, "total_out")
-                increment_rollcall_stat(rc_db_id, "total_out")
+            _display = _get_display_name(call.from_user)
+            try:
+                await voting_svc.vote_out(cid, uid, _display, _username, rc_number=rc_number)
+            except alreadyInList:
+                pass  # already OUT — still show confirmation
+            rc = manager.get_rollcall(cid, rc_number)
             await bot.answer_callback_query(call.id, "❌ Marked as Out")
             await bot.edit_message_text(
-                f"❌ {user.name} is out.\n\n{rc.allList().replace('__RCID__', str(rc_number + 1))}",
+                f"❌ {_display} is out.\n\n{rc.allList().replace('__RCID__', str(rc_number + 1))}",
                 cid, call.message.message_id
             )
             return

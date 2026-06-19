@@ -4,6 +4,7 @@ notify_proxy_owner_wait_to_in, and the btn_* callback handler.
 """
 import asyncio
 import logging
+import os
 from datetime import datetime
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -30,6 +31,16 @@ from services import voting as voting_svc
 
 def _ts() -> str:
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _build_panel_text(rc, rc_number: int) -> str:
+    """Panel text with optional web voting link appended."""
+    text = rc.allList().replace("__RCID__", str(rc_number))
+    base = os.environ.get("WEB_BASE_URL", "").rstrip("/")
+    token = getattr(rc, "web_token", None)
+    if base and token:
+        text += f"\n\n🔗 Vote via web: {base}/web/join/{token}"
+    return text
 
 
 # ── Inline keyboards ──────────────────────────────────────────────────────────
@@ -96,7 +107,7 @@ async def _update_panel(cid: int, rc_number: int, rc, force_new: bool = False) -
     if key not in _panel_msg_ids and getattr(rc, 'panel_msg_id', None):
         _panel_msg_ids[key] = rc.panel_msg_id
 
-    text = rc.allList().replace("__RCID__", str(rc_number))
+    text = _build_panel_text(rc, rc_number)
     markup = await get_status_keyboard(rc_number)
 
     if not force_new:
@@ -183,7 +194,7 @@ async def start_roll_call(message):
         rc_number_1based = result["number"]
         rc = manager.get_rollcall(cid, result["rc_index"])
         markup = await get_status_keyboard(rc_number_1based)
-        text = rc.allList().replace("__RCID__", str(rc_number_1based))
+        text = _build_panel_text(rc, rc_number_1based)
         sent = await bot.send_message(message.chat.id, text, reply_markup=markup)
         _panel_msg_ids[(cid, rc_number_1based)] = sent.message_id
         _persist_panel_msg_id(rc, sent.message_id)
@@ -256,7 +267,7 @@ async def end_roll_call(message):
                     await bot.send_message(cid, "\n".join(lines))
                     for idx, rollcall in enumerate(updated_rollcalls):
                         new_id = idx + 1
-                        text = f"Rollcall number {new_id}\n\n" + rollcall.allList().replace("__RCID__", str(new_id))
+                        text = f"Rollcall number {new_id}\n\n" + _build_panel_text(rollcall, new_id)
                         await bot.send_message(cid, text)
     except Exception as e:
         await reply_error(message, e)
@@ -337,7 +348,7 @@ async def show_panel(message):
             raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         rc = manager.get_rollcall(cid, rc_number)
-        text = rc.allList().replace("__RCID__", str(rc_number + 1))
+        text = _build_panel_text(rc, rc_number + 1)
         markup = await get_status_keyboard(rc_number + 1)
 
         sent = await bot.send_message(cid, text, reply_markup=markup)
@@ -479,7 +490,7 @@ async def callback_handler(call):
                 _p_obj = User(p_name, p_uname, p_id, [])
                 await notify_proxy_owner_wait_to_in(rc, _p_obj, cid, rc.title, rc_number)
 
-            text = rc.allList().replace("__RCID__", str(rc_number))
+            text = _build_panel_text(rc, rc_number)
             markup = await get_status_keyboard(rc_number)
             try:
                 await bot.edit_message_text(text, cid, call.message.message_id, reply_markup=markup)
@@ -524,7 +535,7 @@ async def callback_handler(call):
         # ── Back to main panel ────────────────────────────────────────────────
         if action == "status":
             await bot.answer_callback_query(call.id)
-            text = rc.allList().replace("__RCID__", str(rc_number))
+            text = _build_panel_text(rc, rc_number)
             markup = await get_status_keyboard(rc_number)
             try:
                 await bot.edit_message_text(text, cid, call.message.message_id, reply_markup=markup)
@@ -536,7 +547,7 @@ async def callback_handler(call):
         # ── Refresh ───────────────────────────────────────────────────────────
         if action == "refresh":
             await bot.answer_callback_query(call.id, "Refreshed")
-            text = rc.allList().replace("__RCID__", str(rc_number))
+            text = _build_panel_text(rc, rc_number)
             markup = await get_status_keyboard(rc_number)
             try:
                 await bot.edit_message_text(text, cid, call.message.message_id, reply_markup=markup)
@@ -644,7 +655,7 @@ async def callback_handler(call):
                     await bot.send_message(cid, "\n".join(lines))
                     for idx, rollcall in enumerate(updated_rollcalls):
                         new_id = idx + 1
-                        text = rollcall.allList().replace("__RCID__", str(new_id))
+                        text = _build_panel_text(rollcall, new_id)
                         panel_markup = await get_status_keyboard(new_id)
                         sent = await bot.send_message(cid, text, reply_markup=panel_markup)
                         _panel_msg_ids[(cid, new_id)] = sent.message_id
@@ -654,7 +665,7 @@ async def callback_handler(call):
         # ── Cancel end rollcall ───────────────────────────────────────────────
         if action == "endcancel":
             await bot.answer_callback_query(call.id, "Cancelled")
-            text = rc.allList().replace("__RCID__", str(rc_number))
+            text = _build_panel_text(rc, rc_number)
             markup = await get_status_keyboard(rc_number)
             try:
                 await bot.edit_message_text(text, cid, call.message.message_id, reply_markup=markup)

@@ -127,6 +127,18 @@ COMMANDS = [
         "summary": "Show bot version",
         "details": "Prints the deployed version of the bot and a short changelog summary.",
     },
+    {
+        "name": "weblink", "aliases": [], "scope": "user", "category": "Settings",
+        "args": "", "sample": "/weblink",
+        "summary": "Get web voting link for active rollcall(s)",
+        "details": (
+            "Returns a magic link URL for each active rollcall. "
+            "Anyone with the link can vote via their browser — no Telegram account needed. "
+            "Useful when Telegram is unavailable or for external participants.\n\n"
+            "The link expires when the rollcall ends. "
+            "Requires WEB_BASE_URL to be configured on the server."
+        ),
+    },
 
     # ──────────────────────────── ADMIN ─────────────────────────────
     {

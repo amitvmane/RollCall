@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>RollCall</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #f0f2f5;
+      --card: #ffffff;
+      --border: #e0e0e0;
+      --text: #1a1a2e;
+      --muted: #6b7280;
+      --in-color: #16a34a;
+      --out-color: #dc2626;
+      --maybe-color: #d97706;
+      --accent: #2563eb;
+      --radius: 12px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 16px;
+    }
+
+    /* Telegram Mini App overrides — use theme vars when available */
+    body.tg-mode {
+      background: var(--tg-theme-bg-color, var(--bg));
+      color: var(--tg-theme-text-color, var(--text));
+    }
+
+    h1 { font-size: 1.25rem; font-weight: 700; }
+    h2 { font-size: 0.9rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 8px; }
+
+    .card {
+      background: var(--card);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+
+    .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+    .meta { font-size: 0.82rem; color: var(--muted); margin-top: 4px; }
+
+    /* Name input */
+    .name-row { display: flex; gap: 8px; margin-bottom: 12px; }
+    .name-row input {
+      flex: 1;
+      padding: 10px 12px;
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      font-size: 1rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .name-row input:focus { border-color: var(--accent); }
+    .name-row button {
+      padding: 10px 14px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    .name-tag {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: #eff6ff; color: var(--accent);
+      border-radius: 20px; padding: 4px 12px;
+      font-size: 0.9rem; font-weight: 600;
+      margin-bottom: 12px;
+    }
+    .name-tag button {
+      background: none; border: none; cursor: pointer;
+      font-size: 0.85rem; color: var(--muted); padding: 0;
+    }
+
+    /* Vote buttons */
+    .vote-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+    .vote-btn {
+      padding: 12px 6px;
+      border: 2px solid transparent;
+      border-radius: 10px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+      background: #f8fafc;
+      color: var(--text);
+    }
+    .vote-btn:active { transform: scale(0.96); }
+    .vote-btn.in  { border-color: var(--in-color); color: var(--in-color); }
+    .vote-btn.out { border-color: var(--out-color); color: var(--out-color); }
+    .vote-btn.maybe { border-color: var(--maybe-color); color: var(--maybe-color); }
+    .vote-btn.active.in  { background: var(--in-color); color: #fff; }
+    .vote-btn.active.out { background: var(--out-color); color: #fff; }
+    .vote-btn.active.maybe { background: var(--maybe-color); color: #fff; }
+    .vote-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* Lists */
+    .list-section { margin-top: 4px; }
+    .list-label {
+      font-size: 0.78rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.06em; margin: 10px 0 4px;
+    }
+    .list-label.in    { color: var(--in-color); }
+    .list-label.out   { color: var(--out-color); }
+    .list-label.maybe { color: var(--maybe-color); }
+    .list-label.waiting { color: var(--muted); }
+    .list-items { list-style: none; }
+    .list-items li {
+      font-size: 0.92rem;
+      padding: 3px 0;
+      border-bottom: 1px solid #f3f4f6;
+      display: flex; align-items: baseline; gap: 6px;
+    }
+    .list-items li .pos { color: var(--muted); font-size: 0.78rem; min-width: 18px; }
+    .list-items li .comment { color: var(--muted); font-size: 0.82rem; }
+    .list-items li.you { font-weight: 700; }
+    .empty { color: var(--muted); font-size: 0.85rem; font-style: italic; }
+
+    /* State screens */
+    .center-fill {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; min-height: 60vh; gap: 12px; text-align: center;
+    }
+    .spinner {
+      width: 36px; height: 36px;
+      border: 3px solid #e0e0e0; border-top-color: var(--accent);
+      border-radius: 50%; animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .error-icon { font-size: 2.5rem; }
+    .btn {
+      padding: 10px 24px; border: none; border-radius: 8px;
+      font-size: 0.95rem; font-weight: 600; cursor: pointer;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+
+    .hidden { display: none !important; }
+
+    .refresh-hint { text-align: center; font-size: 0.75rem; color: var(--muted); margin-top: 8px; }
+  </style>
+</head>
+<body>
+<div id="app">
+  <div id="loading" class="center-fill">
+    <div class="spinner"></div>
+    <p>Loading…</p>
+  </div>
+  <div id="error-screen" class="center-fill hidden">
+    <div class="error-icon">⚠️</div>
+    <p id="error-msg">Something went wrong.</p>
+    <button id="retry-btn" class="btn btn-primary">Retry</button>
+  </div>
+  <div id="main" class="hidden">
+    <!-- Rollcall header -->
+    <div class="card">
+      <div class="header">
+        <h1 id="rc-title">RollCall</h1>
+      </div>
+      <div id="rc-meta" class="meta"></div>
+    </div>
+
+    <!-- Name input / identity -->
+    <div class="card" id="identity-card">
+      <h2>Your name</h2>
+      <div id="name-input-row" class="name-row hidden">
+        <input id="name-input" type="text" placeholder="Enter your name" maxlength="64" autocomplete="off" />
+        <button id="name-save-btn">OK</button>
+      </div>
+      <div id="name-tag-row" class="hidden">
+        <span class="name-tag">
+          <span id="name-display"></span>
+          <button id="name-change-btn" title="Change name">✎</button>
+        </span>
+      </div>
+    </div>
+
+    <!-- Vote buttons -->
+    <div class="card">
+      <h2>Your vote</h2>
+      <div class="vote-row">
+        <button class="vote-btn in"    data-vote="in"    id="btn-in">✅ IN</button>
+        <button class="vote-btn out"   data-vote="out"   id="btn-out">❌ OUT</button>
+        <button class="vote-btn maybe" data-vote="maybe" id="btn-maybe">❓ MAYBE</button>
+      </div>
+    </div>
+
+    <!-- Lists -->
+    <div class="card">
+      <div class="header">
+        <h2 style="margin:0">Current list</h2>
+        <span id="count-badge" style="font-size:0.8rem;color:var(--muted)"></span>
+      </div>
+      <div class="list-section" id="lists-container"></div>
+    </div>
+    <p class="refresh-hint" id="refresh-hint"></p>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ── Token from URL ────────────────────────────────────────────────────────
+  // URL pattern: /web/join/{token}  OR  /?token={token}  OR just the last path segment
+  function getToken() {
+    const parts = window.location.pathname.split("/").filter(Boolean);
+    // /web/join/{token} → last segment is token
+    if (parts.length >= 1) return parts[parts.length - 1];
+    return null;
+  }
+  const TOKEN = getToken();
+  const API_BASE = "/api/v1/web/" + TOKEN;
+  const LS_KEY = "rollcall_name_" + TOKEN;
+
+  // ── Telegram WebApp detection ─────────────────────────────────────────────
+  const tg = window.Telegram && window.Telegram.WebApp;
+  let TG_NAME = null;
+  if (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) {
+    TG_NAME = tg.initDataUnsafe.user.first_name || tg.initDataUnsafe.user.username || null;
+    document.body.classList.add("tg-mode");
+    tg.ready();
+    tg.expand();
+  }
+
+  // ── State ─────────────────────────────────────────────────────────────────
+  let currentName = TG_NAME || localStorage.getItem(LS_KEY) || "";
+  let currentVote = null;   // 'in' | 'out' | 'maybe' | null
+  let rollcallData = null;
+  let refreshTimer = null;
+  let voting = false;
+
+  // ── DOM refs ──────────────────────────────────────────────────────────────
+  const $ = id => document.getElementById(id);
+  const loading     = $("loading");
+  const errorScreen = $("error-screen");
+  const main        = $("main");
+  const errorMsg    = $("error-msg");
+  const retryBtn    = $("retry-btn");
+  const rcTitle     = $("rc-title");
+  const rcMeta      = $("rc-meta");
+  const nameInputRow = $("name-input-row");
+  const nameTagRow   = $("name-tag-row");
+  const nameInput    = $("name-input");
+  const nameSaveBtn  = $("name-save-btn");
+  const nameDisplay  = $("name-display");
+  const nameChangeBtn = $("name-change-btn");
+  const btnIn       = $("btn-in");
+  const btnOut      = $("btn-out");
+  const btnMaybe    = $("btn-maybe");
+  const listsContainer = $("lists-container");
+  const countBadge  = $("count-badge");
+  const refreshHint = $("refresh-hint");
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  function show(el)  { el.classList.remove("hidden"); }
+  function hide(el)  { el.classList.add("hidden"); }
+  function showError(msg) {
+    hide(loading); hide(main);
+    errorMsg.textContent = msg;
+    show(errorScreen);
+  }
+  function esc(s) {
+    return String(s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  // ── Identity UI ───────────────────────────────────────────────────────────
+  function renderIdentity() {
+    if (TG_NAME) {
+      // Telegram user — show name tag, no input needed
+      nameDisplay.textContent = TG_NAME;
+      hide(nameInputRow);
+      show(nameTagRow);
+      hide($("identity-card").querySelector("h2"));
+    } else if (currentName) {
+      nameDisplay.textContent = currentName;
+      hide(nameInputRow);
+      show(nameTagRow);
+    } else {
+      show(nameInputRow);
+      hide(nameTagRow);
+    }
+  }
+
+  nameSaveBtn.addEventListener("click", saveName);
+  nameInput.addEventListener("keydown", e => { if (e.key === "Enter") saveName(); });
+  nameChangeBtn.addEventListener("click", () => {
+    if (TG_NAME) return; // can't change Telegram name
+    currentName = "";
+    localStorage.removeItem(LS_KEY);
+    nameInput.value = "";
+    hide(nameTagRow);
+    show(nameInputRow);
+    nameInput.focus();
+  });
+
+  function saveName() {
+    const val = nameInput.value.trim();
+    if (!val) { nameInput.focus(); return; }
+    currentName = val.slice(0, 64);
+    localStorage.setItem(LS_KEY, currentName);
+    renderIdentity();
+    // Re-detect vote state for this name
+    detectCurrentVote();
+  }
+
+  // ── Detect current vote for this user in the data ─────────────────────────
+  function detectCurrentVote() {
+    if (!rollcallData || !currentName) { currentVote = null; renderVoteButtons(); return; }
+    const n = currentName.toLowerCase();
+    if (rollcallData.in.some(u => u.name.toLowerCase() === n))    currentVote = "in";
+    else if (rollcallData.out.some(u => u.name.toLowerCase() === n))  currentVote = "out";
+    else if (rollcallData.maybe.some(u => u.name.toLowerCase() === n)) currentVote = "maybe";
+    else currentVote = null;
+    renderVoteButtons();
+  }
+
+  function renderVoteButtons() {
+    const hasName = !!currentName;
+    [btnIn, btnOut, btnMaybe].forEach(btn => {
+      btn.disabled = !hasName || voting;
+      btn.classList.remove("active");
+      if (currentVote === btn.dataset.vote) btn.classList.add("active");
+    });
+  }
+
+  // ── Vote action ───────────────────────────────────────────────────────────
+  async function castVote(voteType) {
+    if (!currentName || voting) return;
+    voting = true;
+    renderVoteButtons();
+    try {
+      const res = await fetch(API_BASE + "/vote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: currentName, vote: voteType }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || "Vote failed (" + res.status + ")");
+      }
+      rollcallData = await res.json();
+      detectCurrentVote();
+      renderLists();
+    } catch (err) {
+      alert(err.message || "Could not cast vote. Please try again.");
+    } finally {
+      voting = false;
+      renderVoteButtons();
+    }
+  }
+
+  btnIn.addEventListener("click",    () => castVote("in"));
+  btnOut.addEventListener("click",   () => castVote("out"));
+  btnMaybe.addEventListener("click", () => castVote("maybe"));
+
+  // ── Render lists ──────────────────────────────────────────────────────────
+  function renderLists() {
+    if (!rollcallData) return;
+    const { in: inL, out: outL, maybe: maybeL, waiting: waitL } = rollcallData;
+    const total = inL.length;
+    const limit = rollcallData.limit;
+    countBadge.textContent = limit ? `${total}/${limit} IN` : `${total} IN`;
+
+    function section(label, cls, items) {
+      if (!items.length) return "";
+      const rows = items.map((u, i) => {
+        const youClass = currentName && u.name.toLowerCase() === currentName.toLowerCase() ? " you" : "";
+        const comment = u.comment ? `<span class="comment">— ${esc(u.comment)}</span>` : "";
+        return `<li class="${youClass}"><span class="pos">${i + 1}.</span> ${esc(u.name)}${comment}</li>`;
+      }).join("");
+      return `<div class="list-label ${cls}">${label} (${items.length})</div><ul class="list-items">${rows}</ul>`;
+    }
+
+    listsContainer.innerHTML =
+      section("IN", "in", inL) +
+      section("OUT", "out", outL) +
+      section("MAYBE", "maybe", maybeL) +
+      section("WAITING", "waiting", waitL) ||
+      `<p class="empty">No votes yet.</p>`;
+  }
+
+  // ── Load rollcall ─────────────────────────────────────────────────────────
+  async function load() {
+    try {
+      const res = await fetch(API_BASE);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        showError(data.detail || "This rollcall link is invalid or has ended.");
+        return;
+      }
+      rollcallData = await res.json();
+    } catch {
+      showError("Could not connect. Check your internet and tap Retry.");
+      return;
+    }
+
+    // Render header
+    rcTitle.textContent = rollcallData.title;
+    const parts = [];
+    if (rollcallData.finalize_date) parts.push("Closes: " + rollcallData.finalize_date);
+    if (rollcallData.location) parts.push("📍 " + rollcallData.location);
+    rcMeta.textContent = parts.join("  ·  ");
+
+    hide(loading);
+    show(main);
+
+    renderIdentity();
+    detectCurrentVote();
+    renderLists();
+    scheduleRefresh();
+  }
+
+  // ── Auto-refresh ──────────────────────────────────────────────────────────
+  function scheduleRefresh() {
+    clearTimeout(refreshTimer);
+    let nextIn = 30;
+    refreshHint.textContent = `Auto-refreshes in ${nextIn}s`;
+    const tick = setInterval(() => {
+      nextIn--;
+      if (nextIn <= 0) {
+        clearInterval(tick);
+        refreshHint.textContent = "Refreshing…";
+        silentRefresh();
+      } else {
+        refreshHint.textContent = `Auto-refreshes in ${nextIn}s`;
+      }
+    }, 1000);
+  }
+
+  async function silentRefresh() {
+    try {
+      const res = await fetch(API_BASE);
+      if (res.ok) {
+        rollcallData = await res.json();
+        detectCurrentVote();
+        renderLists();
+      }
+    } catch { /* ignore network errors during silent refresh */ }
+    scheduleRefresh();
+  }
+
+  retryBtn.addEventListener("click", () => {
+    hide(errorScreen);
+    show(loading);
+    load();
+  });
+
+  // ── Boot ──────────────────────────────────────────────────────────────────
+  if (!TOKEN || TOKEN === "join") {
+    showError("No rollcall token in URL. Use the link shared in your group.");
+  } else {
+    load();
+  }
+})();
+</script>
+</body>
+</html>

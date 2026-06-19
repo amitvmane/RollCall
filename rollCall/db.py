@@ -843,6 +843,27 @@ def _run_migrations(conn, cursor):
         except Exception:
             conn.rollback()  # column already exists — safe to ignore
 
+    # Add web_token to rollcalls for magic-link web voting
+    if db_type == 'postgresql':
+        try:
+            cursor.execute("ALTER TABLE rollcalls ADD COLUMN IF NOT EXISTS web_token TEXT DEFAULT NULL")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        try:
+            cursor.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS rollcalls_web_token_unique ON rollcalls(web_token) WHERE web_token IS NOT NULL"
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    else:
+        try:
+            cursor.execute("ALTER TABLE rollcalls ADD COLUMN web_token TEXT DEFAULT NULL")
+            conn.commit()
+        except Exception:
+            conn.rollback()  # column already exists — safe to ignore
+
     # PostgreSQL: replace COALESCE expression constraint on ghost_records with partial unique indexes
     # (the expression constraint caused ON CONFLICT clauses to fail at runtime)
     if db_type == 'postgresql':
@@ -970,28 +991,28 @@ def update_chat_settings(chat_id: int, **kwargs) -> bool:
         if db_type == 'postgresql':
             release_connection(conn)
 
-def create_rollcall(chat_id: int, title: str, timezone: str = 'Asia/Kolkata') -> int:
+def create_rollcall(chat_id: int, title: str, timezone: str = 'Asia/Kolkata', web_token: Optional[str] = None) -> int:
     """Create a new rollcall and return its ID"""
     conn = get_connection()
     cursor = None
     try:
         cursor = conn.cursor()
-        
+
         # Ensure chat exists
         get_or_create_chat(chat_id)
-        
+
         if db_type == 'postgresql':
             cursor.execute(
-                """INSERT INTO rollcalls (chat_id, title, timezone)
-                   VALUES (%s, %s, %s) RETURNING id""",
-                (chat_id, title, timezone)
+                """INSERT INTO rollcalls (chat_id, title, timezone, web_token)
+                   VALUES (%s, %s, %s, %s) RETURNING id""",
+                (chat_id, title, timezone, web_token)
             )
             rollcall_id = cursor.fetchone()[0]
         else:
             cursor.execute(
-                """INSERT INTO rollcalls (chat_id, title, timezone)
-                   VALUES (?, ?, ?)""",
-                (chat_id, title, timezone)
+                """INSERT INTO rollcalls (chat_id, title, timezone, web_token)
+                   VALUES (?, ?, ?, ?)""",
+                (chat_id, title, timezone, web_token)
             )
             rollcall_id = cursor.lastrowid
         
@@ -1077,6 +1098,34 @@ def get_rollcall(rollcall_id: int) -> Optional[Dict]:
             cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
+
+def get_rollcall_by_web_token(token: str) -> Optional[Dict]:
+    """Get an active rollcall by its magic-link web_token."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        if db_type == 'postgresql':
+            cursor.execute(
+                "SELECT * FROM rollcalls WHERE web_token = %s AND is_active = TRUE",
+                (token,)
+            )
+        else:
+            cursor.execute(
+                "SELECT * FROM rollcalls WHERE web_token = ? AND is_active = 1",
+                (token,)
+            )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except Exception as e:
+        logging.error(f"Error looking up rollcall by web_token: {e}")
+        return None
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
 
 def update_rollcall(rollcall_id: int, **kwargs) -> bool:
     """Update rollcall fields"""

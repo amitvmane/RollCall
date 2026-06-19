@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import uuid
 from exceptions import *
 from functions import *
 from datetime import datetime, timezone
@@ -77,11 +78,12 @@ class RollCall:
             self.location = None
             self.event_fee = None
             self.createdDate = _utcnow_naive()
+            self.web_token = uuid.uuid4().hex
 
             # Save to database and get ID
             if chat_id:
                 # NEW: use db.create_rollcall and store DB id in self.id
-                self.id = db.create_rollcall(chat_id, title, self.timezone)
+                self.id = db.create_rollcall(chat_id, title, self.timezone, web_token=self.web_token)
                 logging.info(f"[{_ts()}] [RC #{self.id}] Created rollcall '{title}' for chat {chat_id}")
                 self.chat_id = chat_id
                 db.ensure_rollcall_stats(self.id)
@@ -104,6 +106,7 @@ class RollCall:
         self.location = data['location']
         self.event_fee = data['event_fee']
         self.absent_marked = bool(data.get('absent_marked', False))
+        self.web_token = data.get('web_token')
         raw_limit = data['in_list_limit']
         try:
             self.inListLimit = int(raw_limit) if raw_limit is not None else None
@@ -263,7 +266,7 @@ class RollCall:
                     location=self.location,
                     event_fee=self.event_fee,
                     in_list_limit=self.inListLimit,
-                # proxy_owners=self.proxy_owners,  # NEW (once DB supports it) - not required now
+                    web_token=self.web_token,
                 )
         
     # RETURN INLIST

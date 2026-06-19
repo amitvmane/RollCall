@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from exceptions import (
@@ -30,7 +30,7 @@ from exceptions import (
     rollCallNotStarted,
 )
 from api.rate_limit import rate_limit_middleware
-from api.routes import admin, auth, health, proxy_votes, rollcalls, stats, templates, votes
+from api.routes import admin, auth, health, proxy_votes, rollcalls, stats, templates, votes, web as web_routes
 from api.schemas.common import ErrorResponse
 
 
@@ -106,6 +106,7 @@ def create_app() -> FastAPI:
     app.include_router(templates.router, prefix=API_PREFIX, tags=["templates"])
     app.include_router(stats.router, prefix=API_PREFIX, tags=["stats", "ghost", "settings"])
     app.include_router(admin.router, prefix=API_PREFIX, tags=["admin"])
+    app.include_router(web_routes.router, prefix=API_PREFIX, tags=["web-voting"])
 
     # Map proxy-specific exceptions to HTTP status codes
     from exceptions import duplicateProxy, repeatlyName
@@ -122,11 +123,25 @@ def create_app() -> FastAPI:
             ).model_dump(),
         )
 
+    # Web voting join page — serves the self-contained HTML for any token URL.
+    # Registered before the /web static mount so explicit routes take priority.
+    _web_index = Path(__file__).parent / "web" / "index.html"
+
+    @app.get("/web/join/{token}", response_class=HTMLResponse, include_in_schema=False)
+    async def _web_join_page(token: str):
+        return HTMLResponse(content=_web_index.read_text())
+
     # Serve Mini App static files at /miniapp/
     _miniapp_dir = Path(__file__).parent / "miniapp"
     if _miniapp_dir.is_dir():
         app.mount("/miniapp", StaticFiles(directory=str(_miniapp_dir), html=True), name="miniapp")
         logging.info("[api] Mini App served at /miniapp/")
+
+    # Serve web voting static files at /web/
+    _web_dir = Path(__file__).parent / "web"
+    if _web_dir.is_dir():
+        app.mount("/web", StaticFiles(directory=str(_web_dir), html=True), name="web")
+        logging.info("[api] Web voting page served at /web/")
 
     return app
 

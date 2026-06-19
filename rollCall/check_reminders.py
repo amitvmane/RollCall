@@ -353,7 +353,9 @@ async def _auto_start_from_template(chat_id: int, tmpl: dict):
     rc_index = len(rollcalls) - 1  # 0-based; rc was just appended by add_rollcall
     rc_number = rc_index + 1       # 1-based display number
 
-    # Send the full rollcall panel with inline vote buttons
+    # Send the full rollcall panel with inline vote buttons.
+    # Both attempts are best-effort: a network outage must not prevent
+    # last_scheduled_date from being stamped (which would cause duplicates).
     try:
         from handlers.lifecycle import get_status_keyboard, _persist_panel_msg_id
         from bot_state import _panel_msg_ids
@@ -363,16 +365,23 @@ async def _auto_start_from_template(chat_id: int, tmpl: dict):
         _panel_msg_ids[(chat_id, rc_number)] = sent.message_id
         _persist_panel_msg_id(rc, sent.message_id)
     except Exception:
-        # Fallback: plain announcement if panel send fails
+        # Fallback: plain text announcement if panel send fails.
+        # Wrapped in its own try/except so a second network error doesn't
+        # propagate and skip update_template_last_scheduled_date in the caller.
         close_info = ""
         if rc.finalizeDate:
             close_info = f"\nCloses: {rc.finalizeDate.strftime('%A, %d %b at %H:%M')}"
         from bot_state import _esc_md
-        await bot.send_message(
-            chat_id,
-            f"📋 *{_esc_md(title)}* rollcall is now open!{close_info}\nVote with /in or /out.",
-            parse_mode="Markdown"
-        )
+        try:
+            await bot.send_message(
+                chat_id,
+                f"📋 *{_esc_md(title)}* rollcall is now open!{close_info}\nVote with /in or /out.",
+                parse_mode="Markdown"
+            )
+        except Exception:
+            logging.exception(
+                f"[scheduler] Failed to announce auto-started rollcall '{title}' for chat {chat_id}"
+            )
 
     logging.info(
         f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "

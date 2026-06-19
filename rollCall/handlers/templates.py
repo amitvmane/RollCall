@@ -278,16 +278,8 @@ async def schedule_template_cmd(message):
 
         event_day = tmpl.get("event_day")
         event_time = tmpl.get("event_time")
-        if not event_day or not event_time:
-            await bot.send_message(
-                cid,
-                f"Template '{name}' has no event_day/event_time set.\n"
-                "Set them first so the auto-started rollcall knows when to close:\n"
-                f"/set_template {name} event_day=sunday event_time=17:00"
-            )
-            return
 
-        if recurrence_type in ("weekly", "biweekly"):
+        if recurrence_type in ("weekly", "biweekly") and event_day and event_time:
             sched_mins = weekly_minutes(sched_day, sched_time)
             event_mins = weekly_minutes(event_day, event_time)
             if sched_mins is None or event_mins is None:
@@ -314,11 +306,11 @@ async def schedule_template_cmd(message):
                 opens_str = f"day {sched_day} of each month at {sched_time}"
             else:
                 opens_str = f"{sched_day.capitalize()} at {sched_time} ({recurrence_label})"
+            closes_str = f"\nCloses: {event_day.capitalize()} at {event_time}" if event_day and event_time else ""
             await bot.send_message(
                 cid,
                 f"🟢 Schedule set for template *{_esc_md(name)}*:\n"
-                f"Opens: {opens_str}\n"
-                f"Closes: {event_day.capitalize()} at {event_time}",
+                f"Opens: {opens_str}{closes_str}",
                 parse_mode="Markdown"
             )
         except Exception:

@@ -77,13 +77,14 @@ async function castVote(rcNumber, voteType, comment = '') {
   const username  = user.username   || null;
 
   const body = {
+    vote:       voteType,
     user_id:    state.userId,
     first_name: firstName,
     username,
   };
   if (comment) body.comment = comment;
 
-  const ep = `/chats/${state.chatId}/rollcalls/${rcNumber}/votes/${voteType}`;
+  const ep = `/chats/${state.chatId}/rollcalls/${rcNumber}/votes`;
   return apiFetch(ep, { method: 'POST', body: JSON.stringify(body) });
 }
 

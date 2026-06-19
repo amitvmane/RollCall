@@ -303,11 +303,6 @@ def set_schedule(
     name = _validate_name(name)
     if not get_template(chat_id, name):
         raise incorrectParameter(f"Template '{name}' not found.")
-    if not get_template(chat_id, name).get("event_day") or not get_template(chat_id, name).get("event_time"):
-        raise incorrectParameter(
-            f"Template '{name}' has no event_day/event_time set. "
-            "Set them first: upsert with event_day and event_time fields."
-        )
 
     recurrence_type = recurrence_type.lower()
     if recurrence_type not in _VALID_RECURRENCE:

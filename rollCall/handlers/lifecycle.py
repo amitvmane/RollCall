@@ -37,9 +37,21 @@ def _build_panel_text(rc, rc_number: int) -> str:
     """Panel text with optional web voting link appended."""
     text = rc.allList().replace("__RCID__", str(rc_number))
     base = os.environ.get("WEB_BASE_URL", "").rstrip("/")
-    token = getattr(rc, "web_token", None)
-    if base and token:
-        text += f"\n\n🔗 Vote via web: {base}/web/join/{token}"
+    if not base:
+        return text
+    # Prefer permanent group URL (bookmarkable); fall back to per-rollcall URL
+    try:
+        from db import get_or_create_chat
+        chat = get_or_create_chat(rc.chat_id)
+        group_token = chat.get("group_web_token")
+    except Exception:
+        group_token = None
+    if group_token:
+        text += f"\n\n🔗 Web: {base}/web/group/{group_token}"
+    else:
+        token = getattr(rc, "web_token", None)
+        if token:
+            text += f"\n\n🔗 Web: {base}/web/join/{token}"
     return text
 
 

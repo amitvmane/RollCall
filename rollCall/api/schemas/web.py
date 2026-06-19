@@ -10,6 +10,7 @@ class WebUser(BaseModel):
 
 class WebRollcallResponse(BaseModel):
     rollcall_id: int
+    web_token: str = ""
     title: str
     finalize_date: Optional[str] = None
     limit: Optional[int] = None
@@ -20,6 +21,11 @@ class WebRollcallResponse(BaseModel):
     waiting_list: list[WebUser] = Field(default_factory=list, alias="waiting")
 
     model_config = {"populate_by_name": True}
+
+
+class WebGroupResponse(BaseModel):
+    group_token: str
+    rollcalls: list[WebRollcallResponse]
 
 
 class WebVoteRequest(BaseModel):

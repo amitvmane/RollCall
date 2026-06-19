@@ -1,8 +1,11 @@
 """
 Web voting service — magic-link rollcall access for non-Telegram users.
 
-Accepts a per-rollcall UUID token (web_token) and returns/mutates rollcall
-state through the same proxy voting layer used by /sif. Framework-agnostic.
+Two access modes:
+  Per-rollcall token  /web/join/{web_token}   — single rollcall, expires with rollcall
+  Group token         /web/group/{group_token} — permanent, always shows active rollcalls
+
+Framework-agnostic.
 """
 import logging
 from typing import Optional
@@ -32,6 +35,7 @@ def _serialize_web_rollcall(rc) -> dict:
 
     return {
         "rollcall_id": rc.id,
+        "web_token": getattr(rc, "web_token", None) or "",
         "title": rc.title,
         "finalize_date": finalize_str,
         "limit": rc.inListLimit,
@@ -94,3 +98,31 @@ async def vote_by_token(token: str, name: str, vote_type: str) -> dict:
     # Re-resolve so we return the updated state
     _, _, rc = _resolve_rc(token)
     return _serialize_web_rollcall(rc)
+
+
+# ── Group token (permanent per-group URL) ────────────────────────────────────
+
+def get_group_web_token(chat_id: int) -> str:
+    """Return (and lazily generate) the permanent group web token for a chat."""
+    chat = db.get_or_create_chat(chat_id)
+    return chat["group_web_token"]
+
+
+def get_rollcalls_by_group_token(group_token: str) -> dict:
+    """
+    Return all active rollcalls for the group identified by group_token.
+
+    Returns {"group_token": ..., "rollcalls": [...]}.
+    Raises incorrectParameter if the token is unknown.
+    """
+    if not group_token:
+        raise parameterMissing("Group token is required")
+    chat = db.get_chat_by_group_web_token(group_token)
+    if not chat:
+        raise incorrectParameter("This group link is invalid.")
+    chat_id = chat["chat_id"]
+    rollcalls = manager.get_rollcalls(chat_id)
+    return {
+        "group_token": group_token,
+        "rollcalls": [_serialize_web_rollcall(rc) for rc in rollcalls],
+    }

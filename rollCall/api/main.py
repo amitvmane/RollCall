@@ -123,12 +123,16 @@ def create_app() -> FastAPI:
             ).model_dump(),
         )
 
-    # Web voting join page — serves the self-contained HTML for any token URL.
+    # Web voting pages — self-contained HTML served for both URL patterns.
     # Registered before the /web static mount so explicit routes take priority.
     _web_index = Path(__file__).parent / "web" / "index.html"
 
     @app.get("/web/join/{token}", response_class=HTMLResponse, include_in_schema=False)
     async def _web_join_page(token: str):
+        return HTMLResponse(content=_web_index.read_text())
+
+    @app.get("/web/group/{group_token}", response_class=HTMLResponse, include_in_schema=False)
+    async def _web_group_page(group_token: str):
         return HTMLResponse(content=_web_index.read_text())
 
     # Serve Mini App static files at /miniapp/

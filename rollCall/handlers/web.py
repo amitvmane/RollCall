@@ -1,15 +1,15 @@
 """
 Web voting handler — /weblink command.
 
-Shares the magic-link URL for active rollcall(s) so users can vote outside Telegram.
-Requires WEB_BASE_URL env var; silently skips if not configured.
+Shares the permanent group URL (bookmark once, always works) and per-rollcall
+deep links for active rollcalls. Requires WEB_BASE_URL env var.
 """
 import logging
 import os
 
 from bot_state import bot, reply_error, _esc_md
-from functions import roll_call_not_started
 from rollcall_manager import manager
+from services.web import get_group_web_token
 
 
 def _web_base_url() -> str:
@@ -28,22 +28,28 @@ async def weblink_cmd(message):
             )
             return
 
+        group_token = get_group_web_token(cid)
+        group_url = f"{base}/web/group/{group_token}"
+
         rollcalls = manager.get_rollcalls(cid)
-        if not rollcalls:
-            await bot.send_message(cid, "No active rollcalls. Start one with /src first.")
-            return
 
-        lines = []
-        for i, rc in enumerate(rollcalls, start=1):
-            token = getattr(rc, "web_token", None)
-            if not token:
-                lines.append(f"#{i} *{_esc_md(rc.title)}* — web link unavailable (restart the rollcall)")
-            else:
-                url = f"{base}/web/join/{token}"
-                lines.append(f"#{i} *{_esc_md(rc.title)}*\n{url}")
+        lines = [
+            "🔗 *Web voting links*",
+            "",
+            "📌 *Bookmark this link* — works even when Telegram is down:",
+            group_url,
+        ]
 
-        text = "🔗 *Web voting links:*\n\n" + "\n\n".join(lines)
-        text += "\n\n_Share this link with anyone — no Telegram needed._"
-        await bot.send_message(cid, text, parse_mode="Markdown")
+        if rollcalls:
+            lines += ["", "Direct links for active rollcalls:"]
+            for i, rc in enumerate(rollcalls, start=1):
+                token = getattr(rc, "web_token", None)
+                if token:
+                    lines.append(f"#{i} *{_esc_md(rc.title)}*: {base}/web/join/{token}")
+                else:
+                    lines.append(f"#{i} *{_esc_md(rc.title)}* — direct link unavailable")
+
+        lines += ["", "_Share the bookmark link with anyone — no Telegram needed._"]
+        await bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
     except Exception as e:
         await reply_error(cid, e)

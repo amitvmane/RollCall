@@ -130,12 +130,14 @@ COMMANDS = [
     {
         "name": "weblink", "aliases": [], "scope": "user", "category": "Settings",
         "args": "", "sample": "/weblink",
-        "summary": "Get web voting link for active rollcall(s)",
+        "summary": "Get web voting links for this group",
         "details": (
-            "Returns a magic link URL for each active rollcall. "
-            "Anyone with the link can vote via their browser — no Telegram account needed. "
-            "Useful when Telegram is unavailable or for external participants.\n\n"
-            "The link expires when the rollcall ends. "
+            "Returns two types of links:\n\n"
+            "📌 Permanent group link — bookmark this once. Always shows the current "
+            "active rollcall(s) for this group. Works even when Telegram is down.\n\n"
+            "🔗 Per-rollcall links — direct links for each active rollcall. "
+            "Expire when the rollcall ends.\n\n"
+            "Anyone with a link can vote via their browser — no Telegram account needed. "
             "Requires WEB_BASE_URL to be configured on the server."
         ),
     },

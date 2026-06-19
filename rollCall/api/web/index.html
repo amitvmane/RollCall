@@ -20,7 +20,6 @@
       --accent: #2563eb;
       --radius: 12px;
     }
-
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background: var(--bg);
@@ -28,15 +27,13 @@
       min-height: 100vh;
       padding: 16px;
     }
-
-    /* Telegram Mini App overrides — use theme vars when available */
     body.tg-mode {
       background: var(--tg-theme-bg-color, var(--bg));
       color: var(--tg-theme-text-color, var(--text));
     }
 
-    h1 { font-size: 1.25rem; font-weight: 700; }
-    h2 { font-size: 0.9rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 8px; }
+    h1 { font-size: 1.2rem; font-weight: 700; }
+    h2 { font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 8px; }
 
     .card {
       background: var(--card);
@@ -45,37 +42,49 @@
       margin-bottom: 12px;
       box-shadow: 0 1px 3px rgba(0,0,0,0.08);
     }
-
     .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
     .meta { font-size: 0.82rem; color: var(--muted); margin-top: 4px; }
+
+    /* Rollcall tabs (group mode with multiple rollcalls) */
+    .tab-bar {
+      display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px;
+      scrollbar-width: none;
+    }
+    .tab-bar::-webkit-scrollbar { display: none; }
+    .tab-btn {
+      flex-shrink: 0;
+      padding: 6px 14px;
+      border: 1.5px solid var(--border);
+      border-radius: 20px;
+      background: var(--card);
+      font-size: 0.85rem;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s;
+    }
+    .tab-btn.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
 
     /* Name input */
     .name-row { display: flex; gap: 8px; margin-bottom: 12px; }
     .name-row input {
-      flex: 1;
-      padding: 10px 12px;
-      border: 1.5px solid var(--border);
-      border-radius: 8px;
-      font-size: 1rem;
-      outline: none;
-      transition: border-color 0.15s;
+      flex: 1; padding: 10px 12px;
+      border: 1.5px solid var(--border); border-radius: 8px;
+      font-size: 1rem; outline: none; transition: border-color 0.15s;
     }
     .name-row input:focus { border-color: var(--accent); }
     .name-row button {
-      padding: 10px 14px;
-      background: var(--accent);
-      color: #fff;
-      border: none;
-      border-radius: 8px;
-      font-size: 0.9rem;
-      cursor: pointer;
+      padding: 10px 14px; background: var(--accent); color: #fff;
+      border: none; border-radius: 8px; font-size: 0.9rem; cursor: pointer;
     }
     .name-tag {
       display: inline-flex; align-items: center; gap: 6px;
       background: #eff6ff; color: var(--accent);
       border-radius: 20px; padding: 4px 12px;
-      font-size: 0.9rem; font-weight: 600;
-      margin-bottom: 12px;
+      font-size: 0.9rem; font-weight: 600; margin-bottom: 12px;
     }
     .name-tag button {
       background: none; border: none; cursor: pointer;
@@ -85,27 +94,20 @@
     /* Vote buttons */
     .vote-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
     .vote-btn {
-      padding: 12px 6px;
-      border: 2px solid transparent;
-      border-radius: 10px;
-      font-size: 0.95rem;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.15s;
-      background: #f8fafc;
-      color: var(--text);
+      padding: 12px 6px; border: 2px solid transparent; border-radius: 10px;
+      font-size: 0.95rem; font-weight: 600; cursor: pointer;
+      transition: all 0.15s; background: #f8fafc; color: var(--text);
     }
     .vote-btn:active { transform: scale(0.96); }
-    .vote-btn.in  { border-color: var(--in-color); color: var(--in-color); }
-    .vote-btn.out { border-color: var(--out-color); color: var(--out-color); }
+    .vote-btn.in    { border-color: var(--in-color);    color: var(--in-color); }
+    .vote-btn.out   { border-color: var(--out-color);   color: var(--out-color); }
     .vote-btn.maybe { border-color: var(--maybe-color); color: var(--maybe-color); }
-    .vote-btn.active.in  { background: var(--in-color); color: #fff; }
-    .vote-btn.active.out { background: var(--out-color); color: #fff; }
+    .vote-btn.active.in    { background: var(--in-color);    color: #fff; }
+    .vote-btn.active.out   { background: var(--out-color);   color: #fff; }
     .vote-btn.active.maybe { background: var(--maybe-color); color: #fff; }
     .vote-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
     /* Lists */
-    .list-section { margin-top: 4px; }
     .list-label {
       font-size: 0.78rem; font-weight: 700; text-transform: uppercase;
       letter-spacing: 0.06em; margin: 10px 0 4px;
@@ -116,8 +118,7 @@
     .list-label.waiting { color: var(--muted); }
     .list-items { list-style: none; }
     .list-items li {
-      font-size: 0.92rem;
-      padding: 3px 0;
+      font-size: 0.92rem; padding: 3px 0;
       border-bottom: 1px solid #f3f4f6;
       display: flex; align-items: baseline; gap: 6px;
     }
@@ -138,14 +139,16 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     .error-icon { font-size: 2.5rem; }
-    .btn {
-      padding: 10px 24px; border: none; border-radius: 8px;
-      font-size: 0.95rem; font-weight: 600; cursor: pointer;
-    }
+    .btn { padding: 10px 24px; border: none; border-radius: 8px; font-size: 0.95rem; font-weight: 600; cursor: pointer; }
     .btn-primary { background: var(--accent); color: #fff; }
 
-    .hidden { display: none !important; }
+    .no-rollcalls {
+      text-align: center; padding: 32px 16px;
+      color: var(--muted); font-size: 0.95rem;
+    }
+    .no-rollcalls .icon { font-size: 2rem; margin-bottom: 8px; }
 
+    .hidden { display: none !important; }
     .refresh-hint { text-align: center; font-size: 0.75rem; color: var(--muted); margin-top: 8px; }
   </style>
 </head>
@@ -161,15 +164,30 @@
     <button id="retry-btn" class="btn btn-primary">Retry</button>
   </div>
   <div id="main" class="hidden">
+    <!-- Tabs (group mode, multiple rollcalls) -->
+    <div id="tab-card" class="card hidden">
+      <div id="tab-bar" class="tab-bar"></div>
+    </div>
+
     <!-- Rollcall header -->
     <div class="card">
       <div class="header">
         <h1 id="rc-title">RollCall</h1>
+        <span id="count-badge" style="font-size:0.8rem;color:var(--muted)"></span>
       </div>
       <div id="rc-meta" class="meta"></div>
     </div>
 
-    <!-- Name input / identity -->
+    <!-- No rollcalls (group mode, none active) -->
+    <div id="no-rollcalls" class="card hidden">
+      <div class="no-rollcalls">
+        <div class="icon">📋</div>
+        <p>No active rollcalls right now.</p>
+        <p style="margin-top:6px;font-size:0.82rem">Check back later or ask an admin to start one.</p>
+      </div>
+    </div>
+
+    <!-- Identity -->
     <div class="card" id="identity-card">
       <h2>Your name</h2>
       <div id="name-input-row" class="name-row hidden">
@@ -185,7 +203,7 @@
     </div>
 
     <!-- Vote buttons -->
-    <div class="card">
+    <div class="card" id="vote-card">
       <h2>Your vote</h2>
       <div class="vote-row">
         <button class="vote-btn in"    data-vote="in"    id="btn-in">✅ IN</button>
@@ -195,12 +213,9 @@
     </div>
 
     <!-- Lists -->
-    <div class="card">
-      <div class="header">
-        <h2 style="margin:0">Current list</h2>
-        <span id="count-badge" style="font-size:0.8rem;color:var(--muted)"></span>
-      </div>
-      <div class="list-section" id="lists-container"></div>
+    <div class="card" id="lists-card">
+      <h2>Current list</h2>
+      <div id="lists-container"></div>
     </div>
     <p class="refresh-hint" id="refresh-hint"></p>
   </div>
@@ -210,17 +225,24 @@
 (function () {
   "use strict";
 
-  // ── Token from URL ────────────────────────────────────────────────────────
-  // URL pattern: /web/join/{token}  OR  /?token={token}  OR just the last path segment
-  function getToken() {
-    const parts = window.location.pathname.split("/").filter(Boolean);
-    // /web/join/{token} → last segment is token
-    if (parts.length >= 1) return parts[parts.length - 1];
-    return null;
+  // ── URL / mode detection ──────────────────────────────────────────────────
+  // /web/join/{rollcall_token}  → join mode (single rollcall)
+  // /web/group/{group_token}    → group mode (all active rollcalls)
+  const parts = window.location.pathname.split("/").filter(Boolean);
+  // parts: ['web', 'join'|'group', token]
+  const URL_MODE  = parts[1]; // 'join' | 'group'
+  const URL_TOKEN = parts[2];
+
+  if (!URL_TOKEN || (URL_MODE !== "join" && URL_MODE !== "group")) {
+    document.getElementById("loading").classList.add("hidden");
+    document.getElementById("error-screen").classList.remove("hidden");
+    document.getElementById("error-msg").textContent =
+      "Invalid URL. Use the link shared in your group.";
   }
-  const TOKEN = getToken();
-  const API_BASE = "/api/v1/web/" + TOKEN;
-  const LS_KEY = "rollcall_name_" + TOKEN;
+
+  const IS_GROUP = URL_MODE === "group";
+  const API_GROUP = "/api/v1/web/group/" + URL_TOKEN;
+  const LS_NAME_KEY = "rollcall_name"; // shared across all rollcalls for convenience
 
   // ── Telegram WebApp detection ─────────────────────────────────────────────
   const tg = window.Telegram && window.Telegram.WebApp;
@@ -233,75 +255,78 @@
   }
 
   // ── State ─────────────────────────────────────────────────────────────────
-  let currentName = TG_NAME || localStorage.getItem(LS_KEY) || "";
-  let currentVote = null;   // 'in' | 'out' | 'maybe' | null
-  let rollcallData = null;
-  let refreshTimer = null;
-  let voting = false;
+  let currentName   = TG_NAME || localStorage.getItem(LS_NAME_KEY) || "";
+  let currentVote   = null;   // 'in'|'out'|'maybe'|null — for active rollcall
+  let activeRcData  = null;   // the rollcall currently shown
+  let groupData     = null;   // full group response (group mode)
+  let activeTabIdx  = 0;      // index into groupData.rollcalls
+  let voting        = false;
+  let refreshTimer  = null;
 
   // ── DOM refs ──────────────────────────────────────────────────────────────
   const $ = id => document.getElementById(id);
-  const loading     = $("loading");
-  const errorScreen = $("error-screen");
-  const main        = $("main");
-  const errorMsg    = $("error-msg");
-  const retryBtn    = $("retry-btn");
-  const rcTitle     = $("rc-title");
-  const rcMeta      = $("rc-meta");
+  const loading      = $("loading");
+  const errorScreen  = $("error-screen");
+  const main         = $("main");
+  const errorMsg     = $("error-msg");
+  const retryBtn     = $("retry-btn");
+  const tabCard      = $("tab-card");
+  const tabBar       = $("tab-bar");
+  const rcTitle      = $("rc-title");
+  const rcMeta       = $("rc-meta");
+  const countBadge   = $("count-badge");
+  const noRollcalls  = $("no-rollcalls");
+  const identityCard = $("identity-card");
   const nameInputRow = $("name-input-row");
   const nameTagRow   = $("name-tag-row");
   const nameInput    = $("name-input");
   const nameSaveBtn  = $("name-save-btn");
   const nameDisplay  = $("name-display");
-  const nameChangeBtn = $("name-change-btn");
-  const btnIn       = $("btn-in");
-  const btnOut      = $("btn-out");
-  const btnMaybe    = $("btn-maybe");
+  const nameChangeBtn= $("name-change-btn");
+  const voteCard     = $("vote-card");
+  const btnIn        = $("btn-in");
+  const btnOut       = $("btn-out");
+  const btnMaybe     = $("btn-maybe");
+  const listsCard    = $("lists-card");
   const listsContainer = $("lists-container");
-  const countBadge  = $("count-badge");
-  const refreshHint = $("refresh-hint");
+  const refreshHint  = $("refresh-hint");
 
   // ── Helpers ───────────────────────────────────────────────────────────────
-  function show(el)  { el.classList.remove("hidden"); }
-  function hide(el)  { el.classList.add("hidden"); }
+  function show(el) { el.classList.remove("hidden"); }
+  function hide(el) { el.classList.add("hidden"); }
+  function esc(s) {
+    return String(s)
+      .replace(/&/g,"&amp;").replace(/</g,"&lt;")
+      .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  }
   function showError(msg) {
     hide(loading); hide(main);
     errorMsg.textContent = msg;
     show(errorScreen);
   }
-  function esc(s) {
-    return String(s)
-      .replace(/&/g, "&amp;").replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  }
 
-  // ── Identity UI ───────────────────────────────────────────────────────────
+  // ── Identity ──────────────────────────────────────────────────────────────
   function renderIdentity() {
     if (TG_NAME) {
-      // Telegram user — show name tag, no input needed
       nameDisplay.textContent = TG_NAME;
-      hide(nameInputRow);
-      show(nameTagRow);
-      hide($("identity-card").querySelector("h2"));
+      hide(nameInputRow); show(nameTagRow);
+      identityCard.querySelector("h2").style.display = "none";
     } else if (currentName) {
       nameDisplay.textContent = currentName;
-      hide(nameInputRow);
-      show(nameTagRow);
+      hide(nameInputRow); show(nameTagRow);
     } else {
-      show(nameInputRow);
-      hide(nameTagRow);
+      show(nameInputRow); hide(nameTagRow);
     }
   }
 
   nameSaveBtn.addEventListener("click", saveName);
   nameInput.addEventListener("keydown", e => { if (e.key === "Enter") saveName(); });
   nameChangeBtn.addEventListener("click", () => {
-    if (TG_NAME) return; // can't change Telegram name
+    if (TG_NAME) return;
     currentName = "";
-    localStorage.removeItem(LS_KEY);
+    localStorage.removeItem(LS_NAME_KEY);
     nameInput.value = "";
-    hide(nameTagRow);
-    show(nameInputRow);
+    hide(nameTagRow); show(nameInputRow);
     nameInput.focus();
   });
 
@@ -309,25 +334,25 @@
     const val = nameInput.value.trim();
     if (!val) { nameInput.focus(); return; }
     currentName = val.slice(0, 64);
-    localStorage.setItem(LS_KEY, currentName);
+    localStorage.setItem(LS_NAME_KEY, currentName);
     renderIdentity();
-    // Re-detect vote state for this name
     detectCurrentVote();
   }
 
-  // ── Detect current vote for this user in the data ─────────────────────────
+  // ── Vote detection ────────────────────────────────────────────────────────
   function detectCurrentVote() {
-    if (!rollcallData || !currentName) { currentVote = null; renderVoteButtons(); return; }
+    if (!activeRcData || !currentName) { currentVote = null; renderVoteButtons(); return; }
     const n = currentName.toLowerCase();
-    if (rollcallData.in.some(u => u.name.toLowerCase() === n))    currentVote = "in";
-    else if (rollcallData.out.some(u => u.name.toLowerCase() === n))  currentVote = "out";
-    else if (rollcallData.maybe.some(u => u.name.toLowerCase() === n)) currentVote = "maybe";
+    const rc = activeRcData;
+    if (rc.in.some(u => u.name.toLowerCase() === n))    currentVote = "in";
+    else if (rc.out.some(u => u.name.toLowerCase() === n))  currentVote = "out";
+    else if (rc.maybe.some(u => u.name.toLowerCase() === n)) currentVote = "maybe";
     else currentVote = null;
     renderVoteButtons();
   }
 
   function renderVoteButtons() {
-    const hasName = !!currentName;
+    const hasName = !!currentName && !!activeRcData;
     [btnIn, btnOut, btnMaybe].forEach(btn => {
       btn.disabled = !hasName || voting;
       btn.classList.remove("active");
@@ -337,11 +362,13 @@
 
   // ── Vote action ───────────────────────────────────────────────────────────
   async function castVote(voteType) {
-    if (!currentName || voting) return;
+    if (!currentName || voting || !activeRcData) return;
+    const token = activeRcData.web_token;
+    if (!token) { alert("This rollcall cannot be voted on via web."); return; }
     voting = true;
     renderVoteButtons();
     try {
-      const res = await fetch(API_BASE + "/vote", {
+      const res = await fetch("/api/v1/web/" + token + "/vote", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: currentName, vote: voteType }),
@@ -350,7 +377,12 @@
         const data = await res.json().catch(() => ({}));
         throw new Error(data.detail || "Vote failed (" + res.status + ")");
       }
-      rollcallData = await res.json();
+      const updated = await res.json();
+      // Merge back into group data if in group mode
+      activeRcData = updated;
+      if (IS_GROUP && groupData) {
+        groupData.rollcalls[activeTabIdx] = updated;
+      }
       detectCurrentVote();
       renderLists();
     } catch (err) {
@@ -365,20 +397,39 @@
   btnOut.addEventListener("click",   () => castVote("out"));
   btnMaybe.addEventListener("click", () => castVote("maybe"));
 
-  // ── Render lists ──────────────────────────────────────────────────────────
+  // ── Render rollcall ───────────────────────────────────────────────────────
+  function renderRollcall(rc) {
+    activeRcData = rc;
+
+    // Header
+    rcTitle.textContent = rc.title;
+    const meta = [];
+    if (rc.finalize_date) meta.push("Closes: " + rc.finalize_date);
+    if (rc.location)      meta.push("📍 " + rc.location);
+    rcMeta.textContent = meta.join("  ·  ");
+
+    const inCount = rc.in.length;
+    countBadge.textContent = rc.limit ? inCount + "/" + rc.limit + " IN" : inCount + " IN";
+
+    hide(noRollcalls);
+    show(identityCard);
+    show(voteCard);
+    show(listsCard);
+
+    detectCurrentVote();
+    renderLists();
+  }
+
   function renderLists() {
-    if (!rollcallData) return;
-    const { in: inL, out: outL, maybe: maybeL, waiting: waitL } = rollcallData;
-    const total = inL.length;
-    const limit = rollcallData.limit;
-    countBadge.textContent = limit ? `${total}/${limit} IN` : `${total} IN`;
+    if (!activeRcData) return;
+    const { in: inL, out: outL, maybe: maybeL, waiting: waitL } = activeRcData;
 
     function section(label, cls, items) {
       if (!items.length) return "";
       const rows = items.map((u, i) => {
         const youClass = currentName && u.name.toLowerCase() === currentName.toLowerCase() ? " you" : "";
         const comment = u.comment ? `<span class="comment">— ${esc(u.comment)}</span>` : "";
-        return `<li class="${youClass}"><span class="pos">${i + 1}.</span> ${esc(u.name)}${comment}</li>`;
+        return `<li class="${youClass}"><span class="pos">${i+1}.</span> ${esc(u.name)}${comment}</li>`;
       }).join("");
       return `<div class="list-label ${cls}">${label} (${items.length})</div><ul class="list-items">${rows}</ul>`;
     }
@@ -391,76 +442,153 @@
       `<p class="empty">No votes yet.</p>`;
   }
 
-  // ── Load rollcall ─────────────────────────────────────────────────────────
+  // ── Tabs (group mode, multiple rollcalls) ─────────────────────────────────
+  function renderTabs(rollcalls) {
+    tabBar.innerHTML = "";
+    rollcalls.forEach((rc, idx) => {
+      const btn = document.createElement("button");
+      btn.className = "tab-btn" + (idx === activeTabIdx ? " active" : "");
+      btn.textContent = rc.title;
+      btn.addEventListener("click", () => switchTab(idx));
+      tabBar.appendChild(btn);
+    });
+  }
+
+  function switchTab(idx) {
+    activeTabIdx = idx;
+    if (!groupData) return;
+    renderTabs(groupData.rollcalls);
+    renderRollcall(groupData.rollcalls[idx]);
+  }
+
+  // ── Load ──────────────────────────────────────────────────────────────────
   async function load() {
     try {
-      const res = await fetch(API_BASE);
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        showError(data.detail || "This rollcall link is invalid or has ended.");
-        return;
+      if (IS_GROUP) {
+        await loadGroup();
+      } else {
+        await loadJoin();
       }
-      rollcallData = await res.json();
     } catch {
       showError("Could not connect. Check your internet and tap Retry.");
       return;
     }
-
-    // Render header
-    rcTitle.textContent = rollcallData.title;
-    const parts = [];
-    if (rollcallData.finalize_date) parts.push("Closes: " + rollcallData.finalize_date);
-    if (rollcallData.location) parts.push("📍 " + rollcallData.location);
-    rcMeta.textContent = parts.join("  ·  ");
-
     hide(loading);
     show(main);
-
     renderIdentity();
-    detectCurrentVote();
-    renderLists();
     scheduleRefresh();
+  }
+
+  async function loadJoin() {
+    const res = await fetch("/api/v1/web/" + URL_TOKEN);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      showError(data.detail || "This rollcall link is invalid or has ended.");
+      throw new Error("fetch failed");
+    }
+    const rc = await res.json();
+    hide(tabCard);
+    renderRollcall(rc);
+  }
+
+  async function loadGroup() {
+    const res = await fetch(API_GROUP);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      showError(data.detail || "This group link is invalid.");
+      throw new Error("fetch failed");
+    }
+    groupData = await res.json();
+    const rollcalls = groupData.rollcalls;
+
+    if (rollcalls.length === 0) {
+      // No active rollcalls
+      rcTitle.textContent = "RollCall";
+      rcMeta.textContent = "";
+      countBadge.textContent = "";
+      hide(tabCard);
+      show(noRollcalls);
+      hide(identityCard);
+      hide(voteCard);
+      hide(listsCard);
+    } else if (rollcalls.length === 1) {
+      // Single rollcall — seamless, no tabs needed
+      hide(tabCard);
+      renderRollcall(rollcalls[0]);
+    } else {
+      // Multiple rollcalls — show tab bar
+      show(tabCard);
+      if (activeTabIdx >= rollcalls.length) activeTabIdx = 0;
+      renderTabs(rollcalls);
+      renderRollcall(rollcalls[activeTabIdx]);
+    }
   }
 
   // ── Auto-refresh ──────────────────────────────────────────────────────────
   function scheduleRefresh() {
     clearTimeout(refreshTimer);
-    let nextIn = 30;
-    refreshHint.textContent = `Auto-refreshes in ${nextIn}s`;
+    let n = 30;
+    refreshHint.textContent = `Auto-refreshes in ${n}s`;
     const tick = setInterval(() => {
-      nextIn--;
-      if (nextIn <= 0) {
+      n--;
+      if (n <= 0) {
         clearInterval(tick);
         refreshHint.textContent = "Refreshing…";
         silentRefresh();
       } else {
-        refreshHint.textContent = `Auto-refreshes in ${nextIn}s`;
+        refreshHint.textContent = `Auto-refreshes in ${n}s`;
       }
     }, 1000);
   }
 
   async function silentRefresh() {
     try {
-      const res = await fetch(API_BASE);
-      if (res.ok) {
-        rollcallData = await res.json();
-        detectCurrentVote();
-        renderLists();
+      if (IS_GROUP) {
+        const res = await fetch(API_GROUP);
+        if (res.ok) {
+          groupData = await res.json();
+          const rollcalls = groupData.rollcalls;
+          if (rollcalls.length === 0) {
+            hide(tabCard); show(noRollcalls);
+            hide(identityCard); hide(voteCard); hide(listsCard);
+          } else {
+            hide(noRollcalls);
+            if (rollcalls.length > 1) {
+              show(tabCard);
+              renderTabs(rollcalls);
+            } else {
+              hide(tabCard);
+            }
+            if (activeTabIdx >= rollcalls.length) activeTabIdx = 0;
+            activeRcData = rollcalls[activeTabIdx];
+            detectCurrentVote();
+            renderLists();
+            const inCount = activeRcData.in.length;
+            countBadge.textContent = activeRcData.limit
+              ? inCount + "/" + activeRcData.limit + " IN"
+              : inCount + " IN";
+          }
+        }
+      } else {
+        const res = await fetch("/api/v1/web/" + URL_TOKEN);
+        if (res.ok) {
+          activeRcData = await res.json();
+          detectCurrentVote();
+          renderLists();
+        }
       }
-    } catch { /* ignore network errors during silent refresh */ }
+    } catch { /* ignore silent refresh errors */ }
     scheduleRefresh();
   }
 
   retryBtn.addEventListener("click", () => {
-    hide(errorScreen);
-    show(loading);
+    hide(errorScreen); show(loading);
+    activeTabIdx = 0;
     load();
   });
 
   // ── Boot ──────────────────────────────────────────────────────────────────
-  if (!TOKEN || TOKEN === "join") {
-    showError("No rollcall token in URL. Use the link shared in your group.");
-  } else {
+  if (URL_TOKEN && (URL_MODE === "join" || URL_MODE === "group")) {
     load();
   }
 })();

@@ -864,6 +864,27 @@ def _run_migrations(conn, cursor):
         except Exception:
             conn.rollback()  # column already exists — safe to ignore
 
+    # Add group_web_token to chats for permanent per-group bookmarkable URL
+    if db_type == 'postgresql':
+        try:
+            cursor.execute("ALTER TABLE chats ADD COLUMN IF NOT EXISTS group_web_token TEXT DEFAULT NULL")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        try:
+            cursor.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS chats_group_web_token_unique ON chats(group_web_token) WHERE group_web_token IS NOT NULL"
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    else:
+        try:
+            cursor.execute("ALTER TABLE chats ADD COLUMN group_web_token TEXT DEFAULT NULL")
+            conn.commit()
+        except Exception:
+            conn.rollback()  # column already exists — safe to ignore
+
     # PostgreSQL: replace COALESCE expression constraint on ghost_records with partial unique indexes
     # (the expression constraint caused ON CONFLICT clauses to fail at runtime)
     if db_type == 'postgresql':
@@ -901,6 +922,7 @@ def _run_migrations(conn, cursor):
 
 def get_or_create_chat(chat_id: int) -> Dict:
     """Get or create chat settings"""
+    import uuid as _uuid
     conn = get_connection()
     cursor = None
     try:
@@ -917,7 +939,7 @@ def get_or_create_chat(chat_id: int) -> Dict:
             )
         row = cursor.fetchone()
         if row:
-            return dict(row)
+            result = dict(row)
         else:
             # Create new chat
             if db_type == 'postgresql':
@@ -933,7 +955,6 @@ def get_or_create_chat(chat_id: int) -> Dict:
                     VALUES (?, ?, ?, ?, ?, ?)""",
                     (chat_id, 0, 0, 'Asia/Kolkata', 1, 1)
                 )
-                # Re-query to get actual DB values instead of hardcoding
                 cursor.execute(
                     "SELECT * FROM chats WHERE chat_id = ?",
                     (chat_id,)
@@ -941,11 +962,43 @@ def get_or_create_chat(chat_id: int) -> Dict:
                 result = dict(cursor.fetchone())
             conn.commit()
             logging.info(f"Created new chat: {chat_id}")
-            return result
+
+        # Lazily generate group_web_token for existing chats that predate this column.
+        if not result.get('group_web_token'):
+            token = _uuid.uuid4().hex
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"UPDATE chats SET group_web_token = {ph} WHERE chat_id = {ph}",
+                (token, chat_id)
+            )
+            conn.commit()
+            result['group_web_token'] = token
+
+        return result
     except Exception as e:
         conn.rollback()
         logging.error(f"Error in get_or_create_chat: {e}")
         raise
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def get_chat_by_group_web_token(token: str) -> Optional[Dict]:
+    """Look up a chat by its permanent group web token."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(f"SELECT * FROM chats WHERE group_web_token = {ph}", (token,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except Exception as e:
+        logging.error(f"Error in get_chat_by_group_web_token: {e}")
+        return None
     finally:
         if cursor is not None:
             cursor.close()

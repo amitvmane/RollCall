@@ -53,7 +53,10 @@ db_mock.get_or_create_chat.return_value = {
     "timezone": "Asia/Calcutta",
     "absent_limit": 1,
     "ghost_tracking_enabled": True,
+    "group_web_token": "testgrouptoken00000000000000000",
 }
+db_mock.get_rollcall_by_web_token.return_value = None
+db_mock.get_chat_by_group_web_token.return_value = None
 db_mock.get_ghost_count.return_value = 0
 db_mock.increment_ghost_count.return_value = True
 db_mock.reset_ghost_count.return_value = True

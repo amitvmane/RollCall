@@ -30,7 +30,10 @@ A feature-rich Telegram bot for tracking event attendance in group chats. Member
 - **Admin controls** — restrict commands to designated group admins
 - **Webhook mode** — opt-in webhook support via `WEBHOOK_URL` env var (falls back to long-polling)
 - **Dual database support** — SQLite (default) or PostgreSQL
-- **Docker-ready** — ships with a Dockerfile and Docker Compose configuration
+- **Web voting** — shareable browser links for non-Telegram users; permanent per-group bookmarkable URL that works even when Telegram is banned
+- **Telegram Mini App** — in-app voting interface via the Telegram menu button (no browser switch)
+- **REST API** — FastAPI layer with bearer-token auth; powers the web + Mini App frontends
+- **Docker-ready** — ships with a Dockerfile and Docker Compose configuration including a Cloudflare Tunnel sidecar
 - **Health checks** — HTTP `/health` and `/ping` endpoints on port 8080
 
 ---
@@ -87,8 +90,12 @@ Copy `.env.example` to `.env` and set the following variables:
 | `ADMIN1` | No | Telegram user ID of first super-admin |
 | `ADMIN2` | No | Telegram user ID of second super-admin |
 | `DATABASE_URL` | No | PostgreSQL URL — omit to use SQLite |
-| `WEBHOOK_URL` | No | Public HTTPS URL to enable webhook mode (e.g. `https://mybot.example.com/webhook`) |
+| `WEBHOOK_URL` | No | Public HTTPS URL to enable webhook mode |
 | `HEALTH_CHECK_PORT` | No | HTTP port for health endpoints (default: `8080`) |
+| `REST_API_ENABLED` | No | `true` to start FastAPI on port 8081 (required for web voting + Mini App) |
+| `REST_API_PORT` | No | FastAPI port (default: `8081`) |
+| `WEB_BASE_URL` | No | Your public HTTPS base URL — enables web voting links in panels and `/weblink` |
+| `MINIAPP_URL` | No | Public URL of `/miniapp/` — wires the Telegram menu button on startup |
 
 **SQLite** (default) stores the database at `/app/data/rollcall.db`.  
 **PostgreSQL** example: `postgresql://user:password@host:5432/dbname`
@@ -211,16 +218,24 @@ For adding non-Telegram members to a rollcall. Proxy names are limited to **40 c
 RollCall/
 ├── rollCall/
 │   ├── runner.py              # Entry point, health server, webhook/polling setup
-│   ├── telegram_helper.py     # All Telegram command and callback handlers
+│   ├── handlers/              # Thin Telegram adapters (one file per feature area)
+│   ├── services/              # Platform-agnostic business logic (bot + web + REST share this)
+│   ├── api/                   # FastAPI REST layer (gated by REST_API_ENABLED)
+│   │   ├── main.py            # App factory, mounts routes + static files
+│   │   ├── routes/            # REST endpoints (rollcalls, votes, web, miniapp, stats…)
+│   │   ├── schemas/           # Pydantic request/response models
+│   │   ├── web/               # Web voting SPA (index.html — join + group mode)
+│   │   └── miniapp/           # Telegram Mini App SPA (index.html + app.js + style.css)
 │   ├── models.py              # RollCall and User data models
 │   ├── rollcall_manager.py    # In-memory cache + DB sync layer
 │   ├── db.py                  # Database abstraction (SQLite / PostgreSQL)
 │   ├── config.py              # Environment variable parsing
 │   ├── functions.py           # Shared helpers (timezone, admin checks)
 │   ├── check_reminders.py     # Timed reminder and auto-close scheduler
-│   ├── version.json           # Version history
-│   └── exceptions.py          # Custom exception types
-├── tests/                     # pytest test suite (295+ tests)
+│   ├── exceptions.py          # Custom exception types
+│   └── version.json           # Version history
+├── tests/                     # pytest test suite (542+ tests)
+├── scripts/smoke_test.py      # Real-import boot check (run before dep bumps)
 ├── .github/workflows/         # GitHub Actions CI/CD
 ├── dockerfile
 ├── docker-compose.yml
@@ -229,10 +244,12 @@ RollCall/
 
 **Key design decisions:**
 
+- **Service layer** — `services/` is platform-agnostic; the Telegram bot, REST API, and web voting front-end all call the same service functions.
 - **Manager pattern** — `RollCallManager` provides an in-memory cache per chat with lazy loading from the database, minimising repeated DB queries.
 - **Async throughout** — uses `AsyncTeleBot` (pyTelegramBotAPI) with `asyncio` for non-blocking Telegram API calls and the health check server.
 - **Dual DB backend** — the same `db.py` layer supports both SQLite (zero-config) and PostgreSQL (production-scale) via a `DATABASE_URL` environment variable.
-- **In-place panel editing** — votes via commands edit the existing panel message rather than posting a new one, keeping the chat clean.
+- **In-place panel editing** — votes update the panel message rather than posting a new one, keeping the chat clean.
+- **Cloudflare Tunnel** — the recommended public-access pattern: `cloudflared` sidecar in Docker Compose makes an outbound connection to Cloudflare; port 8081 is never opened on the host firewall and the server IP is never exposed.
 
 ---
 
@@ -267,33 +284,111 @@ GitHub Actions runs automatically on every push and pull request:
 
 ## Deployment
 
-### Health Checks
+### 1. Traditional Bot (Telegram only)
 
-The bot exposes HTTP endpoints (default port `8080`):
+No extra steps beyond the Quick Start. Long-polling works out of the box with just `TELEGRAM_TOKEN`.
+
+```bash
+# .env — minimum required
+API_KEY=your-telegram-bot-token
+ADMIN1=123456789   # your Telegram user ID (optional)
+```
+
+```bash
+docker-compose up -d
+```
+
+Health check endpoints on port 8080:
 
 | Endpoint | Response |
 |---|---|
-| `GET /health` | Bot status, username, and cache size |
+| `GET /health` | Bot status, username, cache size |
 | `GET /ping` | `pong` |
 
-These integrate directly with Docker health checks and container orchestration platforms.
-
-### Production with PostgreSQL
+**PostgreSQL** (optional):
 
 ```bash
 DATABASE_URL=postgresql://user:password@db-host:5432/rollcall docker-compose up -d
 ```
 
-Database tables are created automatically on first startup.
+**Webhook mode** (optional): set `WEBHOOK_URL=https://yourdomain.com/webhook` in `.env`. The bot registers and deregisters the webhook automatically.
 
-### Webhook Mode
+---
+
+### 2. Web App (browser voting for non-Telegram users)
+
+Lets anyone vote via a link — no Telegram account required. Works even when Telegram is banned/blocked.
+
+**How it works:**
+- Each rollcall panel gets a `🔗 Web:` link appended automatically.
+- `/weblink` in any group shows a permanent bookmarkable group URL that never expires.
+- Opening the link shows an IN/OUT/MAYBE voting page that auto-refreshes every 30s.
+
+**Setup — using Cloudflare Tunnel (recommended, free, hides your server IP):**
 
 ```bash
-# Set WEBHOOK_URL in .env to enable webhook delivery
-WEBHOOK_URL=https://mybot.example.com/webhook
+# Step 1 — add to .env
+REST_API_ENABLED=true
+WEB_BASE_URL=https://<your-tunnel-url>   # fill in after step 3
+
+# Step 2 — start bot + tunnel together
+docker-compose --profile web up -d
+
+# Step 3 — get your tunnel URL from the cloudflared logs
+docker-compose logs cloudflared | grep "https://"
+# Copy the URL (e.g. https://abc123.trycloudflare.com)
+# Paste it as WEB_BASE_URL in .env, then restart:
+docker-compose --profile web up -d
 ```
 
-The bot registers the webhook with Telegram on startup and removes it cleanly on shutdown. Leave `WEBHOOK_URL` unset to use long-polling (default).
+> The tunnel URL changes on every restart with the quick-tunnel method. For a **stable URL**, set up a named Cloudflare Tunnel — see comments in `docker-compose.yml`.
+
+**Verify:** open `https://<your-tunnel-url>/web/group/<token>` in a browser. Start a rollcall in your Telegram group — the panel will show a `🔗 Web:` link.
+
+---
+
+### 3. Telegram Mini App (in-app voting via menu button)
+
+Adds a menu button inside Telegram that opens the voting interface directly in-app — no browser switch needed.
+
+**Prerequisites:** same Cloudflare Tunnel URL as the web app (both run on port 8081).
+
+```bash
+# Step 1 — add to .env (alongside REST_API_ENABLED and WEB_BASE_URL from above)
+MINIAPP_URL=https://<your-tunnel-url>/miniapp/
+
+# Step 2 — restart
+docker-compose --profile web up -d
+```
+
+On startup the bot automatically sets the Telegram menu button to open `MINIAPP_URL`. Members tap the button icon in any group chat to vote.
+
+**Verify:** open your bot in Telegram — a menu button (⊞) should appear in the message bar. Tapping it opens the Mini App.
+
+> If you only want the Mini App but not web voting links in panels, set `MINIAPP_URL` without `WEB_BASE_URL`.
+
+---
+
+### All three active — full `.env` example
+
+```env
+# Bot
+API_KEY=your-telegram-bot-token
+ADMIN1=123456789
+
+# Web App + Mini App
+REST_API_ENABLED=true
+WEB_BASE_URL=https://abc123.trycloudflare.com
+MINIAPP_URL=https://abc123.trycloudflare.com/miniapp/
+
+# Optional
+DATABASE_URL=sqlite:////app/data/rollcall.db
+STRUCTURED_LOGS=true
+```
+
+```bash
+docker-compose --profile web up -d
+```
 
 ---
 

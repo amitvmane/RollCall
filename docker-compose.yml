@@ -7,7 +7,7 @@ services:
       dockerfile: dockerfile
     container_name: rollcall-bot
     restart: unless-stopped
-    
+
     environment:
       # Telegram Bot Configuration
       - API_KEY=${API_KEY}
@@ -15,25 +15,41 @@ services:
       - ADMIN2=${ADMIN2}
       - TELEGRAM_TOKEN=${API_KEY}
       - HEALTH_CHECK_PORT=8080
-      
+
       # Database Configuration (SQLite with persistent volume)
       - DATABASE_URL=sqlite:////app/data/rollcall.db
       - TZ=Asia/Kolkata
-    
+
+      # REST API / Web App / Mini App
+      # Set REST_API_ENABLED=true to turn on FastAPI (required for web + miniapp)
+      - REST_API_ENABLED=${REST_API_ENABLED:-false}
+      - REST_API_PORT=8081
+      - REST_API_HOST=0.0.0.0
+
+      # Web App — set to your public HTTPS URL (e.g. via Cloudflare Tunnel below)
+      # Leave unset to disable web voting links in panels and /weblink
+      - WEB_BASE_URL=${WEB_BASE_URL:-}
+
+      # Mini App — set to <WEB_BASE_URL>/miniapp/ to wire the Telegram menu button
+      # Leave unset to disable the menu button
+      - MINIAPP_URL=${MINIAPP_URL:-}
+
     volumes:
       # Persist database across container restarts
       - ./data:/app/data
-      
+
       # Persist logs
       - ./logs:/app/logs
-      
+
     ports:
       - "8080:8080"  # Health check endpoint
-    
+      # Port 8081 (REST API) is intentionally NOT exposed to the host.
+      # cloudflared reaches it over the internal Docker network instead.
+
     # Read environment variables from .env file
     env_file:
       - .env
-    
+
     # HTTP-based health check using curl
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -41,10 +57,42 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-    
+
     # Logging configuration
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # Cloudflare Tunnel sidecar — exposes port 8081 publicly without opening any
+  # host firewall port or revealing your server IP.
+  #
+  # Quick start (no account needed):
+  #   Set CLOUDFLARE_TUNNEL_TOKEN=quick in .env — the tunnel URL is printed in
+  #   the logs on first start. Copy it and set WEB_BASE_URL + MINIAPP_URL.
+  #
+  # Stable named tunnel (recommended for production):
+  #   1. Run: docker run cloudflare/cloudflared tunnel login
+  #   2. Run: docker run cloudflare/cloudflared tunnel create rollcall
+  #   3. Set CLOUDFLARE_TUNNEL_TOKEN=<token from step 2> in .env
+  # ---------------------------------------------------------------------------
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: rollcall-cloudflared
+    restart: unless-stopped
+    # Quick tunnel (random URL each restart) — remove this line and use the
+    # named-tunnel command below once you have a stable domain.
+    command: tunnel --url http://rollcall-bot:8081
+    # Named tunnel command (stable URL — use after completing setup above):
+    # command: tunnel run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - rollcall-bot
+    profiles:
+      - web  # only starts when: docker-compose --profile web up -d
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"

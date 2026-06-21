@@ -2,19 +2,19 @@
 # Run from: ~/RollCallDB/RollCall/
 # Usage:    make <target>
 
--include .env
-export
-
 COMPOSE  := docker compose --profile web
 BOT      := rollcall-bot
 TUNNEL   := cloudflared
 DB       := ./data/rollcall.db
 
+# Read a value from .env, stripping surrounding quotes
+_env = $(shell grep -m1 '^$(1)=' .env 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'")
+
 .DEFAULT_GOAL := help
 
 .PHONY: help up down restart build logs logs-cf status url notify
 
-help:
+help: ## Show this help
 	@printf "\nRollCall commands:\n\n"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' Makefile | \
 	  awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -99,7 +99,7 @@ url: ## Show current tunnel URL and all group voting links
 	@URL=$$(docker compose logs $(TUNNEL) 2>/dev/null \
 	  | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1); \
 	if [ -z "$$URL" ]; then echo "Tunnel not running — run: make up"; exit 0; fi; \
-	echo "Tunnel:  $$URL"; \
+	echo "Tunnel:   $$URL"; \
 	echo "API docs: $$URL/api/docs"; \
 	echo ""; \
 	echo "Group voting links:"; \
@@ -115,19 +115,20 @@ notify: ## Send all voting links to Telegram admin (safe to run when banned — 
 	@URL=$$(docker compose logs $(TUNNEL) 2>/dev/null \
 	  | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1); \
 	if [ -z "$$URL" ]; then echo "Tunnel not running — run: make up first"; exit 1; fi; \
+	API_KEY=$$(grep -m1 '^API_KEY=' .env | cut -d= -f2- | tr -d '"' | tr -d "'"); \
+	ADMIN1=$$(grep -m1 '^ADMIN1=' .env | cut -d= -f2- | tr -d '"' | tr -d "'"); \
 	LINKS=$$(sqlite3 $(DB) \
 	  "SELECT chat_id, group_web_token FROM chats WHERE group_web_token IS NOT NULL;" \
 	  2>/dev/null | \
 	  while IFS='|' read -r cid tok; do \
 	    echo "Chat $$cid: $$URL/web/group/$$tok"; \
 	  done); \
-	MSG="🔗 Web voting links (Telegram-down mode):%0A%0A$$LINKS%0A%0AOpen your group link to vote."; \
 	echo "Voting links:"; \
 	echo "$$LINKS"; \
 	echo ""; \
 	curl -sf --max-time 10 \
-	  "https://api.telegram.org/bot$(API_KEY)/sendMessage" \
-	  -d "chat_id=$(ADMIN1)" \
-	  --data-urlencode "text=$$MSG" > /dev/null \
-	  && echo "Sent to Telegram admin ($(ADMIN1))" \
+	  "https://api.telegram.org/bot$$API_KEY/sendMessage" \
+	  -d "chat_id=$$ADMIN1" \
+	  --data-urlencode "text=🔗 Web voting links:%0A%0A$$LINKS%0A%0AOpen your group link to vote." > /dev/null \
+	  && echo "Sent to Telegram admin ($$ADMIN1)" \
 	  || echo "(Telegram unreachable — share the links above manually)"

@@ -36,19 +36,33 @@ class GhostEntry(BaseModel):
 
 class GroupStatsResponse(BaseModel):
     total_rollcalls: int
-    total_attendances: int
-    unique_participants: int
+    real_attendance_slots: int = 0
+    proxy_attendance_slots: int = 0
+    total_attendance_slots: int = 0
+    real_participants: int = 0
+    proxy_participants: int = 0
+    avg_attendance: float = 0.0
+    real_vote_in: int = 0
+    real_vote_out: int = 0
+    real_vote_maybe: int = 0
+    proxy_in: int = 0
+    proxy_out: int = 0
+    proxy_maybe: int = 0
+    waitlist_promotions: int = 0
     top_attendees: List[TopAttendee]
     ghost_leaderboard: List[GhostEntry]
 
 
 class LeaderboardEntry(BaseModel):
     rank: int
-    name: Optional[str]
-    user_id: Optional[int]
-    is_proxy: bool
-    sessions: int
-    attendance_rate: Optional[float]
+    display_name: Optional[str] = None
+    username: Optional[str] = None
+    user_id: Optional[int] = None
+    kind: str = "real"
+    sessions_attended: int = 0
+    total_sessions_voted: int = 0
+    attendance_rate: Optional[float] = None
+    voting_rate: Optional[float] = None
 
 
 class HistoryEntry(BaseModel):

@@ -542,8 +542,13 @@ class TestStatsRoutes(unittest.TestCase):
         self.assertEqual(resp.json()[0]["title"], "G")
 
     def test_leaderboard_200(self):
-        board = [{"rank": 1, "name": "Alice", "user_id": 1, "is_proxy": False,
-                  "sessions": 10, "attendance_rate": 80.0}]
+        board = {
+            "total_rollcalls_in_chat": 5,
+            "entries": [{"rank": 1, "display_name": "Alice", "username": None,
+                         "user_id": 1, "kind": "real", "sessions_attended": 10,
+                         "total_sessions_voted": 10, "attendance_rate": 80.0,
+                         "voting_rate": 80.0}],
+        }
         auth_a, auth_b = _auth_patches(_READ_ROW)
         with auth_a, auth_b, \
              patch("services.stats.leaderboard", return_value=board):

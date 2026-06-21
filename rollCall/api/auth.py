@@ -113,8 +113,10 @@ def require_scope(scope: str):
         # Cross-chat check: if the URL path includes chat_id, it must
         # match the token's bound chat_id. This stops a token issued for
         # chat A from operating on chat B even with the right scope.
+        # Exception: a token issued with chat_id=0 is a global admin token
+        # that may operate on any chat (used by the admin dashboard).
         path_chat_id = request.path_params.get("chat_id")
-        if path_chat_id is not None:
+        if path_chat_id is not None and token.chat_id != 0:
             try:
                 if int(path_chat_id) != token.chat_id:
                     raise _forbidden(

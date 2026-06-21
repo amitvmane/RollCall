@@ -75,7 +75,8 @@ async def leaderboard(
     limit: int = Query(10, ge=1, le=100),
     _token: AuthedToken = Depends(require_scope("read")),
 ) -> List[LeaderboardEntry]:
-    return [LeaderboardEntry(**e) for e in stats_svc.leaderboard(chat_id, limit)]
+    lb = stats_svc.leaderboard(chat_id, limit)
+    return [LeaderboardEntry(**e) for e in lb["entries"]]
 
 
 @router.get(

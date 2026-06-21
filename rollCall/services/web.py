@@ -16,6 +16,17 @@ from rollcall_manager import manager
 from services import proxy as proxy_svc
 
 
+def _ensure_web_token(rc) -> str:
+    """Return the rollcall's web_token, generating and persisting one if missing."""
+    import uuid
+    token = getattr(rc, "web_token", None)
+    if not token:
+        token = uuid.uuid4().hex
+        db.update_rollcall(rc.id, web_token=token)
+        rc.web_token = token
+    return token
+
+
 def _serialize_web_rollcall(rc) -> dict:
     """Minimal dict for the web voting UI."""
     finalize_str = None
@@ -35,7 +46,7 @@ def _serialize_web_rollcall(rc) -> dict:
 
     return {
         "rollcall_id": rc.id,
-        "web_token": getattr(rc, "web_token", None) or "",
+        "web_token": _ensure_web_token(rc),
         "title": rc.title,
         "finalize_date": finalize_str,
         "limit": rc.inListLimit,

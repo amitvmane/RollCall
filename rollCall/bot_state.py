@@ -62,9 +62,12 @@ try:
                 uid = getattr(user, 'id', None)
                 if not isinstance(uid, int):
                     return
-                from db import upsert_chat_member
+                from db import upsert_chat_member, update_chat_group_name
                 first_name = (getattr(user, 'first_name', None) or '').strip() or str(uid)
                 upsert_chat_member(chat.id, uid, first_name, user.username or None)
+                title = getattr(chat, 'title', None)
+                if title:
+                    update_chat_group_name(chat.id, title)
             except Exception:
                 logging.exception("member tracking middleware: ignored failure")
 

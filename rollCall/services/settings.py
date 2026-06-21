@@ -15,6 +15,7 @@ import pytz
 from exceptions import incorrectParameter, parameterMissing, timeError
 from rollcall_manager import manager
 from db import (
+    get_or_create_chat,
     increment_rollcall_stat,
     increment_user_stat,
     log_admin_action,
@@ -26,7 +27,10 @@ from .common import resolve_rollcall_or_raise, serialize_rollcall, serialize_use
 def get_chat_settings(chat_id: int) -> dict:
     """Return current chat-level settings."""
     chat = manager.get_chat(chat_id)
+    row = get_or_create_chat(chat_id)
     return {
+        "chat_id": chat_id,
+        "group_name": row.get("group_name"),
         "timezone": chat.get("timezone", "Asia/Kolkata"),
         "shh_mode": manager.get_shh_mode(chat_id),
         "admin_rights": manager.get_admin_rights(chat_id),

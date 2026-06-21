@@ -173,7 +173,8 @@ def create_tables():
                     timezone VARCHAR(100) DEFAULT 'Asia/Kolkata',
                     absent_limit INTEGER DEFAULT 1,
                     ghost_tracking_enabled BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    group_name TEXT DEFAULT NULL
                 )
             """)
 
@@ -332,7 +333,8 @@ def create_tables():
                     timezone TEXT DEFAULT 'Asia/Kolkata',
                     absent_limit INTEGER DEFAULT 1,
                     ghost_tracking_enabled INTEGER DEFAULT 1,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    group_name TEXT DEFAULT NULL
                 )
             """)
 
@@ -919,6 +921,20 @@ def _run_migrations(conn, cursor):
         except Exception:
             conn.rollback()
 
+    # Add group_name column for capturing Telegram chat titles
+    if db_type == 'postgresql':
+        try:
+            cursor.execute("ALTER TABLE chats ADD COLUMN IF NOT EXISTS group_name TEXT DEFAULT NULL")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    else:
+        try:
+            cursor.execute("ALTER TABLE chats ADD COLUMN group_name TEXT DEFAULT NULL")
+            conn.commit()
+        except Exception:
+            conn.rollback()  # column already exists — safe to ignore
+
 
 def get_or_create_chat(chat_id: int) -> Dict:
     """Get or create chat settings"""
@@ -979,6 +995,33 @@ def get_or_create_chat(chat_id: int) -> Dict:
         conn.rollback()
         logging.error(f"Error in get_or_create_chat: {e}")
         raise
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def update_chat_group_name(chat_id: int, name: str) -> None:
+    """Persist the Telegram group title so it can be displayed in the admin UI."""
+    if not name:
+        return
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(
+            f"UPDATE chats SET group_name = {ph} WHERE chat_id = {ph} AND (group_name IS NULL OR group_name != {ph})",
+            (name, chat_id, name),
+        )
+        conn.commit()
+    except Exception:
+        logging.exception(f"update_chat_group_name({chat_id})")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
     finally:
         if cursor is not None:
             cursor.close()

@@ -137,11 +137,14 @@ class TestSerializeWebRollcall(unittest.TestCase):
         self.assertEqual(result["limit"], 10)
         self.assertEqual(result["location"], "Central Park")
 
-    def test_missing_web_token_returns_empty_string(self):
+    def test_missing_web_token_is_generated_and_persisted(self):
         rc = _make_rc()
-        del rc.web_token  # simulate attribute missing
-        result = self._call(rc)
-        self.assertEqual(result["web_token"], "")
+        del rc.web_token  # simulate rollcall created before web_token column
+        with patch("services.web.db") as mock_db:
+            result = self._call(rc)
+        self.assertIsInstance(result["web_token"], str)
+        self.assertTrue(len(result["web_token"]) > 0, "should generate a non-empty token")
+        mock_db.update_rollcall.assert_called_once()  # token must be persisted
 
     def test_none_comment_returns_empty_string(self):
         alice = _make_user("Alice", comment=None)

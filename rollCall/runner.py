@@ -440,33 +440,22 @@ async def main():
         logger.error(f"❌ Database verification failed: {e}")
         sys.exit(1)
 
-    # Get bot information
-    try:
-        me = await bot.get_me()
-        logger.info("=" * 60)
-        logger.info(f"✅ Bot authenticated successfully!")
-        logger.info(f"   Bot Name: {me.first_name}")
-        logger.info(f"   Username: @{me.username}")
-        logger.info(f"   Bot ID:   {me.id}")
-        logger.info("=" * 60)
-    except Exception as e:
-        logger.error(f"❌ Failed to authenticate with Telegram: {e}")
-        logger.error("Please check your TELEGRAM_TOKEN")
-        sys.exit(1)
-
-    # Register bot command menu
-    try:
-        await register_commands()
-    except Exception as e:
-        logger.warning(f"⚠️  Failed to register bot commands: {e}")
-
-    # Start health check server
+    # Start health check server early so the container is always observable.
     try:
         await start_health_server()
     except Exception as e:
         logger.warning(f"⚠️  Health check server failed to start: {e}")
         logger.warning("Continuing without health check endpoint...")
-    
+
+    # Start REST API early so web voting works even when Telegram is unreachable.
+    if _rest_api_enabled():
+        _api_task = asyncio.create_task(_run_rest_api_server())
+        _api_task.add_done_callback(_log_task_exc)
+        _health_state["api_task"] = _api_task
+        _api_port = int(os.environ.get("REST_API_PORT", "8081"))
+        _api_host = os.environ.get("REST_API_HOST", "127.0.0.1")
+        logger.info(f"✅ REST API server started on http://{_api_host}:{_api_port}/api/v1 (docs: /api/docs)")
+
     # Start template auto-scheduler (persistent background task)
     _sched_task = asyncio.create_task(check_template_schedules())
     _sched_task.add_done_callback(_log_task_exc)
@@ -479,31 +468,44 @@ async def main():
     _health_state["prune_task"] = _prune_task
     logger.info("✅ Memory prune loop started")
 
-    # Start REST API if explicitly enabled. Default OFF — no exposure unless
-    # the operator opts in. See _rest_api_enabled() docstring for why.
-    if _rest_api_enabled():
-        _api_task = asyncio.create_task(_run_rest_api_server())
-        _api_task.add_done_callback(_log_task_exc)
-        _health_state["api_task"] = _api_task
-        _api_port = int(os.environ.get("REST_API_PORT", "8081"))
-        _api_host = os.environ.get("REST_API_HOST", "127.0.0.1")
-        logger.info(f"✅ REST API server started on http://{_api_host}:{_api_port}/api/v1 (docs: /api/docs)")
+    # Get bot information — non-fatal: Telegram may be temporarily unreachable
+    # (network block, outage) but the REST API / web voting should still work.
+    telegram_available = False
+    try:
+        me = await bot.get_me()
+        telegram_available = True
+        logger.info("=" * 60)
+        logger.info(f"✅ Bot authenticated successfully!")
+        logger.info(f"   Bot Name: {me.first_name}")
+        logger.info(f"   Username: @{me.username}")
+        logger.info(f"   Bot ID:   {me.id}")
+        logger.info("=" * 60)
+    except Exception as e:
+        logger.warning(f"⚠️  Telegram unreachable at startup: {e}")
+        logger.warning("Running in degraded mode — web/REST API available, bot polling will retry when Telegram is reachable")
+
+    if telegram_available:
+        # Register bot command menu
+        try:
+            await register_commands()
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to register bot commands: {e}")
 
         # Wire Telegram menu button to Mini App if MINIAPP_URL is configured.
-        # Operators set MINIAPP_URL=https://yourdomain.com/miniapp to enable.
-        _miniapp_url = os.environ.get("MINIAPP_URL", "").strip()
-        if _miniapp_url:
-            try:
-                from telebot.types import MenuButtonWebApp, WebAppInfo
-                await bot.set_chat_menu_button(
-                    menu_button=MenuButtonWebApp(
-                        text="Open RollCall",
-                        web_app=WebAppInfo(url=_miniapp_url),
+        if _rest_api_enabled():
+            _miniapp_url = os.environ.get("MINIAPP_URL", "").strip()
+            if _miniapp_url:
+                try:
+                    from telebot.types import MenuButtonWebApp, WebAppInfo
+                    await bot.set_chat_menu_button(
+                        menu_button=MenuButtonWebApp(
+                            text="Open RollCall",
+                            web_app=WebAppInfo(url=_miniapp_url),
+                        )
                     )
-                )
-                logger.info(f"✅ Mini App menu button set → {_miniapp_url}")
-            except Exception as _e:
-                logger.warning(f"⚠️  Could not set Mini App menu button: {_e}")
+                    logger.info(f"✅ Mini App menu button set → {_miniapp_url}")
+                except Exception as _e:
+                    logger.warning(f"⚠️  Could not set Mini App menu button: {_e}")
 
     # Resume reminder/auto-close loops for rollcalls already in DB with a finalizeDate.
     # Without this, any rollcall created before a bot restart would never auto-close.

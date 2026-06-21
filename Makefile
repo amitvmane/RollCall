@@ -7,7 +7,7 @@ export
 
 COMPOSE  := docker compose --profile web
 BOT      := rollcall-bot
-TUNNEL   := rollcall-cloudflared
+TUNNEL   := cloudflared
 DB       := ./data/rollcall.db
 
 .DEFAULT_GOAL := help
@@ -16,7 +16,7 @@ DB       := ./data/rollcall.db
 
 help:
 	@printf "\nRollCall commands:\n\n"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' Makefile | \
 	  awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 	@printf "\n"
 

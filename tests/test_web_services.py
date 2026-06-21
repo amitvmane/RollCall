@@ -278,16 +278,16 @@ class TestVoteByToken(unittest.IsolatedAsyncioTestCase):
 
     async def test_vote_in_calls_set_in_for(self):
         result, proxy = await self._call("abc123token", "Alice", "in")
-        proxy.set_in_for.assert_awaited_once_with(100, "Alice", rc_index=0)
+        proxy.set_in_for.assert_awaited_once_with(100, 0, "web", "Alice", rc_number=0)
         self.assertEqual(result["title"], "Friday Football")
 
     async def test_vote_out_calls_set_out_for(self):
         _, proxy = await self._call("abc123token", "Bob", "out")
-        proxy.set_out_for.assert_awaited_once_with(100, "Bob", rc_index=0)
+        proxy.set_out_for.assert_awaited_once_with(100, 0, "web", "Bob", rc_number=0)
 
     async def test_vote_maybe_calls_set_maybe_for(self):
         _, proxy = await self._call("abc123token", "Carol", "maybe")
-        proxy.set_maybe_for.assert_awaited_once_with(100, "Carol", rc_index=0)
+        proxy.set_maybe_for.assert_awaited_once_with(100, 0, "web", "Carol", rc_number=0)
 
     async def test_empty_name_raises(self):
         from exceptions import parameterMissing
@@ -327,12 +327,12 @@ class TestVoteByToken(unittest.IsolatedAsyncioTestCase):
 
     async def test_name_whitespace_stripped(self):
         _, proxy = await self._call("abc123token", "  Alice  ", "in")
-        proxy.set_in_for.assert_awaited_once_with(100, "Alice", rc_index=0)
+        proxy.set_in_for.assert_awaited_once_with(100, 0, "web", "Alice", rc_number=0)
 
     async def test_name_truncated_to_64_chars(self):
         long_name = "A" * 100
         _, proxy = await self._call("abc123token", long_name, "in")
-        called_name = proxy.set_in_for.call_args[0][1]
+        called_name = proxy.set_in_for.call_args[0][3]  # proxy_name is 4th positional arg
         self.assertEqual(len(called_name), 64)
 
     async def test_returns_updated_rollcall_state(self):

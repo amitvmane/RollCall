@@ -99,12 +99,13 @@ async def vote_by_token(token: str, name: str, vote_type: str) -> dict:
 
     chat_id, rc_index, _ = _resolve_rc(token)
 
+    # admin_user_id=0 is the sentinel for "submitted via web, no Telegram admin"
     if vote_type == "in":
-        await proxy_svc.set_in_for(chat_id, name, rc_index=rc_index)
+        await proxy_svc.set_in_for(chat_id, 0, "web", name, rc_number=rc_index)
     elif vote_type == "out":
-        await proxy_svc.set_out_for(chat_id, name, rc_index=rc_index)
+        await proxy_svc.set_out_for(chat_id, 0, "web", name, rc_number=rc_index)
     else:
-        await proxy_svc.set_maybe_for(chat_id, name, rc_index=rc_index)
+        await proxy_svc.set_maybe_for(chat_id, 0, "web", name, rc_number=rc_index)
 
     # Re-resolve so we return the updated state
     _, _, rc = _resolve_rc(token)

@@ -61,8 +61,39 @@ logs: ## Tail bot logs (Ctrl+C to stop)
 logs-cf: ## Tail Cloudflare tunnel logs (Ctrl+C to stop)
 	docker compose logs -f $(TUNNEL)
 
-status: ## Show container status
-	$(COMPOSE) ps
+status: ## Show container status + external service reachability
+	@echo ""
+	@echo "=== Containers ==="
+	@$(COMPOSE) ps
+	@echo ""
+	@echo "=== External Services ==="
+	@printf "  Telegram API:     "; \
+	curl -sf --max-time 5 https://api.telegram.org > /dev/null 2>&1 \
+	  && echo "✅  reachable" \
+	  || echo "❌  unreachable (ISP ban or outage)"
+	@printf "  Cloudflare:       "; \
+	curl -sf --max-time 5 https://www.cloudflare.com > /dev/null 2>&1 \
+	  && echo "✅  reachable" \
+	  || echo "❌  unreachable"
+	@URL=$$(docker compose logs $(TUNNEL) 2>/dev/null \
+	  | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1); \
+	printf "  Tunnel endpoint:  "; \
+	if [ -z "$$URL" ]; then \
+	  echo "❌  no URL (tunnel not started — run: make up)"; \
+	else \
+	  curl -sf --max-time 8 "$$URL/api/v1/health" > /dev/null 2>&1 \
+	    && echo "✅  $$URL" \
+	    || echo "❌  $$URL (tunnel started but not reachable yet)"; \
+	fi
+	@echo ""
+	@echo "=== Bot Health ==="
+	@HEALTH=$$(curl -sf --max-time 5 http://localhost:8080/health 2>/dev/null); \
+	if [ -z "$$HEALTH" ]; then \
+	  echo "  ❌  health endpoint not responding (bot down?)"; \
+	else \
+	  echo "  $$HEALTH" | fold -s -w 100; \
+	fi
+	@echo ""
 
 url: ## Show current tunnel URL and all group voting links
 	@URL=$$(docker compose logs $(TUNNEL) 2>/dev/null \

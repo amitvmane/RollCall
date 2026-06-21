@@ -15,6 +15,7 @@ import pytz
 from exceptions import incorrectParameter, parameterMissing, timeError
 from rollcall_manager import manager
 from db import (
+    get_all_chat_ids,
     get_or_create_chat,
     increment_rollcall_stat,
     increment_user_stat,
@@ -355,3 +356,58 @@ def set_admin_rights(
     log_admin_action(chat_id, admin_user_id, admin_name,
                      "set_admins" if enabled else "unset_admins")
     return {"admin_rights": enabled}
+
+
+def list_groups() -> list:
+    """
+    Return summary info for every known chat — used by the admin dashboard.
+
+    Each entry: {chat_id, group_name, timezone, active_rollcalls, absent_limit, ghost_tracking_enabled}
+    """
+    chat_ids = get_all_chat_ids()
+    groups = []
+    for cid in chat_ids:
+        row = get_or_create_chat(cid)
+        active = len(manager.get_rollcalls(cid))
+        groups.append({
+            "chat_id": cid,
+            "group_name": row.get("group_name"),
+            "timezone": row.get("timezone", "Asia/Kolkata"),
+            "active_rollcalls": active,
+            "absent_limit": row.get("absent_limit", 1),
+            "ghost_tracking_enabled": bool(row.get("ghost_tracking_enabled", True)),
+            "admin_rights": bool(row.get("admin_rights", False)),
+            "group_web_token": row.get("group_web_token"),
+        })
+    return groups
+
+
+def update_group_settings(
+    chat_id: int,
+    admin_user_id: int,
+    admin_name: str,
+    timezone: str | None = None,
+    shh_mode: bool | None = None,
+    admin_rights: bool | None = None,
+    ghost_tracking_enabled: bool | None = None,
+    absent_limit: int | None = None,
+) -> dict:
+    """
+    Batch-update one or more chat-level settings from the admin API.
+
+    Only fields that are not None are changed.
+    Returns the full settings dict after applying changes.
+    """
+    if timezone is not None:
+        set_timezone(chat_id, timezone, admin_user_id, admin_name)
+    if shh_mode is not None:
+        set_shh_mode(chat_id, shh_mode, admin_user_id, admin_name)
+    if admin_rights is not None:
+        set_admin_rights(chat_id, admin_rights, admin_user_id, admin_name)
+    if ghost_tracking_enabled is not None:
+        from services.ghost import toggle_ghost_tracking
+        toggle_ghost_tracking(chat_id, ghost_tracking_enabled, admin_user_id, admin_name)
+    if absent_limit is not None:
+        from services.ghost import set_absent_limit
+        set_absent_limit(chat_id, absent_limit, admin_user_id, admin_name)
+    return get_chat_settings(chat_id)

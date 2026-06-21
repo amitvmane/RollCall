@@ -24,6 +24,7 @@ from exceptions import (
 from functions import admin_rights, roll_call_not_started
 from models import User
 from rollcall_manager import manager
+from db import update_rollcall
 from services import rollcalls as rollcalls_svc
 from services import voting as voting_svc
 

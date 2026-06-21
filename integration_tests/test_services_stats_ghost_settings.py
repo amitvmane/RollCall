@@ -58,7 +58,8 @@ class TestStatsService(ServiceBase):
         self.assertEqual(result["top_attendees"], [])
 
     async def test_leaderboard_empty(self):
-        self.assertEqual(self.stats.leaderboard(CHAT_ID), [])
+        result = self.stats.leaderboard(CHAT_ID)
+        self.assertEqual(result["entries"], [])
 
     async def test_history_empty(self):
         self.assertEqual(self.stats.history(CHAT_ID), [])

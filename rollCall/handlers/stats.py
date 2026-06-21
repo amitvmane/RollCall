@@ -22,7 +22,9 @@ def _esc(text: str) -> str:
 
 
 def _pct_str(rate) -> str:
-    return f"{rate}%" if rate is not None else "—"
+    if rate is None:
+        return "—"
+    return f"{int(rate)}%" if rate == int(rate) else f"{rate}%"
 
 
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] in ["/stats", "/s"])
@@ -206,6 +208,32 @@ def _fmt_ghost_stats(cid: int) -> str:
     if not tracking_on:
         lines.append("_(Ghost tracking is currently disabled for this group)_")
     return "\n".join(lines)
+
+
+# ── Public shims (used by integration tests and external callers) ─────────────
+
+async def build_user_stats_text(chat_id: int, user_id: int, first_name: str) -> str:
+    return _fmt_personal_stats(stats_svc.personal_stats(chat_id, user_id), first_name)
+
+
+async def build_proxy_stats_text(chat_id: int, proxy_name: str, display_name: str) -> str:
+    return _fmt_proxy_stats(stats_svc.proxy_stats(chat_id, proxy_name), display_name)
+
+
+async def build_group_stats_text(chat_id: int) -> str:
+    return _fmt_group_stats(stats_svc.group_stats(chat_id))
+
+
+async def build_leaderboard_text(chat_id: int) -> str:
+    return _fmt_leaderboard(stats_svc.leaderboard(chat_id))
+
+
+async def build_ghost_stats_text(chat_id: int, _mgr=None) -> str:
+    return _fmt_ghost_stats(chat_id)
+
+
+async def resolve_user_for_stats(chat_id: int, arg: str):
+    return stats_svc.resolve_user(chat_id, arg)
 
 
 def _fmt_bot_stats(data: dict) -> str:

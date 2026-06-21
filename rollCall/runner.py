@@ -514,7 +514,13 @@ async def main():
 
     # Start bot — webhook or polling
     try:
-        if WEBHOOK_URL:
+        if not telegram_available:
+            # Telegram is unreachable (banned, outage, etc.). Keep the process
+            # alive so the REST API / web voting continues to work. A container
+            # restart after Telegram is reachable again will resume polling.
+            logger.info("⏳ Telegram unreachable — REST API running, polling skipped until restart")
+            await asyncio.Event().wait()
+        elif WEBHOOK_URL:
             logger.info(f"🔗 Webhook mode enabled → {WEBHOOK_URL}")
             logger.info("🚀 Bot is now running via webhook...")
             logger.info("=" * 60)

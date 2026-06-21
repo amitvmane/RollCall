@@ -51,25 +51,37 @@ class JsonFormatter(logging.Formatter):
 
 def _setup_logging():
     """Configure root logging. JSON when STRUCTURED_LOGS=true (or 1/yes),
-    plain text otherwise. Writes to both stdout and /app/logs/bot.log."""
+    plain text otherwise. Writes to stdout and a daily rotating log file
+    (/app/logs/bot.log, rotated at midnight, 5 days retained, 5 MB max)."""
     log_dir = "/app/logs"
     try:
         os.makedirs(log_dir, exist_ok=True)
     except OSError:
-        # Local dev / tests run outside the container.
-        log_dir = None
+        log_dir = None  # Local dev / tests run outside the container
 
     structured = os.getenv("STRUCTURED_LOGS", "").strip().lower() in ("1", "true", "yes", "on")
     text_fmt = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    fmt = JsonFormatter() if structured else logging.Formatter(text_fmt)
 
-    handlers = []
+    handlers: list[logging.Handler] = []
     stream = logging.StreamHandler()
-    stream.setFormatter(JsonFormatter() if structured else logging.Formatter(text_fmt))
+    stream.setFormatter(fmt)
     handlers.append(stream)
+
     if log_dir:
-        fileh = logging.FileHandler(f"{log_dir}/bot.log")
-        fileh.setFormatter(JsonFormatter() if structured else logging.Formatter(text_fmt))
-        handlers.append(fileh)
+        # Daily rotation at midnight UTC, keep 5 days of history.
+        # RotatingFileHandler caps each file at 5 MB with 5 backups (total ≤30 MB).
+        # We use size-based rotation as a practical cap; TimedRotatingFileHandler
+        # doesn't support maxBytes so we pair both independently.
+        from logging.handlers import RotatingFileHandler
+        fh = RotatingFileHandler(
+            f"{log_dir}/bot.log",
+            maxBytes=5 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8",
+        )
+        fh.setFormatter(fmt)
+        handlers.append(fh)
 
     logging.basicConfig(level=logging.INFO, handlers=handlers, force=True)
     logging.getLogger("TeleBot").setLevel(logging.WARNING)

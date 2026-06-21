@@ -1,43 +1,28 @@
 """
-/stats command and all stats-building helpers.
+/stats command handler — formats stats data from services.stats and services.ghost.
 
-This module reports REAL attendance (final-IN status in ended rollcalls),
-not vote counts. The Telegram bot's vote handlers increment
-user_stats.total_in / total_out / total_maybe per vote — so a user who
-flips IN→OUT→IN within a single session has total_in=2 even though they
-attended at most once. Those counters are still displayed under "vote
-breakdown" because they're useful as an engagement-flux indicator, but
-the headline metrics (Voting%, Attendance%, leaderboard rank) are all
-derived from the per-rollcall final-status table (`users` for real users,
-`proxy_users` for proxies added via /sif /sof /smf).
+All data queries go through services/stats.py and services/ghost.py.
+This module is responsible only for Telegram Markdown formatting.
 """
 import logging
 
 from bot_state import bot
 from config import ADMINS
-from db import (
-    get_ghost_leaderboard, get_connection, db_type, release_connection,
-    get_user_attendance_count, get_leaderboard_by_attendance,
-    get_chat_ended_rollcall_count,
-    get_proxy_attendance_count, get_proxy_stats,
-    get_group_attendance_totals, get_bot_attendance_totals,
-    find_proxy_in_chat, get_proxy_streaks,
-    get_ghost_count, get_ghost_count_by_proxy_name,
-)
 from rollcall_manager import manager
+from services import ghost as ghost_svc
+from services import stats as stats_svc
 
 
 def _esc(text: str) -> str:
-    """Escape Markdown v1 special characters in user-supplied strings."""
     if not text:
         return text or ""
-    for c in ('_', '*', '`', '['):
-        text = text.replace(c, f'\\{c}')
+    for c in ("_", "*", "`", "["):
+        text = text.replace(c, f"\\{c}")
     return text
 
 
-def _pct(num: int, denom: int) -> str:
-    return f"{round(num / denom * 100)}%" if denom > 0 else "—"
+def _pct_str(rate) -> str:
+    return f"{rate}%" if rate is not None else "—"
 
 
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] in ["/stats", "/s"])
@@ -67,7 +52,7 @@ async def stats_command(message):
                 return
             scope = "bot"
         else:
-            resolved = await resolve_user_for_stats(cid, arg)
+            resolved = stats_svc.resolve_user(cid, arg)
             if resolved is None:
                 await bot.send_message(cid, f"Could not find user '{arg}' in ended rollcalls for this chat.")
                 return
@@ -77,377 +62,170 @@ async def stats_command(message):
                 await bot.send_message(
                     cid,
                     f"Found {count} users with the name '{arg}' in this chat. "
-                    f"Please use the exact Telegram @username to disambiguate.",
+                    "Please use the exact Telegram @username to disambiguate.",
                 )
                 return
             elif kind == "proxy":
                 target_proxy_name = resolved[1]
                 display_name = resolved[2]
                 scope = "proxy"
-            else:  # 'real'
+            else:
                 target_user_id = resolved[1]
                 display_name = resolved[2]
                 scope = "other"
 
     try:
         if scope == "group":
-            text = await build_group_stats_text(cid)
+            out = _fmt_group_stats(stats_svc.group_stats(cid))
         elif scope == "top":
-            text = await build_leaderboard_text(cid)
+            out = _fmt_leaderboard(stats_svc.leaderboard(cid))
         elif scope == "ghost":
-            text = await build_ghost_stats_text(cid, manager)
+            out = _fmt_ghost_stats(cid)
         elif scope == "bot":
-            text = await build_bot_stats_text()
+            out = _fmt_bot_stats(stats_svc.bot_stats())
         elif scope == "proxy":
-            text = await build_proxy_stats_text(cid, target_proxy_name, display_name)
+            out = _fmt_proxy_stats(stats_svc.proxy_stats(cid, target_proxy_name), display_name)
         else:
-            text = await build_user_stats_text(cid, target_user_id, display_name)
+            out = _fmt_personal_stats(stats_svc.personal_stats(cid, target_user_id), display_name)
 
-        await bot.send_message(cid, text, parse_mode="Markdown")
+        await bot.send_message(cid, out, parse_mode="Markdown")
     except Exception:
         logging.exception("Error in /stats")
         await bot.send_message(cid, "Error while fetching stats, please try again later.")
 
 
-async def build_ghost_stats_text(cid: int, mgr) -> str:
-    leaderboard = get_ghost_leaderboard(cid)
-    limit = mgr.get_absent_limit(cid)
-    tracking_on = mgr.get_ghost_tracking_enabled(cid)
+# ── Formatters ────────────────────────────────────────────────────────────────
 
-    if not leaderboard:
-        return "🏆 No ghosts yet — everyone's been showing up!"
-
-    lines = ["👻 *Ghost Leaderboard*", "─────────────────"]
-    for i, entry in enumerate(leaderboard, 1):
-        if entry.get('proxy_name'):
-            name = f"{entry['proxy_name']} (via /sif)"
-        else:
-            name = entry.get('user_name') or f"User {entry['user_id']}"
-        count = entry['ghost_count']
-        warning = " ⚠️" if count >= limit else ""
-        lines.append(f"{i}. {_esc(name)} — {count} session(s) ghosted{warning}")
-
-    lines.append("")
-    lines.append(f"Current ghost limit: {limit} session(s)")
-    if not tracking_on:
-        lines.append("_(Ghost tracking is currently disabled for this group)_")
-
-    return "\n".join(lines)
-
-
-async def build_bot_stats_text() -> str:
-    """Bot-wide stats. Shows real attendance (sum of final-IN slots across
-    ALL groups) alongside the legacy vote-count totals — the latter are
-    still useful as a global engagement-flux indicator."""
-    conn = get_connection()
-    cursor = None
-    try:
-        cursor = conn.cursor()
-
-        def _fetch_one(pg_sql, sqlite_sql, params=()):
-            if db_type == "postgresql":
-                cursor.execute(pg_sql, params)
-            else:
-                cursor.execute(sqlite_sql, params)
-            row = cursor.fetchone()
-            if row is None:
-                return 0
-            return int((row[0] if not isinstance(row, dict) else next(iter(row.values()))) or 0)
-
-        total_groups = _fetch_one(
-            "SELECT COUNT(DISTINCT chat_id) FROM chats",
-            "SELECT COUNT(DISTINCT chat_id) FROM chats",
-        )
-        active_groups_7d = _fetch_one(
-            "SELECT COUNT(DISTINCT chat_id) FROM rollcalls WHERE created_at >= NOW() - INTERVAL '7 days'",
-            "SELECT COUNT(DISTINCT r.chat_id) FROM rollcalls r WHERE r.created_at >= datetime('now', '-7 days')",
-        )
-        active_groups_30d = _fetch_one(
-            "SELECT COUNT(DISTINCT chat_id) FROM rollcalls WHERE created_at >= NOW() - INTERVAL '30 days'",
-            "SELECT COUNT(DISTINCT r.chat_id) FROM rollcalls r WHERE r.created_at >= datetime('now', '-30 days')",
-        )
-        total_rollcalls = _fetch_one("SELECT COUNT(*) FROM rollcalls", "SELECT COUNT(*) FROM rollcalls")
-        rollcalls_30d = _fetch_one(
-            "SELECT COUNT(*) FROM rollcalls WHERE created_at >= NOW() - INTERVAL '30 days'",
-            "SELECT COUNT(*) FROM rollcalls WHERE created_at >= datetime('now', '-30 days')",
-        )
-        total_real_users = _fetch_one("SELECT COUNT(DISTINCT user_id) FROM users", "SELECT COUNT(DISTINCT user_id) FROM users")
-        total_proxy_users = _fetch_one("SELECT COUNT(DISTINCT name) FROM proxy_users", "SELECT COUNT(DISTINCT name) FROM proxy_users")
-        total_templates = _fetch_one("SELECT COUNT(*) FROM templates", "SELECT COUNT(*) FROM templates")
-
-        # Legacy vote-count totals — kept for engagement signal, clearly
-        # labelled as votes (not attendance).
-        cursor.execute("SELECT SUM(total_in), SUM(total_out), SUM(total_maybe) FROM user_stats")
-        row = cursor.fetchone()
-        if row is None:
-            sum_in = sum_out = sum_maybe = 0
-        elif isinstance(row, dict):
-            vals = list(row.values())
-            sum_in    = int(vals[0] or 0)
-            sum_out   = int(vals[1] or 0)
-            sum_maybe = int(vals[2] or 0)
-        else:
-            sum_in    = int(row[0] or 0)
-            sum_out   = int(row[1] or 0)
-            sum_maybe = int(row[2] or 0)
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
-
-    totals = get_bot_attendance_totals()
-    ended_rcs           = totals['ended_rollcalls']
-    real_att_slots      = totals['real_attendance_slots']
-    proxy_att_slots     = totals['proxy_attendance_slots']
-    real_attended_users = totals['real_participants']
-    proxy_attended      = totals['proxy_participants']
-    total_att_slots     = real_att_slots + proxy_att_slots
-    avg_attendance      = (total_att_slots / ended_rcs) if ended_rcs > 0 else 0.0
-
-    return "\n".join([
-        "*🤖 Bot-Wide Statistics*", "",
-        "*Groups:*",
-        f"🏘️ Total: {total_groups}",
-        f"✅ Active (7d): {active_groups_7d}",
-        f"✅ Active (30d): {active_groups_30d}", "",
-        "*Rollcalls:*",
-        f"📋 Total: {total_rollcalls}",
-        f"✓ Ended: {ended_rcs}",
-        f"📈 Last 30d: {rollcalls_30d}", "",
-        "*Attendance (final-IN at /erc):*",
-        f"✅ Total IN slots: {total_att_slots}  ({real_att_slots} member + {proxy_att_slots} proxy)",
-        f"📊 Avg per ended rollcall: {avg_attendance:.1f}", "",
-        "*Members:*",
-        f"👥 Distinct real users: {total_real_users}",
-        f"👤 Distinct proxy names: {total_proxy_users}", "",
-        "*Vote breakdown (real-user votes cast, may exceed attendance if users flipped):*",
-        f"🗳 IN: {sum_in}  OUT: {sum_out}  MAYBE: {sum_maybe}", "",
-        f"📝 Templates: {total_templates}",
-    ])
-
-
-async def build_leaderboard_text(chat_id: int, limit: int = 10) -> str:
-    """Top-N by REAL attendance (final-IN in ended rollcalls), including
-    proxies. Tiebreak by total_rollcalls ASC so a participant who attended
-    the same number of sessions but participated in fewer (higher %) ranks
-    first. Proxies are marked with (via /sif)."""
-    rows = get_leaderboard_by_attendance(chat_id, limit)
-    if not rows:
-        return "*Leaderboard:*\n\nNo data yet. Participate in some rollcalls first!"
-
-    total_rcs = get_chat_ended_rollcall_count(chat_id)
-
-    lines = [f"*Leaderboard (top {len(rows)} by attendance):*", ""]
-    for rank, row in enumerate(rows, 1):
-        attended = row['attended']
-        voted = row['total_rollcalls']
-        if row['kind'] == 'proxy':
-            name_text = f"{_esc(row['display_name'])} (via /sif)"
-        elif row.get('username'):
-            name_text = f"@{_esc(row['username'])}"
-        else:
-            name_text = _esc(row['display_name'] or 'User')
-        if total_rcs > 0:
-            att_pct = _pct(attended, total_rcs)
-            vote_pct = _pct(voted, total_rcs)
-            lines.append(
-                f"{rank}. {name_text} — ✅ {attended}/{total_rcs} ({att_pct})  ·  🗳 {voted}/{total_rcs} ({vote_pct})"
-            )
-        else:
-            lines.append(f"{rank}. {name_text} — ✅ {attended}  ·  🗳 {voted}")
-
-    return "\n".join(lines)
-
-
-async def resolve_user_for_stats(chat_id: int, arg: str):
-    """Look up a stats target by @username or by display name. Returns:
-        ('real',      user_id,    display_name)  — real Telegram user
-        ('proxy',     proxy_name, proxy_name)    — proxy added via /sif
-        ('ambiguous', count,      arg)           — multiple matches, ask @username
-        None                                     — no match
-
-    All queries are restricted to ENDED rollcalls (`r.is_active = FALSE`)
-    so in-progress sessions don't shadow real history.
-    """
-    raw = arg.strip()
-    username = raw[1:] if raw.startswith("@") else None
-    name = None if username else raw
-
-    conn = get_connection()
-    cursor = None
-    try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        active_false = 'FALSE' if db_type == 'postgresql' else '0'
-
-        if username:
-            # Telegram @usernames are unique — no ambiguity possible.
-            cursor.execute(f"""
-                SELECT DISTINCT u.user_id, u.first_name FROM users u
-                JOIN rollcalls r ON u.rollcall_id = r.id
-                WHERE r.chat_id = {ph} AND u.username = {ph} AND r.is_active = {active_false}
-                ORDER BY u.user_id
-                LIMIT 1
-            """, (chat_id, username))
-            row = cursor.fetchone()
-            if row is not None:
-                if isinstance(row, dict):
-                    return ('real', row['user_id'], row.get('first_name') or arg)
-                return ('real', row[0], row[1] or arg)
-            return None
-
-        # First-name path: detect ambiguity before picking.
-        cursor.execute(f"""
-            SELECT u.user_id, MAX(u.first_name) AS first_name, MAX(u.updated_at) AS latest_seen
-            FROM users u
-            JOIN rollcalls r ON u.rollcall_id = r.id
-            WHERE r.chat_id = {ph} AND u.first_name = {ph} AND r.is_active = {active_false}
-            GROUP BY u.user_id
-            ORDER BY latest_seen DESC
-        """, (chat_id, name))
-        rows = cursor.fetchall()
-        if rows:
-            if len(rows) > 1:
-                return ('ambiguous', len(rows), name)
-            r = rows[0]
-            if isinstance(r, dict):
-                return ('real', r['user_id'], r.get('first_name') or arg)
-            return ('real', r[0], r[1] or arg)
-
-        # No real-user match — fall through to proxy lookup.
-        if find_proxy_in_chat(chat_id, name):
-            return ('proxy', name, name)
-
-        return None
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
-
-
-async def build_user_stats_text(chat_id: int, user_id: int, first_name: str) -> str:
-    conn = get_connection()
-    cursor = None
-    try:
-        cursor = conn.cursor()
-        if db_type == "postgresql":
-            cursor.execute(
-                "SELECT total_in, total_out, total_maybe, total_waiting_to_in, "
-                "total_rollcalls, current_streak, best_streak "
-                "FROM user_stats WHERE chat_id = %s AND user_id = %s",
-                (chat_id, user_id),
-            )
-        else:
-            cursor.execute(
-                "SELECT total_in, total_out, total_maybe, total_waiting_to_in, "
-                "total_rollcalls, current_streak, best_streak "
-                "FROM user_stats WHERE chat_id = ? AND user_id = ?",
-                (chat_id, user_id),
-            )
-        row = cursor.fetchone()
-        if not row:
-            return f"*Stats for {_esc(first_name)}:*\n\nNo data yet. Participate in a few rollcalls first!"
-
-        data = row if isinstance(row, dict) else {c[0]: row[i] for i, c in enumerate(cursor.description)}
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
-
-    t_in    = int(data.get("total_in", 0) or 0)
-    t_out   = int(data.get("total_out", 0) or 0)
-    t_maybe = int(data.get("total_maybe", 0) or 0)
-    t_wait  = int(data.get("total_waiting_to_in", 0) or 0)
-    voted_in_rcs = int(data.get("total_rollcalls", 0) or 0)
-    streak  = int(data.get("current_streak", 0) or 0)
-    best    = int(data.get("best_streak", 0) or 0)
-
-    total_rcs = get_chat_ended_rollcall_count(chat_id)
-    attended = get_user_attendance_count(chat_id, user_id)
-    ghost_count = get_ghost_count(chat_id, user_id)
-    absent_limit = manager.get_absent_limit(chat_id)
-    # Surface a ⚠ marker once the user has crossed the reconfirmation
-    # threshold (the same limit that triggers the "are you sure?" prompt
-    # the next time they vote IN). Helps users notice they're at risk
-    # without having to read /stats ghost separately.
+def _fmt_personal_stats(data: dict, first_name: str) -> str:
+    if data["total_sessions_voted"] == 0 and data["sessions_attended"] == 0:
+        return f"*Stats for {_esc(first_name)}:*\n\nNo data yet. Participate in a few rollcalls first!"
+    ghost_count = data["ghost_count"]
+    absent_limit = data["absent_limit"]
     ghost_warn = " ⚠️ (next /in asks for reconfirmation)" if ghost_count >= absent_limit and ghost_count > 0 else ""
-
+    total_rcs = data["total_rollcalls_in_chat"]
+    voted = data["total_sessions_voted"]
+    attended = data["sessions_attended"]
     return "\n".join([
         f"*Stats for {_esc(first_name)}:*", "",
-        f"🗳 Voted in: {voted_in_rcs} of {total_rcs} rollcalls ({_pct(voted_in_rcs, total_rcs)})",
-        f"✅ Attended: {attended} of {total_rcs} rollcalls ({_pct(attended, total_rcs)})",
+        f"🗳 Voted in: {voted} of {total_rcs} rollcalls ({_pct_str(data['voting_rate'])})",
+        f"✅ Attended: {attended} of {total_rcs} rollcalls ({_pct_str(data['attendance_rate'])})",
         f"👻 Ghosted: {ghost_count} session(s){ghost_warn}",
-        f"📊 Vote breakdown — IN: {t_in}  OUT: {t_out}  MAYBE: {t_maybe}",
-        f"⏫ Promoted from waitlist: {t_wait}", "",
-        f"🔥 Current streak: {streak} session(s)",
-        f"🏆 Best streak: {best} session(s)",
+        f"📊 Vote breakdown — IN: {data['total_in_votes']}  OUT: {data['total_out_votes']}  MAYBE: {data['total_maybe_votes']}",
+        f"⏫ Promoted from waitlist: {data['total_waiting_to_in']}", "",
+        f"🔥 Current streak: {data['current_streak']} session(s)",
+        f"🏆 Best streak: {data['best_streak']} session(s)",
     ])
 
 
-async def build_proxy_stats_text(chat_id: int, proxy_name: str, display_name: str) -> str:
-    """Per-proxy stats including streaks. Streaks live in the parallel
-    proxy_stats table (keyed on chat_id + proxy_name) — added so proxies
-    are first-class citizens for streak tracking alongside real users."""
-    stats = get_proxy_stats(chat_id, proxy_name)
-    voted = stats['total_rollcalls']
-    attended = stats['attended']
-    total_rcs = get_chat_ended_rollcall_count(chat_id)
-
+def _fmt_proxy_stats(data: dict, display_name: str) -> str:
+    voted = data["total_sessions_voted"]
     if voted == 0:
         return f"*Stats for {_esc(display_name)} (via /sif):*\n\nNo data yet for this proxy."
-
-    streaks = get_proxy_streaks(chat_id, proxy_name)
-    ghost_count = get_ghost_count_by_proxy_name(chat_id, proxy_name)
-    absent_limit = manager.get_absent_limit(chat_id)
+    ghost_count = data["ghost_count"]
+    absent_limit = data["absent_limit"]
     ghost_warn = " ⚠️ (next /sif asks for reconfirmation)" if ghost_count >= absent_limit and ghost_count > 0 else ""
-
+    total_rcs = data["total_rollcalls_in_chat"]
+    attended = data["sessions_attended"]
     return "\n".join([
         f"*Stats for {_esc(display_name)} (via /sif):*", "",
-        f"🗳 Voted in: {voted} of {total_rcs} rollcalls ({_pct(voted, total_rcs)})",
-        f"✅ Attended: {attended} of {total_rcs} rollcalls ({_pct(attended, total_rcs)})",
+        f"🗳 Voted in: {voted} of {total_rcs} rollcalls ({_pct_str(data['voting_rate'])})",
+        f"✅ Attended: {attended} of {total_rcs} rollcalls ({_pct_str(data['attendance_rate'])})",
         f"👻 Ghosted: {ghost_count} session(s){ghost_warn}",
-        f"📊 Per-session breakdown — IN: {stats['total_in']}  OUT: {stats['total_out']}  MAYBE: {stats['total_maybe']}",
+        f"📊 Per-session breakdown — IN: {data['total_in_votes']}  OUT: {data['total_out_votes']}  MAYBE: {data['total_maybe_votes']}",
         "",
-        f"🔥 Current streak: {streaks['current_streak']} session(s)",
-        f"🏆 Best streak: {streaks['best_streak']} session(s)",
+        f"🔥 Current streak: {data['current_streak']} session(s)",
+        f"🏆 Best streak: {data['best_streak']} session(s)",
     ])
 
 
-async def build_group_stats_text(chat_id: int) -> str:
-    """Group stats. Sums REAL attendance (final-IN slots) across both real
-    users and proxies. Vote counts are shown as a secondary detail with
-    explicit labelling so they're not confused with attendance.
-    """
-    totals = get_group_attendance_totals(chat_id)
-    if totals['total_rollcalls'] == 0:
+def _fmt_group_stats(data: dict) -> str:
+    if data["total_rollcalls"] == 0:
         return "*Group stats:*\n\nNo ended rollcalls yet."
-
-    total_rcs        = totals['total_rollcalls']
-    real_slots       = totals['real_attendance_slots']
-    proxy_slots      = totals['proxy_attendance_slots']
-    total_att_slots  = real_slots + proxy_slots
-    real_pax         = totals['real_participants']
-    proxy_pax        = totals['proxy_participants']
-    avg_per_rc       = total_att_slots / total_rcs if total_rcs > 0 else 0.0
-
+    total_rcs = data["total_rollcalls"]
+    real_slots = data["real_attendance_slots"]
+    proxy_slots = data["proxy_attendance_slots"]
+    total_slots = data["total_attendance_slots"]
+    real_pax = data["real_participants"]
+    proxy_pax = data["proxy_participants"]
     lines = [
         "*Group stats:*", "",
         f"📋 Ended rollcalls: {total_rcs}",
-        f"✅ Total attendance (IN slots): {total_att_slots}",
+        f"✅ Total attendance (IN slots): {total_slots}",
         f"   • Members: {real_slots}    • Proxies: {proxy_slots}",
-        f"📊 Average attendance per rollcall: {avg_per_rc:.1f}",
+        f"📊 Average attendance per rollcall: {data['avg_attendance']}",
         f"👥 Distinct attendees: {real_pax + proxy_pax}",
         f"   • Members: {real_pax}    • Proxies: {proxy_pax}",
         "",
         "*Vote activity*",
-        f"🗳 Real-user votes — IN: {totals['real_vote_in']}  OUT: {totals['real_vote_out']}  MAYBE: {totals['real_vote_maybe']}",
-        f"👤 Proxy sessions  — IN: {totals['proxy_in']}  OUT: {totals['proxy_out']}  MAYBE: {totals['proxy_maybe']}",
-        f"⏫ Waitlist → IN promotions: {totals['waitlist_promotions']}",
+        f"🗳 Real-user votes — IN: {data['real_vote_in']}  OUT: {data['real_vote_out']}  MAYBE: {data['real_vote_maybe']}",
+        f"👤 Proxy sessions  — IN: {data['proxy_in']}  OUT: {data['proxy_out']}  MAYBE: {data['proxy_maybe']}",
+        f"⏫ Waitlist → IN promotions: {data['waitlist_promotions']}",
     ]
     if proxy_pax == 0:
-        lines.append("")
-        lines.append("_(No proxy members tracked in this chat yet.)_")
+        lines += ["", "_(No proxy members tracked in this chat yet.)_"]
     return "\n".join(lines)
+
+
+def _fmt_leaderboard(data: dict) -> str:
+    entries = data["entries"]
+    total_rcs = data["total_rollcalls_in_chat"]
+    if not entries:
+        return "*Leaderboard:*\n\nNo data yet. Participate in some rollcalls first!"
+    lines = [f"*Leaderboard (top {len(entries)} by attendance):*", ""]
+    for row in entries:
+        attended = row["sessions_attended"]
+        voted = row["total_sessions_voted"]
+        if row["kind"] == "proxy":
+            name_text = f"{_esc(row['display_name'])} (via /sif)"
+        elif row.get("username"):
+            name_text = f"@{_esc(row['username'])}"
+        else:
+            name_text = _esc(row["display_name"] or "User")
+        if total_rcs > 0:
+            lines.append(
+                f"{row['rank']}. {name_text} — ✅ {attended}/{total_rcs} ({_pct_str(row['attendance_rate'])})  ·  🗳 {voted}/{total_rcs} ({_pct_str(row['voting_rate'])})"
+            )
+        else:
+            lines.append(f"{row['rank']}. {name_text} — ✅ {attended}  ·  🗳 {voted}")
+    return "\n".join(lines)
+
+
+def _fmt_ghost_stats(cid: int) -> str:
+    leaderboard = ghost_svc.ghost_leaderboard(cid)
+    limit = manager.get_absent_limit(cid)
+    tracking_on = manager.get_ghost_tracking_enabled(cid)
+    if not leaderboard:
+        return "🏆 No ghosts yet — everyone's been showing up!"
+    lines = ["👻 *Ghost Leaderboard*", "─────────────────"]
+    for i, entry in enumerate(leaderboard, 1):
+        name = f"{entry['name']} (via /sif)" if entry["is_proxy"] else entry["name"]
+        count = entry["ghost_count"]
+        warning = " ⚠️" if count >= limit else ""
+        lines.append(f"{i}. {_esc(name)} — {count} session(s) ghosted{warning}")
+    lines += ["", f"Current ghost limit: {limit} session(s)"]
+    if not tracking_on:
+        lines.append("_(Ghost tracking is currently disabled for this group)_")
+    return "\n".join(lines)
+
+
+def _fmt_bot_stats(data: dict) -> str:
+    return "\n".join([
+        "*🤖 Bot-Wide Statistics*", "",
+        "*Groups:*",
+        f"🏘️ Total: {data['total_groups']}",
+        f"✅ Active (7d): {data['active_groups_7d']}",
+        f"✅ Active (30d): {data['active_groups_30d']}", "",
+        "*Rollcalls:*",
+        f"📋 Total: {data['total_rollcalls']}",
+        f"✓ Ended: {data['ended_rollcalls']}",
+        f"📈 Last 30d: {data['rollcalls_30d']}", "",
+        "*Attendance (final-IN at /erc):*",
+        f"✅ Total IN slots: {data['total_attendance_slots']}  ({data['real_attendance_slots']} member + {data['proxy_attendance_slots']} proxy)",
+        f"📊 Avg per ended rollcall: {data['avg_attendance_per_rollcall']}", "",
+        "*Members:*",
+        f"👥 Distinct real users: {data['total_real_users']}",
+        f"👤 Distinct proxy names: {data['total_proxy_users']}", "",
+        "*Vote breakdown (real-user votes cast, may exceed attendance if users flipped):*",
+        f"🗳 IN: {data['sum_in_votes']}  OUT: {data['sum_out_votes']}  MAYBE: {data['sum_maybe_votes']}", "",
+        f"📝 Templates: {data['total_templates']}",
+    ])

@@ -81,9 +81,11 @@ def _make_manager(rollcalls=None, ghost_on=True, absent_limit=1, shh=False):
     m.get_admin_rights.return_value = False
     m.get_ghost_tracking_enabled.return_value = ghost_on
     m.get_absent_limit.return_value = absent_limit
-    # get_chat_write_lock returns a real asyncio.Lock for async tests
-    import asyncio
-    m.get_chat_write_lock.return_value = asyncio.Lock()
+    # get_chat_write_lock returns an async-context-manager mock (no event loop needed)
+    lock_ctx = MagicMock()
+    lock_ctx.__aenter__ = AsyncMock(return_value=None)
+    lock_ctx.__aexit__ = AsyncMock(return_value=False)
+    m.get_chat_write_lock.return_value = lock_ctx
     return m
 
 
@@ -1299,30 +1301,40 @@ class TestStatsService(unittest.TestCase):
         self.assertEqual(result["sessions_attended"], 7)
 
     def test_group_stats_returns_dict(self):
-        with patch("services.stats.get_group_attendance_totals", return_value={"total_in": 50, "unique_users": 10}), \
+        with patch("services.stats.get_group_attendance_totals", return_value={
+                "real_attendance_slots": 40, "proxy_attendance_slots": 10,
+                "real_participants": 8, "proxy_participants": 2,
+                "real_vote_in": 40, "real_vote_out": 5, "real_vote_maybe": 3,
+                "proxy_in": 10, "proxy_out": 1, "proxy_maybe": 0,
+                "waitlist_promotions": 2,
+             }), \
              patch("services.stats.get_chat_ended_rollcall_count", return_value=20), \
              patch("services.stats.get_leaderboard_by_attendance", return_value=[]), \
              patch("services.stats.get_ghost_leaderboard", return_value=[]):
             from services.stats import group_stats
             result = group_stats(100)
         self.assertEqual(result["total_rollcalls"], 20)
-        self.assertEqual(result["total_attendances"], 50)
+        self.assertEqual(result["total_attendance_slots"], 50)
+        self.assertEqual(result["real_participants"], 8)
 
     def test_leaderboard_returns_ranked_list(self):
         rows = [
-            {"first_name": "Alice", "proxy_name": None, "user_id": 1, "attended": 10},
-            {"first_name": None, "proxy_name": "Bob-Proxy", "user_id": None, "attended": 5},
+            {"display_name": "Alice", "first_name": "Alice", "proxy_name": None, "user_id": 1,
+             "attended": 10, "total_rollcalls": 12, "username": None, "kind": "real"},
+            {"display_name": "Bob-Proxy", "first_name": None, "proxy_name": "Bob-Proxy", "user_id": None,
+             "attended": 5, "total_rollcalls": 5, "username": None, "kind": "proxy"},
         ]
         with patch("services.stats.get_chat_ended_rollcall_count", return_value=15), \
              patch("services.stats.get_leaderboard_by_attendance", return_value=rows):
             from services.stats import leaderboard
             result = leaderboard(100, limit=10)
-        self.assertEqual(len(result), 2)
-        self.assertEqual(result[0]["rank"], 1)
-        self.assertEqual(result[0]["name"], "Alice")
-        self.assertFalse(result[0]["is_proxy"])
-        self.assertEqual(result[1]["rank"], 2)
-        self.assertTrue(result[1]["is_proxy"])
+        entries = result["entries"]
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(entries[0]["rank"], 1)
+        self.assertEqual(entries[0]["display_name"], "Alice")
+        self.assertEqual(entries[0]["kind"], "real")
+        self.assertEqual(entries[1]["rank"], 2)
+        self.assertEqual(entries[1]["kind"], "proxy")
 
     def test_history_returns_list(self):
         rows = [{"id": 1, "title": "Game", "ended_at": "2024-01-01", "in_count": 5,

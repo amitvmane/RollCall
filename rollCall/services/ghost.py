@@ -10,6 +10,7 @@ from exceptions import incorrectParameter
 from rollcall_manager import manager
 from db import (
     get_ghost_leaderboard,
+    get_user_ghost_count_by_name,
     log_admin_action,
     reset_ghost_count,
     update_chat_settings,
@@ -91,6 +92,33 @@ def clear_absent(
                          f"proxy:{proxy_name}" if proxy_name else "all"
                      ))
     return {"cleared": True}
+
+
+def find_ghost_record(chat_id: int, name: str) -> Optional[dict]:
+    """
+    Find a ghost record by name (exact first, then Levenshtein fuzzy fallback ≤3).
+
+    Returns the matching record dict or None if no close match exists.
+    """
+    record = get_user_ghost_count_by_name(chat_id, name)
+    if record:
+        return record
+    leaderboard = get_ghost_leaderboard(chat_id)
+    best = None
+    best_score = None
+    try:
+        from Levenshtein import distance as lev_distance
+        for entry in leaderboard:
+            entry_name = entry.get("user_name") or entry.get("proxy_name") or ""
+            score = lev_distance(name.lower(), entry_name.lower())
+            if best_score is None or score < best_score:
+                best_score = score
+                best = entry
+    except ImportError:
+        pass
+    if best and best_score is not None and best_score <= 3:
+        return best
+    return None
 
 
 def ghost_leaderboard(chat_id: int) -> list:

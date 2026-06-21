@@ -1164,12 +1164,35 @@ class TestStatsCommand(HandlerTestBase):
 
     async def _run_stats(self, text):
         msg = self._make_message(text, user_id=42, first_name="Alice", username="alice")
+        _personal = {
+            "total_rollcalls_in_chat": 10, "sessions_attended": 8, "attendance_rate": 80.0,
+            "total_in_votes": 8, "total_out_votes": 1, "total_maybe_votes": 1,
+            "total_sessions_voted": 8, "voting_rate": 80.0, "total_waiting_to_in": 0,
+            "best_streak": 3, "current_streak": 2, "ghost_count": 0, "absent_limit": 3,
+        }
+        _group = {
+            "total_rollcalls": 10, "real_attendance_slots": 80, "proxy_attendance_slots": 10,
+            "total_attendance_slots": 90, "real_participants": 8, "proxy_participants": 2,
+            "avg_attendance": 9.0, "real_vote_in": 80, "real_vote_out": 5, "real_vote_maybe": 3,
+            "proxy_in": 10, "proxy_out": 1, "proxy_maybe": 0, "waitlist_promotions": 2,
+            "top_attendees": [], "ghost_leaderboard": [],
+        }
+        _lb = {"total_rollcalls_in_chat": 10, "entries": []}
         with self._patch_manager(), \
-             patch('handlers.stats.build_user_stats_text', new=AsyncMock(return_value="stats text")), \
-             patch('handlers.stats.build_group_stats_text', new=AsyncMock(return_value="group text")), \
-             patch('handlers.stats.build_leaderboard_text', new=AsyncMock(return_value="leader text")), \
-             patch('handlers.stats.build_bot_stats_text', new=AsyncMock(return_value="bot text")), \
-             patch('handlers.stats.resolve_user_for_stats', new=AsyncMock(return_value=(42, "Alice"))):
+             patch('handlers.stats.stats_svc') as mock_svc, \
+             patch('handlers.stats.ghost_svc') as mock_gsvc:
+            mock_svc.personal_stats.return_value = _personal
+            mock_svc.group_stats.return_value = _group
+            mock_svc.leaderboard.return_value = _lb
+            mock_svc.bot_stats.return_value = {k: 0 for k in [
+                "total_groups", "active_groups_7d", "active_groups_30d", "total_rollcalls",
+                "ended_rollcalls", "rollcalls_30d", "total_real_users", "total_proxy_users",
+                "total_templates", "total_attendance_slots", "real_attendance_slots",
+                "proxy_attendance_slots", "avg_attendance_per_rollcall", "real_participants",
+                "proxy_participants", "sum_in_votes", "sum_out_votes", "sum_maybe_votes",
+            ]}
+            mock_svc.resolve_user.return_value = ("real", 42, "Alice")
+            mock_gsvc.ghost_leaderboard.return_value = []
             await self.stats_command(msg)
 
     async def test_stats_my_stats_sends_message(self):

@@ -12,13 +12,36 @@ from datetime import datetime
 
 from exceptions import incorrectParameter, parameterMissing, rollCallNotStarted
 from rollcall_manager import manager
-from db import log_admin_action, delete_user_by_id
+from db import log_admin_action, delete_user_by_id, get_admin_audit_log, count_admin_audit_log
 
 from .common import resolve_rollcall_or_raise, serialize_rollcall
 
 
 def _ts() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def get_audit_log(chat_id: int, page: int = 1, per_page: int = 15) -> dict:
+    """
+    Return a page of admin audit log entries for a chat.
+
+    Returns:
+      {"total": int, "page": int, "total_pages": int, "per_page": int, "records": list}
+    """
+    total = count_admin_audit_log(chat_id)
+    if total == 0:
+        return {"total": 0, "page": 1, "total_pages": 1, "per_page": per_page, "records": []}
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    page = max(1, min(page, total_pages))
+    offset = (page - 1) * per_page
+    records = get_admin_audit_log(chat_id, limit=per_page, offset=offset)
+    return {
+        "total": total,
+        "page": page,
+        "total_pages": total_pages,
+        "per_page": per_page,
+        "records": list(records),
+    }
 
 
 def delete_user_from_rollcall(

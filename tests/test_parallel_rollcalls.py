@@ -303,7 +303,10 @@ class TestStateIsolation(TestParallelRollcallsBase):
         mgr.get_rollcall.return_value = rc2
 
         msg = self._make_message("/set_title New Title ::2")
-        with self._rc_started(), patch('handlers.lifecycle.manager', mgr):
+        with self._rc_started(), \
+             patch('handlers.lifecycle.manager', mgr), \
+             patch('rollcall_manager.manager', mgr), \
+             patch('services.rollcalls.log_admin_action'):
             await self.set_title(msg)
 
         self.assertEqual(rc2.title, "New Title")

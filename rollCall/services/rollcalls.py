@@ -245,3 +245,32 @@ def get_rollcall(chat_id: int, rc_number: int = 0) -> dict:
     """
     rc = resolve_rollcall_or_raise(chat_id, rc_number)
     return serialize_rollcall(rc, rc_number)
+
+
+def set_title(
+    chat_id: int,
+    rc_number: int,
+    title: str,
+    admin_user_id: int,
+    admin_name: str,
+) -> dict:
+    """
+    Rename a rollcall. Empty title falls back to '<Empty>'.
+
+    Returns:
+      Serialized rollcall dict with the new title.
+    Raises:
+      rollCallNotStarted — no rollcalls active
+      incorrectParameter — rc_number out of range
+    """
+    rc = resolve_rollcall_or_raise(chat_id, rc_number)
+    clean_title = title.strip() or "<Empty>"
+    rc.title = clean_title
+    rc.save()
+    log_admin_action(
+        chat_id, admin_user_id, admin_name,
+        "set_title", target_name=clean_title,
+        rollcall_id=getattr(rc, "id", None), details=str(rc_number + 1),
+    )
+    logging.info(f"[{_ts()}] [CHAT {chat_id}] Title set to '{clean_title}' by {admin_name}")
+    return serialize_rollcall(rc, rc_number)

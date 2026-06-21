@@ -9,7 +9,7 @@ from config import ADMINS
 from exceptions import parameterMissing
 from functions import admin_rights, auto_complete_timezone
 from rollcall_manager import manager
-from db import get_all_chat_ids, log_admin_action
+from db import get_all_chat_ids
 from services import settings as settings_svc
 from commands_registry import (
     COMMANDS, lookup_command, all_names_and_aliases,
@@ -173,8 +173,7 @@ async def set_admins(message):
     if member.status not in ['administrator', 'creator']:
         await bot.send_message(cid, "You don't have permissions to use this command :(")
         return
-    manager.set_admin_rights(cid, True)
-    log_admin_action(cid, message.from_user.id, message.from_user.first_name, "set_admins")
+    settings_svc.set_admin_rights(cid, True, message.from_user.id, message.from_user.first_name)
     await bot.send_message(cid, 'Admin permissions activated')
 
 
@@ -185,8 +184,7 @@ async def unset_admins(message):
     if member.status not in ['administrator', 'creator']:
         await bot.send_message(cid, "You don't have permissions to use this command :(")
         return
-    manager.set_admin_rights(cid, False)
-    log_admin_action(cid, message.from_user.id, message.from_user.first_name, "unset_admins")
+    settings_svc.set_admin_rights(cid, False, message.from_user.id, message.from_user.first_name)
     await bot.send_message(cid, 'Admin permissions disabled')
 
 

@@ -7,9 +7,12 @@ All return a dict describing what changed.
 
 from __future__ import annotations
 
+import re
+from datetime import datetime, timedelta
+
 import pytz
 
-from exceptions import incorrectParameter
+from exceptions import incorrectParameter, parameterMissing, timeError
 from rollcall_manager import manager
 from db import (
     increment_rollcall_stat,
@@ -198,3 +201,153 @@ def set_event_fee(
     log_admin_action(chat_id, admin_user_id, admin_name,
                      "event_fee", details=fee)
     return serialize_rollcall(rc, rc_number)
+
+
+def set_rollcall_time(
+    chat_id: int,
+    rc_number: int,
+    datetime_str: str,
+    admin_user_id: int,
+    admin_name: str,
+) -> dict:
+    """
+    Set or cancel the finalize datetime for a rollcall.
+
+    Pass datetime_str="cancel" to clear both finalizeDate and reminder.
+    Otherwise pass "DD-MM-YYYY HH:MM" in the rollcall's configured timezone.
+
+    Returns:
+      {"rollcall": ..., "cancelled": bool, "reminder_reset": bool}
+    Raises:
+      rollCallNotStarted — no rollcall at rc_number
+      incorrectParameter — bad format
+      timeError          — date is in the past
+    """
+    rc = resolve_rollcall_or_raise(chat_id, rc_number)
+
+    if datetime_str.strip().lower() == "cancel":
+        rc.finalizeDate = None
+        rc.reminder = None
+        rc.save()
+        log_admin_action(chat_id, admin_user_id, admin_name,
+                         "set_rollcall_time", details="cancelled",
+                         rollcall_id=getattr(rc, "id", None))
+        return {"rollcall": serialize_rollcall(rc, rc_number), "cancelled": True, "reminder_reset": False}
+
+    tz = pytz.timezone(rc.timezone)
+    try:
+        date = datetime.strptime(datetime_str.strip(), "%d-%m-%Y %H:%M")
+    except ValueError:
+        raise incorrectParameter(
+            f"'{datetime_str}' is not a valid datetime. Use DD-MM-YYYY HH:MM (e.g. 25-12-2026 18:30)."
+        )
+    date = tz.localize(date)
+    now = datetime.now(tz)
+    if now > date:
+        raise timeError("Please provide valid future datetime.")
+
+    reminder_reset = rc.reminder is not None
+    rc.finalizeDate = date
+    rc.reminder = None
+    rc.save()
+    log_admin_action(chat_id, admin_user_id, admin_name,
+                     "set_rollcall_time", details=date.strftime("%d-%m-%Y %H:%M"),
+                     rollcall_id=getattr(rc, "id", None))
+    return {
+        "rollcall": serialize_rollcall(rc, rc_number),
+        "cancelled": False,
+        "reminder_reset": reminder_reset,
+        "finalize_str": date.strftime("%d-%m-%Y %H:%M"),
+        "timezone": rc.timezone,
+    }
+
+
+def set_reminder(
+    chat_id: int,
+    rc_number: int,
+    hours: int | None,
+    admin_user_id: int,
+    admin_name: str,
+) -> dict:
+    """
+    Set or cancel the reminder for a rollcall.
+
+    Pass hours=None to cancel. Otherwise hours must be >= 1 and the
+    reminder time (finalizeDate - hours) must be in the future.
+
+    Returns:
+      {"rollcall": ..., "cancelled": bool, "hours": int|None}
+    Raises:
+      rollCallNotStarted — no rollcall at rc_number
+      parameterMissing   — finalizeDate not set
+      incorrectParameter — hours < 1 or reminder already in the past
+    """
+    rc = resolve_rollcall_or_raise(chat_id, rc_number)
+
+    if hours is None:
+        rc.reminder = None
+        rc.save()
+        log_admin_action(chat_id, admin_user_id, admin_name,
+                         "set_reminder", details="cancelled",
+                         rollcall_id=getattr(rc, "id", None))
+        return {"rollcall": serialize_rollcall(rc, rc_number), "cancelled": True, "hours": None}
+
+    if rc.finalizeDate is None:
+        raise parameterMissing("First you need to set a finalize time for the current rollcall.")
+    if hours < 1:
+        raise incorrectParameter("Hours must be higher than 1.")
+
+    tz = pytz.timezone(rc.timezone)
+    finalize = rc.finalizeDate
+    if finalize.tzinfo is None:
+        finalize = tz.localize(finalize)
+    if finalize - timedelta(hours=hours) < datetime.now(tz):
+        raise incorrectParameter("Reminder notification time is less than current time, please set it correctly.")
+
+    rc.reminder = hours
+    rc.save()
+    log_admin_action(chat_id, admin_user_id, admin_name,
+                     "set_reminder", details=f"{hours}h",
+                     rollcall_id=getattr(rc, "id", None))
+    return {"rollcall": serialize_rollcall(rc, rc_number), "cancelled": False, "hours": hours}
+
+
+def get_individual_fee(chat_id: int, rc_number: int = 0) -> dict:
+    """
+    Compute the per-person fee for a rollcall based on event_fee / IN-list size.
+
+    Returns:
+      {"event_fee": str, "in_count": int, "individual_fee": float}
+    Raises:
+      rollCallNotStarted — no rollcall at rc_number
+      parameterMissing   — no event fee set
+    """
+    rc = resolve_rollcall_or_raise(chat_id, rc_number)
+    if rc.event_fee is None:
+        raise parameterMissing("No event fee set. Use /event_fee to set one first.")
+    in_count = len(rc.inList)
+    numeric = int(re.sub(r"[^0-9]", "", str(rc.event_fee)) or "0")
+    individual = round(numeric / in_count, 2) if in_count > 0 else 0.0
+    return {
+        "event_fee": str(rc.event_fee),
+        "in_count": in_count,
+        "individual_fee": individual,
+    }
+
+
+def set_admin_rights(
+    chat_id: int,
+    enabled: bool,
+    admin_user_id: int,
+    admin_name: str,
+) -> dict:
+    """
+    Enable or disable admin-only mode for a chat.
+
+    Returns:
+      {"admin_rights": bool}
+    """
+    manager.set_admin_rights(chat_id, enabled)
+    log_admin_action(chat_id, admin_user_id, admin_name,
+                     "set_admins" if enabled else "unset_admins")
+    return {"admin_rights": enabled}

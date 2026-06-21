@@ -19,7 +19,6 @@ from exceptions import (
 )
 from functions import admin_rights, roll_call_not_started
 from rollcall_manager import manager
-from db import log_admin_action
 from services import settings as settings_svc
 
 
@@ -51,53 +50,33 @@ async def set_rollcall_time(message):
         rollcalls = manager.get_rollcalls(cid)
         if rc_number < 0 or len(rollcalls) < rc_number + 1:
             raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
-        rc = manager.get_rollcall(cid, rc_number)
-
-        if (pmts[0]).lower() == 'cancel':
-            rc.finalizeDate = None
-            rc.reminder = None
-            rc.save()
-            if not manager.get_shh_mode(cid):
-                await bot.send_message(message.chat.id, "Reminder time is canceled.")
-            return
-
         input_datetime = " ".join(pmts).strip()
-        tz = pytz.timezone(rc.timezone)
-        try:
-            date = datetime.strptime(input_datetime, "%d-%m-%Y %H:%M")
-        except ValueError:
-            raise incorrectParameter(
-                f"'{input_datetime}' is not a valid datetime. Use DD-MM-YYYY HH:MM (e.g. 25-12-2026 18:30)."
-            )
-        date = tz.localize(date)
-        now_date_string = datetime.now(pytz.timezone(rc.timezone)).strftime("%d-%m-%Y %H:%M")
-        now_date = datetime.strptime(now_date_string, "%d-%m-%Y %H:%M")
-        now_date = tz.localize(now_date)
+        result = settings_svc.set_rollcall_time(
+            cid, rc_number, input_datetime,
+            message.from_user.id, message.from_user.first_name,
+        )
 
-        if now_date > date:
-            raise timeError("Please provide valid future datetime.")
-
-        rc.finalizeDate = date
-        changed = False
-        if rc.reminder is not None:
-            rc.reminder = None
-            changed = True
-
-        rc.save()
         if not manager.get_shh_mode(cid):
-            backslash = '\n'
-            await bot.send_message(cid, f"Event notification time is set to {rc.finalizeDate.strftime('%d-%m-%Y %H:%M')} {rc.timezone} for '{rc.title}' (ID: {rc_number + 1}).{backslash*2+'Reminder has been reset!' if changed else ''}")
+            if result["cancelled"]:
+                await bot.send_message(message.chat.id, "Reminder time is canceled.")
+            else:
+                suffix = "\n\nReminder has been reset!" if result["reminder_reset"] else ""
+                rc_title = result["rollcall"]["title"]
+                await bot.send_message(
+                    cid,
+                    f"Event notification time is set to {result['finalize_str']} {result['timezone']}"
+                    f" for '{rc_title}' (ID: {rc_number + 1}).{suffix}"
+                )
 
+        rc = manager.get_rollcall(cid, rc_number)
         from handlers.lifecycle import _update_panel
         await _update_panel(cid, rc_number + 1, rc)
-        from check_reminders import start
-        rollcalls = manager.get_rollcalls(cid)
-        asyncio.create_task(start(rollcalls, rc.timezone, cid)).add_done_callback(_log_task_exc)
+        if not result["cancelled"]:
+            from check_reminders import start
+            rollcalls = manager.get_rollcalls(cid)
+            asyncio.create_task(start(rollcalls, rc.timezone, cid)).add_done_callback(_log_task_exc)
 
     except Exception as e:
-        # Only log as a bug if it's not a curated user-input exception —
-        # reply_error already passes user-facing exceptions through verbatim
-        # without logging.
         from bot_state import _USER_FACING_EXCEPTIONS
         if not isinstance(e, _USER_FACING_EXCEPTIONS):
             logging.exception("[set_rollcall_time] Unexpected error")
@@ -133,46 +112,32 @@ async def reminder(message):
             if rc_number < 0 or len(rollcalls) < rc_number + 1:
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
-        rc = manager.get_rollcall(cid, rc_number)
-
-        if rc.finalizeDate is None:
-            raise parameterMissing('First you need to set a finalize time for the current rollcall')
-
-        if len(pmts) > 0 and pmts[0].lower() == 'cancel':
-            rc.reminder = None
-            rc.save()
-            if not manager.get_shh_mode(cid):
-                await bot.send_message(message.chat.id, "Reminder Notification is canceled.")
-            from handlers.lifecycle import _update_panel
-            await _update_panel(cid, rc_number + 1, rc)
-            return
-
-        if len(pmts) == 0 or not pmts[0].isdigit():
+        if len(pmts) == 0:
             raise parameterMissing("The format is /set_rollcall_reminder hours")
 
-        if int(pmts[0]) < 1:
-            raise incorrectParameter("Hours must be higher than 1")
+        cancel = pmts[0].lower() == "cancel"
+        hours_val = None if cancel else (int(pmts[0]) if pmts[0].isdigit() else None)
+        if not cancel and hours_val is None:
+            raise parameterMissing("The format is /set_rollcall_reminder hours")
 
-        hour = pmts[0]
+        result = settings_svc.set_reminder(
+            cid, rc_number, hours_val,
+            message.from_user.id, message.from_user.first_name,
+        )
 
-        finalize = rc.finalizeDate
-        if finalize.tzinfo is None:
-            finalize = pytz.timezone(rc.timezone).localize(finalize)
-        if finalize - timedelta(hours=int(hour)) < datetime.now(pytz.timezone(rc.timezone)):
-            raise incorrectParameter("Reminder notification time is less than current time, please set it correctly.")
-
-        rc.reminder = int(hour) if int(hour) != 0 else None
-        rc.save()
         if not manager.get_shh_mode(cid):
-            await bot.send_message(cid, f'I will remind {hour}hour/s before the event! Thank you!')
+            if result["cancelled"]:
+                await bot.send_message(message.chat.id, "Reminder Notification is canceled.")
+            else:
+                await bot.send_message(cid, f"I will remind {result['hours']}hour/s before the event! Thank you!")
 
+        rc = manager.get_rollcall(cid, rc_number)
         from handlers.lifecycle import _update_panel
         await _update_panel(cid, rc_number + 1, rc)
 
     except ValueError:
-        # Normal user-input error — curated message, no traceback in logs.
         logging.info(f"[{_ts()}] [reminder] invalid value from user")
-        await bot.send_message(cid, 'The correct format is /set_rollcall_reminder HH')
+        await bot.send_message(cid, "The correct format is /set_rollcall_reminder HH")
     except Exception as e:
         await reply_error(cid, e)
 
@@ -244,18 +209,8 @@ async def individual_fee(message):
             if rc_number < 0 or len(rollcalls) < rc_number + 1:
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
-        rc = manager.get_rollcall(cid, rc_number)
-        if rc.event_fee is None:
-            raise parameterMissing("No event fee set. Use /event_fee to set one first.")
-        in_list = len(rc.inList)
-        event_price = int(re.sub(r'[^0-9]', "", str(rc.event_fee)))
-
-        if in_list > 0:
-            ind_fee = round(event_price / in_list, 2)
-        else:
-            ind_fee = 0
-
-        await bot.send_message(cid, f'Individual fee is {ind_fee}')
+        result = settings_svc.get_individual_fee(cid, rc_number)
+        await bot.send_message(cid, f"Individual fee is {result['individual_fee']}")
 
     except Exception as e:
         await reply_error(cid, e)

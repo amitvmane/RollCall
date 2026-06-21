@@ -20,13 +20,14 @@ from models import User
 from rollcall_manager import manager
 from db import (
     get_ghost_count, increment_ghost_count, reset_ghost_count, decrement_ghost_count,
-    get_ghost_leaderboard, get_user_ghost_count_by_name, get_ghost_count_by_proxy_name,
+    get_ghost_leaderboard, get_ghost_count_by_proxy_name,
     mark_rollcall_absent_done, get_unprocessed_rollcalls,
     add_ghost_event, get_rollcall_in_users, save_ghost_selections, load_ghost_selections,
     reset_user_streak, log_admin_action, upsert_chat_member,
     increment_user_stat, increment_rollcall_stat,
 )
 from services import admin as admin_svc
+from services import ghost as ghost_svc
 from services import voting as voting_svc
 
 
@@ -73,8 +74,7 @@ async def toggle_ghost_tracking(message):
             new_state = False
         else:
             new_state = not manager.get_ghost_tracking_enabled(cid)
-        manager.set_ghost_tracking_enabled(cid, new_state)
-        log_admin_action(cid, message.from_user.id, message.from_user.first_name, "toggle_ghost_tracking", details=f"enabled={new_state}")
+        ghost_svc.toggle_ghost_tracking(cid, new_state, message.from_user.id, message.from_user.first_name)
         if not manager.get_shh_mode(cid):
             await bot.send_message(cid, f"👻 Ghost tracking is now {'ENABLED' if new_state else 'DISABLED'}.")
 
@@ -104,7 +104,7 @@ async def set_absent_limit(message):
         except ValueError:
             await bot.send_message(cid, "⚠️ Please provide a positive integer. Example: /set_absent_limit 3")
             return
-        manager.set_absent_limit(cid, limit)
+        ghost_svc.set_absent_limit(cid, limit, message.from_user.id, message.from_user.first_name)
         if not manager.get_shh_mode(cid):
             await bot.send_message(
                 cid,
@@ -127,32 +127,22 @@ async def clear_absent(message):
             return
         target_name = parts[1].strip()
 
-        record = get_user_ghost_count_by_name(cid, target_name)
+        record = ghost_svc.find_ghost_record(cid, target_name)
         if not record:
-            leaderboard = get_ghost_leaderboard(cid)
-            best = None
-            best_score = None
-            try:
-                from Levenshtein import distance as lev_distance
-                for entry in leaderboard:
-                    name = entry.get('user_name') or entry.get('proxy_name') or ""
-                    score = lev_distance(target_name.lower(), name.lower())
-                    if best_score is None or score < best_score:
-                        best_score = score
-                        best = entry
-            except ImportError:
-                pass
-            if best and best_score is not None and best_score <= 3:
-                record = best
-            else:
-                await bot.send_message(cid, f"⚠️ No ghost record found for '{target_name}'.")
-                return
+            await bot.send_message(cid, f"⚠️ No ghost record found for '{target_name}'.")
+            return
 
-        proxy_name = record.get('proxy_name')
-        user_id = record.get('user_id', -1)
-        reset_ghost_count(cid, user_id, proxy_name=proxy_name)
-        name = record.get('user_name') or proxy_name or target_name
-        await bot.send_message(cid, f"✅ {name}'s ghost record has been cleared. Fresh start! 👻➡️✅")
+        proxy_name = record.get("proxy_name")
+        user_id = record.get("user_id")
+        ghost_svc.clear_absent(
+            cid,
+            message.from_user.id,
+            message.from_user.first_name,
+            target_user_id=user_id if not proxy_name else None,
+            proxy_name=proxy_name,
+        )
+        display = record.get("user_name") or proxy_name or target_name
+        await bot.send_message(cid, f"✅ {display}'s ghost record has been cleared. Fresh start! 👻➡️✅")
     except Exception as e:
         await reply_error(message, e)
 

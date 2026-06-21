@@ -452,11 +452,16 @@ class TestGhostCallbackDone(GhostTestBase):
 class TestSetAbsentLimit(GhostTestBase):
 
     async def test_sets_limit_successfully(self):
+        mock_ghost_svc = MagicMock()
         with patch('handlers.ghost.admin_rights', new=AsyncMock(return_value=True)), \
-             patch('handlers.ghost.manager', self.manager):
+             patch('handlers.ghost.manager', self.manager), \
+             patch('handlers.ghost.ghost_svc', mock_ghost_svc):
             await self.set_absent_limit(self._make_message("/set_absent_limit 3"))
 
-        self.manager.set_absent_limit.assert_called_once_with(100, 3)
+        mock_ghost_svc.set_absent_limit.assert_called_once()
+        call_args = mock_ghost_svc.set_absent_limit.call_args[0]
+        self.assertEqual(call_args[0], 100)
+        self.assertEqual(call_args[1], 3)
         text = self._sent_text(0)
         self.assertIn("3", text)
 
@@ -496,20 +501,30 @@ class TestSetAbsentLimit(GhostTestBase):
 
 class TestStatsGhost(GhostTestBase):
 
+    def _ghost_ctx(self, board=None, manager=None):
+        """Context manager that patches ghost_svc and stats manager for /stats ghost tests."""
+        mock_ghost_svc = MagicMock()
+        mock_ghost_svc.ghost_leaderboard.return_value = board or []
+        mgr = manager or self.manager
+        return (mock_ghost_svc, [
+            patch('handlers.stats.ghost_svc', mock_ghost_svc),
+            patch('handlers.stats.manager', mgr),
+        ])
+
     async def test_no_ghosts_sends_clean_message(self):
-        with patch('handlers.stats.get_ghost_leaderboard', return_value=[]), \
-             patch('handlers.stats.manager', self.manager):
+        mock_gsvc, patches = self._ghost_ctx([])
+        with patches[0], patches[1]:
             await self.stats_command(self._make_message("/stats ghost"))
 
         self.assertIn("🏆", self._sent_text(0))
 
     async def test_leaderboard_lists_ghosts(self):
         board = [
-            {'user_id': 5, 'user_name': 'Bob', 'ghost_count': 3},
-            {'user_id': 6, 'user_name': 'Carol', 'ghost_count': 1},
+            {'name': 'Bob', 'ghost_count': 3, 'is_proxy': False},
+            {'name': 'Carol', 'ghost_count': 1, 'is_proxy': False},
         ]
-        with patch('handlers.stats.get_ghost_leaderboard', return_value=board), \
-             patch('handlers.stats.manager', self.manager):
+        mock_gsvc, patches = self._ghost_ctx(board)
+        with patches[0], patches[1]:
             await self.stats_command(self._make_message("/stats ghost"))
 
         text = self._sent_text(0)
@@ -518,24 +533,24 @@ class TestStatsGhost(GhostTestBase):
         self.assertIn("👻", text)
 
     async def test_warning_badge_shown_for_users_at_or_above_limit(self):
-        board = [{'user_id': 5, 'user_name': 'Bob', 'ghost_count': 2}]
+        board = [{'name': 'Bob', 'ghost_count': 2, 'is_proxy': False}]
         self.manager.get_absent_limit.return_value = 2
-        with patch('handlers.stats.get_ghost_leaderboard', return_value=board), \
-             patch('handlers.stats.manager', self.manager):
+        mock_gsvc, patches = self._ghost_ctx(board, manager=self.manager)
+        with patches[0], patches[1]:
             await self.stats_command(self._make_message("/stats ghost"))
 
         self.assertIn("⚠️", self._sent_text(0))
 
     async def test_ghosts_alias_works(self):
-        with patch('handlers.stats.get_ghost_leaderboard', return_value=[]), \
-             patch('handlers.stats.manager', self.manager):
+        mock_gsvc, patches = self._ghost_ctx([])
+        with patches[0], patches[1]:
             await self.stats_command(self._make_message("/stats ghosts"))
 
         self.assertIn("🏆", self._sent_text(0))
 
     async def test_absent_alias_works(self):
-        with patch('handlers.stats.get_ghost_leaderboard', return_value=[]), \
-             patch('handlers.stats.manager', self.manager):
+        mock_gsvc, patches = self._ghost_ctx([])
+        with patches[0], patches[1]:
             await self.stats_command(self._make_message("/stats absent"))
 
         self.assertIn("🏆", self._sent_text(0))
@@ -548,14 +563,15 @@ class TestStatsGhost(GhostTestBase):
 class TestClearAbsent(GhostTestBase):
 
     async def test_clears_by_exact_name(self):
-        record = {'user_id': 5, 'user_name': 'Bob', 'ghost_count': 2}
+        record = {'user_id': 5, 'name': 'Bob', 'ghost_count': 2, 'is_proxy': False}
+        mock_ghost_svc = MagicMock()
+        mock_ghost_svc.find_ghost_record.return_value = record
         with patch('handlers.ghost.admin_rights', new=AsyncMock(return_value=True)), \
-             patch('handlers.ghost.get_user_ghost_count_by_name', return_value=record), \
-             patch('handlers.ghost.reset_ghost_count') as mock_reset, \
+             patch('handlers.ghost.ghost_svc', mock_ghost_svc), \
              patch('handlers.ghost.manager', self.manager):
             await self.clear_absent(self._make_message("/clear_absent Bob"))
 
-        mock_reset.assert_called_once_with(100, 5, proxy_name=None)
+        mock_ghost_svc.clear_absent.assert_called_once()
         self.assertIn("Bob", self._sent_text(0))
 
     async def test_missing_name_sends_usage(self):
@@ -566,9 +582,10 @@ class TestClearAbsent(GhostTestBase):
         self.assertIn("Usage", self._sent_text(0))
 
     async def test_name_not_found_sends_warning(self):
+        mock_ghost_svc = MagicMock()
+        mock_ghost_svc.find_ghost_record.return_value = None
         with patch('handlers.ghost.admin_rights', new=AsyncMock(return_value=True)), \
-             patch('handlers.ghost.get_user_ghost_count_by_name', return_value=None), \
-             patch('handlers.ghost.get_ghost_leaderboard', return_value=[]), \
+             patch('handlers.ghost.ghost_svc', mock_ghost_svc), \
              patch('handlers.ghost.manager', self.manager):
             await self.clear_absent(self._make_message("/clear_absent Unknown"))
 
@@ -590,28 +607,40 @@ class TestGhostTrackingToggle(GhostTestBase):
 
     async def test_toggle_on_to_off(self):
         self.manager.get_ghost_tracking_enabled.return_value = True
+        mock_ghost_svc = MagicMock()
         with patch('handlers.ghost.admin_rights', new=AsyncMock(return_value=True)), \
-             patch('handlers.ghost.manager', self.manager):
+             patch('handlers.ghost.manager', self.manager), \
+             patch('handlers.ghost.ghost_svc', mock_ghost_svc):
             await self.toggle_ghost_tracking(self._make_message("/toggle_ghost_tracking"))
 
-        self.manager.set_ghost_tracking_enabled.assert_called_once_with(100, False)
+        mock_ghost_svc.toggle_ghost_tracking.assert_called_once()
+        args = mock_ghost_svc.toggle_ghost_tracking.call_args[0]
+        self.assertEqual(args[0], 100)
+        self.assertEqual(args[1], False)
         self.assertIn("disabled", self._sent_text(0).lower())
 
     async def test_toggle_off_to_on(self):
         self.manager.get_ghost_tracking_enabled.return_value = False
+        mock_ghost_svc = MagicMock()
         with patch('handlers.ghost.admin_rights', new=AsyncMock(return_value=True)), \
-             patch('handlers.ghost.manager', self.manager):
+             patch('handlers.ghost.manager', self.manager), \
+             patch('handlers.ghost.ghost_svc', mock_ghost_svc):
             await self.toggle_ghost_tracking(self._make_message("/toggle_ghost_tracking"))
 
-        self.manager.set_ghost_tracking_enabled.assert_called_once_with(100, True)
+        mock_ghost_svc.toggle_ghost_tracking.assert_called_once()
+        args = mock_ghost_svc.toggle_ghost_tracking.call_args[0]
+        self.assertEqual(args[0], 100)
+        self.assertEqual(args[1], True)
         self.assertIn("enabled", self._sent_text(0).lower())
 
     async def test_non_admin_blocked(self):
+        mock_ghost_svc = MagicMock()
         with patch('handlers.ghost.admin_rights', new=AsyncMock(return_value=False)), \
-             patch('handlers.ghost.manager', self.manager):
+             patch('handlers.ghost.manager', self.manager), \
+             patch('handlers.ghost.ghost_svc', mock_ghost_svc):
             await self.toggle_ghost_tracking(self._make_message("/toggle_ghost_tracking"))
 
-        self.manager.set_ghost_tracking_enabled.assert_not_called()
+        mock_ghost_svc.toggle_ghost_tracking.assert_not_called()
 
 
 # ===========================================================================

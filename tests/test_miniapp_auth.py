@@ -14,6 +14,12 @@ from urllib.parse import quote, urlencode
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "rollCall"))
 
+try:
+    import fastapi  # noqa: F401
+    FASTAPI_AVAILABLE = True
+except ImportError:
+    FASTAPI_AVAILABLE = False
+
 BOT_TOKEN = "123456789:TEST_BOT_TOKEN_FOR_UNIT_TESTS_ONLY"
 
 
@@ -39,6 +45,7 @@ def _make_init_data(user_id=111, chat_id=-100200, first_name="Alice",
     return urlencode(pairs)
 
 
+@unittest.skipUnless(FASTAPI_AVAILABLE, "fastapi not installed")
 class TestValidateInitData(unittest.TestCase):
     """Unit-test _validate_init_data without hitting the DB."""
 
@@ -77,6 +84,7 @@ class TestValidateInitData(unittest.TestCase):
             self._call(data, bot_token="999:WRONG_TOKEN")
 
 
+@unittest.skipUnless(FASTAPI_AVAILABLE, "fastapi not installed")
 class TestExtractIds(unittest.TestCase):
     """Unit-test _extract_ids."""
 

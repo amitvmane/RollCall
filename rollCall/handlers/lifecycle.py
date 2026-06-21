@@ -24,7 +24,6 @@ from exceptions import (
 from functions import admin_rights, roll_call_not_started
 from models import User
 from rollcall_manager import manager
-from db import update_rollcall
 from services import rollcalls as rollcalls_svc
 from services import voting as voting_svc
 
@@ -316,20 +315,17 @@ async def set_title(message):
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         title = " ".join(pmts)
-        user = message.from_user.first_name
 
-        if title == "":
-            title = "<Empty>"
-
+        result = rollcalls_svc.set_title(
+            cid, rc_number, title,
+            message.from_user.id, message.from_user.first_name,
+        )
         rc = manager.get_rollcall(cid, rc_number)
-        rc.title = title
-        rc.save()
 
         if not manager.get_shh_mode(cid):
-            await bot.send_message(cid, 'The roll call title is set to: ' + title)
+            await bot.send_message(cid, "The roll call title is set to: " + result["title"])
 
         await _update_panel(cid, rc_number + 1, rc)
-        logging.info(f"[{_ts()}] Title changed: {user} -> {title}")
 
     except Exception as e:
         await reply_error(message, e)

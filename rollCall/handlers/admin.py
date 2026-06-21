@@ -14,7 +14,7 @@ from exceptions import (
 from functions import admin_rights, roll_call_not_started
 from models import User
 from rollcall_manager import manager
-from db import log_admin_action, get_admin_audit_log, count_admin_audit_log, delete_user_by_id
+from services import admin as admin_svc
 
 
 _AUDIT_PER_PAGE = 15
@@ -70,7 +70,8 @@ def _build_audit_keyboard(page: int, total_pages: int, per_page: int) -> InlineK
 
 
 async def _send_audit_page(cid: int, page: int, per_page: int, edit_msg_id: int = None):
-    total = count_admin_audit_log(cid)
+    data = admin_svc.get_audit_log(cid, page=page, per_page=per_page)
+    total = data["total"]
     if total == 0:
         text = "No commands recorded yet."
         if edit_msg_id:
@@ -79,10 +80,9 @@ async def _send_audit_page(cid: int, page: int, per_page: int, edit_msg_id: int 
             await bot.send_message(cid, text)
         return
 
-    total_pages = max(1, (total + per_page - 1) // per_page)
-    page = max(1, min(page, total_pages))
-    offset = (page - 1) * per_page
-    records = get_admin_audit_log(cid, limit=per_page, offset=offset)
+    page = data["page"]
+    total_pages = data["total_pages"]
+    records = data["records"]
 
     lines = [f"<b>🔍 Audit Log — Page {page}/{total_pages}  ({total} total)</b>", ""]
     lines += [_fmt_audit_entry(r) for r in records]

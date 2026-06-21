@@ -135,3 +135,26 @@ class SetFeeRequest(BaseModel):
     fee: str
     admin_user_id: int
     admin_name: str
+
+
+class SetTitleRequest(BaseModel):
+    title: str
+    admin_user_id: int
+    admin_name: str
+
+
+class SetWhenRequest(BaseModel):
+    datetime_str: str = Field(
+        ...,
+        description="'cancel' to clear, or 'DD-MM-YYYY HH:MM' in the rollcall's timezone",
+    )
+    admin_user_id: int
+    admin_name: str
+
+
+class SetReminderRequest(BaseModel):
+    hours: Optional[int] = Field(
+        None, description="Hours before finalize_date to send reminder. None/null cancels."
+    )
+    admin_user_id: int
+    admin_name: str

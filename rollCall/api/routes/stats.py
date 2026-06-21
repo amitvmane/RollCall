@@ -10,6 +10,8 @@ from services import stats as stats_svc
 
 from api.auth import AuthedToken, require_scope
 from api.schemas.rollcalls import RollcallResponse
+from services import rollcalls as rc_svc
+
 from api.schemas.stats import (
     ChatSettingsResponse,
     ClearAbsentRequest,
@@ -24,8 +26,11 @@ from api.schemas.stats import (
     SetFeeRequest,
     SetLimitRequest,
     SetLocationRequest,
+    SetReminderRequest,
     SetShhModeRequest,
     SetTimezoneRequest,
+    SetTitleRequest,
+    SetWhenRequest,
     ToggleGhostRequest,
 )
 
@@ -261,3 +266,55 @@ async def set_fee(
             chat_id, body.fee, body.admin_user_id, body.admin_name, rc_number - 1
         )
     )
+
+
+@router.put(
+    "/chats/{chat_id}/rollcalls/{rc_number}/settings/title",
+    response_model=RollcallResponse,
+    summary="Set title on a rollcall",
+)
+async def set_title(
+    body: SetTitleRequest,
+    chat_id: int = Path(...),
+    rc_number: int = Path(..., ge=1),
+    _token: AuthedToken = Depends(require_scope("admin")),
+) -> RollcallResponse:
+    return RollcallResponse(
+        **rc_svc.set_title(
+            chat_id, rc_number - 1, body.title, body.admin_user_id, body.admin_name
+        )
+    )
+
+
+@router.put(
+    "/chats/{chat_id}/rollcalls/{rc_number}/settings/when",
+    response_model=RollcallResponse,
+    summary="Set or cancel the finalize date/time for a rollcall",
+)
+async def set_when(
+    body: SetWhenRequest,
+    chat_id: int = Path(...),
+    rc_number: int = Path(..., ge=1),
+    _token: AuthedToken = Depends(require_scope("admin")),
+) -> RollcallResponse:
+    result = settings_svc.set_rollcall_time(
+        chat_id, rc_number - 1, body.datetime_str, body.admin_user_id, body.admin_name
+    )
+    return RollcallResponse(**result["rollcall"])
+
+
+@router.put(
+    "/chats/{chat_id}/rollcalls/{rc_number}/settings/reminder",
+    response_model=RollcallResponse,
+    summary="Set or cancel the pre-event reminder for a rollcall",
+)
+async def set_reminder(
+    body: SetReminderRequest,
+    chat_id: int = Path(...),
+    rc_number: int = Path(..., ge=1),
+    _token: AuthedToken = Depends(require_scope("admin")),
+) -> RollcallResponse:
+    result = settings_svc.set_reminder(
+        chat_id, rc_number - 1, body.hours, body.admin_user_id, body.admin_name
+    )
+    return RollcallResponse(**result["rollcall"])

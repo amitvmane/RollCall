@@ -148,6 +148,12 @@ def create_app() -> FastAPI:
         app.mount("/web", StaticFiles(directory=str(_web_dir), html=True), name="web")
         logging.info("[api] Web voting page served at /web/")
 
+    # Serve admin dashboard at /admin/
+    _admin_dir = Path(__file__).parent / "admin"
+    if _admin_dir.is_dir():
+        app.mount("/admin", StaticFiles(directory=str(_admin_dir), html=True), name="admin")
+        logging.info("[api] Admin dashboard served at /admin/")
+
     return app
 
 

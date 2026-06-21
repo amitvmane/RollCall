@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="theme-color" content="#2563eb" />
+  <title>RollCall Admin</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #f0f2f5; --card: #fff; --border: #e0e0e0;
+      --text: #1a1a2e; --muted: #6b7280; --accent: #2563eb;
+      --danger: #dc2626; --success: #16a34a; --warn: #d97706;
+      --radius: 10px;
+    }
+    html, body { height: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      background: var(--bg); color: var(--text); min-height: 100%;
+      -webkit-text-size-adjust: 100%;
+    }
+
+    /* ── Login ── */
+    #login-screen { display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:20px; }
+    .login-card { background:var(--card);border-radius:var(--radius);padding:32px 28px;width:100%;max-width:420px;box-shadow:0 4px 20px rgba(0,0,0,.1); }
+    .login-card h1 { font-size:1.5rem;margin-bottom:4px; }
+    .login-card .sub { color:var(--muted);font-size:.88rem;margin-bottom:24px; }
+    .login-card label { font-size:.82rem;font-weight:600;display:block;margin-bottom:6px; }
+    .login-card input { width:100%;padding:11px 13px;border:1.5px solid var(--border);border-radius:8px;font-size:1rem;font-family:monospace;margin-bottom:14px;outline:none;transition:border-color .15s;-webkit-appearance:none; }
+    .login-card input:focus { border-color:var(--accent); }
+    #login-error { color:var(--danger);font-size:.82rem;margin-bottom:10px;display:none; }
+
+    /* ── Top bar ── */
+    .topbar { background:var(--accent);color:#fff;padding:0 14px;height:52px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:200;box-shadow:0 2px 8px rgba(0,0,0,.2); }
+    .topbar .logo { font-weight:700;font-size:1rem; }
+    .topbar .tr { display:flex;gap:8px;align-items:center; }
+    .hamburger { display:none;background:none;border:none;color:#fff;font-size:1.4rem;cursor:pointer;padding:4px 6px;line-height:1; }
+    #app { display:none; }
+
+    /* ── Layout ── */
+    .main-layout { display:flex;height:calc(100vh - 52px);overflow:hidden; }
+    .sb-backdrop { display:none;position:fixed;inset:0;z-index:150;background:rgba(0,0,0,.35); }
+    .sb-backdrop.open { display:block; }
+    .sidebar { width:260px;flex-shrink:0;background:var(--card);border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column;z-index:160;transition:transform .25s; }
+    .sb-head { padding:12px 14px 8px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border); }
+    .sb-head h2 { font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted); }
+    .sb-head button { background:none;border:none;cursor:pointer;font-size:.8rem;color:var(--accent);padding:2px 6px; }
+    .gi { padding:10px 14px;cursor:pointer;border-left:3px solid transparent;transition:background .12s;border-bottom:1px solid #f3f4f6; }
+    .gi:hover { background:#f8fafc; }
+    .gi.active { background:#eff6ff;border-left-color:var(--accent); }
+    .gi .gn { font-size:.9rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+    .gi .gm { font-size:.73rem;color:var(--muted);margin-top:2px; }
+    .badge { display:inline-block;background:var(--accent);color:#fff;border-radius:10px;font-size:.66rem;font-weight:700;padding:1px 6px;margin-left:5px;vertical-align:middle; }
+    .content { flex:1;overflow-y:auto;padding:14px; }
+
+    /* ── Cards ── */
+    .card { background:var(--card);border-radius:var(--radius);padding:16px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,.06); }
+    .ch { display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;gap:10px;flex-wrap:wrap; }
+    .ch h2 { font-size:.96rem;font-weight:700; }
+    .ch-sub { font-size:.76rem;color:var(--muted);margin-top:2px; }
+    .ch .btn-row { display:flex;gap:6px;flex-wrap:wrap; }
+
+    /* ── Tabs ── */
+    .tab-bar { display:flex;gap:4px;margin-bottom:12px;border-bottom:2px solid var(--border);padding-bottom:0; }
+    .tab { padding:7px 14px;background:none;border:none;cursor:pointer;font-size:.85rem;font-weight:600;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-2px;transition:color .15s,border-color .15s; }
+    .tab.active { color:var(--accent);border-bottom-color:var(--accent); }
+
+    /* ── Rollcall rows ── */
+    .rc-row { display:flex;align-items:flex-start;justify-content:space-between;padding:10px 0;border-bottom:1px solid #f3f4f6;gap:10px;flex-wrap:wrap; }
+    .rc-row:last-child { border-bottom:none; }
+    .rt { font-weight:600;font-size:.92rem; }
+    .rm { font-size:.75rem;color:var(--muted);margin-top:2px; }
+    .ra { display:flex;gap:5px;flex-shrink:0;flex-wrap:wrap; }
+
+    /* ── Vote lists ── */
+    .vote-section { margin-top:10px; }
+    .vl-head { font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin:10px 0 4px; }
+    .vl-in { color:var(--success); } .vl-out { color:var(--danger); } .vl-maybe { color:var(--warn); } .vl-wait { color:var(--muted); }
+    .vl-items { list-style:none; }
+    .vl-items li { font-size:.88rem;padding:3px 0;border-bottom:1px solid #f8fafc;display:flex;gap:6px; }
+    .vl-items li .pos { color:var(--muted);font-size:.75rem;min-width:18px; }
+
+    /* ── Rollcall property form ── */
+    .rc-props { display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px; }
+    .prop-row { display:flex;align-items:center;gap:6px; }
+    .prop-row input { flex:1;padding:6px 9px;border:1.5px solid var(--border);border-radius:6px;font-size:.85rem;outline:none;-webkit-appearance:none; }
+    .prop-row input:focus { border-color:var(--accent); }
+    .prop-row .lbl { font-size:.75rem;color:var(--muted);white-space:nowrap;min-width:52px; }
+
+    /* ── Start form ── */
+    .start-form { background:#f8fafc;border-radius:8px;padding:12px;margin-bottom:12px; }
+    .form-row { display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap; }
+    .fg { flex:1;min-width:130px; }
+    .fg label { font-size:.78rem;font-weight:600;display:block;margin-bottom:3px; }
+    .fg input,.fg select { width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:.88rem;outline:none;background:var(--card);-webkit-appearance:none; }
+    .fg input:focus,.fg select:focus { border-color:var(--accent); }
+
+    /* ── Settings ── */
+    .sr { display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid #f3f4f6;gap:12px; }
+    .sr:last-child { border-bottom:none; }
+    .sl { font-size:.88rem;font-weight:600; } .sd { font-size:.73rem;color:var(--muted);margin-top:2px; }
+    .sc { flex-shrink:0;display:flex;align-items:center;gap:7px; }
+    .toggle { position:relative;width:42px;height:24px;flex-shrink:0; }
+    .toggle input { opacity:0;width:0;height:0; }
+    .toggle .slider { position:absolute;inset:0;background:var(--border);border-radius:24px;cursor:pointer;transition:background .2s; }
+    .toggle .slider::before { content:"";position:absolute;width:18px;height:18px;border-radius:50%;background:#fff;left:3px;top:3px;transition:transform .2s;box-shadow:0 1px 3px rgba(0,0,0,.2); }
+    .toggle input:checked + .slider { background:var(--accent); }
+    .toggle input:checked + .slider::before { transform:translateX(18px); }
+    .mini-inp { width:60px;padding:5px 7px;border:1.5px solid var(--border);border-radius:6px;font-size:.86rem;text-align:center;outline:none;-webkit-appearance:none; }
+    .mini-inp:focus { border-color:var(--accent); }
+    .tz-inp { width:176px;padding:5px 7px;border:1.5px solid var(--border);border-radius:6px;font-size:.82rem;font-family:monospace;outline:none;-webkit-appearance:none; }
+    .tz-inp:focus { border-color:var(--accent); }
+
+    /* ── Template rows ── */
+    .tmpl-row { display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid #f3f4f6;gap:10px;flex-wrap:wrap; }
+    .tmpl-row:last-child { border-bottom:none; }
+    .tn { font-weight:600;font-size:.9rem; }
+    .tm { font-size:.74rem;color:var(--muted);margin-top:2px; }
+    .ta { display:flex;gap:5px;flex-shrink:0; }
+
+    /* ── Buttons ── */
+    .btn { padding:8px 14px;border:none;border-radius:7px;font-size:.84rem;font-weight:600;cursor:pointer;transition:opacity .15s;white-space:nowrap;-webkit-tap-highlight-color:transparent;touch-action:manipulation; }
+    .btn:active { opacity:.8; } .btn:disabled { opacity:.5;cursor:not-allowed; }
+    .btn-primary { background:var(--accent);color:#fff; }
+    .btn-danger  { background:var(--danger);color:#fff; }
+    .btn-ghost   { background:transparent;color:var(--accent);border:1.5px solid var(--accent); }
+    .btn-success { background:var(--success);color:#fff; }
+    .btn-sm { padding:5px 10px;font-size:.78rem; }
+    .btn-logout { background:rgba(255,255,255,.18);color:#fff;border:none;font-size:.8rem;padding:6px 12px;border-radius:6px;cursor:pointer; }
+
+    /* ── Misc ── */
+    .no-sel { display:flex;flex-direction:column;align-items:center;justify-content:center;height:60vh;color:var(--muted);text-align:center;gap:10px; }
+    .no-sel .ic { font-size:2.5rem; }
+    .empty { color:var(--muted);font-size:.87rem;font-style:italic;padding:8px 0; }
+    .spinner { width:24px;height:24px;border:3px solid #e0e0e0;border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;display:inline-block;vertical-align:middle; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    .lc { text-align:center;padding:40px; }
+    .toast { position:fixed;bottom:18px;right:14px;left:14px;max-width:380px;margin:0 auto;background:#1e293b;color:#fff;padding:10px 16px;border-radius:8px;font-size:.87rem;box-shadow:0 4px 16px rgba(0,0,0,.25);opacity:0;transform:translateY(8px);transition:opacity .25s,transform .25s;pointer-events:none;z-index:9999; }
+    .toast.show { opacity:1;transform:none; }
+    hr.sep { border:none;border-top:1px solid var(--border);margin:12px 0; }
+
+    @media (max-width:768px) {
+      .sidebar { position:fixed;left:0;top:52px;height:calc(100% - 52px);transform:translateX(-100%); }
+      .sidebar.open { transform:translateX(0); }
+      .hamburger { display:block; }
+      .content { padding:10px; }
+      .rc-props { grid-template-columns:1fr; }
+    }
+    @media (max-width:480px) {
+      .login-card { padding:22px 18px; }
+      .card { padding:12px; }
+      .form-row { flex-direction:column; }
+      .form-row .btn { width:100%; }
+      .tz-inp { width:140px; }
+    }
+  </style>
+</head>
+<body>
+
+<div id="login-screen">
+  <div class="login-card">
+    <h1>🔐 RollCall Admin</h1>
+    <p class="sub">Enter your admin API token to manage groups</p>
+    <label for="ti">API Token</label>
+    <input id="ti" type="password" placeholder="rc_live_…" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" />
+    <p id="login-error"></p>
+    <button class="btn btn-primary" id="login-btn" style="width:100%;padding:12px">Sign in →</button>
+  </div>
+</div>
+
+<div id="app">
+  <div class="topbar">
+    <div style="display:flex;align-items:center;gap:10px">
+      <button class="hamburger" id="hbtn" aria-label="Menu">☰</button>
+      <span class="logo">RollCall Admin</span>
+    </div>
+    <div class="tr">
+      <button class="btn-logout" id="logout-btn">Sign out</button>
+    </div>
+  </div>
+  <div class="sb-backdrop" id="sbbdrop"></div>
+  <div class="main-layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="sb-head">
+        <h2>Groups</h2>
+        <button onclick="loadGroups()">↻ Refresh</button>
+      </div>
+      <div id="glist"><div style="padding:14px;color:var(--muted);font-size:.88rem">Loading…</div></div>
+    </aside>
+    <main class="content" id="content">
+      <div class="no-sel" id="no-sel">
+        <div class="ic">👈</div>
+        <p>Select a group from the sidebar</p>
+        <p style="font-size:.8rem;margin-top:4px">Tap ☰ to open menu on mobile</p>
+      </div>
+      <div id="gdetail"></div>
+    </main>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+"use strict";
+const API="/api/v1", LS="rc_admin_token";
+let TOKEN=localStorage.getItem(LS)||"", groups=[], selCid=null;
+
+// ── Sidebar ────────────────────────────────────────────────────────────────
+const sidebar=id("sidebar"), sbbdrop=id("sbbdrop");
+function openSB(){ sidebar.classList.add("open");sbbdrop.classList.add("open"); }
+function closeSB(){ sidebar.classList.remove("open");sbbdrop.classList.remove("open"); }
+id("hbtn").addEventListener("click",()=>sidebar.classList.contains("open")?closeSB():openSB());
+sbbdrop.addEventListener("click",closeSB);
+
+// ── Toast ──────────────────────────────────────────────────────────────────
+function toast(msg,ms=2800){
+  const el=id("toast"); el.textContent=msg; el.classList.add("show");
+  clearTimeout(el._t); el._t=setTimeout(()=>el.classList.remove("show"),ms);
+}
+
+// ── API ────────────────────────────────────────────────────────────────────
+async function api(path,opts={}){
+  const res=await fetch(API+path,{...opts,headers:{"Content-Type":"application/json","Authorization":"Bearer "+TOKEN,...(opts.headers||{})}});
+  if(res.status===401){signOut();throw new Error("Unauthorized");}
+  if(!res.ok){const b=await res.json().catch(()=>({}));throw new Error(b.detail||"HTTP "+res.status);}
+  return res.status===204?null:res.json();
+}
+
+// ── Auth ───────────────────────────────────────────────────────────────────
+function signOut(){
+  localStorage.removeItem(LS); TOKEN="";
+  id("app").style.display="none"; id("login-screen").style.display="flex";
+  id("ti").value="";
+}
+id("logout-btn").addEventListener("click",signOut);
+
+async function doLogin(){
+  const raw=id("ti").value.trim(); if(!raw)return;
+  const err=id("login-error"); err.style.display="none"; TOKEN=raw;
+  try{ await api("/admin/groups"); localStorage.setItem(LS,TOKEN); boot(); }
+  catch(e){ TOKEN=""; err.textContent=e.message==="Unauthorized"?"Invalid token or insufficient scope.":"Connect error: "+e.message; err.style.display="block"; }
+}
+id("login-btn").addEventListener("click",doLogin);
+id("ti").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
+function boot(){ id("login-screen").style.display="none"; id("app").style.display="block"; loadGroups(); }
+if(TOKEN) boot();
+
+// ── Groups ─────────────────────────────────────────────────────────────────
+async function loadGroups(){
+  const el=id("glist"); el.innerHTML=html('<div style="padding:14px;color:var(--muted);font-size:.88rem">Loading…</div>');
+  try{ groups=await api("/admin/groups"); renderGList(); }
+  catch(e){ el.innerHTML=html(`<div style="padding:14px;color:var(--danger);font-size:.85rem">Error: ${esc(e.message)}</div>`); }
+}
+window.loadGroups=loadGroups;
+
+function renderGList(){
+  const el=id("glist");
+  if(!groups.length){el.innerHTML='<div style="padding:14px;color:var(--muted);font-size:.88rem">No groups yet.</div>';return;}
+  el.innerHTML=groups.map(g=>{
+    const name=g.group_name||"Chat "+g.chat_id;
+    const badge=g.active_rollcalls>0?`<span class="badge">${g.active_rollcalls}</span>`:"";
+    return `<div class="gi${selCid===g.chat_id?" active":""}" data-cid="${g.chat_id}" role="button" tabindex="0">
+      <div class="gn">${esc(name)}${badge}</div>
+      <div class="gm">${esc(g.timezone)}</div>
+    </div>`;
+  }).join("");
+  el.querySelectorAll(".gi").forEach(el=>{
+    const cid=parseInt(el.dataset.cid);
+    el.addEventListener("click",()=>selectGroup(cid));
+    el.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" ")selectGroup(cid);});
+  });
+}
+
+function selectGroup(cid){
+  selCid=cid; renderGList(); closeSB();
+  id("no-sel").style.display="none";
+  loadGDetail(cid);
+}
+
+// ── Group Detail ───────────────────────────────────────────────────────────
+async function loadGDetail(cid){
+  const el=id("gdetail"); el.innerHTML='<div class="lc"><div class="spinner"></div></div>';
+  try{
+    const [settings,rcs,tmpls]=await Promise.all([
+      api("/admin/groups/"+cid),
+      api("/chats/"+cid+"/rollcalls"),
+      api("/chats/"+cid+"/templates").catch(()=>[]),
+    ]);
+    renderGDetail(settings,rcs,tmpls);
+  }catch(e){
+    el.innerHTML=`<div class="card"><p style="color:var(--danger)">Error: ${esc(e.message)}</p></div>`;
+  }
+}
+window.loadGDetail=loadGDetail;
+
+// current tab per group
+const tabState={};
+function renderGDetail(settings,rcs,tmpls){
+  const cid=settings.chat_id, name=settings.group_name||"Chat "+cid;
+  const el=id("gdetail"); el.innerHTML="";
+
+  // Header
+  el.innerHTML+=`<div class="card"><div class="ch">
+    <div><h2>${esc(name)}</h2><div class="ch-sub">Chat ID: ${cid}</div></div>
+    <div class="btn-row">
+      <button class="btn btn-ghost btn-sm" onclick="loadGDetail(${cid})">↻ Refresh</button>
+    </div>
+  </div></div>`;
+
+  // Tab bar
+  const tabs=["Rollcalls","Templates","Settings"];
+  el.innerHTML+=`<div class="card" style="padding:0 16px 0">
+    <div class="tab-bar" id="tabs-${cid}">
+      ${tabs.map((t,i)=>`<button class="tab${(tabState[cid]||0)===i?" active":""}" onclick="switchTab(${cid},${i})">${t}</button>`).join("")}
+    </div>
+  </div>`;
+
+  // Panels (hidden by default, shown via switchTab)
+  el.innerHTML+=`
+    <div id="panel-${cid}-0">${buildRcPanel(cid,rcs)}</div>
+    <div id="panel-${cid}-1">${buildTmplPanel(cid,tmpls)}</div>
+    <div id="panel-${cid}-2">${buildSettingsPanel(cid,settings)}</div>
+  `;
+  switchTab(cid, tabState[cid]||0);
+}
+
+window.switchTab=function(cid,idx){
+  tabState[cid]=idx;
+  [0,1,2].forEach(i=>{
+    const p=id(`panel-${cid}-${i}`); if(p) p.style.display=i===idx?"block":"none";
+  });
+  document.querySelectorAll(`#tabs-${cid} .tab`).forEach((t,i)=>t.classList.toggle("active",i===idx));
+};
+
+// ── Rollcalls panel ────────────────────────────────────────────────────────
+function buildRcPanel(cid,rcs){
+  const rcRows=rcs.length?rcs.map((rc,idx)=>{
+    const num=idx+1;
+    const fin=rc.finalize_date?`Closes: ${esc(rc.finalize_date)}  · `:"";
+    const loc=rc.location?`📍${esc(rc.location)}  · `:"";
+    const fee=rc.event_fee?`💰${esc(rc.event_fee)}  · `:"";
+    const lim=rc.limit?`Cap: ${rc.limit}  · `:"";
+    return `<div class="rc-row">
+      <div style="flex:1;min-width:0">
+        <div class="rt">#${num} — ${esc(rc.title||"Untitled")}</div>
+        <div class="rm">${rc.in_count} IN${rc.limit?"/"+rc.limit:""}  ·  ${rc.out_count} OUT  ·  ${rc.maybe_count} MAYBE  ·  ${rc.wait_count} WAIT</div>
+        ${fin||loc||fee||lim?`<div class="rm">${fin}${loc}${fee}${lim}</div>`:""}
+      </div>
+      <div class="ra">
+        <button class="btn btn-ghost btn-sm" onclick="showRcDetails(${cid},${num})">Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="doEndRc(${cid},${num})">End</button>
+      </div>
+    </div>`;
+  }).join(""):
+  '<p class="empty">No active rollcalls.</p>';
+
+  return `<div class="card" id="rc-card-${cid}">
+    <div class="ch">
+      <div><h2>Active Rollcalls</h2></div>
+      <div class="btn-row">
+        <button class="btn btn-primary btn-sm" onclick="showStartForm(${cid})">+ Start</button>
+      </div>
+    </div>
+    <div id="start-form-${cid}" class="start-form" style="display:none">
+      <div class="form-row">
+        <div class="fg"><label>Title (optional)</label>
+          <input id="sft-${cid}" type="text" placeholder="e.g. Friday Football" maxlength="100" autocorrect="off" autocapitalize="words" /></div>
+        <button class="btn btn-primary btn-sm" onclick="doStartRc(${cid})">Start</button>
+        <button class="btn btn-ghost btn-sm" onclick="hideStartForm(${cid})">Cancel</button>
+      </div>
+    </div>
+    <div id="rc-list-${cid}">${rcRows}</div>
+    <div id="rc-detail-${cid}"></div>
+  </div>`;
+}
+
+window.showStartForm=function(cid){
+  id(`start-form-${cid}`).style.display="block";
+  const inp=id(`sft-${cid}`); if(inp) inp.focus();
+};
+window.hideStartForm=function(cid){ id(`start-form-${cid}`).style.display="none"; };
+
+window.doStartRc=async function(cid){
+  const title=(id(`sft-${cid}`)?.value||"").trim();
+  try{
+    await api(`/chats/${cid}/rollcalls`,{method:"POST",body:JSON.stringify({title:title||null,started_by_user_id:0,started_by_name:"Admin (web)"})});
+    toast("Rollcall started!"); hideStartForm(cid);
+    const rcs=await api(`/chats/${cid}/rollcalls`);
+    id(`rc-list-${cid}`).innerHTML=rcs.length?rcs.map((rc,idx)=>buildRcRowHtml(cid,rc,idx)).join(""):'<p class="empty">No active rollcalls.</p>';
+    updateGroupBadge(cid,rcs.length);
+  }catch(e){toast("Error: "+e.message,4000);}
+};
+
+function buildRcRowHtml(cid,rc,idx){
+  const num=idx+1;
+  const fin=rc.finalize_date?`Closes: ${esc(rc.finalize_date)}  · `:"";
+  const loc=rc.location?`📍${esc(rc.location)}  · `:"";
+  const fee=rc.event_fee?`💰${esc(rc.event_fee)}  · `:"";
+  const lim=rc.limit?`Cap: ${rc.limit}  · `:"";
+  return `<div class="rc-row">
+    <div style="flex:1;min-width:0">
+      <div class="rt">#${num} — ${esc(rc.title||"Untitled")}</div>
+      <div class="rm">${rc.in_count} IN${rc.limit?"/"+rc.limit:""}  ·  ${rc.out_count} OUT  ·  ${rc.maybe_count} MAYBE  ·  ${rc.wait_count} WAIT</div>
+      ${fin||loc||fee||lim?`<div class="rm">${fin}${loc}${fee}${lim}</div>`:""}
+    </div>
+    <div class="ra">
+      <button class="btn btn-ghost btn-sm" onclick="showRcDetails(${cid},${num})">Edit</button>
+      <button class="btn btn-danger btn-sm" onclick="doEndRc(${cid},${num})">End</button>
+    </div>
+  </div>`;
+}
+
+window.showRcDetails=async function(cid,num){
+  const area=id(`rc-detail-${cid}`);
+  area.innerHTML='<div class="lc"><div class="spinner"></div></div>';
+  area.scrollIntoView({behavior:"smooth",block:"nearest"});
+  try{
+    const rc=await api(`/chats/${cid}/rollcalls/${num}`);
+    area.innerHTML=buildRcEditPanel(cid,num,rc);
+  }catch(e){area.innerHTML=`<p style="color:var(--danger);padding:8px">Error: ${esc(e.message)}</p>`;}
+};
+
+function buildRcEditPanel(cid,num,rc){
+  // Vote lists
+  function vlist(label,cls,items){
+    if(!items.length)return"";
+    const rows=items.map((u,i)=>`<li><span class="pos">${i+1}.</span>${esc(u.name||u.first_name||"?")}${u.comment?` <span style="color:var(--muted);font-size:.8rem">— ${esc(u.comment)}</span>`:""}</li>`).join("");
+    return `<div class="vl-head vl-${cls}">${label} (${items.length})</div><ul class="vl-items">${rows}</ul>`;
+  }
+  const lists=vlist("IN","in",rc.in_list||[])+vlist("OUT","out",rc.out_list||[])+vlist("MAYBE","maybe",rc.maybe_list||[])+vlist("WAIT","wait",rc.wait_list||[]);
+
+  return `<hr class="sep" />
+  <div style="margin-top:4px">
+    <div style="font-size:.85rem;font-weight:700;margin-bottom:10px">Edit rollcall #${num}</div>
+    <div class="rc-props">
+      <div class="prop-row"><span class="lbl">Title</span><input id="pe-title-${cid}-${num}" value="${esc(rc.title||"")}" placeholder="Title" autocorrect="off" /><button class="btn btn-ghost btn-sm" onclick="saveProp(${cid},${num},'title',id('pe-title-${cid}-${num}').value)">Save</button></div>
+      <div class="prop-row"><span class="lbl">Location</span><input id="pe-loc-${cid}-${num}" value="${esc(rc.location||"")}" placeholder="e.g. Court A" autocorrect="off" /><button class="btn btn-ghost btn-sm" onclick="saveProp(${cid},${num},'location',id('pe-loc-${cid}-${num}').value)">Save</button></div>
+      <div class="prop-row"><span class="lbl">Event fee</span><input id="pe-fee-${cid}-${num}" value="${esc(rc.event_fee||"")}" placeholder="e.g. ₹200" autocorrect="off" /><button class="btn btn-ghost btn-sm" onclick="saveProp(${cid},${num},'fee',id('pe-fee-${cid}-${num}').value)">Save</button></div>
+      <div class="prop-row"><span class="lbl">IN cap</span><input id="pe-lim-${cid}-${num}" type="number" min="0" value="${rc.limit||""}" placeholder="0 = no cap" inputmode="numeric" /><button class="btn btn-ghost btn-sm" onclick="saveProp(${cid},${num},'limit',parseInt(id('pe-lim-${cid}-${num}').value)||0)">Save</button></div>
+      <div class="prop-row"><span class="lbl">Closes</span><input id="pe-when-${cid}-${num}" value="${esc(rc.finalize_date||"")}" placeholder="DD-MM-YYYY HH:MM or cancel" autocorrect="off" autocapitalize="none" /><button class="btn btn-ghost btn-sm" onclick="saveProp(${cid},${num},'when',id('pe-when-${cid}-${num}').value)">Save</button></div>
+      <div class="prop-row"><span class="lbl">Reminder</span><input id="pe-rem-${cid}-${num}" type="number" min="0" value="${rc.reminder_hours||""}" placeholder="hours before" inputmode="numeric" /><button class="btn btn-ghost btn-sm" onclick="saveProp(${cid},${num},'reminder',parseInt(id('pe-rem-${cid}-${num}').value)||null)">Save</button></div>
+    </div>
+    <div class="vote-section">${lists||'<p class="empty">No votes yet.</p>'}</div>
+    <div style="margin-top:10px"><button class="btn btn-ghost btn-sm" onclick="id('rc-detail-${cid}').innerHTML=''">Close ✕</button></div>
+  </div>`;
+}
+
+window.saveProp=async function(cid,num,prop,val){
+  const endpoints={
+    title:`/chats/${cid}/rollcalls/${num}/settings/title`,
+    location:`/chats/${cid}/rollcalls/${num}/settings/location`,
+    fee:`/chats/${cid}/rollcalls/${num}/settings/fee`,
+    limit:`/chats/${cid}/rollcalls/${num}/settings/limit`,
+    when:`/chats/${cid}/rollcalls/${num}/settings/when`,
+    reminder:`/chats/${cid}/rollcalls/${num}/settings/reminder`,
+  };
+  const bodies={
+    title:{title:val,admin_user_id:0,admin_name:"Admin (web)"},
+    location:{location:val||"",admin_user_id:0,admin_name:"Admin (web)"},
+    fee:{fee:val||"",admin_user_id:0,admin_name:"Admin (web)"},
+    limit:{limit:val,admin_user_id:0,admin_name:"Admin (web)"},
+    when:{datetime_str:val,admin_user_id:0,admin_name:"Admin (web)"},
+    reminder:{hours:val,admin_user_id:0,admin_name:"Admin (web)"},
+  };
+  try{
+    await api(endpoints[prop],{method:"PUT",body:JSON.stringify(bodies[prop])});
+    toast("Saved."); showRcDetails(cid,num);
+  }catch(e){toast("Error: "+e.message,4000);}
+};
+
+window.doEndRc=async function(cid,num){
+  if(!confirm(`End rollcall #${num}? This cannot be undone.`))return;
+  try{
+    await api(`/chats/${cid}/rollcalls/${num}`,{method:"DELETE",body:JSON.stringify({ended_by_user_id:0,ended_by_name:"Admin (web)"})});
+    toast("Rollcall ended.");
+    const rcs=await api(`/chats/${cid}/rollcalls`);
+    id(`rc-list-${cid}`).innerHTML=rcs.length?rcs.map((rc,idx)=>buildRcRowHtml(cid,rc,idx)).join(""):'<p class="empty">No active rollcalls.</p>';
+    id(`rc-detail-${cid}`).innerHTML="";
+    updateGroupBadge(cid,rcs.length);
+  }catch(e){toast("Error: "+e.message,4000);}
+};
+
+// ── Templates panel ────────────────────────────────────────────────────────
+function buildTmplPanel(cid,tmpls){
+  const rows=tmpls.length?tmpls.map(t=>{
+    const sched=t.schedule_enabled?`📅 ${t.schedule_day||""} ${t.event_time||""}`.trim():"No schedule";
+    const meta=[t.limit?`Cap: ${t.limit}`:"",t.location?`📍${t.location}`:"",t.fee?`💰${t.fee}`:"",sched].filter(Boolean).join("  ·  ");
+    return `<div class="tmpl-row">
+      <div style="flex:1;min-width:0">
+        <div class="tn">${esc(t.name)}</div>
+        <div class="tm">${esc(t.title||"No title")}${meta?"  ·  "+meta:""}</div>
+      </div>
+      <div class="ta">
+        <button class="btn btn-success btn-sm" onclick="doStartTmpl(${cid},'${esc(t.name)}')">Start</button>
+      </div>
+    </div>`;
+  }).join(""):'<p class="empty">No templates saved for this group.</p>';
+
+  return `<div class="card" id="tmpl-card-${cid}">
+    <div class="ch"><h2>Templates</h2></div>
+    <div id="tmpl-list-${cid}">${rows}</div>
+  </div>`;
+}
+
+window.doStartTmpl=async function(cid,name){
+  if(!confirm(`Start rollcall from template "${name}"?`))return;
+  try{
+    await api(`/chats/${cid}/templates/${encodeURIComponent(name)}/start`,{method:"POST",body:JSON.stringify({admin_user_id:0,admin_name:"Admin (web)"})});
+    toast("Rollcall started from template!");
+    switchTab(cid,0);
+    const rcs=await api(`/chats/${cid}/rollcalls`);
+    if(id(`rc-list-${cid}`))
+      id(`rc-list-${cid}`).innerHTML=rcs.length?rcs.map((rc,idx)=>buildRcRowHtml(cid,rc,idx)).join(""):'<p class="empty">No active rollcalls.</p>';
+    updateGroupBadge(cid,rcs.length);
+  }catch(e){toast("Error: "+e.message,4000);}
+};
+
+// ── Settings panel ─────────────────────────────────────────────────────────
+function buildSettingsPanel(cid,settings){
+  return `<div class="card">
+    <div class="ch"><h2>Group Settings</h2></div>
+    <div class="sr">
+      <div><div class="sl">Admin-only mode</div><div class="sd">Only Telegram admins can use bot commands</div></div>
+      <div class="sc"><label class="toggle"><input type="checkbox" id="ts-admin-${cid}" ${settings.admin_rights?"checked":""} onchange="patchSetting(${cid},'admin_rights',this.checked)"><span class="slider"></span></label></div>
+    </div>
+    <div class="sr">
+      <div><div class="sl">Silent mode (shh)</div><div class="sd">Bot confirms quietly instead of broadcasting</div></div>
+      <div class="sc"><label class="toggle"><input type="checkbox" id="ts-shh-${cid}" ${settings.shh_mode?"checked":""} onchange="patchSetting(${cid},'shh_mode',this.checked)"><span class="slider"></span></label></div>
+    </div>
+    <div class="sr">
+      <div><div class="sl">Ghost tracking</div><div class="sd">Track members who RSVP IN but don't show up</div></div>
+      <div class="sc"><label class="toggle"><input type="checkbox" id="ts-ghost-${cid}" ${settings.ghost_tracking_enabled?"checked":""} onchange="patchSetting(${cid},'ghost_tracking_enabled',this.checked)"><span class="slider"></span></label></div>
+    </div>
+    <div class="sr">
+      <div><div class="sl">Ghost limit</div><div class="sd">Sessions missed before warning triggers</div></div>
+      <div class="sc">
+        <input class="mini-inp" type="number" id="ts-lim-${cid}" value="${settings.absent_limit}" min="1" max="99" inputmode="numeric" />
+        <button class="btn btn-ghost btn-sm" onclick="saveAbsentLimit(${cid})">Save</button>
+      </div>
+    </div>
+    <div class="sr" style="border-bottom:none">
+      <div><div class="sl">Timezone</div><div class="sd">IANA tz for scheduling (e.g. Asia/Kolkata)</div></div>
+      <div class="sc">
+        <input class="tz-inp" id="ts-tz-${cid}" value="${esc(settings.timezone)}" autocorrect="off" autocapitalize="none" spellcheck="false" />
+        <button class="btn btn-ghost btn-sm" onclick="saveTz(${cid})">Save</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+window.patchSetting=async function(cid,key,value){
+  try{
+    await api(`/admin/groups/${cid}`,{method:"PATCH",body:JSON.stringify({admin_user_id:0,admin_name:"Admin (web)",[key]:value})});
+    toast("Saved.");
+  }catch(e){toast("Error: "+e.message,4000);}
+};
+window.saveAbsentLimit=async function(cid){
+  const v=parseInt(id(`ts-lim-${cid}`).value);
+  if(!v||v<1){toast("Limit must be ≥ 1",3000);return;}
+  await window.patchSetting(cid,"absent_limit",v);
+};
+window.saveTz=async function(cid){
+  const tz=id(`ts-tz-${cid}`).value.trim(); if(!tz)return;
+  await window.patchSetting(cid,"timezone",tz);
+};
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function updateGroupBadge(cid,count){
+  const g=groups.find(x=>x.chat_id===cid); if(g){g.active_rollcalls=count;renderGList();}
+}
+function id(x){ return document.getElementById(x); }
+function html(s){ return s; }
+function esc(s){ return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+window.id=id;
+
+})();
+</script>
+</body>
+</html>

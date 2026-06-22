@@ -115,7 +115,7 @@ token: ## Issue a global admin API token. Usage: make token [LABEL="my label"] [
 	@LABEL=$${LABEL:-"Admin dashboard"}; \
 	EXTRA=""; \
 	if [ -n "$$DAYS" ]; then EXTRA="--expires-days $$DAYS"; fi; \
-	docker exec $(BOT) python scripts/issue_api_token.py \
+	docker exec $(BOT) python /app/scripts/issue_api_token.py \
 	  --chat-id 0 \
 	  --scopes read,vote,admin \
 	  --label "$$LABEL" $$EXTRA

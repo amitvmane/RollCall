@@ -12,7 +12,7 @@ _env = $(shell grep -m1 '^$(1)=' .env 2>/dev/null | cut -d= -f2- | tr -d '"' | t
 
 .DEFAULT_GOAL := help
 
-.PHONY: help up down restart build logs logs-cf status url notify
+.PHONY: help up down restart build logs logs-cf status url notify token
 
 help: ## Show this help
 	@printf "\nRollCall commands:\n\n"
@@ -110,6 +110,13 @@ url: ## Show current tunnel URL and all group voting links
 	  printf "  Chat %-22s %s\n" "$$cid:" "$$URL/web/group/$$tok"; \
 	done; \
 	echo ""
+
+token: ## Issue a global admin API token (chat_id=0, scopes read+vote+admin). Usage: make token [LABEL="my label"]
+	@LABEL=$${LABEL:-"Admin dashboard"}; \
+	docker exec $(BOT) python scripts/issue_api_token.py \
+	  --chat-id 0 \
+	  --scopes read,vote,admin \
+	  --label "$$LABEL"
 
 notify: ## Send all voting links to Telegram admin (safe to run when banned — prints links if unreachable)
 	@URL=$$(docker compose logs $(TUNNEL) 2>/dev/null \

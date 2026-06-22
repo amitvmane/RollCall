@@ -12,12 +12,43 @@ _env = $(shell grep -m1 '^$(1)=' .env 2>/dev/null | cut -d= -f2- | tr -d '"' | t
 
 .DEFAULT_GOAL := help
 
-.PHONY: help up down restart build logs logs-cf status url notify token
+.PHONY: help up down restart build logs logs-cf status url notify token group-token chats
 
 help: ## Show this help
-	@printf "\nRollCall commands:\n\n"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' Makefile | \
-	  awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
+	@printf "\n\033[1mRollCall — deployment manager\033[0m\n"
+	@printf "\n\033[4mLIFECYCLE\033[0m\n"
+	@printf "  \033[36m%-16s\033[0m %s\n" "make up"      "Start tunnel + bot; detect URL and update .env"
+	@printf "  \033[36m%-16s\033[0m %s\n" "make down"    "Stop all containers"
+	@printf "  \033[36m%-16s\033[0m %s\n" "make restart" "Restart bot (picks up .env changes)"
+	@printf "  \033[36m%-16s\033[0m %s\n" "make build"   "Rebuild bot image and restart"
+	@printf "\n\033[4mOBSERVABILITY\033[0m\n"
+	@printf "  \033[36m%-16s\033[0m %s\n" "make logs"    "Tail bot logs (Ctrl+C to stop)"
+	@printf "  \033[36m%-16s\033[0m %s\n" "make logs-cf" "Tail Cloudflare tunnel logs"
+	@printf "  \033[36m%-16s\033[0m %s\n" "make status"  "Container status + external service reachability"
+	@printf "  \033[36m%-16s\033[0m %s\n" "make url"     "Current tunnel URL and all group voting links"
+	@printf "  \033[36m%-16s\033[0m %s\n" "make notify"  "Send all voting links to Telegram admin"
+	@printf "  \033[36m%-16s\033[0m %s\n" "make chats"   "List all known groups with their chat IDs"
+	@printf "\n\033[4mTOKENS\033[0m\n"
+	@printf "  \033[36mmake token\033[0m\n"
+	@printf "    Issue a \033[1mglobal\033[0m admin token (chat-id 0, all scopes — works across all groups)\n"
+	@printf "    Options:\n"
+	@printf "      LABEL=\"...\"   Friendly name shown in token listings  (default: \"Admin dashboard\")\n"
+	@printf "      DAYS=N        Expire after N days                     (default: never)\n"
+	@printf "    Examples:\n"
+	@printf "      make token\n"
+	@printf "      make token LABEL=\"Dashboard\" DAYS=90\n"
+	@printf "\n"
+	@printf "  \033[36mmake group-token\033[0m\n"
+	@printf "    Issue a token scoped to \033[1mone specific group\033[0m only\n"
+	@printf "    Run \033[36mmake chats\033[0m first to find the chat ID of your group\n"
+	@printf "    Options:\n"
+	@printf "      CHAT=<chat_id>     Required: Telegram chat ID (negative number, e.g. -1001234567890)\n"
+	@printf "      SCOPES=read,vote   Comma-separated scopes: read, vote, admin  (default: read,vote)\n"
+	@printf "      LABEL=\"...\"        Friendly name\n"
+	@printf "      DAYS=N             Expire after N days  (default: never)\n"
+	@printf "    Examples:\n"
+	@printf "      make group-token CHAT=-1001234567890\n"
+	@printf "      make group-token CHAT=-1001234567890 SCOPES=read,vote LABEL=\"Webapp\" DAYS=30\n"
 	@printf "\n"
 
 up: ## Start tunnel + bot; auto-detect URL and update .env
@@ -119,6 +150,34 @@ token: ## Issue a global admin API token. Usage: make token [LABEL="my label"] [
 	  --chat-id 0 \
 	  --scopes read,vote,admin \
 	  --label "$$LABEL" $$EXTRA
+
+group-token: ## Issue a token scoped to one group. Usage: make group-token CHAT=<chat_id> [SCOPES=read,vote] [LABEL="..."] [DAYS=N]
+	@if [ -z "$(CHAT)" ]; then \
+	  echo "ERROR: CHAT is required. Run 'make chats' to list group IDs."; \
+	  echo "Usage: make group-token CHAT=-1001234567890 [SCOPES=read,vote] [LABEL=\"...\"] [DAYS=N]"; \
+	  exit 1; \
+	fi; \
+	SCOPES_VAL=$${SCOPES:-"read,vote"}; \
+	LABEL_VAL=$${LABEL:-""}; \
+	EXTRA=""; \
+	if [ -n "$$DAYS" ]; then EXTRA="--expires-days $$DAYS"; fi; \
+	LABEL_ARG=""; \
+	if [ -n "$$LABEL_VAL" ]; then LABEL_ARG="--label \"$$LABEL_VAL\""; fi; \
+	docker exec $(BOT) python /app/scripts/issue_api_token.py \
+	  --chat-id $(CHAT) \
+	  --scopes "$$SCOPES_VAL" \
+	  $$LABEL_ARG $$EXTRA
+
+chats: ## List all known groups with chat IDs (use these with make group-token)
+	@echo ""
+	@echo "Known groups:"
+	@sqlite3 $(DB) \
+	  "SELECT chat_id, COALESCE(group_name, '(no name)') FROM chats ORDER BY group_name;" \
+	  2>/dev/null | \
+	while IFS='|' read -r cid name; do \
+	  printf "  %-30s %s\n" "$$name" "$$cid"; \
+	done
+	@echo ""
 
 notify: ## Send all voting links to Telegram admin (safe to run when banned — prints links if unreachable)
 	@URL=$$(docker compose logs $(TUNNEL) 2>/dev/null \

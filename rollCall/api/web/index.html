@@ -11,8 +11,8 @@
     :root {
       --bg: #f0f2f5;
       --card: #ffffff;
-      --border: #e0e0e0;
-      --text: #1a1a2e;
+      --border: #e5e7eb;
+      --text: #111827;
       --muted: #6b7280;
       --in-color: #16a34a;
       --out-color: #dc2626;
@@ -25,83 +25,82 @@
       background: var(--bg);
       color: var(--text);
       min-height: 100vh;
-      padding: 16px;
+      padding: 12px 14px 24px;
     }
     body.tg-mode {
       background: var(--tg-theme-bg-color, var(--bg));
       color: var(--tg-theme-text-color, var(--text));
     }
 
-    h1 { font-size: 1.2rem; font-weight: 700; }
-    h2 { font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 8px; }
-
     .card {
       background: var(--card);
       border-radius: var(--radius);
       padding: 16px;
-      margin-bottom: 12px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+      margin-bottom: 10px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.07);
     }
-    .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
-    .meta { font-size: 0.82rem; color: var(--muted); margin-top: 4px; }
 
-    /* Rollcall tabs (group mode with multiple rollcalls) */
-    .tab-bar {
-      display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px;
-      scrollbar-width: none;
-    }
+    /* Header card */
+    .header-card { padding-bottom: 14px; }
+    .header-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+    .rc-title { font-size: 1.15rem; font-weight: 700; line-height: 1.3; }
+    .count-badge { font-size: 0.78rem; color: var(--muted); white-space: nowrap; margin-top: 3px; flex-shrink: 0; }
+    .meta { font-size: 0.8rem; color: var(--muted); margin-top: 5px; line-height: 1.5; }
+    .cap-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+    .cap-bar { flex: 1; height: 5px; background: #e5e7eb; border-radius: 3px; overflow: hidden; }
+    .cap-fill { height: 100%; background: var(--in-color); border-radius: 3px; transition: width .4s ease; }
+    .cap-text { font-size: 0.72rem; color: var(--muted); white-space: nowrap; }
+
+    /* Tabs */
+    .tab-bar { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
     .tab-bar::-webkit-scrollbar { display: none; }
     .tab-btn {
-      flex-shrink: 0;
-      padding: 6px 14px;
-      border: 1.5px solid var(--border);
-      border-radius: 20px;
-      background: var(--card);
-      font-size: 0.85rem;
-      cursor: pointer;
-      white-space: nowrap;
-      transition: all 0.15s;
-      display: flex; flex-direction: column; align-items: center; gap: 2px;
+      flex-shrink: 0; padding: 5px 13px;
+      border: 1.5px solid var(--border); border-radius: 20px;
+      background: var(--card); font-size: 0.82rem; cursor: pointer;
+      white-space: nowrap; transition: all 0.15s;
+      display: flex; flex-direction: column; align-items: center; gap: 1px;
     }
-    .tab-btn .tab-num { font-size: 0.7rem; font-weight: 700; opacity: 0.6; }
-    .tab-btn .tab-title { font-size: 0.82rem; max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
-    .tab-btn.active {
-      background: var(--accent);
-      color: #fff;
-      border-color: var(--accent);
-    }
+    .tab-btn .tab-num  { font-size: 0.65rem; font-weight: 700; opacity: 0.6; }
+    .tab-btn .tab-title { font-size: 0.8rem; max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
+    .tab-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
     .tab-btn.active .tab-num { opacity: 0.8; }
 
-    /* Name input */
-    .name-row { display: flex; gap: 8px; margin-bottom: 12px; }
+    /* Name section */
+    .section-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 10px; }
+    .name-row { display: flex; gap: 8px; }
     .name-row input {
       flex: 1; padding: 10px 12px;
       border: 1.5px solid var(--border); border-radius: 8px;
-      font-size: 1rem; outline: none; transition: border-color 0.15s;
+      font-size: 0.95rem; outline: none; transition: border-color 0.15s;
+      -webkit-appearance: none;
     }
     .name-row input:focus { border-color: var(--accent); }
     .name-row button {
-      padding: 10px 14px; background: var(--accent); color: #fff;
-      border: none; border-radius: 8px; font-size: 0.9rem; cursor: pointer;
+      padding: 10px 16px; background: var(--accent); color: #fff;
+      border: none; border-radius: 8px; font-size: 0.9rem; font-weight: 600; cursor: pointer;
     }
     .name-tag {
       display: inline-flex; align-items: center; gap: 6px;
       background: #eff6ff; color: var(--accent);
-      border-radius: 20px; padding: 4px 12px;
-      font-size: 0.9rem; font-weight: 600; margin-bottom: 12px;
+      border-radius: 20px; padding: 5px 12px;
+      font-size: 0.9rem; font-weight: 600;
     }
     .name-tag button {
       background: none; border: none; cursor: pointer;
-      font-size: 0.85rem; color: var(--muted); padding: 0;
+      font-size: 0.82rem; color: var(--muted); padding: 0; line-height: 1;
     }
 
     /* Vote buttons */
     .vote-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
     .vote-btn {
-      padding: 12px 6px; border: 2px solid transparent; border-radius: 10px;
-      font-size: 0.95rem; font-weight: 600; cursor: pointer;
+      padding: 14px 6px; border: 2px solid transparent; border-radius: 10px;
+      font-size: 1rem; font-weight: 700; cursor: pointer; letter-spacing: .01em;
       transition: all 0.15s; background: #f8fafc; color: var(--text);
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
     }
+    .vote-btn .vb-icon { font-size: 1.3rem; }
+    .vote-btn .vb-label { font-size: 0.75rem; font-weight: 700; letter-spacing: .04em; }
     .vote-btn:active { transform: scale(0.96); }
     .vote-btn.in    { border-color: var(--in-color);    color: var(--in-color); }
     .vote-btn.out   { border-color: var(--out-color);   color: var(--out-color); }
@@ -109,91 +108,97 @@
     .vote-btn.active.in    { background: var(--in-color);    color: #fff; }
     .vote-btn.active.out   { background: var(--out-color);   color: #fff; }
     .vote-btn.active.maybe { background: var(--maybe-color); color: #fff; }
-    .vote-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .vote-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
 
-    /* Lists */
+    /* Attendee list */
+    .list-section { margin-bottom: 14px; }
+    .list-section:last-child { margin-bottom: 0; }
     .list-label {
-      font-size: 0.78rem; font-weight: 700; text-transform: uppercase;
-      letter-spacing: 0.06em; margin: 10px 0 4px;
+      font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.06em; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;
     }
-    .list-label.in    { color: var(--in-color); }
-    .list-label.out   { color: var(--out-color); }
-    .list-label.maybe { color: var(--maybe-color); }
-    .list-label.waiting { color: var(--muted); }
+    .list-label.in     { color: var(--in-color); }
+    .list-label.out    { color: var(--out-color); }
+    .list-label.maybe  { color: var(--maybe-color); }
+    .list-label.waiting{ color: var(--muted); }
+    .list-count { font-weight: 400; opacity: .7; }
     .list-items { list-style: none; }
     .list-items li {
-      font-size: 0.92rem; padding: 3px 0;
+      font-size: 0.9rem; padding: 5px 0;
       border-bottom: 1px solid #f3f4f6;
-      display: flex; align-items: baseline; gap: 6px;
+      display: flex; align-items: center; gap: 8px;
     }
-    .list-items li .pos { color: var(--muted); font-size: 0.78rem; min-width: 18px; }
-    .list-items li .comment { color: var(--muted); font-size: 0.82rem; }
-    .list-items li.you { font-weight: 700; }
+    .list-items li:last-child { border-bottom: none; }
+    .av {
+      width: 24px; height: 24px; border-radius: 50%;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: #fff; font-size: 0.68rem; font-weight: 700; flex-shrink: 0;
+    }
+    .li-pos { font-size: 0.72rem; color: var(--muted); min-width: 16px; text-align: right; flex-shrink: 0; }
+    .li-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .li-comment { color: var(--muted); font-size: 0.78rem; flex-shrink: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .you { font-weight: 700; }
     .empty { color: var(--muted); font-size: 0.85rem; font-style: italic; }
 
     /* State screens */
-    .center-fill {
-      display: flex; flex-direction: column; align-items: center;
-      justify-content: center; min-height: 60vh; gap: 12px; text-align: center;
-    }
-    .spinner {
-      width: 36px; height: 36px;
-      border: 3px solid #e0e0e0; border-top-color: var(--accent);
-      border-radius: 50%; animation: spin 0.8s linear infinite;
-    }
+    .center-fill { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 60vh; gap: 12px; text-align: center; }
+    .spinner { width: 36px; height: 36px; border: 3px solid #e0e0e0; border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .error-icon { font-size: 2.5rem; }
     .btn { padding: 10px 24px; border: none; border-radius: 8px; font-size: 0.95rem; font-weight: 600; cursor: pointer; }
     .btn-primary { background: var(--accent); color: #fff; }
 
-    .no-rollcalls {
-      text-align: center; padding: 32px 16px;
-      color: var(--muted); font-size: 0.95rem;
-    }
+    .no-rollcalls { text-align: center; padding: 28px 16px; color: var(--muted); font-size: 0.92rem; }
     .no-rollcalls .icon { font-size: 2rem; margin-bottom: 8px; }
 
+    /* Auto-refresh bar */
+    .refresh-bar { height: 2px; background: #e5e7eb; border-radius: 1px; margin-top: 2px; overflow: hidden; }
+    .refresh-fill { height: 100%; background: var(--accent); border-radius: 1px; width: 100%; }
+
     .hidden { display: none !important; }
-    .refresh-hint { text-align: center; font-size: 0.75rem; color: var(--muted); margin-top: 8px; }
   </style>
 </head>
 <body>
 <div id="app">
   <div id="loading" class="center-fill">
     <div class="spinner"></div>
-    <p>Loading…</p>
+    <p style="color:var(--muted);font-size:.9rem">Loading…</p>
   </div>
   <div id="error-screen" class="center-fill hidden">
-    <div class="error-icon">⚠️</div>
-    <p id="error-msg">Something went wrong.</p>
+    <div style="font-size:2.5rem">⚠️</div>
+    <p id="error-msg" style="color:var(--muted)">Something went wrong.</p>
     <button id="retry-btn" class="btn btn-primary">Retry</button>
   </div>
   <div id="main" class="hidden">
-    <!-- Tabs (group mode, multiple rollcalls) -->
+    <!-- Tabs (group mode) -->
     <div id="tab-card" class="card hidden">
       <div id="tab-bar" class="tab-bar"></div>
     </div>
 
     <!-- Rollcall header -->
-    <div class="card">
-      <div class="header">
-        <h1 id="rc-title">RollCall</h1>
-        <span id="count-badge" style="font-size:0.8rem;color:var(--muted)"></span>
+    <div class="card header-card">
+      <div class="header-row">
+        <h1 id="rc-title" class="rc-title">RollCall</h1>
+        <span id="count-badge" class="count-badge"></span>
       </div>
       <div id="rc-meta" class="meta"></div>
+      <div id="cap-row" class="cap-row hidden">
+        <div class="cap-bar"><div id="cap-fill" class="cap-fill" style="width:0%"></div></div>
+        <span id="cap-text" class="cap-text"></span>
+      </div>
     </div>
 
-    <!-- No rollcalls (group mode, none active) -->
+    <!-- No active rollcalls (group mode) -->
     <div id="no-rollcalls" class="card hidden">
       <div class="no-rollcalls">
         <div class="icon">📋</div>
         <p>No active rollcalls right now.</p>
-        <p style="margin-top:6px;font-size:0.82rem">Check back later or ask an admin to start one.</p>
+        <p style="margin-top:6px;font-size:0.8rem">Check back later or ask an admin to start one.</p>
       </div>
     </div>
 
     <!-- Identity -->
     <div class="card" id="identity-card">
-      <h2>Your name</h2>
+      <div class="section-label">Your name</div>
       <div id="name-input-row" class="name-row hidden">
         <input id="name-input" type="text" placeholder="Enter your name" maxlength="64" autocomplete="off" />
         <button id="name-save-btn">OK</button>
@@ -208,20 +213,26 @@
 
     <!-- Vote buttons -->
     <div class="card" id="vote-card">
-      <h2>Your vote</h2>
+      <div class="section-label">Your vote</div>
       <div class="vote-row">
-        <button class="vote-btn in"    data-vote="in"    id="btn-in">✅ IN</button>
-        <button class="vote-btn out"   data-vote="out"   id="btn-out">❌ OUT</button>
-        <button class="vote-btn maybe" data-vote="maybe" id="btn-maybe">❓ MAYBE</button>
+        <button class="vote-btn in"    data-vote="in"    id="btn-in">
+          <span class="vb-icon">✅</span><span class="vb-label">IN</span>
+        </button>
+        <button class="vote-btn out"   data-vote="out"   id="btn-out">
+          <span class="vb-icon">❌</span><span class="vb-label">OUT</span>
+        </button>
+        <button class="vote-btn maybe" data-vote="maybe" id="btn-maybe">
+          <span class="vb-icon">🤔</span><span class="vb-label">MAYBE</span>
+        </button>
       </div>
     </div>
 
     <!-- Lists -->
     <div class="card" id="lists-card">
-      <h2>Current list</h2>
+      <div class="section-label">Current list</div>
       <div id="lists-container"></div>
     </div>
-    <p class="refresh-hint" id="refresh-hint"></p>
+    <div class="refresh-bar"><div id="refresh-fill" class="refresh-fill"></div></div>
   </div>
 </div>
 
@@ -229,26 +240,20 @@
 (function () {
   "use strict";
 
-  // ── URL / mode detection ──────────────────────────────────────────────────
-  // /web/join/{rollcall_token}  → join mode (single rollcall)
-  // /web/group/{group_token}    → group mode (all active rollcalls)
   const parts = window.location.pathname.split("/").filter(Boolean);
-  // parts: ['web', 'join'|'group', token]
-  const URL_MODE  = parts[1]; // 'join' | 'group'
+  const URL_MODE  = parts[1];
   const URL_TOKEN = parts[2];
 
   if (!URL_TOKEN || (URL_MODE !== "join" && URL_MODE !== "group")) {
     document.getElementById("loading").classList.add("hidden");
     document.getElementById("error-screen").classList.remove("hidden");
-    document.getElementById("error-msg").textContent =
-      "Invalid URL. Use the link shared in your group.";
+    document.getElementById("error-msg").textContent = "Invalid URL. Use the link shared in your group.";
   }
 
-  const IS_GROUP = URL_MODE === "group";
+  const IS_GROUP  = URL_MODE === "group";
   const API_GROUP = "/api/v1/web/group/" + URL_TOKEN;
-  const LS_NAME_KEY = "rollcall_name"; // shared across all rollcalls for convenience
+  const LS_NAME   = "rollcall_name";
 
-  // ── Telegram WebApp detection ─────────────────────────────────────────────
   const tg = window.Telegram && window.Telegram.WebApp;
   let TG_NAME = null;
   if (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) {
@@ -258,87 +263,49 @@
     tg.expand();
   }
 
-  // ── State ─────────────────────────────────────────────────────────────────
-  let currentName   = TG_NAME || localStorage.getItem(LS_NAME_KEY) || "";
-  let currentVote   = null;   // 'in'|'out'|'maybe'|null — for active rollcall
-  let activeRcData  = null;   // the rollcall currently shown
-  let groupData     = null;   // full group response (group mode)
-  let activeTabIdx  = 0;      // index into groupData.rollcalls
-  let voting        = false;
-  let refreshTimer  = null;
+  let currentName  = TG_NAME || localStorage.getItem(LS_NAME) || "";
+  let currentVote  = null;
+  let activeRcData = null;
+  let groupData    = null;
+  let activeTabIdx = 0;
+  let voting       = false;
 
-  // ── DOM refs ──────────────────────────────────────────────────────────────
-  const $ = id => document.getElementById(id);
-  const loading      = $("loading");
-  const errorScreen  = $("error-screen");
-  const main         = $("main");
-  const errorMsg     = $("error-msg");
-  const retryBtn     = $("retry-btn");
-  const tabCard      = $("tab-card");
-  const tabBar       = $("tab-bar");
-  const rcTitle      = $("rc-title");
-  const rcMeta       = $("rc-meta");
-  const countBadge   = $("count-badge");
-  const noRollcalls  = $("no-rollcalls");
-  const identityCard = $("identity-card");
-  const nameInputRow = $("name-input-row");
-  const nameTagRow   = $("name-tag-row");
-  const nameInput    = $("name-input");
-  const nameSaveBtn  = $("name-save-btn");
-  const nameDisplay  = $("name-display");
-  const nameChangeBtn= $("name-change-btn");
-  const voteCard     = $("vote-card");
-  const btnIn        = $("btn-in");
-  const btnOut       = $("btn-out");
-  const btnMaybe     = $("btn-maybe");
-  const listsCard    = $("lists-card");
-  const listsContainer = $("lists-container");
-  const refreshHint  = $("refresh-hint");
-
-  // ── Helpers ───────────────────────────────────────────────────────────────
-  function show(el) { el.classList.remove("hidden"); }
-  function hide(el) { el.classList.add("hidden"); }
-  function esc(s) {
-    return String(s)
-      .replace(/&/g,"&amp;").replace(/</g,"&lt;")
-      .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-  }
-  function showError(msg) {
-    hide(loading); hide(main);
-    errorMsg.textContent = msg;
-    show(errorScreen);
-  }
+  const $ = x => document.getElementById(x);
 
   // ── Identity ──────────────────────────────────────────────────────────────
   function renderIdentity() {
     if (TG_NAME) {
-      nameDisplay.textContent = TG_NAME;
-      hide(nameInputRow); show(nameTagRow);
-      identityCard.querySelector("h2").style.display = "none";
+      $("name-display").textContent = TG_NAME;
+      $("name-input-row").classList.add("hidden");
+      $("name-tag-row").classList.remove("hidden");
+      $("identity-card").querySelector(".section-label").style.display = "none";
     } else if (currentName) {
-      nameDisplay.textContent = currentName;
-      hide(nameInputRow); show(nameTagRow);
+      $("name-display").textContent = currentName;
+      $("name-input-row").classList.add("hidden");
+      $("name-tag-row").classList.remove("hidden");
     } else {
-      show(nameInputRow); hide(nameTagRow);
+      $("name-input-row").classList.remove("hidden");
+      $("name-tag-row").classList.add("hidden");
     }
   }
 
-  nameSaveBtn.addEventListener("click", saveName);
-  nameInput.addEventListener("keydown", e => { if (e.key === "Enter") saveName(); });
-  nameChangeBtn.addEventListener("click", () => {
+  $("name-save-btn").addEventListener("click", saveName);
+  $("name-input").addEventListener("keydown", e => { if (e.key === "Enter") saveName(); });
+  $("name-change-btn").addEventListener("click", () => {
     if (TG_NAME) return;
     currentName = "";
-    localStorage.removeItem(LS_NAME_KEY);
-    nameInput.value = "";
-    hide(nameTagRow); show(nameInputRow);
-    nameInput.focus();
+    localStorage.removeItem(LS_NAME);
+    $("name-input").value = "";
+    $("name-tag-row").classList.add("hidden");
+    $("name-input-row").classList.remove("hidden");
+    $("name-input").focus();
   });
 
   function saveName() {
-    const val = nameInput.value.trim();
-    if (!val) { nameInput.focus(); return; }
+    const val = $("name-input").value.trim();
+    if (!val) { $("name-input").focus(); return; }
     currentName = val.slice(0, 64);
-    localStorage.setItem(LS_NAME_KEY, currentName);
+    localStorage.setItem(LS_NAME, currentName);
     renderIdentity();
     detectCurrentVote();
   }
@@ -347,20 +314,18 @@
   function detectCurrentVote() {
     if (!activeRcData || !currentName) { currentVote = null; renderVoteButtons(); return; }
     const n = currentName.toLowerCase();
-    const rc = activeRcData;
-    if (rc.in.some(u => u.name.toLowerCase() === n))    currentVote = "in";
-    else if (rc.out.some(u => u.name.toLowerCase() === n))  currentVote = "out";
-    else if (rc.maybe.some(u => u.name.toLowerCase() === n)) currentVote = "maybe";
+    if (activeRcData.in.some(u    => u.name.toLowerCase() === n)) currentVote = "in";
+    else if (activeRcData.out.some(u   => u.name.toLowerCase() === n)) currentVote = "out";
+    else if (activeRcData.maybe.some(u => u.name.toLowerCase() === n)) currentVote = "maybe";
     else currentVote = null;
     renderVoteButtons();
   }
 
   function renderVoteButtons() {
     const hasName = !!currentName && !!activeRcData;
-    [btnIn, btnOut, btnMaybe].forEach(btn => {
+    [$("btn-in"), $("btn-out"), $("btn-maybe")].forEach(btn => {
       btn.disabled = !hasName || voting;
-      btn.classList.remove("active");
-      if (currentVote === btn.dataset.vote) btn.classList.add("active");
+      btn.classList.toggle("active", currentVote === btn.dataset.vote);
     });
   }
 
@@ -382,13 +347,11 @@
         throw new Error(data.detail || "Vote failed (" + res.status + ")");
       }
       const updated = await res.json();
-      // Merge back into group data if in group mode
       activeRcData = updated;
-      if (IS_GROUP && groupData) {
-        groupData.rollcalls[activeTabIdx] = updated;
-      }
+      if (IS_GROUP && groupData) groupData.rollcalls[activeTabIdx] = updated;
       detectCurrentVote();
       renderLists();
+      renderCapBar(updated);
     } catch (err) {
       alert(err.message || "Could not cast vote. Please try again.");
     } finally {
@@ -397,29 +360,56 @@
     }
   }
 
-  btnIn.addEventListener("click",    () => castVote("in"));
-  btnOut.addEventListener("click",   () => castVote("out"));
-  btnMaybe.addEventListener("click", () => castVote("maybe"));
+  $("btn-in").addEventListener("click",    () => castVote("in"));
+  $("btn-out").addEventListener("click",   () => castVote("out"));
+  $("btn-maybe").addEventListener("click", () => castVote("maybe"));
+
+  // ── Avatar colour ─────────────────────────────────────────────────────────
+  const AV_COLORS = ["#4f46e5","#0891b2","#16a34a","#d97706","#7c3aed","#0284c7","#059669","#b45309"];
+  function avColor(name) {
+    let h = 0;
+    for (const c of String(name)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+    return AV_COLORS[h % AV_COLORS.length];
+  }
 
   // ── Render rollcall ───────────────────────────────────────────────────────
+  function renderCapBar(rc) {
+    const inCount = rc.in.length;
+    const capRow  = $("cap-row");
+    const capFill = $("cap-fill");
+    const capText = $("cap-text");
+    if (rc.limit) {
+      capRow.classList.remove("hidden");
+      const pct = Math.min(100, Math.round(inCount / rc.limit * 100));
+      capFill.style.width = pct + "%";
+      const remaining = rc.limit - inCount;
+      capText.textContent = remaining > 0 ? `${inCount}/${rc.limit} — ${remaining} spot${remaining===1?"":"s"} left` : `${inCount}/${rc.limit} — Full`;
+      capFill.style.background = remaining <= 0 ? "var(--maybe-color)" : "var(--in-color)";
+    } else {
+      capRow.classList.add("hidden");
+    }
+  }
+
   function renderRollcall(rc) {
     activeRcData = rc;
 
-    // Header — prefix with #N when multiple rollcalls so tab context is clear
     const totalRc = IS_GROUP && groupData ? groupData.rollcalls.length : 1;
-    rcTitle.textContent = totalRc > 1 ? `#${activeTabIdx + 1} · ${rc.title}` : rc.title;
+    $("rc-title").textContent = totalRc > 1 ? `#${activeTabIdx + 1} · ${rc.title}` : rc.title;
+
     const meta = [];
     if (rc.finalize_date) meta.push("Closes: " + rc.finalize_date);
     if (rc.location)      meta.push("📍 " + rc.location);
-    rcMeta.textContent = meta.join("  ·  ");
+    $("rc-meta").textContent = meta.join("  ·  ");
 
     const inCount = rc.in.length;
-    countBadge.textContent = rc.limit ? inCount + "/" + rc.limit + " IN" : inCount + " IN";
+    $("count-badge").textContent = rc.limit ? inCount + "/" + rc.limit + " IN" : inCount + " IN";
 
-    hide(noRollcalls);
-    show(identityCard);
-    show(voteCard);
-    show(listsCard);
+    renderCapBar(rc);
+
+    $("no-rollcalls").classList.add("hidden");
+    $("identity-card").classList.remove("hidden");
+    $("vote-card").classList.remove("hidden");
+    $("lists-card").classList.remove("hidden");
 
     detectCurrentVote();
     renderLists();
@@ -432,14 +422,21 @@
     function section(label, cls, items) {
       if (!items.length) return "";
       const rows = items.map((u, i) => {
-        const youClass = currentName && u.name.toLowerCase() === currentName.toLowerCase() ? " you" : "";
-        const comment = u.comment ? `<span class="comment">— ${esc(u.comment)}</span>` : "";
-        return `<li class="${youClass}"><span class="pos">${i+1}.</span> ${esc(u.name)}${comment}</li>`;
+        const isYou = currentName && u.name.toLowerCase() === currentName.toLowerCase();
+        const av    = `<span class="av" style="background:${avColor(u.name)}">${(u.name[0]||"?").toUpperCase()}</span>`;
+        const cm    = u.comment ? `<span class="li-comment">— ${esc(u.comment)}</span>` : "";
+        return `<li class="${isYou?"you":""}">
+          <span class="li-pos">${i+1}</span>${av}
+          <span class="li-name">${esc(u.name)}</span>${cm}
+        </li>`;
       }).join("");
-      return `<div class="list-label ${cls}">${label} (${items.length})</div><ul class="list-items">${rows}</ul>`;
+      return `<div class="list-section">
+        <div class="list-label ${cls}">${label} <span class="list-count">(${items.length})</span></div>
+        <ul class="list-items">${rows}</ul>
+      </div>`;
     }
 
-    listsContainer.innerHTML =
+    $("lists-container").innerHTML =
       section("IN", "in", inL) +
       section("OUT", "out", outL) +
       section("MAYBE", "maybe", maybeL) +
@@ -447,17 +444,15 @@
       `<p class="empty">No votes yet.</p>`;
   }
 
-  // ── Tabs (group mode, multiple rollcalls) ─────────────────────────────────
+  // ── Tabs ──────────────────────────────────────────────────────────────────
   function renderTabs(rollcalls) {
-    tabBar.innerHTML = "";
+    $("tab-bar").innerHTML = "";
     rollcalls.forEach((rc, idx) => {
       const btn = document.createElement("button");
       btn.className = "tab-btn" + (idx === activeTabIdx ? " active" : "");
-      btn.innerHTML =
-        `<span class="tab-num">#${idx + 1}</span>` +
-        `<span class="tab-title">${esc(rc.title)}</span>`;
+      btn.innerHTML = `<span class="tab-num">#${idx+1}</span><span class="tab-title">${esc(rc.title)}</span>`;
       btn.addEventListener("click", () => switchTab(idx));
-      tabBar.appendChild(btn);
+      $("tab-bar").appendChild(btn);
     });
   }
 
@@ -471,17 +466,13 @@
   // ── Load ──────────────────────────────────────────────────────────────────
   async function load() {
     try {
-      if (IS_GROUP) {
-        await loadGroup();
-      } else {
-        await loadJoin();
-      }
+      IS_GROUP ? await loadGroup() : await loadJoin();
     } catch {
       showError("Could not connect. Check your internet and tap Retry.");
       return;
     }
-    hide(loading);
-    show(main);
+    $("loading").classList.add("hidden");
+    $("main").classList.remove("hidden");
     renderIdentity();
     scheduleRefresh();
   }
@@ -493,9 +484,8 @@
       showError(data.detail || "This rollcall link is invalid or has ended.");
       throw new Error("fetch failed");
     }
-    const rc = await res.json();
-    hide(tabCard);
-    renderRollcall(rc);
+    $("tab-card").classList.add("hidden");
+    renderRollcall(await res.json());
   }
 
   async function loadGroup() {
@@ -506,46 +496,39 @@
       throw new Error("fetch failed");
     }
     groupData = await res.json();
-    const rollcalls = groupData.rollcalls;
-
-    if (rollcalls.length === 0) {
-      // No active rollcalls
-      rcTitle.textContent = "RollCall";
-      rcMeta.textContent = "";
-      countBadge.textContent = "";
-      hide(tabCard);
-      show(noRollcalls);
-      hide(identityCard);
-      hide(voteCard);
-      hide(listsCard);
-    } else if (rollcalls.length === 1) {
-      // Single rollcall — seamless, no tabs needed
-      hide(tabCard);
-      renderRollcall(rollcalls[0]);
+    const rcs = groupData.rollcalls;
+    if (rcs.length === 0) {
+      $("rc-title").textContent = "RollCall";
+      $("rc-meta").textContent = "";
+      $("count-badge").textContent = "";
+      $("tab-card").classList.add("hidden");
+      $("no-rollcalls").classList.remove("hidden");
+      $("identity-card").classList.add("hidden");
+      $("vote-card").classList.add("hidden");
+      $("lists-card").classList.add("hidden");
+    } else if (rcs.length === 1) {
+      $("tab-card").classList.add("hidden");
+      renderRollcall(rcs[0]);
     } else {
-      // Multiple rollcalls — show tab bar
-      show(tabCard);
-      if (activeTabIdx >= rollcalls.length) activeTabIdx = 0;
-      renderTabs(rollcalls);
-      renderRollcall(rollcalls[activeTabIdx]);
+      $("tab-card").classList.remove("hidden");
+      if (activeTabIdx >= rcs.length) activeTabIdx = 0;
+      renderTabs(rcs);
+      renderRollcall(rcs[activeTabIdx]);
     }
   }
 
   // ── Auto-refresh ──────────────────────────────────────────────────────────
   function scheduleRefresh() {
-    clearTimeout(refreshTimer);
-    let n = 30;
-    refreshHint.textContent = `Auto-refreshes in ${n}s`;
-    const tick = setInterval(() => {
-      n--;
-      if (n <= 0) {
-        clearInterval(tick);
-        refreshHint.textContent = "Refreshing…";
-        silentRefresh();
-      } else {
-        refreshHint.textContent = `Auto-refreshes in ${n}s`;
-      }
-    }, 1000);
+    const fill = $("refresh-fill");
+    if (fill) {
+      fill.style.transition = "none";
+      fill.style.width = "100%";
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        fill.style.transition = "width 30s linear";
+        fill.style.width = "0%";
+      }));
+    }
+    setTimeout(silentRefresh, 30000);
   }
 
   async function silentRefresh() {
@@ -554,24 +537,24 @@
         const res = await fetch(API_GROUP);
         if (res.ok) {
           groupData = await res.json();
-          const rollcalls = groupData.rollcalls;
-          if (rollcalls.length === 0) {
-            hide(tabCard); show(noRollcalls);
-            hide(identityCard); hide(voteCard); hide(listsCard);
+          const rcs = groupData.rollcalls;
+          if (rcs.length === 0) {
+            $("tab-card").classList.add("hidden");
+            $("no-rollcalls").classList.remove("hidden");
+            $("identity-card").classList.add("hidden");
+            $("vote-card").classList.add("hidden");
+            $("lists-card").classList.add("hidden");
           } else {
-            hide(noRollcalls);
-            if (rollcalls.length > 1) {
-              show(tabCard);
-              renderTabs(rollcalls);
-            } else {
-              hide(tabCard);
-            }
-            if (activeTabIdx >= rollcalls.length) activeTabIdx = 0;
-            activeRcData = rollcalls[activeTabIdx];
+            $("no-rollcalls").classList.add("hidden");
+            if (rcs.length > 1) { $("tab-card").classList.remove("hidden"); renderTabs(rcs); }
+            else $("tab-card").classList.add("hidden");
+            if (activeTabIdx >= rcs.length) activeTabIdx = 0;
+            activeRcData = rcs[activeTabIdx];
             detectCurrentVote();
             renderLists();
+            renderCapBar(activeRcData);
             const inCount = activeRcData.in.length;
-            countBadge.textContent = activeRcData.limit
+            $("count-badge").textContent = activeRcData.limit
               ? inCount + "/" + activeRcData.limit + " IN"
               : inCount + " IN";
           }
@@ -582,22 +565,32 @@
           activeRcData = await res.json();
           detectCurrentVote();
           renderLists();
+          renderCapBar(activeRcData);
         }
       }
-    } catch { /* ignore silent refresh errors */ }
+    } catch { /* silent */ }
     scheduleRefresh();
   }
 
-  retryBtn.addEventListener("click", () => {
-    hide(errorScreen); show(loading);
+  function showError(msg) {
+    $("loading").classList.add("hidden");
+    $("main").classList.add("hidden");
+    $("error-msg").textContent = msg;
+    $("error-screen").classList.remove("hidden");
+  }
+
+  $("retry-btn").addEventListener("click", () => {
+    $("error-screen").classList.add("hidden");
+    $("loading").classList.remove("hidden");
     activeTabIdx = 0;
     load();
   });
 
-  // ── Boot ──────────────────────────────────────────────────────────────────
-  if (URL_TOKEN && (URL_MODE === "join" || URL_MODE === "group")) {
-    load();
+  function esc(s) {
+    return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
   }
+
+  if (URL_TOKEN && (URL_MODE === "join" || URL_MODE === "group")) load();
 })();
 </script>
 </body>

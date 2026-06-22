@@ -182,6 +182,36 @@ def _ts() -> str:
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 
+# ── Graceful edit helpers ─────────────────────────────────────────────────────
+
+async def safe_edit_text(cid: int, msg_id: int, text: str, reply_markup=None, parse_mode: str = None) -> bool:
+    """Edit a message text; swallow failures gracefully (log WARNING, return False).
+
+    Returns True if the edit succeeded, False otherwise. Callers that need a
+    fallback send_message can branch on the return value.
+    """
+    try:
+        await bot.edit_message_text(text, cid, msg_id, reply_markup=reply_markup, parse_mode=parse_mode)
+        return True
+    except Exception as e:
+        if "message is not modified" in str(e).lower():
+            return True
+        logging.warning("edit_message_text failed (chat=%s msg=%s): %s", cid, msg_id, e)
+        return False
+
+
+async def safe_edit_markup(cid: int, msg_id: int, reply_markup=None) -> bool:
+    """Edit reply markup only; swallow failures gracefully."""
+    try:
+        await bot.edit_message_reply_markup(cid, msg_id, reply_markup=reply_markup)
+        return True
+    except Exception as e:
+        if "message is not modified" in str(e).lower():
+            return True
+        logging.warning("edit_message_reply_markup failed (chat=%s msg=%s): %s", cid, msg_id, e)
+        return False
+
+
 # ── Task helpers ──────────────────────────────────────────────────────────────
 
 # Last unhandled-error signal for /health diagnostics

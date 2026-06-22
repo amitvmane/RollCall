@@ -15,6 +15,7 @@ from bot_state import (
     _is_rate_limited, _get_display_name, format_mention_with_name,
     format_mention_with_name_md, _esc_md,
     warn_no_username, _dm_promoted_real_user, get_rc_db_id, reply_error,
+    safe_edit_text, safe_edit_markup,
 )
 from config import ADMINS
 from exceptions import (
@@ -505,8 +506,8 @@ async def callback_handler(call):
                 await bot.edit_message_text(text, cid, call.message.message_id, reply_markup=markup)
                 _panel_msg_ids[(cid, rc_number)] = call.message.message_id
             except Exception as e:
-                if "message is not modified" not in str(e):
-                    raise
+                if "message is not modified" not in str(e).lower():
+                    logging.warning("Panel edit failed after vote (chat=%s msg=%s): %s", cid, call.message.message_id, e)
             return
 
         # ── Lists submenu ─────────────────────────────────────────────────────
@@ -516,8 +517,8 @@ async def callback_handler(call):
             try:
                 await bot.edit_message_text("Select list:", cid, call.message.message_id, reply_markup=markup)
             except Exception as e:
-                if "message is not modified" not in str(e):
-                    raise
+                if "message is not modified" not in str(e).lower():
+                    logging.warning("Lists menu edit failed (chat=%s msg=%s): %s", cid, call.message.message_id, e)
             return
 
         if action in ("wi", "wo", "wm", "ww"):
@@ -537,8 +538,8 @@ async def callback_handler(call):
                     reply_markup=await get_lists_keyboard(rc_number),
                 )
             except Exception as e:
-                if "message is not modified" not in str(e):
-                    raise
+                if "message is not modified" not in str(e).lower():
+                    logging.warning("List view edit failed (chat=%s msg=%s): %s", cid, call.message.message_id, e)
             return
 
         # ── Back to main panel ────────────────────────────────────────────────
@@ -549,8 +550,8 @@ async def callback_handler(call):
             try:
                 await bot.edit_message_text(text, cid, call.message.message_id, reply_markup=markup)
             except Exception as e:
-                if "message is not modified" not in str(e):
-                    raise
+                if "message is not modified" not in str(e).lower():
+                    logging.warning("Status edit failed (chat=%s msg=%s): %s", cid, call.message.message_id, e)
             return
 
         # ── Refresh ───────────────────────────────────────────────────────────
@@ -562,8 +563,8 @@ async def callback_handler(call):
                 await bot.edit_message_text(text, cid, call.message.message_id, reply_markup=markup)
                 _panel_msg_ids[(cid, rc_number)] = call.message.message_id
             except Exception as e:
-                if "message is not modified" not in str(e):
-                    raise
+                if "message is not modified" not in str(e).lower():
+                    logging.warning("Refresh edit failed (chat=%s msg=%s): %s", cid, call.message.message_id, e)
             return
 
         # ── Show end confirmation ─────────────────────────────────────────────
@@ -587,8 +588,8 @@ async def callback_handler(call):
                     cid, call.message.message_id, reply_markup=markup,
                 )
             except Exception as e:
-                if "message is not modified" not in str(e):
-                    raise
+                if "message is not modified" not in str(e).lower():
+                    logging.warning("End-confirm edit failed (chat=%s msg=%s): %s", cid, call.message.message_id, e)
             return
 
         # ── Confirm end rollcall ──────────────────────────────────────────────
@@ -679,8 +680,8 @@ async def callback_handler(call):
             try:
                 await bot.edit_message_text(text, cid, call.message.message_id, reply_markup=markup)
             except Exception as e:
-                if "message is not modified" not in str(e):
-                    raise
+                if "message is not modified" not in str(e).lower():
+                    logging.warning("Endcancel edit failed (chat=%s msg=%s): %s", cid, call.message.message_id, e)
             return
 
         await bot.answer_callback_query(call.id, "Unknown action")

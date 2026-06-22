@@ -12,7 +12,7 @@ from bot_state import (
     bot, _ghost_selections, _pending_reconf, _pending_deletes, _pending_overrides,
     _pending_proxy_add, _log_task_exc, _get_display_name, format_mention_with_name,
     _esc_md, get_rc_db_id, _build_ghost_select_keyboard, _fmt_ended_at,
-    reply_error,
+    reply_error, safe_edit_text, safe_edit_markup,
 )
 from exceptions import insufficientPermissions, rollCallNotStarted, incorrectParameter, alreadyInList
 from functions import admin_rights, roll_call_not_started
@@ -198,7 +198,7 @@ async def ghost_callback_handler(call):
             # Everyone IN attended → forgive 1 absence each.
             _decrement_attended(cid, get_rollcall_in_users(rc_db_id), set())
             await bot.answer_callback_query(call.id, "✅ Got it!")
-            await bot.edit_message_text("✅ No ghosts — everyone showed up! Great session! 🎉", cid, call.message.message_id)
+            await safe_edit_text(cid, call.message.message_id, "✅ No ghosts — everyone showed up! Great session! 🎉")
             return
 
         # ── ghost_yes ────────────────────────────────────────────────────────
@@ -212,10 +212,7 @@ async def ghost_callback_handler(call):
             _ghost_selections[(cid, rc_db_id)] = saved if saved else set()
             markup = _build_ghost_select_keyboard(rc_db_id, in_users, _ghost_selections[(cid, rc_db_id)])
             await bot.answer_callback_query(call.id)
-            await bot.edit_message_text(
-                "👻 Who ghosted? Tap to select, then tap Done.",
-                cid, call.message.message_id, reply_markup=markup
-            )
+            await safe_edit_text(cid, call.message.message_id, "👻 Who ghosted? Tap to select, then tap Done.", reply_markup=markup)
             return
 
         # ── ghost_togp (proxy) ───────────────────────────────────────────────
@@ -236,11 +233,7 @@ async def ghost_callback_handler(call):
             in_users = get_rollcall_in_users(rc_db_id)
             markup = _build_ghost_select_keyboard(rc_db_id, in_users, _ghost_selections[key])
             await bot.answer_callback_query(call.id)
-            try:
-                await bot.edit_message_reply_markup(cid, call.message.message_id, reply_markup=markup)
-            except Exception as e:
-                if "message is not modified" not in str(e):
-                    raise
+            await safe_edit_markup(cid, call.message.message_id, reply_markup=markup)
             return
 
         # ── ghost_tog (real user) ────────────────────────────────────────────
@@ -263,11 +256,7 @@ async def ghost_callback_handler(call):
             in_users = get_rollcall_in_users(rc_db_id)
             markup = _build_ghost_select_keyboard(rc_db_id, in_users, _ghost_selections[key])
             await bot.answer_callback_query(call.id)
-            try:
-                await bot.edit_message_reply_markup(cid, call.message.message_id, reply_markup=markup)
-            except Exception as e:
-                if "message is not modified" not in str(e):
-                    raise
+            await safe_edit_markup(cid, call.message.message_id, reply_markup=markup)
             return
 
         # ── ghost_done ───────────────────────────────────────────────────────
@@ -287,7 +276,7 @@ async def ghost_callback_handler(call):
                 # Selection canvas opened but no one tapped → everyone IN attended.
                 _decrement_attended(cid, get_rollcall_in_users(rc_db_id), set())
                 await bot.answer_callback_query(call.id, "No ghosts selected — marking all as attended.")
-                await bot.edit_message_text("✅ No ghosts selected — all marked as attended.", cid, call.message.message_id)
+                await safe_edit_text(cid, call.message.message_id, "✅ No ghosts selected — all marked as attended.")
                 return
 
             in_users = get_rollcall_in_users(rc_db_id)
@@ -326,10 +315,7 @@ async def ghost_callback_handler(call):
 
             summary = "\n".join(lines)
             await bot.answer_callback_query(call.id, f"{len(selected)} ghost(s) recorded.")
-            await bot.edit_message_text(
-                f"👻 Ghost session recorded!\n\n{summary}",
-                cid, call.message.message_id
-            )
+            await safe_edit_text(cid, call.message.message_id, f"👻 Ghost session recorded!\n\n{summary}")
             return
 
         # ── reconf_in ────────────────────────────────────────────────────────
@@ -355,10 +341,7 @@ async def ghost_callback_handler(call):
                 pass  # already IN from a concurrent vote — still show confirmation
             rc = manager.get_rollcall(cid, rc_number)
             await bot.answer_callback_query(call.id, "💪 You're IN!")
-            await bot.edit_message_text(
-                f"💪 {_display} committed to IN!\n\n{rc.allList().replace('__RCID__', str(rc_number + 1))}",
-                cid, call.message.message_id
-            )
+            await safe_edit_text(cid, call.message.message_id, f"💪 {_display} committed to IN!\n\n{rc.allList().replace('__RCID__', str(rc_number + 1))}")
             return
 
         # ── reconf_out ───────────────────────────────────────────────────────
@@ -382,10 +365,7 @@ async def ghost_callback_handler(call):
                 pass  # already OUT — still show confirmation
             rc = manager.get_rollcall(cid, rc_number)
             await bot.answer_callback_query(call.id, "❌ Marked as Out")
-            await bot.edit_message_text(
-                f"❌ {_display} is out.\n\n{rc.allList().replace('__RCID__', str(rc_number + 1))}",
-                cid, call.message.message_id
-            )
+            await safe_edit_text(cid, call.message.message_id, f"❌ {_display} is out.\n\n{rc.allList().replace('__RCID__', str(rc_number + 1))}")
             return
 
         # ── proxy_add ────────────────────────────────────────────────────────
@@ -413,7 +393,7 @@ async def ghost_callback_handler(call):
             rc.save()
 
             await bot.answer_callback_query(call.id, f"✅ Added {proxy_name}")
-            await bot.edit_message_text(f"✅ {proxy_name} added to IN list", cid, call.message.message_id)
+            await safe_edit_text(cid, call.message.message_id, f"✅ {proxy_name} added to IN list")
             from handlers.lifecycle import _update_panel
             await _update_panel(cid, rc_number + 1, rc, force_new=True)
             return
@@ -424,7 +404,7 @@ async def ghost_callback_handler(call):
             proxy_name = parts[3] if len(parts) > 3 else ""
             _pending_proxy_add.pop((cid, call.from_user.id, proxy_name), None)
             await bot.answer_callback_query(call.id, "❌ Cancelled")
-            await bot.edit_message_text("❌ Cancelled — user not added", cid, call.message.message_id)
+            await safe_edit_text(cid, call.message.message_id, "❌ Cancelled — user not added")
             return
 
         # ── delconf_yes / delconf_no ─────────────────────────────────────────
@@ -448,7 +428,7 @@ async def ghost_callback_handler(call):
                 return
             if not confirmed or pending is None:
                 await bot.answer_callback_query(call.id, "❌ Cancelled")
-                await bot.edit_message_text("❌ Delete cancelled.", cid, call.message.message_id)
+                await safe_edit_text(cid, call.message.message_id, "❌ Delete cancelled.")
                 return
 
             name = pending['name']
@@ -458,10 +438,10 @@ async def ghost_callback_handler(call):
                     cid, rc_number, name, admin_id, call.from_user.first_name
                 )
                 await bot.answer_callback_query(call.id, f"✅ Deleted {name}")
-                await bot.edit_message_text(f"✅ *{_esc_md(name)}* removed from rollcall #{rc_number + 1}.", cid, call.message.message_id, parse_mode="Markdown")
+                await safe_edit_text(cid, call.message.message_id, f"✅ *{_esc_md(name)}* removed from rollcall #{rc_number + 1}.", parse_mode="Markdown")
             except incorrectParameter:
                 await bot.answer_callback_query(call.id, "User not found")
-                await bot.edit_message_text(f"⚠️ User *{_esc_md(name)}* not found.", cid, call.message.message_id, parse_mode="Markdown")
+                await safe_edit_text(cid, call.message.message_id, f"⚠️ User *{_esc_md(name)}* not found.", parse_mode="Markdown")
             return
 
         # ── ovrd_yes / ovrd_no ───────────────────────────────────────────────
@@ -477,7 +457,7 @@ async def ghost_callback_handler(call):
             pending = _pending_overrides.pop((cid, admin_id), None)
             if not confirmed or pending is None:
                 await bot.answer_callback_query(call.id, "❌ Cancelled")
-                await bot.edit_message_text("❌ Override cancelled.", cid, call.message.message_id)
+                await safe_edit_text(cid, call.message.message_id, "❌ Override cancelled.")
                 return
 
             user = pending['user']
@@ -486,7 +466,7 @@ async def ghost_callback_handler(call):
             rc = manager.get_rollcall(cid, rc_number)
             if not rc:
                 await bot.answer_callback_query(call.id, "Rollcall not found")
-                await bot.edit_message_text("⚠️ Rollcall not found.", cid, call.message.message_id)
+                await safe_edit_text(cid, call.message.message_id, "⚠️ Rollcall not found.")
                 return
 
             try:
@@ -520,10 +500,7 @@ async def ghost_callback_handler(call):
             from handlers.lifecycle import _update_panel
             await _update_panel(cid, rc_number + 1, rc)
             await bot.answer_callback_query(call.id, f"✅ Moved to {status.upper()}")
-            await bot.edit_message_text(
-                f"✅ *{_esc_md(user.name)}* → *{status.upper()}* in rollcall #{rc_number + 1}.",
-                cid, call.message.message_id, parse_mode="Markdown"
-            )
+            await safe_edit_text(cid, call.message.message_id, f"✅ *{_esc_md(user.name)}* → *{status.upper()}* in rollcall #{rc_number + 1}.", parse_mode="Markdown")
             return
 
         # ── mabs_sel ─────────────────────────────────────────────────────────
@@ -532,15 +509,12 @@ async def ghost_callback_handler(call):
             in_users = get_rollcall_in_users(rc_db_id)
             if not in_users:
                 await bot.answer_callback_query(call.id, "No IN users found for this session.")
-                await bot.edit_message_text("⚠️ No IN users were found for this session.", cid, call.message.message_id)
+                await safe_edit_text(cid, call.message.message_id, "⚠️ No IN users were found for this session.")
                 return
             _ghost_selections[(cid, rc_db_id)] = set()
             markup = _build_ghost_select_keyboard(rc_db_id, in_users, set())
             await bot.answer_callback_query(call.id)
-            await bot.edit_message_text(
-                "👻 Who ghosted? Tap to select, then tap Done.",
-                cid, call.message.message_id, reply_markup=markup
-            )
+            await safe_edit_text(cid, call.message.message_id, "👻 Who ghosted? Tap to select, then tap Done.", reply_markup=markup)
             return
 
         await bot.answer_callback_query(call.id, "Unknown ghost action")

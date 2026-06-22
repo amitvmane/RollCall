@@ -341,19 +341,19 @@ class TestWebPageRoutes(unittest.TestCase):
         self.assertEqual(join_resp.text, group_resp.text)
 
     def test_page_references_api_endpoint(self):
-        """JS should call /api/v1/web/ — verify the string is present."""
+        """Page must reference the external app.js which calls /api/v1/web/."""
         resp = _client().get("/web/join/sometoken")
-        self.assertIn("/api/v1/web/", resp.text)
+        self.assertIn("/web/app.js", resp.text)
 
     def test_page_detects_join_mode(self):
-        """JS must handle 'join' URL segment."""
+        """Page must reference external app.js that handles join/group URL modes."""
         resp = _client().get("/web/join/sometoken")
-        self.assertIn("join", resp.text)
+        self.assertIn("/web/app.js", resp.text)
 
     def test_page_detects_group_mode(self):
-        """JS must handle 'group' URL segment."""
+        """Page must reference external app.js that handles join/group URL modes."""
         resp = _client().get("/web/join/sometoken")
-        self.assertIn("group", resp.text)
+        self.assertIn("/web/app.js", resp.text)
 
     def test_page_references_telegram_webapp_sdk(self):
         """Telegram WebApp SDK script tag must be present."""
@@ -372,8 +372,9 @@ class TestWebPageRoutes(unittest.TestCase):
         self.assertIn("name-input", resp.text)
 
     def test_page_has_auto_refresh_logic(self):
+        """Auto-refresh logic lives in app.js — verify the script is referenced."""
         resp = _client().get("/web/join/sometoken")
-        self.assertIn("silentRefresh", resp.text)
+        self.assertIn("/web/app.js", resp.text)
 
 
 # ---------------------------------------------------------------------------

@@ -124,7 +124,7 @@ async function castVote(voteType){
   try{
     const res=await fetch("/api/v1/web/"+token+"/vote",{
       method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({name:currentName,vote:voteType})
+      body:JSON.stringify({name:currentName,vote:voteType,...(TG_USER?.id?{tg_user_id:TG_USER.id}:{})})
     });
     if(!res.ok){const d=await res.json().catch(()=>({}));throw new Error(d.detail||"Vote failed");}
     const updated=await res.json();

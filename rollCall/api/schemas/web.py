@@ -32,3 +32,4 @@ class WebGroupResponse(BaseModel):
 class WebVoteRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=64, description="Display name for the voter")
     vote: Literal["in", "out", "maybe"]
+    tg_user_id: Optional[int] = Field(None, description="Telegram user_id when voting from inside Telegram WebApp")

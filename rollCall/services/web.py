@@ -82,12 +82,19 @@ def get_rollcall_by_token(token: str) -> dict:
     return _serialize_web_rollcall(rc)
 
 
-async def vote_by_token(token: str, name: str, vote_type: str) -> dict:
+async def vote_by_token(
+    token: str,
+    name: str,
+    vote_type: str,
+    tg_user_id: int | None = None,
+) -> dict:
     """
     Submit a vote via magic link.
 
-    name      — display name (stored as proxy user_id)
-    vote_type — 'in' | 'out' | 'maybe'
+    name        — display name
+    vote_type   — 'in' | 'out' | 'maybe'
+    tg_user_id  — real Telegram user_id when voting from inside TG WebApp;
+                  None means proxy (name-only) entry
 
     Returns updated rollcall dict.
     Raises parameterMissing / incorrectParameter on bad input.
@@ -101,13 +108,34 @@ async def vote_by_token(token: str, name: str, vote_type: str) -> dict:
 
     chat_id, rc_index, _ = _resolve_rc(token)
 
-    # admin_user_id=0 is the sentinel for "submitted via web, no Telegram admin"
-    if vote_type == "in":
-        await proxy_svc.set_in_for(chat_id, 0, "web", name, rc_number=rc_index)
-    elif vote_type == "out":
-        await proxy_svc.set_out_for(chat_id, 0, "web", name, rc_number=rc_index)
-    else:
-        await proxy_svc.set_maybe_for(chat_id, 0, "web", name, rc_number=rc_index)
+    is_real_user = isinstance(tg_user_id, int) and tg_user_id > 0
+
+    try:
+        if is_real_user:
+            # Real Telegram user identified via WebApp SDK — vote as their actual user_id
+            # so stats, ghost tracking, and is_proxy=false all work correctly.
+            from services import voting as voting_svc
+            if vote_type == "in":
+                await voting_svc.vote_in(chat_id, tg_user_id, name, rc_number=rc_index)
+            elif vote_type == "out":
+                await voting_svc.vote_out(chat_id, tg_user_id, name, rc_number=rc_index)
+            else:
+                await voting_svc.vote_maybe(chat_id, tg_user_id, name, rc_number=rc_index)
+        else:
+            # Guest / external user — proxy entry identified by display name
+            if vote_type == "in":
+                await proxy_svc.set_in_for(chat_id, 0, "web", name, rc_number=rc_index)
+            elif vote_type == "out":
+                await proxy_svc.set_out_for(chat_id, 0, "web", name, rc_number=rc_index)
+            else:
+                await proxy_svc.set_maybe_for(chat_id, 0, "web", name, rc_number=rc_index)
+    except Exception as e:
+        # alreadyInList / duplicateProxy / repeatlyName all mean the user is
+        # already in the target bucket — treat as idempotent success so the
+        # UI gets back fresh state rather than an error toast.
+        from exceptions import alreadyInList, duplicateProxy, repeatlyName
+        if not isinstance(e, (alreadyInList, duplicateProxy, repeatlyName)):
+            raise
 
     # Re-resolve so we return the updated state
     _, _, rc = _resolve_rc(token)

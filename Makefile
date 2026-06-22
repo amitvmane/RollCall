@@ -111,12 +111,14 @@ url: ## Show current tunnel URL and all group voting links
 	done; \
 	echo ""
 
-token: ## Issue a global admin API token (chat_id=0, scopes read+vote+admin). Usage: make token [LABEL="my label"]
+token: ## Issue a global admin API token. Usage: make token [LABEL="my label"] [DAYS=90]
 	@LABEL=$${LABEL:-"Admin dashboard"}; \
+	EXTRA=""; \
+	if [ -n "$$DAYS" ]; then EXTRA="--expires-days $$DAYS"; fi; \
 	docker exec $(BOT) python scripts/issue_api_token.py \
 	  --chat-id 0 \
 	  --scopes read,vote,admin \
-	  --label "$$LABEL"
+	  --label "$$LABEL" $$EXTRA
 
 notify: ## Send all voting links to Telegram admin (safe to run when banned — prints links if unreachable)
 	@URL=$$(docker compose logs $(TUNNEL) 2>/dev/null \

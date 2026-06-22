@@ -7,6 +7,12 @@ from typing import Optional
 from pydantic import BaseModel
 
 
+class GroupMemberEntry(BaseModel):
+    user_id: int
+    first_name: str
+    username: Optional[str] = None
+
+
 class GroupSummary(BaseModel):
     chat_id: int
     group_name: Optional[str] = None

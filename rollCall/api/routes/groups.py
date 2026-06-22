@@ -12,10 +12,12 @@ from typing import List
 
 from fastapi import APIRouter, Depends, Path
 
+from db import get_active_members
 from services import settings as settings_svc
 
 from api.auth import AuthedToken, require_scope
 from api.schemas.groups import (
+    GroupMemberEntry,
     GroupSettings,
     GroupSummary,
     UpdateGroupSettingsRequest,
@@ -46,6 +48,18 @@ async def get_group_settings(
     _token: AuthedToken = Depends(require_scope("admin")),
 ) -> GroupSettings:
     return GroupSettings(**settings_svc.get_chat_settings(chat_id))
+
+
+@router.get(
+    "/chats/{chat_id}/members",
+    response_model=List[GroupMemberEntry],
+    summary="List active known members of a group (from member-tracking table)",
+)
+async def list_group_members(
+    chat_id: int = Path(..., description="Telegram chat id"),
+    _token: AuthedToken = Depends(require_scope("read")),
+) -> List[GroupMemberEntry]:
+    return [GroupMemberEntry(**m) for m in get_active_members(chat_id)]
 
 
 @router.patch(

@@ -350,6 +350,18 @@ COMMANDS = [
         "summary": "View admin audit log",
         "details": "Paginated list of admin actions: rollcall starts/ends, buzzes, mode toggles, timezone changes, panel ends. Default 15 per page.",
     },
+    {
+        "name": "gentoken", "aliases": [], "scope": "admin", "category": "API Access",
+        "args": "", "sample": "/gentoken",
+        "summary": "Generate an API token for the admin dashboard",
+        "details": (
+            "Issues a personal API token scoped to this group (read + vote + admin), "
+            "valid for 1 year. The token is sent to you via private DM — never posted in the group.\n\n"
+            "Only Telegram group admins (administrator or creator) can run this command.\n\n"
+            "Use the token to log in to the admin dashboard at /admin/ on the bot server.\n\n"
+            "When your token expires, run /gentoken again to get a fresh one."
+        ),
+    },
 
     # ────────────────────────── SUPER ADMIN ─────────────────────────
     {

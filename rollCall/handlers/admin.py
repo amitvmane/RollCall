@@ -1,13 +1,15 @@
 """
-Admin handlers: /delete_user, /set_status, /audit_log, audit_pagination_callback
+Admin handlers: /delete_user, /set_status, /audit_log, /gentoken, audit_pagination_callback
 """
 import html
 import logging
-from datetime import datetime
+import os
+from datetime import datetime, timedelta, timezone
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot_state import bot, _pending_deletes, _pending_overrides, _esc_md, _prune_pending, reply_error
+from db import generate_api_token, insert_api_token, _hash_token
 from exceptions import (
     rollCallNotStarted, insufficientPermissions, parameterMissing, incorrectParameter,
 )
@@ -269,6 +271,83 @@ async def set_status_override(message):
     except Exception:
         logging.exception("Error in /set_status")
         await bot.send_message(cid, "Error processing /set_status, please try again.")
+
+
+@bot.message_handler(commands=["gentoken"])
+async def gentoken_command(message):
+    cid = message.chat.id
+    uid = message.from_user.id
+
+    if message.chat.type not in ("group", "supergroup"):
+        await bot.send_message(cid, "⛔ /gentoken only works in group chats.")
+        return
+
+    # Always require Telegram admin status — independent of the bot's admin_rights setting.
+    try:
+        member = await bot.get_chat_member(cid, uid)
+    except Exception:
+        logging.exception("gentoken: get_chat_member failed")
+        await bot.send_message(cid, "⚠️ Could not verify your admin status. Please try again.")
+        return
+
+    if member.status not in ("administrator", "creator"):
+        await bot.send_message(cid, "⛔ Only Telegram group admins can generate API tokens.")
+        return
+
+    token = generate_api_token()
+    expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=365)
+    requester_name = message.from_user.first_name or message.from_user.username or str(uid)
+    chat_title = message.chat.title or str(cid)
+
+    insert_api_token(
+        token_hash=_hash_token(token),
+        chat_id=cid,
+        scopes="admin,read,vote",
+        label=f"{chat_title} — /gentoken by {requester_name}",
+        issued_by_user_id=uid,
+        expires_at=expires_at,
+    )
+
+    web_base = os.environ.get("WEB_BASE_URL", "").rstrip("/")
+    dashboard_line = (
+        f"\n🖥 Admin dashboard: {web_base}/admin/\n"
+        if web_base else ""
+    )
+
+    dm_text = (
+        f"🔑 *API Token — {_esc_md(chat_title)}*\n\n"
+        f"`{token}`\n\n"
+        f"⚠️ _Save this now — it won't be shown again\\._\n\n"
+        f"*Chat ID:* `{cid}`\n"
+        f"*Scopes:* read, vote, admin\n"
+        f"*Expires:* {expires_at.strftime('%d %b %Y')}\n"
+        f"{dashboard_line}\n"
+        f"When it expires, run /gentoken in the group again\\."
+    )
+
+    try:
+        await bot.send_message(uid, dm_text, parse_mode="Markdown")
+        await bot.send_message(
+            cid,
+            f"✅ Token sent to you via DM, {requester_name}.\n"
+            f"Expires: {expires_at.strftime('%d %b %Y')}.",
+        )
+    except Exception as e:
+        err = str(e).lower()
+        if "forbidden" in err or "initiate conversation" in err or "bot was blocked" in err:
+            try:
+                me = await bot.get_me()
+                start_link = f"\n\n👉 t.me/{me.username}"
+            except Exception:
+                start_link = ""
+            await bot.send_message(
+                cid,
+                f"⚠️ {requester_name}, I couldn't DM you — please start a private chat with me "
+                f"first, then run /gentoken again in this group.{start_link}",
+            )
+        else:
+            logging.exception("gentoken: failed to send DM")
+            await bot.send_message(cid, "⚠️ Token was generated but I couldn't send it via DM. Please try again.")
 
 
 @bot.callback_query_handler(func=lambda call: call.data and (

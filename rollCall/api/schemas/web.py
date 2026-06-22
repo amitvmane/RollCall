@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 class WebUser(BaseModel):
     name: str
     comment: str = ""
+    is_proxy: bool = True
 
 
 class WebRollcallResponse(BaseModel):

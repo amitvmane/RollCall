@@ -1,182 +1,32 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"/>
   <title>RollCall</title>
   <script async src="https://telegram.org/js/telegram-web-app.js"></script>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    :root {
-      --bg: #f0f2f5;
-      --card: #ffffff;
-      --border: #e5e7eb;
-      --text: #111827;
-      --muted: #6b7280;
-      --in-color: #16a34a;
-      --out-color: #dc2626;
-      --maybe-color: #d97706;
-      --accent: #2563eb;
-      --radius: 12px;
-    }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      min-height: 100vh;
-      padding: 12px 14px 24px;
-    }
-    body.tg-mode {
-      background: var(--tg-theme-bg-color, var(--bg));
-      color: var(--tg-theme-text-color, var(--text));
-    }
-
-    .card {
-      background: var(--card);
-      border-radius: var(--radius);
-      padding: 16px;
-      margin-bottom: 10px;
-      box-shadow: 0 1px 4px rgba(0,0,0,.07);
-    }
-
-    /* Header card */
-    .header-card { padding-bottom: 14px; }
-    .header-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-    .rc-title { font-size: 1.15rem; font-weight: 700; line-height: 1.3; }
-    .count-badge { font-size: 0.78rem; color: var(--muted); white-space: nowrap; margin-top: 3px; flex-shrink: 0; }
-    .meta { font-size: 0.8rem; color: var(--muted); margin-top: 5px; line-height: 1.5; }
-    .cap-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
-    .cap-bar { flex: 1; height: 5px; background: #e5e7eb; border-radius: 3px; overflow: hidden; }
-    .cap-fill { height: 100%; background: var(--in-color); border-radius: 3px; transition: width .4s ease; }
-    .cap-text { font-size: 0.72rem; color: var(--muted); white-space: nowrap; }
-
-    /* Tabs */
-    .tab-bar { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
-    .tab-bar::-webkit-scrollbar { display: none; }
-    .tab-btn {
-      flex-shrink: 0; padding: 5px 13px;
-      border: 1.5px solid var(--border); border-radius: 20px;
-      background: var(--card); font-size: 0.82rem; cursor: pointer;
-      white-space: nowrap; transition: all 0.15s;
-      display: flex; flex-direction: column; align-items: center; gap: 1px;
-    }
-    .tab-btn .tab-num  { font-size: 0.65rem; font-weight: 700; opacity: 0.6; }
-    .tab-btn .tab-title { font-size: 0.8rem; max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
-    .tab-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
-    .tab-btn.active .tab-num { opacity: 0.8; }
-
-    /* Name section */
-    .section-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 10px; }
-    .name-row { display: flex; gap: 8px; }
-    .name-row input {
-      flex: 1; padding: 10px 12px;
-      border: 1.5px solid var(--border); border-radius: 8px;
-      font-size: 0.95rem; outline: none; transition: border-color 0.15s;
-      -webkit-appearance: none;
-    }
-    .name-row input:focus { border-color: var(--accent); }
-    .name-row button {
-      padding: 10px 16px; background: var(--accent); color: #fff;
-      border: none; border-radius: 8px; font-size: 0.9rem; font-weight: 600; cursor: pointer;
-    }
-    .name-tag {
-      display: inline-flex; align-items: center; gap: 6px;
-      background: #eff6ff; color: var(--accent);
-      border-radius: 20px; padding: 5px 12px;
-      font-size: 0.9rem; font-weight: 600;
-    }
-    .name-tag button {
-      background: none; border: none; cursor: pointer;
-      font-size: 0.82rem; color: var(--muted); padding: 0; line-height: 1;
-    }
-
-    /* Vote buttons */
-    .vote-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
-    .vote-btn {
-      padding: 14px 6px; border: 2px solid transparent; border-radius: 10px;
-      font-size: 1rem; font-weight: 700; cursor: pointer; letter-spacing: .01em;
-      transition: all 0.15s; background: #f8fafc; color: var(--text);
-      display: flex; flex-direction: column; align-items: center; gap: 4px;
-    }
-    .vote-btn .vb-icon { font-size: 1.3rem; }
-    .vote-btn .vb-label { font-size: 0.75rem; font-weight: 700; letter-spacing: .04em; }
-    .vote-btn:active { transform: scale(0.96); }
-    .vote-btn.in    { border-color: var(--in-color);    color: var(--in-color); }
-    .vote-btn.out   { border-color: var(--out-color);   color: var(--out-color); }
-    .vote-btn.maybe { border-color: var(--maybe-color); color: var(--maybe-color); }
-    .vote-btn.active.in    { background: var(--in-color);    color: #fff; }
-    .vote-btn.active.out   { background: var(--out-color);   color: #fff; }
-    .vote-btn.active.maybe { background: var(--maybe-color); color: #fff; }
-    .vote-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
-
-    /* Attendee list */
-    .list-section { margin-bottom: 14px; }
-    .list-section:last-child { margin-bottom: 0; }
-    .list-label {
-      font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
-      letter-spacing: 0.06em; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;
-    }
-    .list-label.in     { color: var(--in-color); }
-    .list-label.out    { color: var(--out-color); }
-    .list-label.maybe  { color: var(--maybe-color); }
-    .list-label.waiting{ color: var(--muted); }
-    .list-count { font-weight: 400; opacity: .7; }
-    .list-items { list-style: none; }
-    .list-items li {
-      font-size: 0.9rem; padding: 5px 0;
-      border-bottom: 1px solid #f3f4f6;
-      display: flex; align-items: center; gap: 8px;
-    }
-    .list-items li:last-child { border-bottom: none; }
-    .av {
-      width: 24px; height: 24px; border-radius: 50%;
-      display: inline-flex; align-items: center; justify-content: center;
-      color: #fff; font-size: 0.68rem; font-weight: 700; flex-shrink: 0;
-    }
-    .li-pos { font-size: 0.72rem; color: var(--muted); min-width: 16px; text-align: right; flex-shrink: 0; }
-    .li-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .li-comment { color: var(--muted); font-size: 0.78rem; flex-shrink: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .you { font-weight: 700; }
-    .empty { color: var(--muted); font-size: 0.85rem; font-style: italic; }
-
-    /* State screens */
-    .center-fill { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 60vh; gap: 12px; text-align: center; }
-    .spinner { width: 36px; height: 36px; border: 3px solid #e0e0e0; border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .btn { padding: 10px 24px; border: none; border-radius: 8px; font-size: 0.95rem; font-weight: 600; cursor: pointer; }
-    .btn-primary { background: var(--accent); color: #fff; }
-
-    .no-rollcalls { text-align: center; padding: 28px 16px; color: var(--muted); font-size: 0.92rem; }
-    .no-rollcalls .icon { font-size: 2rem; margin-bottom: 8px; }
-
-    /* Auto-refresh bar */
-    .refresh-bar { height: 2px; background: #e5e7eb; border-radius: 1px; margin-top: 2px; overflow: hidden; }
-    .refresh-fill { height: 100%; background: var(--accent); border-radius: 1px; width: 100%; }
-
-    .hidden { display: none !important; }
-  </style>
+  <link rel="stylesheet" href="/web/style.css"/>
 </head>
 <body>
 <div id="app">
-  <div id="loading" class="center-fill">
+  <div id="loading" class="center">
     <div class="spinner"></div>
-    <p style="color:var(--muted);font-size:.9rem">Loading…</p>
+    <p style="color:var(--sub);font-size:.9rem">Loading…</p>
   </div>
-  <div id="error-screen" class="center-fill hidden">
+  <div id="error-screen" class="center hidden">
     <div style="font-size:2.5rem">⚠️</div>
-    <p id="error-msg" style="color:var(--muted)">Something went wrong.</p>
-    <button id="retry-btn" class="btn btn-primary">Retry</button>
+    <p id="error-msg" style="color:var(--sub)">Something went wrong.</p>
+    <button id="retry-btn" class="btn btn-primary" style="margin-top:8px">Retry</button>
   </div>
   <div id="main" class="hidden">
-    <!-- Tabs (group mode) -->
+    <!-- Tabs (multi-rollcall group mode) -->
     <div id="tab-card" class="card hidden">
       <div id="tab-bar" class="tab-bar"></div>
     </div>
 
     <!-- Rollcall header -->
-    <div class="card header-card">
-      <div class="header-row">
+    <div class="card">
+      <div class="hdr-row">
         <h1 id="rc-title" class="rc-title">RollCall</h1>
         <span id="count-badge" class="count-badge"></span>
       </div>
@@ -185,413 +35,58 @@
         <div class="cap-bar"><div id="cap-fill" class="cap-fill" style="width:0%"></div></div>
         <span id="cap-text" class="cap-text"></span>
       </div>
+      <div style="margin-top:10px">
+        <button class="copy-btn" onclick="copyPageLink()">🔗 Copy link to share</button>
+      </div>
     </div>
 
-    <!-- No active rollcalls (group mode) -->
+    <!-- No active rollcalls -->
     <div id="no-rollcalls" class="card hidden">
-      <div class="no-rollcalls">
-        <div class="icon">📋</div>
+      <div class="no-rc"><div class="icon">📋</div>
         <p>No active rollcalls right now.</p>
-        <p style="margin-top:6px;font-size:0.8rem">Check back later or ask an admin to start one.</p>
+        <p style="margin-top:6px;font-size:.8rem">Check back later or ask an admin to start one.</p>
       </div>
     </div>
 
     <!-- Identity -->
     <div class="card" id="identity-card">
-      <div class="section-label">Your name</div>
-      <div id="name-input-row" class="name-row hidden">
-        <input id="name-input" type="text" placeholder="Enter your name" maxlength="64" autocomplete="off" />
-        <button id="name-save-btn">OK</button>
+      <div id="name-input-row" class="hidden">
+        <div style="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:8px">Enter your name to vote</div>
+        <div class="name-row">
+          <input id="name-input" type="text" placeholder="Your name" maxlength="64" autocomplete="given-name"/>
+          <button class="btn btn-primary" id="name-save-btn" style="padding:10px 16px;font-size:.9rem">OK</button>
+        </div>
       </div>
       <div id="name-tag-row" class="hidden">
-        <span class="name-tag">
-          <span id="name-display"></span>
-          <button id="name-change-btn" title="Change name">✎</button>
-        </span>
+        <div class="id-inner">
+          <span class="id-badge" id="id-badge"></span>
+          <div class="id-actions">
+            <button class="id-change" id="name-change-btn" title="Change name">✎ Change</button>
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- Vote buttons -->
+    <!-- Vote card -->
     <div class="card" id="vote-card">
-      <div class="section-label">Your vote</div>
+      <div id="vote-status-row"></div>
+      <div id="vote-hint" class="vote-hint" style="display:none">Tap to vote ↓</div>
       <div class="vote-row">
-        <button class="vote-btn in"    data-vote="in"    id="btn-in">
-          <span class="vb-icon">✅</span><span class="vb-label">IN</span>
-        </button>
-        <button class="vote-btn out"   data-vote="out"   id="btn-out">
-          <span class="vb-icon">❌</span><span class="vb-label">OUT</span>
-        </button>
-        <button class="vote-btn maybe" data-vote="maybe" id="btn-maybe">
-          <span class="vb-icon">🤔</span><span class="vb-label">MAYBE</span>
-        </button>
+        <button class="vote-btn in"    data-vote="in"    id="btn-in"   ><span class="vb-icon">✅</span><span class="vb-label">IN</span></button>
+        <button class="vote-btn out"   data-vote="out"   id="btn-out"  ><span class="vb-icon">❌</span><span class="vb-label">OUT</span></button>
+        <button class="vote-btn maybe" data-vote="maybe" id="btn-maybe"><span class="vb-icon">🤔</span><span class="vb-label">MAYBE</span></button>
       </div>
     </div>
 
     <!-- Lists -->
     <div class="card" id="lists-card">
-      <div class="section-label">Current list</div>
       <div id="lists-container"></div>
     </div>
     <div class="refresh-bar"><div id="refresh-fill" class="refresh-fill"></div></div>
   </div>
 </div>
+<div class="toast-local" id="toast-local"></div>
 
-<script>
-(function () {
-  "use strict";
-
-  const parts = window.location.pathname.split("/").filter(Boolean);
-  const URL_MODE  = parts[1];
-  const URL_TOKEN = parts[2];
-
-  if (!URL_TOKEN || (URL_MODE !== "join" && URL_MODE !== "group")) {
-    document.getElementById("loading").classList.add("hidden");
-    document.getElementById("error-screen").classList.remove("hidden");
-    document.getElementById("error-msg").textContent = "Invalid URL. Use the link shared in your group.";
-  }
-
-  const IS_GROUP  = URL_MODE === "group";
-  const API_GROUP = "/api/v1/web/group/" + URL_TOKEN;
-  const LS_NAME   = "rollcall_name";
-
-  const tg = window.Telegram && window.Telegram.WebApp;
-  let TG_NAME = null;
-  if (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) {
-    TG_NAME = tg.initDataUnsafe.user.first_name || tg.initDataUnsafe.user.username || null;
-    document.body.classList.add("tg-mode");
-    tg.ready();
-    tg.expand();
-  }
-
-  let currentName  = TG_NAME || localStorage.getItem(LS_NAME) || "";
-  let currentVote  = null;
-  let activeRcData = null;
-  let groupData    = null;
-  let activeTabIdx = 0;
-  let voting       = false;
-
-  const $ = x => document.getElementById(x);
-
-  // ── Identity ──────────────────────────────────────────────────────────────
-  function renderIdentity() {
-    if (TG_NAME) {
-      $("name-display").textContent = TG_NAME;
-      $("name-input-row").classList.add("hidden");
-      $("name-tag-row").classList.remove("hidden");
-      $("identity-card").querySelector(".section-label").style.display = "none";
-    } else if (currentName) {
-      $("name-display").textContent = currentName;
-      $("name-input-row").classList.add("hidden");
-      $("name-tag-row").classList.remove("hidden");
-    } else {
-      $("name-input-row").classList.remove("hidden");
-      $("name-tag-row").classList.add("hidden");
-    }
-  }
-
-  $("name-save-btn").addEventListener("click", saveName);
-  $("name-input").addEventListener("keydown", e => { if (e.key === "Enter") saveName(); });
-  $("name-change-btn").addEventListener("click", () => {
-    if (TG_NAME) return;
-    currentName = "";
-    localStorage.removeItem(LS_NAME);
-    $("name-input").value = "";
-    $("name-tag-row").classList.add("hidden");
-    $("name-input-row").classList.remove("hidden");
-    $("name-input").focus();
-  });
-
-  function saveName() {
-    const val = $("name-input").value.trim();
-    if (!val) { $("name-input").focus(); return; }
-    currentName = val.slice(0, 64);
-    localStorage.setItem(LS_NAME, currentName);
-    renderIdentity();
-    detectCurrentVote();
-  }
-
-  // ── Vote detection ────────────────────────────────────────────────────────
-  function detectCurrentVote() {
-    if (!activeRcData || !currentName) { currentVote = null; renderVoteButtons(); return; }
-    const n = currentName.toLowerCase();
-    if (activeRcData.in.some(u    => u.name.toLowerCase() === n)) currentVote = "in";
-    else if (activeRcData.out.some(u   => u.name.toLowerCase() === n)) currentVote = "out";
-    else if (activeRcData.maybe.some(u => u.name.toLowerCase() === n)) currentVote = "maybe";
-    else currentVote = null;
-    renderVoteButtons();
-  }
-
-  function renderVoteButtons() {
-    const hasName = !!currentName && !!activeRcData;
-    [$("btn-in"), $("btn-out"), $("btn-maybe")].forEach(btn => {
-      btn.disabled = !hasName || voting;
-      btn.classList.toggle("active", currentVote === btn.dataset.vote);
-    });
-  }
-
-  // ── Vote action ───────────────────────────────────────────────────────────
-  async function castVote(voteType) {
-    if (!currentName || voting || !activeRcData) return;
-    const token = activeRcData.web_token;
-    if (!token) { alert("This rollcall cannot be voted on via web."); return; }
-    voting = true;
-    renderVoteButtons();
-    try {
-      const res = await fetch("/api/v1/web/" + token + "/vote", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: currentName, vote: voteType }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.detail || "Vote failed (" + res.status + ")");
-      }
-      const updated = await res.json();
-      activeRcData = updated;
-      if (IS_GROUP && groupData) groupData.rollcalls[activeTabIdx] = updated;
-      detectCurrentVote();
-      renderLists();
-      renderCapBar(updated);
-    } catch (err) {
-      alert(err.message || "Could not cast vote. Please try again.");
-    } finally {
-      voting = false;
-      renderVoteButtons();
-    }
-  }
-
-  $("btn-in").addEventListener("click",    () => castVote("in"));
-  $("btn-out").addEventListener("click",   () => castVote("out"));
-  $("btn-maybe").addEventListener("click", () => castVote("maybe"));
-
-  // ── Avatar colour ─────────────────────────────────────────────────────────
-  const AV_COLORS = ["#4f46e5","#0891b2","#16a34a","#d97706","#7c3aed","#0284c7","#059669","#b45309"];
-  function avColor(name) {
-    let h = 0;
-    for (const c of String(name)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-    return AV_COLORS[h % AV_COLORS.length];
-  }
-
-  // ── Render rollcall ───────────────────────────────────────────────────────
-  function renderCapBar(rc) {
-    const inCount = rc.in.length;
-    const capRow  = $("cap-row");
-    const capFill = $("cap-fill");
-    const capText = $("cap-text");
-    if (rc.limit) {
-      capRow.classList.remove("hidden");
-      const pct = Math.min(100, Math.round(inCount / rc.limit * 100));
-      capFill.style.width = pct + "%";
-      const remaining = rc.limit - inCount;
-      capText.textContent = remaining > 0 ? `${inCount}/${rc.limit} — ${remaining} spot${remaining===1?"":"s"} left` : `${inCount}/${rc.limit} — Full`;
-      capFill.style.background = remaining <= 0 ? "var(--maybe-color)" : "var(--in-color)";
-    } else {
-      capRow.classList.add("hidden");
-    }
-  }
-
-  function renderRollcall(rc) {
-    activeRcData = rc;
-
-    const totalRc = IS_GROUP && groupData ? groupData.rollcalls.length : 1;
-    $("rc-title").textContent = totalRc > 1 ? `#${activeTabIdx + 1} · ${rc.title}` : rc.title;
-
-    const meta = [];
-    if (rc.finalize_date) meta.push("Closes: " + rc.finalize_date);
-    if (rc.location)      meta.push("📍 " + rc.location);
-    $("rc-meta").textContent = meta.join("  ·  ");
-
-    const inCount = rc.in.length;
-    $("count-badge").textContent = rc.limit ? inCount + "/" + rc.limit + " IN" : inCount + " IN";
-
-    renderCapBar(rc);
-
-    $("no-rollcalls").classList.add("hidden");
-    $("identity-card").classList.remove("hidden");
-    $("vote-card").classList.remove("hidden");
-    $("lists-card").classList.remove("hidden");
-
-    detectCurrentVote();
-    renderLists();
-  }
-
-  function renderLists() {
-    if (!activeRcData) return;
-    const { in: inL, out: outL, maybe: maybeL, waiting: waitL } = activeRcData;
-
-    function section(label, cls, items) {
-      if (!items.length) return "";
-      const rows = items.map((u, i) => {
-        const isYou = currentName && u.name.toLowerCase() === currentName.toLowerCase();
-        const av    = `<span class="av" style="background:${avColor(u.name)}">${(u.name[0]||"?").toUpperCase()}</span>`;
-        const cm    = u.comment ? `<span class="li-comment">— ${esc(u.comment)}</span>` : "";
-        return `<li class="${isYou?"you":""}">
-          <span class="li-pos">${i+1}</span>${av}
-          <span class="li-name">${esc(u.name)}</span>${cm}
-        </li>`;
-      }).join("");
-      return `<div class="list-section">
-        <div class="list-label ${cls}">${label} <span class="list-count">(${items.length})</span></div>
-        <ul class="list-items">${rows}</ul>
-      </div>`;
-    }
-
-    $("lists-container").innerHTML =
-      section("IN", "in", inL) +
-      section("OUT", "out", outL) +
-      section("MAYBE", "maybe", maybeL) +
-      section("WAITING", "waiting", waitL) ||
-      `<p class="empty">No votes yet.</p>`;
-  }
-
-  // ── Tabs ──────────────────────────────────────────────────────────────────
-  function renderTabs(rollcalls) {
-    $("tab-bar").innerHTML = "";
-    rollcalls.forEach((rc, idx) => {
-      const btn = document.createElement("button");
-      btn.className = "tab-btn" + (idx === activeTabIdx ? " active" : "");
-      btn.innerHTML = `<span class="tab-num">#${idx+1}</span><span class="tab-title">${esc(rc.title)}</span>`;
-      btn.addEventListener("click", () => switchTab(idx));
-      $("tab-bar").appendChild(btn);
-    });
-  }
-
-  function switchTab(idx) {
-    activeTabIdx = idx;
-    if (!groupData) return;
-    renderTabs(groupData.rollcalls);
-    renderRollcall(groupData.rollcalls[idx]);
-  }
-
-  // ── Load ──────────────────────────────────────────────────────────────────
-  async function load() {
-    try {
-      IS_GROUP ? await loadGroup() : await loadJoin();
-    } catch {
-      showError("Could not connect. Check your internet and tap Retry.");
-      return;
-    }
-    $("loading").classList.add("hidden");
-    $("main").classList.remove("hidden");
-    renderIdentity();
-    scheduleRefresh();
-  }
-
-  async function loadJoin() {
-    const res = await fetch("/api/v1/web/" + URL_TOKEN);
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      showError(data.detail || "This rollcall link is invalid or has ended.");
-      throw new Error("fetch failed");
-    }
-    $("tab-card").classList.add("hidden");
-    renderRollcall(await res.json());
-  }
-
-  async function loadGroup() {
-    const res = await fetch(API_GROUP);
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      showError(data.detail || "This group link is invalid.");
-      throw new Error("fetch failed");
-    }
-    groupData = await res.json();
-    const rcs = groupData.rollcalls;
-    if (rcs.length === 0) {
-      $("rc-title").textContent = "RollCall";
-      $("rc-meta").textContent = "";
-      $("count-badge").textContent = "";
-      $("tab-card").classList.add("hidden");
-      $("no-rollcalls").classList.remove("hidden");
-      $("identity-card").classList.add("hidden");
-      $("vote-card").classList.add("hidden");
-      $("lists-card").classList.add("hidden");
-    } else if (rcs.length === 1) {
-      $("tab-card").classList.add("hidden");
-      renderRollcall(rcs[0]);
-    } else {
-      $("tab-card").classList.remove("hidden");
-      if (activeTabIdx >= rcs.length) activeTabIdx = 0;
-      renderTabs(rcs);
-      renderRollcall(rcs[activeTabIdx]);
-    }
-  }
-
-  // ── Auto-refresh ──────────────────────────────────────────────────────────
-  function scheduleRefresh() {
-    const fill = $("refresh-fill");
-    if (fill) {
-      fill.style.transition = "none";
-      fill.style.width = "100%";
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        fill.style.transition = "width 30s linear";
-        fill.style.width = "0%";
-      }));
-    }
-    setTimeout(silentRefresh, 30000);
-  }
-
-  async function silentRefresh() {
-    try {
-      if (IS_GROUP) {
-        const res = await fetch(API_GROUP);
-        if (res.ok) {
-          groupData = await res.json();
-          const rcs = groupData.rollcalls;
-          if (rcs.length === 0) {
-            $("tab-card").classList.add("hidden");
-            $("no-rollcalls").classList.remove("hidden");
-            $("identity-card").classList.add("hidden");
-            $("vote-card").classList.add("hidden");
-            $("lists-card").classList.add("hidden");
-          } else {
-            $("no-rollcalls").classList.add("hidden");
-            if (rcs.length > 1) { $("tab-card").classList.remove("hidden"); renderTabs(rcs); }
-            else $("tab-card").classList.add("hidden");
-            if (activeTabIdx >= rcs.length) activeTabIdx = 0;
-            activeRcData = rcs[activeTabIdx];
-            detectCurrentVote();
-            renderLists();
-            renderCapBar(activeRcData);
-            const inCount = activeRcData.in.length;
-            $("count-badge").textContent = activeRcData.limit
-              ? inCount + "/" + activeRcData.limit + " IN"
-              : inCount + " IN";
-          }
-        }
-      } else {
-        const res = await fetch("/api/v1/web/" + URL_TOKEN);
-        if (res.ok) {
-          activeRcData = await res.json();
-          detectCurrentVote();
-          renderLists();
-          renderCapBar(activeRcData);
-        }
-      }
-    } catch { /* silent */ }
-    scheduleRefresh();
-  }
-
-  function showError(msg) {
-    $("loading").classList.add("hidden");
-    $("main").classList.add("hidden");
-    $("error-msg").textContent = msg;
-    $("error-screen").classList.remove("hidden");
-  }
-
-  $("retry-btn").addEventListener("click", () => {
-    $("error-screen").classList.add("hidden");
-    $("loading").classList.remove("hidden");
-    activeTabIdx = 0;
-    load();
-  });
-
-  function esc(s) {
-    return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-  }
-
-  if (URL_TOKEN && (URL_MODE === "join" || URL_MODE === "group")) load();
-})();
-</script>
+<script src="/web/app.js"></script>
 </body>
 </html>

@@ -42,7 +42,9 @@ def _serialize_web_rollcall(rc) -> dict:
             finalize_str = str(rc.finalizeDate)
 
     def _user_dict(u):
-        return {"name": u.name, "comment": u.comment or ""}
+        uid = getattr(u, "user_id", None)
+        is_proxy = not (isinstance(uid, int) and uid > 0)
+        return {"name": u.name, "comment": u.comment or "", "is_proxy": is_proxy}
 
     return {
         "rollcall_id": rc.id,

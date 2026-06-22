@@ -30,6 +30,7 @@ def _ensure_web_token(rc) -> str:
 def _serialize_web_rollcall(rc) -> dict:
     """Minimal dict for the web voting UI."""
     finalize_str = None
+    finalize_epoch = None
     if rc.finalizeDate:
         try:
             import pytz
@@ -38,6 +39,7 @@ def _serialize_web_rollcall(rc) -> dict:
             if fd.tzinfo is None:
                 fd = pytz.utc.localize(fd).astimezone(tz)
             finalize_str = fd.strftime("%A, %d %b at %H:%M")
+            finalize_epoch = fd.timestamp()
         except Exception:
             finalize_str = str(rc.finalizeDate)
 
@@ -51,6 +53,7 @@ def _serialize_web_rollcall(rc) -> dict:
         "web_token": _ensure_web_token(rc),
         "title": rc.title,
         "finalize_date": finalize_str,
+        "finalize_epoch": finalize_epoch,
         "limit": rc.inListLimit,
         "location": rc.location,
         "in": [_user_dict(u) for u in rc.inList],
@@ -82,11 +85,24 @@ def get_rollcall_by_token(token: str) -> dict:
     return _serialize_web_rollcall(rc)
 
 
+def _find_canonical_name(rc, name: str) -> str:
+    """Return the existing display name from any list that matches case-insensitively, else name as-is."""
+    n_lower = name.lower()
+    for lst in (rc.inList, rc.outList, rc.maybeList, rc.waitList):
+        for u in lst:
+            uid = getattr(u, "user_id", None)
+            is_proxy = not (isinstance(uid, int) and uid > 0)
+            if is_proxy and u.name.lower() == n_lower:
+                return u.name
+    return name
+
+
 async def vote_by_token(
     token: str,
     name: str,
     vote_type: str,
-    tg_user_id: int | None = None,
+    tg_user_id: Optional[int] = None,
+    comment: Optional[str] = None,
 ) -> dict:
     """
     Submit a vote via magic link.
@@ -95,6 +111,7 @@ async def vote_by_token(
     vote_type   — 'in' | 'out' | 'maybe'
     tg_user_id  — real Telegram user_id when voting from inside TG WebApp;
                   None means proxy (name-only) entry
+    comment     — optional note attached to the vote
 
     Returns updated rollcall dict.
     Raises parameterMissing / incorrectParameter on bad input.
@@ -102,13 +119,18 @@ async def vote_by_token(
     if not name or not name.strip():
         raise parameterMissing("Name is required")
     name = name.strip()[:64]
+    comment = comment.strip()[:100] if comment and comment.strip() else None
 
     if vote_type not in ("in", "out", "maybe"):
         raise incorrectParameter("vote must be 'in', 'out', or 'maybe'")
 
-    chat_id, rc_index, _ = _resolve_rc(token)
+    chat_id, rc_index, rc_pre = _resolve_rc(token)
 
     is_real_user = isinstance(tg_user_id, int) and tg_user_id > 0
+
+    # For proxy votes, normalise to canonical casing of any existing same-name entry
+    if not is_real_user:
+        name = _find_canonical_name(rc_pre, name)
 
     try:
         if is_real_user:
@@ -116,19 +138,19 @@ async def vote_by_token(
             # so stats, ghost tracking, and is_proxy=false all work correctly.
             from services import voting as voting_svc
             if vote_type == "in":
-                await voting_svc.vote_in(chat_id, tg_user_id, name, rc_number=rc_index)
+                await voting_svc.vote_in(chat_id, tg_user_id, name, rc_number=rc_index, comment=comment)
             elif vote_type == "out":
-                await voting_svc.vote_out(chat_id, tg_user_id, name, rc_number=rc_index)
+                await voting_svc.vote_out(chat_id, tg_user_id, name, rc_number=rc_index, comment=comment)
             else:
-                await voting_svc.vote_maybe(chat_id, tg_user_id, name, rc_number=rc_index)
+                await voting_svc.vote_maybe(chat_id, tg_user_id, name, rc_number=rc_index, comment=comment)
         else:
             # Guest / external user — proxy entry identified by display name
             if vote_type == "in":
-                await proxy_svc.set_in_for(chat_id, 0, "web", name, rc_number=rc_index)
+                await proxy_svc.set_in_for(chat_id, 0, "web", name, rc_number=rc_index, comment=comment)
             elif vote_type == "out":
-                await proxy_svc.set_out_for(chat_id, 0, "web", name, rc_number=rc_index)
+                await proxy_svc.set_out_for(chat_id, 0, "web", name, rc_number=rc_index, comment=comment)
             else:
-                await proxy_svc.set_maybe_for(chat_id, 0, "web", name, rc_number=rc_index)
+                await proxy_svc.set_maybe_for(chat_id, 0, "web", name, rc_number=rc_index, comment=comment)
     except Exception as e:
         # alreadyInList / duplicateProxy / repeatlyName all mean the user is
         # already in the target bucket — treat as idempotent success so the

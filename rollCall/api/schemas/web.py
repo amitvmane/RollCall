@@ -14,6 +14,7 @@ class WebRollcallResponse(BaseModel):
     web_token: str = ""
     title: str
     finalize_date: Optional[str] = None
+    finalize_epoch: Optional[float] = None
     limit: Optional[int] = None
     location: Optional[str] = None
     in_list: list[WebUser] = Field(default_factory=list, alias="in")
@@ -33,3 +34,4 @@ class WebVoteRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=64, description="Display name for the voter")
     vote: Literal["in", "out", "maybe"]
     tg_user_id: Optional[int] = Field(None, description="Telegram user_id when voting from inside Telegram WebApp")
+    comment: Optional[str] = Field(None, max_length=100, description="Optional note to attach to the vote")

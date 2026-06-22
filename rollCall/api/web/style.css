@@ -65,6 +65,17 @@ body.tg-mode{background:var(--tg-theme-bg-color,var(--bg));color:var(--tg-theme-
 .vote-btn.active.out  {background:var(--out);  color:#fff}
 .vote-btn.active.maybe{background:var(--maybe);color:#fff}
 .vote-btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
+.vote-btn.spinning .vb-icon{display:none}
+.vote-btn.spinning::before{content:"";display:inline-block;width:18px;height:18px;border:2.5px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin .6s linear infinite;opacity:.8;margin-bottom:4px}
+
+/* ── Comment input ── */
+.comment-row{margin-bottom:10px}
+.comment-input{width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:.85rem;outline:none;-webkit-appearance:none;transition:border-color .15s;color:var(--text);background:var(--card)}
+.comment-input:focus{border-color:var(--accent)}
+
+/* ── Countdown pill ── */
+.cd-pill{display:inline-block;background:#eff6ff;color:#2563eb;border-radius:20px;font-size:.68rem;font-weight:600;padding:2px 8px;margin-left:6px;vertical-align:middle}
+.cd-pill.soon{background:#fef3c7;color:#b45309}
 
 /* ── Lists ── */
 .list-sect{margin-bottom:14px}
@@ -91,8 +102,11 @@ body.tg-mode{background:var(--tg-theme-bg-color,var(--bg));color:var(--tg-theme-
 .btn-primary{background:var(--accent);color:#fff}
 .no-rc{text-align:center;padding:28px 16px;color:var(--sub);font-size:.92rem}
 .no-rc .icon{font-size:2rem;margin-bottom:8px}
-.refresh-bar{height:2px;background:#e5e7eb;border-radius:1px;margin-top:4px;overflow:hidden}
+.refresh-bar-wrap{display:flex;align-items:center;gap:8px;margin-top:4px}
+.refresh-bar{flex:1;height:2px;background:#e5e7eb;border-radius:1px;overflow:hidden}
 .refresh-fill{height:100%;background:var(--accent);border-radius:1px;width:100%}
+.refresh-label{font-size:.68rem;color:var(--sub);white-space:nowrap;opacity:0;transition:opacity .3s}
+.refresh-label.show{opacity:1}
 .toast-local{position:fixed;bottom:20px;right:14px;left:14px;max-width:360px;margin:0 auto;padding:10px 16px;border-radius:10px;font-size:.87rem;background:#1e293b;color:#fff;box-shadow:0 4px 16px rgba(0,0,0,.2);opacity:0;transform:translateY(8px);transition:opacity .2s,transform .2s;pointer-events:none;z-index:999}
 .toast-local.show{opacity:1;transform:none}
 .hidden{display:none!important}

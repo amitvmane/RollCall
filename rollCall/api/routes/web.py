@@ -54,5 +54,5 @@ async def vote_web(
     body: WebVoteRequest,
     token: str = Path(..., description="Per-rollcall magic-link token"),
 ) -> WebRollcallResponse:
-    data = await web_svc.vote_by_token(token, body.name, body.vote, tg_user_id=body.tg_user_id)
+    data = await web_svc.vote_by_token(token, body.name, body.vote, tg_user_id=body.tg_user_id, comment=body.comment)
     return WebRollcallResponse(**data)

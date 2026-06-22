@@ -33,7 +33,11 @@ function toast(msg,type="info",ms=3000){
 // ─── API ──────────────────────────────────────────────────────────────────────
 async function api(path,opts={}){
   const res=await fetch(API+path,{...opts,headers:{"Content-Type":"application/json","Authorization":"Bearer "+S.token,...(opts.headers||{})}});
-  if(res.status===401){signOut();throw new Error("Unauthorized")}
+  if(res.status===401){
+    toast("Session expired — please sign in again.","err",4000);
+    signOut();
+    throw new Error("Unauthorized");
+  }
   if(!res.ok){
     const b=await res.json().catch(()=>({}));
     const msg=b.detail||("HTTP "+res.status);
@@ -82,6 +86,8 @@ if(S.token)boot();
 
 // ─── Groups ───────────────────────────────────────────────────────────────────
 async function loadGroups(){
+  // Clear member cache on group list refresh so stale data doesn't persist
+  S.memberCache={};
   const el=$id("glist");el.innerHTML='<div style="padding:16px;color:var(--sub);font-size:.88rem">Loading…</div>';
   try{
     S.groups=await api("/admin/groups");
@@ -119,6 +125,8 @@ function selectGroup(cid){
 
 // ─── Group detail ─────────────────────────────────────────────────────────────
 async function loadGDetail(cid){
+  // Invalidate member cache for this group on every explicit refresh/tab switch
+  delete S.memberCache[cid];
   const el=$id("gdetail");el.innerHTML='<div class="lc"><div class="spinner"></div></div>';
   try{
     const [settings,rcs,tmpls]=await Promise.all([
@@ -148,7 +156,7 @@ function renderGDetail(settings,rcs,tmpls){
       <div class="card-header">
         <div>
           <h2>${escH(name)}</h2>
-          <div class="card-sub">Chat ID: ${cid} &nbsp;·&nbsp; ${escH(settings.timezone)}</div>
+          <div class="card-sub" id="gsub-${cidK(cid)}">Chat ID: ${cid} &nbsp;·&nbsp; ${escH(settings.timezone)}</div>
         </div>
         <div class="btn-row">
           <button class="btn btn-ghost btn-sm" onclick="loadGDetail(${cid})">↻ Refresh</button>
@@ -181,7 +189,13 @@ window.switchTab=function(cid,idx){
 
 // ─── Rollcalls panel ──────────────────────────────────────────────────────────
 function buildRcPanel(cid,rcs,groupName){
-  const rows=rcs.length?rcs.map((rc,i)=>buildRcRowHtml(cid,rc,i,groupName)).join(""):'<p class="empty">No active rollcalls.</p>';
+  const rows=rcs.length
+    ?rcs.map((rc,i)=>buildRcRowHtml(cid,rc,i,groupName)).join("")
+    :`<div class="rc-empty">
+        <div class="icon">📋</div>
+        <p>No active rollcalls</p>
+        <p class="rc-empty-sub">Tap <strong>+ Start new</strong> above, or use <code>/rc</code> in Telegram.</p>
+      </div>`;
   const g=S.groups.find(x=>x.chat_id===cid);
   const linkBtn=g?.group_web_token
     ?`<button class="btn btn-ghost btn-sm" onclick="copyGroupLink(${cid})" title="Copy voting link for members">🔗 Copy link</button>`:"";
@@ -244,9 +258,9 @@ window.promptEndRc=function(cid,num){
   const btn=$id(`end-btn-${cidK(cid)}-${num}`);
   if(!btn)return;
   btn.outerHTML=`<div class="confirm-row" id="end-confirm-${cidK(cid)}-${num}">
-    <span>End #${num}?</span>
-    <button class="btn btn-danger btn-xs" onclick="doEndRc(${cid},${num})">Yes, end</button>
-    <button class="btn btn-ghost btn-xs" onclick="cancelEndRc(${cid},${num})">Cancel</button>
+    <span class="confirm-label">End rollcall #${num}?</span>
+    <button class="btn btn-danger btn-sm" onclick="doEndRc(${cid},${num})">Yes, end</button>
+    <button class="btn btn-ghost btn-sm" onclick="cancelEndRc(${cid},${num})">Cancel</button>
   </div>`;
 };
 
@@ -262,13 +276,19 @@ window.doEndRc=async function(cid,num){
     const rcs=await api(`/chats/${cid}/rollcalls`);
     const name=S.groupNames[cid]||("Chat "+cid);
     const el=$id(`rc-list-${cidK(cid)}`);
-    if(el)el.innerHTML=rcs.length?rcs.map((rc,i)=>buildRcRowHtml(cid,rc,i,name)).join(""):'<p class="empty">No active rollcalls.</p>';
+    if(el)el.innerHTML=rcs.length
+      ?rcs.map((rc,i)=>buildRcRowHtml(cid,rc,i,name)).join("")
+      :`<div class="rc-empty"><div class="icon">📋</div><p>No active rollcalls</p><p class="rc-empty-sub">Tap <strong>+ Start new</strong> above, or use <code>/rc</code> in Telegram.</p></div>`;
     updateGroupBadge(cid,rcs.length);
   }catch(e){toast("Error: "+e.message,"err",4000);}
 };
 
 // ─── Rollcall detail / edit panel ─────────────────────────────────────────────
 window.showRcDetails=async function(cid,num){
+  // Highlight the row being edited, clear others
+  document.querySelectorAll(`[id^="rcrow-${cidK(cid)}-"]`).forEach(el=>el.classList.remove("rc-row--editing"));
+  $id(`rcrow-${cidK(cid)}-${num}`)?.classList.add("rc-row--editing");
+
   const area=$id(`rc-detail-${cidK(cid)}-${num}`);
   if(!area)return;
   area.innerHTML='<div class="lc"><div class="spinner"></div></div>';
@@ -441,6 +461,7 @@ function buildRcEditPanel(cid,num,rc,groupName){
 }
 
 window.closeEditPanel=function(cid,num){
+  $id(`rcrow-${cidK(cid)}-${num}`)?.classList.remove("rc-row--editing");
   const area=$id(`rc-detail-${cidK(cid)}-${num}`);
   if(area)area.innerHTML="";
 };
@@ -469,7 +490,7 @@ window.saveAllProps=async function(cid,num){
     try{await saveProp(cid,num,prop,vals[prop]);}
     catch(e){errors.push(`${prop}: ${e.message}`);}
   }
-  if(btn){btn.disabled=false;btn.textContent="Save changes";}
+  if(btn){btn.disabled=false;btn.textContent="Save changes";btn.classList.remove("changed-hint");}
   if(errors.length){toast("Some saves failed: "+errors.join("; "),"err",5000);}
   else{toast("Changes saved!","ok");}
   await refreshRcList(cid);
@@ -564,11 +585,13 @@ window.toggleTgSection=function(cid,num,key,show){
   if(el)el.style.display=show?"block":"none";
 };
 
+// Members cache: {members: [...], _ts: timestamp_ms}. TTL = 5 minutes.
 async function loadGroupMembers(cid){
-  if(S.memberCache[cid])return S.memberCache[cid];
+  const cached=S.memberCache[cid];
+  if(cached&&(Date.now()-cached._ts)<300000)return cached.members;
   try{
     const members=await api(`/chats/${cid}/members`);
-    S.memberCache[cid]=members;
+    S.memberCache[cid]={members,_ts:Date.now()};
     return members;
   }catch{return[];}
 }
@@ -632,7 +655,9 @@ async function refreshRcList(cid){
     const rcs=await api(`/chats/${cid}/rollcalls`);
     const name=S.groupNames[cid]||("Chat "+cid);
     const el=$id(`rc-list-${cidK(cid)}`);
-    if(el)el.innerHTML=rcs.length?rcs.map((rc,i)=>buildRcRowHtml(cid,rc,i,name)).join(""):'<p class="empty">No active rollcalls.</p>';
+    if(el)el.innerHTML=rcs.length
+      ?rcs.map((rc,i)=>buildRcRowHtml(cid,rc,i,name)).join("")
+      :`<div class="rc-empty"><div class="icon">📋</div><p>No active rollcalls</p><p class="rc-empty-sub">Tap <strong>+ Start new</strong> above, or use <code>/rc</code> in Telegram.</p></div>`;
     updateGroupBadge(cid,rcs.length);
   }catch{}
 }
@@ -651,7 +676,12 @@ function buildTmplPanel(cid,tmpls){
         <button class="btn btn-success btn-sm" onclick="doStartTmpl(${cid},${JSON.stringify(t.name)},this)">▶ Start</button>
       </div>
     </div>`;
-  }).join(""):'<p class="empty">No templates saved for this group.</p>';
+  }).join("")
+  :`<div class="tmpl-empty">
+      <div class="te-icon">📋</div>
+      <p>No templates saved for this group</p>
+      <p class="te-hint">In Telegram, use <code>/template save &lt;name&gt;</code> after setting up a rollcall to save it as a reusable template.</p>
+    </div>`;
   return `<div class="card"><div class="card-header"><h2>Templates</h2></div><div id="tmpl-list-${cidK(cid)}">${rows}</div></div>`;
 }
 
@@ -671,15 +701,15 @@ function buildSettingsPanel(cid,s){
     <div class="card-header"><h2>Group Settings</h2></div>
     <div class="setting-row">
       <div><div class="setting-label">Admin-only mode</div><div class="setting-desc">Only Telegram admins can use bot commands</div></div>
-      <div class="setting-ctrl"><label class="toggle"><input type="checkbox" ${s.admin_rights?"checked":""} onchange="patchSetting(${cid},'admin_rights',this.checked)"><span class="slider"></span></label></div>
+      <div class="setting-ctrl"><label class="toggle"><input type="checkbox" ${s.admin_rights?"checked":""} onchange="patchSetting(${cid},'admin_rights',this.checked,this)"><span class="slider"></span></label></div>
     </div>
     <div class="setting-row">
       <div><div class="setting-label">Silent mode (shh)</div><div class="setting-desc">Bot confirms quietly instead of broadcasting</div></div>
-      <div class="setting-ctrl"><label class="toggle"><input type="checkbox" ${s.shh_mode?"checked":""} onchange="patchSetting(${cid},'shh_mode',this.checked)"><span class="slider"></span></label></div>
+      <div class="setting-ctrl"><label class="toggle"><input type="checkbox" ${s.shh_mode?"checked":""} onchange="patchSetting(${cid},'shh_mode',this.checked,this)"><span class="slider"></span></label></div>
     </div>
     <div class="setting-row">
       <div><div class="setting-label">Ghost tracking</div><div class="setting-desc">Track members who RSVP IN but don't show up</div></div>
-      <div class="setting-ctrl"><label class="toggle"><input type="checkbox" ${s.ghost_tracking_enabled?"checked":""} onchange="patchSetting(${cid},'ghost_tracking_enabled',this.checked)"><span class="slider"></span></label></div>
+      <div class="setting-ctrl"><label class="toggle"><input type="checkbox" ${s.ghost_tracking_enabled?"checked":""} onchange="patchSetting(${cid},'ghost_tracking_enabled',this.checked,this)"><span class="slider"></span></label></div>
     </div>
     <div class="setting-row">
       <div><div class="setting-label">Ghost limit</div><div class="setting-desc">Missed sessions before a warning triggers</div></div>
@@ -698,20 +728,34 @@ function buildSettingsPanel(cid,s){
   </div>`;
 }
 
-window.patchSetting=async function(cid,key,value){
+window.patchSetting=async function(cid,key,value,checkboxEl){
   try{
     await api(`/admin/groups/${cid}`,{method:"PATCH",body:JSON.stringify({admin_user_id:0,admin_name:"Admin (web)",[key]:value})});
     toast("Setting saved.","ok");
+  }catch(e){
+    if(checkboxEl)checkboxEl.checked=!value;
+    toast("Error: "+e.message,"err",4000);
+  }
+};
+
+window.saveAbsentLimit=async function(cid){
+  const v=parseInt($id(`ts-lim-${cidK(cid)}`)?.value);
+  if(!v||v<1){toast("Limit must be ≥ 1","err",3000);return;}
+  try{
+    await api(`/admin/groups/${cid}`,{method:"PATCH",body:JSON.stringify({admin_user_id:0,admin_name:"Admin (web)",absent_limit:v})});
+    toast("Ghost limit saved.","ok");
   }catch(e){toast("Error: "+e.message,"err",4000);}
 };
-window.saveAbsentLimit=async function(cid){
-  const v=parseInt($id(`ts-lim-${cidK(cid)}`).value);
-  if(!v||v<1){toast("Limit must be ≥ 1","err",3000);return;}
-  await window.patchSetting(cid,"absent_limit",v);
-};
+
 window.saveTz=async function(cid){
-  const tz=$id(`ts-tz-${cidK(cid)}`).value.trim();if(!tz)return;
-  await window.patchSetting(cid,"timezone",tz);
+  const tz=$id(`ts-tz-${cidK(cid)}`)?.value.trim();
+  if(!tz)return;
+  try{
+    await api(`/admin/groups/${cid}`,{method:"PATCH",body:JSON.stringify({admin_user_id:0,admin_name:"Admin (web)",timezone:tz})});
+    toast("Timezone saved.","ok");
+    const sub=$id(`gsub-${cidK(cid)}`);
+    if(sub)sub.textContent=`Chat ID: ${cid} · ${tz}`;
+  }catch(e){toast("Error: "+e.message,"err",4000);}
 };
 
 // ─── Copy group link ──────────────────────────────────────────────────────────

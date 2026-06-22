@@ -278,16 +278,16 @@ class TestVoteByToken(unittest.IsolatedAsyncioTestCase):
 
     async def test_vote_in_calls_set_in_for(self):
         result, proxy = await self._call("abc123token", "Alice", "in")
-        proxy.set_in_for.assert_awaited_once_with(100, 0, "web", "Alice", rc_number=0)
+        proxy.set_in_for.assert_awaited_once_with(100, 0, "web", "Alice", rc_number=0, comment=None)
         self.assertEqual(result["title"], "Friday Football")
 
     async def test_vote_out_calls_set_out_for(self):
         _, proxy = await self._call("abc123token", "Bob", "out")
-        proxy.set_out_for.assert_awaited_once_with(100, 0, "web", "Bob", rc_number=0)
+        proxy.set_out_for.assert_awaited_once_with(100, 0, "web", "Bob", rc_number=0, comment=None)
 
     async def test_vote_maybe_calls_set_maybe_for(self):
         _, proxy = await self._call("abc123token", "Carol", "maybe")
-        proxy.set_maybe_for.assert_awaited_once_with(100, 0, "web", "Carol", rc_number=0)
+        proxy.set_maybe_for.assert_awaited_once_with(100, 0, "web", "Carol", rc_number=0, comment=None)
 
     async def test_empty_name_raises(self):
         from exceptions import parameterMissing
@@ -327,7 +327,7 @@ class TestVoteByToken(unittest.IsolatedAsyncioTestCase):
 
     async def test_name_whitespace_stripped(self):
         _, proxy = await self._call("abc123token", "  Alice  ", "in")
-        proxy.set_in_for.assert_awaited_once_with(100, 0, "web", "Alice", rc_number=0)
+        proxy.set_in_for.assert_awaited_once_with(100, 0, "web", "Alice", rc_number=0, comment=None)
 
     async def test_name_truncated_to_64_chars(self):
         long_name = "A" * 100

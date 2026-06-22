@@ -71,6 +71,9 @@
     <div class="card" id="vote-card">
       <div id="vote-status-row"></div>
       <div id="vote-hint" class="vote-hint" style="display:none">Tap to vote ↓</div>
+      <div id="comment-row" class="comment-row hidden">
+        <input id="comment-input" class="comment-input" type="text" placeholder="Add a note… (optional)" maxlength="100"/>
+      </div>
       <div class="vote-row">
         <button class="vote-btn in"    data-vote="in"    id="btn-in"   ><span class="vb-icon">✅</span><span class="vb-label">IN</span></button>
         <button class="vote-btn out"   data-vote="out"   id="btn-out"  ><span class="vb-icon">❌</span><span class="vb-label">OUT</span></button>
@@ -82,7 +85,10 @@
     <div class="card" id="lists-card">
       <div id="lists-container"></div>
     </div>
-    <div class="refresh-bar"><div id="refresh-fill" class="refresh-fill"></div></div>
+    <div class="refresh-bar-wrap">
+      <div class="refresh-bar"><div id="refresh-fill" class="refresh-fill"></div></div>
+      <span id="refresh-label" class="refresh-label"></span>
+    </div>
   </div>
 </div>
 <div class="toast-local" id="toast-local"></div>

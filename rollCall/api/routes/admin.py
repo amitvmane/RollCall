@@ -13,6 +13,7 @@ Both routes require the `admin` scope. rc_number in the URL is 1-based
 
 from fastapi import APIRouter, Depends, Path
 
+from rollcall_manager import manager
 from services import admin as admin_svc
 
 from api.auth import AuthedToken, require_scope
@@ -39,13 +40,14 @@ async def delete_user(
     name: str = Path(..., description="Display name or @username of the user to remove"),
     _token: AuthedToken = Depends(require_scope("admin")),
 ) -> DeleteUserResponse:
-    result = admin_svc.delete_user_from_rollcall(
-        chat_id=chat_id,
-        rc_number=rc_number - 1,
-        name=name,
-        admin_user_id=body.admin_user_id,
-        admin_name=body.admin_name,
-    )
+    async with manager.get_chat_write_lock(chat_id):
+        result = admin_svc.delete_user_from_rollcall(
+            chat_id=chat_id,
+            rc_number=rc_number - 1,
+            name=name,
+            admin_user_id=body.admin_user_id,
+            admin_name=body.admin_name,
+        )
     return DeleteUserResponse(**result)
 
 
@@ -61,12 +63,13 @@ async def set_user_status(
     name: str = Path(..., description="Display name or @username to match"),
     _token: AuthedToken = Depends(require_scope("admin")),
 ) -> SetStatusResponse:
-    result = admin_svc.set_user_status(
-        chat_id=chat_id,
-        rc_number=rc_number - 1,
-        name=name,
-        new_status=body.new_status,
-        admin_user_id=body.admin_user_id,
-        admin_name=body.admin_name,
-    )
+    async with manager.get_chat_write_lock(chat_id):
+        result = admin_svc.set_user_status(
+            chat_id=chat_id,
+            rc_number=rc_number - 1,
+            name=name,
+            new_status=body.new_status,
+            admin_user_id=body.admin_user_id,
+            admin_name=body.admin_name,
+        )
     return SetStatusResponse(**result)

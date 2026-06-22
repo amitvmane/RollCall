@@ -68,7 +68,8 @@ $id("logout-btn").addEventListener("click",signOut);
 async function doLogin(){
   const raw=$id("ti").value.trim();if(!raw)return;
   const err=$id("login-error");err.style.display="none";S.token=raw;
-  const btn=$id("login-btn");btn.disabled=true;btn.textContent="Signing in…";
+  const btn=$id("login-btn"),ti=$id("ti");
+  btn.disabled=true;btn.textContent="Signing in…";ti.disabled=true;
   try{
     await api("/admin/groups");
     localStorage.setItem(LS,S.token);boot();
@@ -76,7 +77,7 @@ async function doLogin(){
     S.token="";
     err.textContent=e.message==="Unauthorized"?"Invalid token or insufficient scope.":"Error: "+e.message;
     err.style.display="block";
-  }finally{btn.disabled=false;btn.textContent="Sign in →";}
+  }finally{btn.disabled=false;btn.textContent="Sign in →";ti.disabled=false;}
 }
 $id("login-btn").addEventListener("click",doLogin);
 $id("ti").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin()});
@@ -340,11 +341,11 @@ function buildRcEditPanel(cid,num,rc,groupName){
         <span class="ur-pos">${i+1}</span>
         <span class="ur-name">${pb}${escH(u.name)}${cm}</span>
         <div class="ur-acts">
-          <select class="move-sel" title="Move to…" onchange="doMoveUser(${cid},${num},${JSON.stringify(esc(u.name))},this.value);this.value=''">
+          <select class="move-sel" title="Move to…" onchange="doMoveUser(${cid},${num},${JSON.stringify(escH(u.name))},this.value);this.value=''">
             <option value="">→</option>${moveOpts}
           </select>
-          ${canRename?`<button class="btn-icon" title="Rename" onclick="showRenameRow(${cid},${num},${JSON.stringify(esc(u.name))},'${key}')">✎</button>`:""}
-          <button class="btn-icon del" title="Remove" onclick="doRemoveUser(${cid},${num},${JSON.stringify(esc(u.name))})">✕</button>
+          ${canRename?`<button class="btn-icon" title="Rename" onclick="showRenameRow(${cid},${num},${JSON.stringify(escH(u.name))},'${key}')">✎</button>`:""}
+          <button class="btn-icon del" title="Remove" onclick="doRemoveUser(${cid},${num},${JSON.stringify(escH(u.name))})">✕</button>
         </div>
       </div>`;
     }).join("");
@@ -482,7 +483,11 @@ window.saveAllProps=async function(cid,num){
       return sel.value;
     })(),
   };
-  const changed=Object.keys(vals);
+  const changed=Object.keys(vals).filter(k=>{
+    const el=$id(`pe-${k}-${cidK(cid)}-${num}`);
+    if(!el)return vals[k]!==null&&String(vals[k]||"")!=="";
+    return String(vals[k]??"")!==String(el.dataset?.original??"");
+  });
   if(!changed.length){toast("No changes to save.","info");return;}
   if(btn){btn.disabled=true;btn.textContent="Saving…";}
   const errors=[];
@@ -545,7 +550,7 @@ window.showRenameRow=function(cid,num,name,currentStatus){
   if(!row)return;
   row.insertAdjacentHTML("afterend",`<div class="rename-row" id="rename-row-${cidK(cid)}-${num}-${escH(key)}">
     <input class="rename-inp" id="rename-inp-${cidK(cid)}-${num}-${escH(key)}" value="${escH(name)}" maxlength="64" autocorrect="off"/>
-    <button class="btn btn-primary btn-xs" onclick="doRenameProxy(${cid},${num},${JSON.stringify(esc(name))},'${currentStatus}')">Save</button>
+    <button class="btn btn-primary btn-xs" onclick="doRenameProxy(${cid},${num},${JSON.stringify(escH(name))},'${currentStatus}')">Save</button>
     <button class="btn btn-ghost btn-xs" onclick="document.getElementById('rename-row-${cidK(cid)}-${num}-${escH(key)}').remove()">Cancel</button>
   </div>`);
   $id(`rename-inp-${cidK(cid)}-${num}-${escH(key)}`)?.focus();
@@ -555,14 +560,20 @@ window.doRenameProxy=async function(cid,num,oldName,currentStatus){
   const key=oldName.replace(/\s/g,'_');
   const newName=$id(`rename-inp-${cidK(cid)}-${num}-${escH(key)}`)?.value.trim();
   if(!newName){toast("Name cannot be empty","err");return;}
-  if(newName===oldName){showRcDetails(cid,num);return;}
+  if(newName===oldName){await showRcDetails(cid,num);return;}
   try{
     await api(`/chats/${cid}/rollcalls/${num}/users/${encodeURIComponent(oldName)}`,
       {method:"DELETE",body:JSON.stringify({admin_user_id:0,admin_name:"Admin (web)"})});
-    await api(`/chats/${cid}/rollcalls/${num}/proxy-votes`,{
-      method:"POST",
-      body:JSON.stringify({vote:currentStatus,admin_user_id:0,admin_name:"Admin (web)",proxy_name:newName})
-    });
+    try{
+      await api(`/chats/${cid}/rollcalls/${num}/proxy-votes`,{
+        method:"POST",
+        body:JSON.stringify({vote:currentStatus,admin_user_id:0,admin_name:"Admin (web)",proxy_name:newName})
+      });
+    }catch(e2){
+      toast(`Rename failed after removing ${escH(oldName)} — re-add them manually.`,"err",6000);
+      await refreshRcList(cid);await showRcDetails(cid,num);
+      return;
+    }
     toast(`Renamed to ${newName}`,"ok");
     await refreshRcList(cid);await showRcDetails(cid,num);
   }catch(e){toast("Error: "+e.message,"err",4000);}
@@ -659,21 +670,21 @@ async function refreshRcList(cid){
       ?rcs.map((rc,i)=>buildRcRowHtml(cid,rc,i,name)).join("")
       :`<div class="rc-empty"><div class="icon">📋</div><p>No active rollcalls</p><p class="rc-empty-sub">Tap <strong>+ Start new</strong> above, or use <code>/rc</code> in Telegram.</p></div>`;
     updateGroupBadge(cid,rcs.length);
-  }catch{}
+  }catch(e){toast("Could not refresh rollcall list — "+e.message,"err",4000);}
 }
 
 // ─── Templates ────────────────────────────────────────────────────────────────
 function buildTmplPanel(cid,tmpls){
   const rows=tmpls.length?tmpls.map(t=>{
-    const sched=t.schedule_enabled?`📅 ${t.schedule_day||""} ${t.event_time||""}`.trim():"No schedule";
-    const meta=[t.limit?`Cap: ${t.limit}`:"",t.location?`📍${t.location}`:"",t.fee?`💰${t.fee}`:"",sched].filter(Boolean).join(" · ");
+    const sched=t.schedule_enabled?`📅 ${escH(t.schedule_day||"")} ${escH(t.event_time||"")}`.trim():"No schedule";
+    const meta=[t.limit?`Cap: ${t.limit}`:"",t.location?`📍${escH(t.location)}`:"",t.fee?`💰${escH(t.fee)}`:"",sched].filter(Boolean).join(" · ");
     return `<div class="tmpl-row">
       <div style="flex:1;min-width:0">
         <div class="tmpl-name">${escH(t.name)}</div>
-        <div class="tmpl-meta">${escH(t.title||"No title")}${meta?" · "+escH(meta):""}</div>
+        <div class="tmpl-meta">${escH(t.title||"No title")}${meta?" · "+meta:""}</div>
       </div>
       <div style="display:flex;gap:6px">
-        <button class="btn btn-success btn-sm" onclick="doStartTmpl(${cid},${JSON.stringify(t.name)},this)">▶ Start</button>
+        <button class="btn btn-success btn-sm" onclick="doStartTmpl(${cid},${JSON.stringify(escH(t.name))},this)">▶ Start</button>
       </div>
     </div>`;
   }).join("")

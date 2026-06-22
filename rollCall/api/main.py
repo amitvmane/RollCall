@@ -17,6 +17,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -28,6 +29,7 @@ from exceptions import (
     parameterMissing,
     rollCallAlreadyStarted,
     rollCallNotStarted,
+    timeError,
 )
 from api.rate_limit import rate_limit_middleware
 from api.routes import admin, auth, groups, health, proxy_votes, rollcalls, stats, templates, votes, web as web_routes
@@ -75,6 +77,7 @@ def create_app() -> FastAPI:
         incorrectParameter: 422,
         parameterMissing: 422,
         insufficientPermissions: 403,
+        timeError: 422,
     }
 
     @app.exception_handler(rollCallNotStarted)
@@ -84,6 +87,7 @@ def create_app() -> FastAPI:
     @app.exception_handler(incorrectParameter)
     @app.exception_handler(parameterMissing)
     @app.exception_handler(insufficientPermissions)
+    @app.exception_handler(timeError)
     async def _curated_exception_handler(request: Request, exc: Exception):
         status = _exception_map.get(type(exc), 400)
         return JSONResponse(
@@ -93,6 +97,17 @@ def create_app() -> FastAPI:
                 detail=str(exc) or type(exc).__name__,
             ).model_dump(),
         )
+
+    # CORS — allow cross-origin requests from browser-based clients.
+    # Configure CORS_ALLOWED_ORIGINS (comma-separated) to restrict in production.
+    _cors_origins = os.environ.get("CORS_ALLOWED_ORIGINS", "*").split(",")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type"],
+    )
 
     # Rate-limit middleware. Runs before routes; skips /health.
     app.middleware("http")(rate_limit_middleware)

@@ -212,9 +212,9 @@ function renderRollcall(rc){
   if(rc.finalize_date){
     const cd=formatCountdown(rc.finalize_epoch);
     const cdHtml=cd?`<span class="cd-pill${cd.includes("m")&&!cd.includes("h")?" soon":""}">${esc(cd)}</span>`:"";
-    meta.push("🕐 Closes: "+rc.finalize_date+(cdHtml?" "+cdHtml:""));
+    meta.push("🕐 Closes: "+esc(rc.finalize_date)+(cdHtml?" "+cdHtml:""));
   }
-  if(rc.location)meta.push("📍 "+rc.location);
+  if(rc.location)meta.push("📍 "+esc(rc.location));
   $("rc-meta").innerHTML=meta.map(m=>`<span>${m}</span>`).join("<br/>");
   $("count-badge").textContent=rc.limit?rc.in.length+"/"+rc.limit+" IN":rc.in.length+" IN";
 
@@ -276,7 +276,7 @@ function switchTab(idx){
 // ── Load ───────────────────────────────────────────────────────────────────
 async function load(){
   try{IS_GROUP?await loadGroup():await loadJoin();}
-  catch{showError("Could not connect. Check your internet and tap Retry.");return;}
+  catch(e){showError(e.message||"Could not connect. Check your internet and tap Retry.");return;}
   $("loading").classList.add("hidden");
   $("main").classList.remove("hidden");
   renderIdentity();scheduleRefresh();
@@ -284,14 +284,14 @@ async function load(){
 
 async function loadJoin(){
   const res=await fetch("/api/v1/web/"+URL_TOKEN);
-  if(!res.ok){const d=await res.json().catch(()=>({}));showError(d.detail||"This link is invalid or has ended.");throw new Error();}
+  if(!res.ok){const d=await res.json().catch(()=>({}));throw new Error(d.detail||"This link is invalid or has ended.");}
   $("tab-card").classList.add("hidden");
   renderRollcall(await res.json());
 }
 
 async function loadGroup(){
   const res=await fetch(API_GROUP);
-  if(!res.ok){const d=await res.json().catch(()=>({}));showError(d.detail||"This group link is invalid.");throw new Error();}
+  if(!res.ok){const d=await res.json().catch(()=>({}));throw new Error(d.detail||"This group link is invalid.");}
   groupData=await res.json();
   const rcs=groupData.rollcalls;
   if(!rcs.length){
@@ -304,10 +304,12 @@ async function loadGroup(){
 }
 
 // ── Auto-refresh ───────────────────────────────────────────────────────────
+let _refreshTimer=null;
 function scheduleRefresh(){
+  if(_refreshTimer)clearTimeout(_refreshTimer);
   const fill=$("refresh-fill");
   if(fill){fill.style.transition="none";fill.style.width="100%";requestAnimationFrame(()=>requestAnimationFrame(()=>{fill.style.transition="width 30s linear";fill.style.width="0%";}))}
-  setTimeout(silentRefresh,30000);
+  _refreshTimer=setTimeout(silentRefresh,30000);
 }
 
 function showRefreshLabel(text){
@@ -332,7 +334,14 @@ async function silentRefresh(){
           if(rcs.length>1){$("tab-card").classList.remove("hidden");renderTabs(rcs);}
           else $("tab-card").classList.add("hidden");
           if(activeTabIdx>=rcs.length)activeTabIdx=0;
-          activeRcData=rcs[activeTabIdx];detectCurrentVote();renderLists();renderCapBar(activeRcData);
+          activeRcData=rcs[activeTabIdx];
+          const _rc=activeRcData;
+          $("rc-title").textContent=rcs.length>1?`#${activeTabIdx+1} · ${_rc.title}`:_rc.title;
+          const _m=[];
+          if(_rc.finalize_date){const _cd=formatCountdown(_rc.finalize_epoch);const _cdH=_cd?`<span class="cd-pill${_cd.includes("m")&&!_cd.includes("h")?" soon":""}">${esc(_cd)}</span>`:"";_m.push("🕐 Closes: "+esc(_rc.finalize_date)+(_cdH?" "+_cdH:""));}
+          if(_rc.location)_m.push("📍 "+esc(_rc.location));
+          $("rc-meta").innerHTML=_m.map(x=>`<span>${x}</span>`).join("<br/>");
+          detectCurrentVote();renderLists();renderCapBar(activeRcData);
           $("count-badge").textContent=activeRcData.limit?activeRcData.in.length+"/"+activeRcData.limit+" IN":activeRcData.in.length+" IN";
         }
       }

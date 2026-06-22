@@ -122,7 +122,7 @@ COMMANDS = [
         ),
     },
     {
-        "name": "version", "aliases": [], "scope": "user", "category": "Settings",
+        "name": "version", "aliases": ["v"], "scope": "user", "category": "Settings",
         "args": "", "sample": "/version",
         "summary": "Show bot version",
         "details": "Prints the deployed version of the bot and a short changelog summary.",
@@ -408,7 +408,7 @@ def all_names_and_aliases():
 USER_CATEGORY_ORDER = ["Vote", "View Lists", "Stats & History", "Settings"]
 ADMIN_CATEGORY_ORDER = [
     "Rollcall", "Settings", "Proxy", "Templates",
-    "User Management", "Ghost Tracking", "Audit", "Super Admin",
+    "User Management", "Ghost Tracking", "Audit", "API Access", "Super Admin",
 ]
 
 

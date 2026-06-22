@@ -1049,17 +1049,25 @@ def get_chat_by_group_web_token(token: str) -> Optional[Dict]:
             release_connection(conn)
 
 
+_VALID_CHAT_FIELDS = {
+    'shh_mode', 'admin_rights', 'timezone', 'absent_limit',
+    'ghost_tracking_enabled', 'group_name', 'group_web_token',
+}
+
 def update_chat_settings(chat_id: int, **kwargs) -> bool:
     """Update chat settings"""
+    for key in kwargs:
+        if key not in _VALID_CHAT_FIELDS:
+            raise ValueError(f"update_chat_settings: invalid field '{key}'")
     conn = get_connection()
     cursor = None
     try:
         cursor = conn.cursor()
-        
+
         # Build UPDATE query dynamically
         fields = []
         values = []
-        
+
         for key, value in kwargs.items():
             fields.append(f"{key} = %s" if db_type == 'postgresql' else f"{key} = ?")
             # Convert boolean to int for SQLite
@@ -1223,17 +1231,26 @@ def get_rollcall_by_web_token(token: str) -> Optional[Dict]:
             release_connection(conn)
 
 
+_VALID_ROLLCALL_FIELDS = {
+    'chat_id', 'title', 'is_active', 'finalize_date', 'location',
+    'event_fee', 'in_list_limit', 'panel_msg_id', 'web_token',
+    'timezone', 'reminder_hours', 'template_name', 'created_at',
+}
+
 def update_rollcall(rollcall_id: int, **kwargs) -> bool:
     """Update rollcall fields"""
+    for key in kwargs:
+        if key not in _VALID_ROLLCALL_FIELDS:
+            raise ValueError(f"update_rollcall: invalid field '{key}'")
     conn = get_connection()
     cursor = None
     try:
         cursor = conn.cursor()
-        
+
         # Build UPDATE query dynamically
         fields = []
         values = []
-        
+
         for key, value in kwargs.items():
             fields.append(f"{key} = %s" if db_type == 'postgresql' else f"{key} = ?")
             values.append(value)
@@ -2694,8 +2711,8 @@ def save_ghost_selections(chat_id: int, rc_db_id: int, selected_ids: set) -> boo
     """Save ghost selections to database for crash recovery"""
     conn = get_connection()
     cursor = None
-    cursor = conn.cursor()
     try:
+        cursor = conn.cursor()
         ph = "%s" if db_type == 'postgresql' else "?"
         ts = "NOW()" if db_type == 'postgresql' else "CURRENT_TIMESTAMP"
         
@@ -2724,8 +2741,8 @@ def load_ghost_selections(chat_id: int, rc_db_id: int) -> Optional[set]:
     """Load ghost selections from database for crash recovery"""
     conn = get_connection()
     cursor = None
-    cursor = conn.cursor()
     try:
+        cursor = conn.cursor()
         ph = "%s" if db_type == 'postgresql' else "?"
         
         cursor.execute(
@@ -2751,8 +2768,8 @@ def create_ghost_selections_table() -> None:
     """Create ghost_selections table if not exists"""
     conn = get_connection()
     cursor = None
-    cursor = conn.cursor()
     try:
+        cursor = conn.cursor()
         if db_type == 'postgresql':
             cursor.execute("""CREATE TABLE IF NOT EXISTS ghost_selections (
                 chat_id BIGINT NOT NULL,

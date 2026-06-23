@@ -1510,6 +1510,26 @@ def get_all_chat_ids() -> List[int]:
 _VALID_STATUSES = {'in', 'out', 'maybe', 'waitlist'}
 
 
+def _next_pos_with_cursor(cursor, rollcall_id: int, status: str) -> int:
+    """Return next position using the caller's cursor — avoids a second connection and eliminates
+    the TOCTOU race between the MAX query and the subsequent INSERT on PostgreSQL."""
+    col = {'in': 'in_pos', 'out': 'out_pos', 'waitlist': 'wait_pos'}.get(status)
+    if col is None:
+        return 0
+    ph = '%s' if db_type == 'postgresql' else '?'
+    cursor.execute(
+        f"SELECT COALESCE(MAX({col}), 0) FROM users WHERE rollcall_id = {ph} AND status = {ph}",
+        (rollcall_id, status)
+    )
+    max_real = int(cursor.fetchone()[0] or 0)
+    cursor.execute(
+        f"SELECT COALESCE(MAX({col}), 0) FROM proxy_users WHERE rollcall_id = {ph} AND status = {ph}",
+        (rollcall_id, status)
+    )
+    max_proxy = int(cursor.fetchone()[0] or 0)
+    return max(max_real, max_proxy) + 1
+
+
 def add_or_update_user(rollcall_id: int, user_id: int, first_name: str, username: str, status: str, comment: str = '') -> bool:
     """Insert or update a regular user. Position assigned once per bucket, preserved on re-entry."""
     if status not in _VALID_STATUSES:
@@ -1545,22 +1565,23 @@ def add_or_update_user(rollcall_id: int, user_id: int, first_name: str, username
             if prev_status == 'waitlist' and status != 'waitlist':
                 wait_pos = None
             # Assign NEW position when entering a bucket for the first time
-            # (or re-entering after having left).
+            # (or re-entering after having left). Use the same cursor so the
+            # MAX query and the INSERT share a connection and avoid a TOCTOU race.
             if status == 'in' and in_pos is None:
-                in_pos = get_next_position(rollcall_id, 'in')
+                in_pos = _next_pos_with_cursor(cursor, rollcall_id, 'in')
             elif status == 'out' and out_pos is None:
-                out_pos = get_next_position(rollcall_id, 'out')
+                out_pos = _next_pos_with_cursor(cursor, rollcall_id, 'out')
             elif status == 'waitlist' and wait_pos is None:
-                wait_pos = get_next_position(rollcall_id, 'waitlist')
+                wait_pos = _next_pos_with_cursor(cursor, rollcall_id, 'waitlist')
         else:
             # Brand new user
             in_pos = out_pos = wait_pos = None
             if status == 'in':
-                in_pos = get_next_position(rollcall_id, 'in')
+                in_pos = _next_pos_with_cursor(cursor, rollcall_id, 'in')
             elif status == 'out':
-                out_pos = get_next_position(rollcall_id, 'out')
+                out_pos = _next_pos_with_cursor(cursor, rollcall_id, 'out')
             elif status == 'waitlist':
-                wait_pos = get_next_position(rollcall_id, 'waitlist')
+                wait_pos = _next_pos_with_cursor(cursor, rollcall_id, 'waitlist')
 
         if db_type == 'postgresql':
             cursor.execute("""
@@ -1639,22 +1660,23 @@ def add_or_update_proxy_user(rollcall_id: int, name: str, status: str, comment: 
             if prev_status == 'waitlist' and status != 'waitlist':
                 wait_pos = None
             # Assign NEW position when entering a bucket for the first time
-            # (or re-entering after having left).
+            # (or re-entering after having left). Use the same cursor so the
+            # MAX query and the INSERT share a connection and avoid a TOCTOU race.
             if status == 'in' and in_pos is None:
-                in_pos = get_next_position(rollcall_id, 'in')
+                in_pos = _next_pos_with_cursor(cursor, rollcall_id, 'in')
             elif status == 'out' and out_pos is None:
-                out_pos = get_next_position(rollcall_id, 'out')
+                out_pos = _next_pos_with_cursor(cursor, rollcall_id, 'out')
             elif status == 'waitlist' and wait_pos is None:
-                wait_pos = get_next_position(rollcall_id, 'waitlist')
+                wait_pos = _next_pos_with_cursor(cursor, rollcall_id, 'waitlist')
         else:
             # Brand new proxy
             in_pos = out_pos = wait_pos = None
             if status == 'in':
-                in_pos = get_next_position(rollcall_id, 'in')
+                in_pos = _next_pos_with_cursor(cursor, rollcall_id, 'in')
             elif status == 'out':
-                out_pos = get_next_position(rollcall_id, 'out')
+                out_pos = _next_pos_with_cursor(cursor, rollcall_id, 'out')
             elif status == 'waitlist':
-                wait_pos = get_next_position(rollcall_id, 'waitlist')
+                wait_pos = _next_pos_with_cursor(cursor, rollcall_id, 'waitlist')
 
         if db_type == 'postgresql':
             cursor.execute("""

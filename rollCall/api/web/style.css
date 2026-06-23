@@ -6,7 +6,30 @@
   --radius:14px;--shadow:0 1px 4px rgba(0,0,0,.08)
 }
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding:12px 14px 32px;-webkit-text-size-adjust:100%}
-body.tg-mode{background:var(--tg-theme-bg-color,var(--bg));color:var(--tg-theme-text-color,var(--text))}
+body.tg-mode{
+  --bg:var(--tg-theme-bg-color,#f0f4f8);
+  --card:var(--tg-theme-secondary-bg-color,#fff);
+  --text:var(--tg-theme-text-color,#0f172a);
+  --sub:var(--tg-theme-hint-color,#64748b);
+  --accent:var(--tg-theme-button-color,#2563eb);
+  --border:var(--tg-theme-hint-color,#e4e8ef);
+  background:var(--bg);color:var(--text);
+}
+/* Hardcoded light-mode colors that don't flow through CSS variables */
+body.tg-mode .id-badge.tg{background:rgba(3,105,161,.18);color:var(--tg-theme-link-color,#0369a1)}
+body.tg-mode .id-badge.guest{background:rgba(21,128,61,.18);color:var(--tg-theme-link-color,#15803d)}
+body.tg-mode .vote-status.in{background:rgba(22,163,74,.18)}
+body.tg-mode .vote-status.out{background:rgba(220,38,38,.18)}
+body.tg-mode .vote-status.maybe{background:rgba(217,119,6,.18)}
+body.tg-mode .vote-btn{background:var(--card)}
+body.tg-mode .tab-btn{background:var(--card);border-color:var(--border)}
+body.tg-mode .list-items li{border-bottom-color:var(--border)}
+body.tg-mode .cd-pill{background:rgba(37,99,235,.2);color:var(--accent)}
+body.tg-mode .cd-pill.soon{background:rgba(180,83,9,.2);color:var(--maybe)}
+body.tg-mode .cap-bar{background:var(--border)}
+body.tg-mode .refresh-bar{background:var(--border)}
+body.tg-mode .name-row input{background:var(--card);color:var(--text);border-color:var(--border)}
+body.tg-mode .comment-input{background:var(--card);color:var(--text);border-color:var(--border)}
 
 .card{background:var(--card);border-radius:var(--radius);padding:16px;margin-bottom:10px;box-shadow:var(--shadow)}
 

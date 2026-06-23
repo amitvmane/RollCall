@@ -235,3 +235,42 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:12px 0}
   .card{padding:14px}
   .btn-row{flex-wrap:wrap}
 }
+
+/* ── Dark mode ── */
+@media(prefers-color-scheme:dark){
+  :root{
+    --bg:#0f172a;--card:#1e293b;--border:#334155;
+    --text:#f1f5f9;--sub:#94a3b8;
+    --accent:#3b82f6;--accent-dim:rgba(59,130,246,.15);
+    --danger:#f87171;--danger-dim:rgba(248,113,113,.12);
+    --success:#4ade80;--warn:#fbbf24;
+    --shadow:0 1px 3px rgba(0,0,0,.5),0 1px 2px rgba(0,0,0,.4);
+    --shadow-md:0 4px 16px rgba(0,0,0,.5);
+  }
+  #login-screen{background:linear-gradient(135deg,#0f172a 0%,#1e3a8a 100%)}
+  .login-card input{background:var(--card);color:var(--text)}
+  .topbar{box-shadow:0 2px 12px rgba(0,0,0,.6)}
+  .gi{border-bottom-color:var(--border)}
+  .gi:hover{background:#243148}
+  .gi.active{background:var(--accent-dim)}
+  .sb-head{background:var(--card)}
+  input,select,textarea{background:#243148;color:var(--text);border-color:var(--border)}
+  input:focus,select:focus,textarea:focus{border-color:var(--accent)}
+  .scope-warn{background:rgba(251,191,36,.12);border-color:#fbbf24;color:#fbbf24}
+  .rename-row{background:#172033;border-bottom-color:var(--border)}
+  .rc-row--editing{background:#172033;border-left-color:var(--accent)}
+  .confirm-row{background:rgba(248,113,113,.12);border-color:#f87171}
+  .proxy-badge{background:rgba(99,102,241,.25);color:#a5b4fc}
+  .real-badge{background:rgba(74,222,128,.15);color:#4ade80}
+  .tg-warn{background:rgba(251,191,36,.1);border-color:#854d0e;color:#fbbf24}
+  .tmpl-row:hover,.rc-row:hover{background:#243148}
+  .tab-link.active{border-bottom-color:var(--accent);color:var(--accent)}
+  .member-picker{background:#243148;color:var(--text);border-color:var(--border)}
+  .reminder-custom{background:#243148;color:var(--text)}
+  .amf-inp{background:#243148;color:var(--text)}
+  .btn-ghost{border-color:var(--border);color:var(--text)}
+  .btn-ghost:hover{background:var(--border)}
+  .btn-icon{background:var(--card);border-color:var(--border);color:var(--sub)}
+  .btn-icon:hover{background:#334155;color:var(--text)}
+  .move-sel{background:#243148}
+}

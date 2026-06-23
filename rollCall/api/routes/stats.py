@@ -226,11 +226,17 @@ async def set_limit(
     rc_number: int = Path(..., ge=1),
     _token: AuthedToken = Depends(require_scope("admin")),
 ) -> RollcallResponse:
-    return RollcallResponse(
-        **settings_svc.set_rollcall_limit(
-            chat_id, body.limit, body.admin_user_id, body.admin_name, rc_number - 1
+    if body.limit == 0:
+        # Removing the cap — no rebalance needed
+        result = settings_svc.set_rollcall_limit(
+            chat_id, 0, body.admin_user_id, body.admin_name, rc_number - 1
         )
-    )
+    else:
+        # Setting a positive cap — rebalance IN↔WAIT immediately
+        result = settings_svc.set_wait_limit(
+            chat_id, body.limit, body.admin_user_id, body.admin_name, rc_number - 1
+        )["rollcall"]
+    return RollcallResponse(**result)
 
 
 @router.put(

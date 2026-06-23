@@ -54,14 +54,17 @@ def reset_buckets_for_tests() -> None:
 
 def _bucket_key(request: Request) -> str:
     """
-    Choose a bucket key. Prefer the authed token's hash (set on
-    request.state by api.auth.require_scope). Falls back to client IP
-    so unauthenticated requests still get a (shared, aggressive) cap.
+    Choose a bucket key. Middleware runs before FastAPI dependencies so
+    request.state.api_token is never set here. Instead, read the
+    Authorization header directly and hash the Bearer token so each
+    issued token gets its own isolated bucket.
     """
-    token = getattr(request.state, "api_token", None)
-    if token is not None:
-        # Use chat_id + label as a stable handle without re-hashing.
-        return f"token:{token.chat_id}:{token.label or ''}"
+    import hashlib
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        raw = auth[7:].strip()
+        if raw:
+            return "token:" + hashlib.sha256(raw.encode()).hexdigest()[:24]
     client = request.client
     return f"ip:{client.host if client else 'unknown'}"
 

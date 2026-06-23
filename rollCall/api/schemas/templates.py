@@ -90,3 +90,8 @@ class SetScheduleRequest(BaseModel):
 class ToggleScheduleRequest(BaseModel):
     admin_user_id: int
     admin_name: str
+
+
+class DeleteTemplateRequest(BaseModel):
+    admin_user_id: int
+    admin_name: str

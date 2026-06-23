@@ -160,13 +160,26 @@ def set_user_status(
         delete_user_by_id(rc_db_id, found_user.user_id)
     rc._load_users_from_db()
 
-    if new_status == "in":
-        rc.addIn(found_user)
-    elif new_status == "out":
-        rc.addOut(found_user)
-    else:
-        rc.addMaybe(found_user)
-    rc.save()
+    try:
+        if new_status == "in":
+            rc.addIn(found_user)
+        elif new_status == "out":
+            rc.addOut(found_user)
+        else:
+            rc.addMaybe(found_user)
+        rc.save()
+    except Exception as move_err:
+        # Restore the user at their original status to prevent silent data loss.
+        try:
+            rc._save_user_to_db(found_user, current_status)
+            rc._load_users_from_db()
+        except Exception:
+            logging.exception(
+                "set_user_status: failed to restore '%s' after move failure — "
+                "user may be missing from rollcall #%d",
+                found_user.name, rc_number + 1,
+            )
+        raise move_err
 
     logging.info(
         f"[{_ts()}] [CHAT {chat_id}] set_status: '{found_user.name}' "

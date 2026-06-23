@@ -114,6 +114,8 @@ class GhostLeaderboardEntry(BaseModel):
 # ─── Settings ─────────────────────────────────────────────────────────────────
 
 class ChatSettingsResponse(BaseModel):
+    chat_id: Optional[int] = None
+    group_name: Optional[str] = None
     timezone: str
     shh_mode: bool
     admin_rights: bool

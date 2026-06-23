@@ -14,6 +14,7 @@ from services import templates as tmpl_svc
 from api.auth import AuthedToken, require_scope
 from api.schemas.rollcalls import RollcallResponse
 from api.schemas.templates import (
+    DeleteTemplateRequest,
     DeleteTemplateResponse,
     ScheduleResponse,
     SetScheduleRequest,
@@ -109,7 +110,7 @@ async def start_template(
     summary="Delete a template",
 )
 async def delete_template(
-    body: ToggleScheduleRequest,
+    body: DeleteTemplateRequest,
     chat_id: int = Path(...),
     name: str = Path(...),
     _token: AuthedToken = Depends(require_scope("admin")),

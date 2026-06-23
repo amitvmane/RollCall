@@ -3450,6 +3450,10 @@ def get_rollcall_history(chat_id: int, limit: int = 10, offset: int = 0) -> List
                 SELECT r.id, r.title, r.ended_at,
                     (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'in') +
                     (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND p.status = 'in') AS in_count,
+                    (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'out') +
+                    (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND p.status = 'out') AS out_count,
+                    (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'maybe') +
+                    (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND p.status = 'maybe') AS maybe_count,
                     (SELECT COUNT(*) FROM ghost_events g WHERE g.rollcall_id = r.id) AS ghost_count
                 FROM rollcalls r
                 WHERE r.chat_id = {ph} AND r.is_active = FALSE
@@ -3461,6 +3465,10 @@ def get_rollcall_history(chat_id: int, limit: int = 10, offset: int = 0) -> List
                 SELECT r.id, r.title, r.ended_at,
                     (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'in') +
                     (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND p.status = 'in') AS in_count,
+                    (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'out') +
+                    (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND p.status = 'out') AS out_count,
+                    (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'maybe') +
+                    (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND p.status = 'maybe') AS maybe_count,
                     (SELECT COUNT(*) FROM ghost_events g WHERE g.rollcall_id = r.id) AS ghost_count
                 FROM rollcalls r
                 WHERE r.chat_id = {ph} AND r.is_active = 0
@@ -3697,6 +3705,10 @@ def insert_api_token(
             VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph})
         """, (token_hash, chat_id, issued_by_user_id, scopes, label, expires_at))
         conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logging.exception("insert_api_token: failed to persist token for chat %s: %s", chat_id, e)
+        raise
     finally:
         if cursor is not None:
             cursor.close()

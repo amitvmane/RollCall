@@ -337,15 +337,18 @@ function buildRcEditPanel(cid,num,rc,groupName){
       const moveOpts=["in","out","maybe"].filter(s=>s!==key)
         .map(s=>`<option value="${s}">${s.toUpperCase()}</option>`).join("");
       const canRename=u.is_proxy;
-      return `<div class="ur" id="ur-${cidK(cid)}-${num}-${escH(u.name.replace(/\s/g,'_'))}">
+      // Use data-* attrs instead of onclick="...JSON.stringify(name)..." — inline onclick
+      // with JSON.stringify produces inner double-quotes that terminate the HTML attribute,
+      // silently breaking every action for every user name.
+      return `<div class="ur" data-cid="${cid}" data-num="${num}" data-uname="${escH(u.name)}" data-status="${key}">
         <span class="ur-pos">${i+1}</span>
         <span class="ur-name">${pb}${escH(u.name)}${cm}</span>
         <div class="ur-acts">
-          <select class="move-sel" title="Move to…" onchange="doMoveUser(${cid},${num},${JSON.stringify(escH(u.name))},this.value);this.value=''">
-            <option value="">→</option>${moveOpts}
+          <select class="move-sel" title="Move to another list">
+            <option value="">Move →</option>${moveOpts}
           </select>
-          ${canRename?`<button class="btn-icon" title="Rename" onclick="showRenameRow(${cid},${num},${JSON.stringify(escH(u.name))},'${key}')">✎</button>`:""}
-          <button class="btn-icon del" title="Remove" onclick="doRemoveUser(${cid},${num},${JSON.stringify(escH(u.name))})">✕</button>
+          ${canRename?`<button class="btn-icon ur-rename" title="Rename">✎</button>`:""}
+          <button class="btn-icon del ur-del" title="Remove">✕</button>
         </div>
       </div>`;
     }).join("");
@@ -457,6 +460,10 @@ function buildRcEditPanel(cid,num,rc,groupName){
       </div>
     </div>
     <hr class="sep" style="margin:0 16px"/>
+    <div class="manage-header">
+      <span class="manage-title">Manage members</span>
+      <span class="manage-hint">Move or remove applies instantly</span>
+    </div>
     <div class="vote-grid">${sections.map(voteSection).join("")}</div>
   </div>`;
 }
@@ -543,24 +550,26 @@ window.doMoveUser=async function(cid,num,name,newStatus){
 };
 
 // ─── Rename proxy (delete + re-add) ──────────────────────────────────────────
-window.showRenameRow=function(cid,num,name,currentStatus){
-  const key=name.replace(/\s/g,'_');
-  const rowId=`ur-${cidK(cid)}-${num}-${escH(key)}`;
-  const row=$id(rowId);
-  if(!row)return;
-  row.insertAdjacentHTML("afterend",`<div class="rename-row" id="rename-row-${cidK(cid)}-${num}-${escH(key)}">
-    <input class="rename-inp" id="rename-inp-${cidK(cid)}-${num}-${escH(key)}" value="${escH(name)}" maxlength="64" autocorrect="off"/>
-    <button class="btn btn-primary btn-xs" onclick="doRenameProxy(${cid},${num},${JSON.stringify(escH(name))},'${currentStatus}')">Save</button>
-    <button class="btn btn-ghost btn-xs" onclick="document.getElementById('rename-row-${cidK(cid)}-${num}-${escH(key)}').remove()">Cancel</button>
-  </div>`);
-  $id(`rename-inp-${cidK(cid)}-${num}-${escH(key)}`)?.focus();
+// showRenameRow now receives the .ur row element from event delegation —
+// avoids passing names through onclick attributes (same double-quote truncation bug).
+window.showRenameRow=function(rowEl){
+  // Remove stale rename row left behind by a previous click
+  if(rowEl.nextElementSibling?.classList.contains('rename-row'))
+    rowEl.nextElementSibling.remove();
+  const{cid,num,uname,status}=rowEl.dataset;
+  rowEl.insertAdjacentHTML("afterend",
+    `<div class="rename-row" data-cid="${cid}" data-num="${num}" data-oldname="${escH(uname)}" data-status="${status}">
+      <input class="rename-inp" value="${escH(uname)}" maxlength="64" autocorrect="off"/>
+      <button class="btn btn-primary btn-xs do-rename-save">Save</button>
+      <button class="btn btn-ghost btn-xs do-rename-cancel">Cancel</button>
+    </div>`);
+  rowEl.nextElementSibling.querySelector('.rename-inp')?.focus();
 };
 
-window.doRenameProxy=async function(cid,num,oldName,currentStatus){
-  const key=oldName.replace(/\s/g,'_');
-  const newName=$id(`rename-inp-${cidK(cid)}-${num}-${escH(key)}`)?.value.trim();
+// newName is read from the input directly by the event delegation — no ID lookup needed.
+window.doRenameProxy=async function(cid,num,oldName,currentStatus,newName){
   if(!newName){toast("Name cannot be empty","err");return;}
-  if(newName===oldName){await showRcDetails(cid,num);return;}
+  if(newName===oldName){return;}
   try{
     await api(`/chats/${cid}/rollcalls/${num}/users/${encodeURIComponent(oldName)}`,
       {method:"DELETE",body:JSON.stringify({admin_user_id:0,admin_name:"Admin (web)"})});
@@ -790,5 +799,52 @@ function _fallbackCopy(text){
 function updateGroupBadge(cid,count){
   const g=S.groups.find(x=>x.chat_id===cid);if(g){g.active_rollcalls=count;renderGList();}
 }
+
+// ─── Delegated handlers for user-row actions ──────────────────────────────────
+// User names are stored in data-uname attributes (HTML-entity-encoded).
+// The browser decodes them back to plain text on dataset read, so all API
+// calls receive the original unescaped name — safe for encodeURIComponent.
+document.addEventListener('change',e=>{
+  const sel=e.target.closest('.move-sel');
+  if(!sel||!sel.value)return;
+  const row=sel.closest('.ur');
+  if(!row)return;
+  const{cid,num,uname}=row.dataset;
+  doMoveUser(Number(cid),Number(num),uname,sel.value);
+  sel.value='';
+});
+
+document.addEventListener('click',e=>{
+  // Remove user
+  const del=e.target.closest('.ur-del');
+  if(del){
+    const row=del.closest('.ur');
+    if(row){const{cid,num,uname}=row.dataset;doRemoveUser(Number(cid),Number(num),uname);}
+    return;
+  }
+  // Rename proxy — show inline rename row
+  const ren=e.target.closest('.ur-rename');
+  if(ren){
+    const row=ren.closest('.ur');
+    if(row)showRenameRow(row);
+    return;
+  }
+  // Rename save
+  const sav=e.target.closest('.do-rename-save');
+  if(sav){
+    const rr=sav.closest('.rename-row');
+    if(rr){
+      const{cid,num,oldname,status}=rr.dataset;
+      const newName=rr.querySelector('.rename-inp')?.value.trim();
+      if(!newName){toast("Name cannot be empty","err");return;}
+      if(newName===oldname){rr.remove();return;}
+      doRenameProxy(Number(cid),Number(num),oldname,status,newName);
+    }
+    return;
+  }
+  // Rename cancel
+  const can=e.target.closest('.do-rename-cancel');
+  if(can){can.closest('.rename-row')?.remove();return;}
+});
 
 })();

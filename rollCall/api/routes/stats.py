@@ -304,9 +304,22 @@ async def set_when(
     rc_number: int = Path(..., ge=1),
     _token: AuthedToken = Depends(require_scope("admin")),
 ) -> RollcallResponse:
+    import asyncio
     result = settings_svc.set_rollcall_time(
         chat_id, rc_number - 1, body.datetime_str, body.admin_user_id, body.admin_name
     )
+    if not result.get("cancelled"):
+        # Mirror what the Telegram /set_rollcall_time handler does: kick off the
+        # reminder/auto-close loop so the rollcall is closed at the scheduled time.
+        # Without this, finalize_date set via the web admin had no effect.
+        from check_reminders import start
+        from rollcall_manager import manager as _mgr
+        from bot_state import _log_task_exc
+        rc = _mgr.get_rollcall(chat_id, rc_number - 1)
+        if rc is not None:
+            rollcalls = _mgr.get_rollcalls(chat_id)
+            tz = getattr(rc, "timezone", None) or _mgr.get_chat(chat_id).get("timezone", "Asia/Kolkata")
+            asyncio.create_task(start(rollcalls, tz, chat_id)).add_done_callback(_log_task_exc)
     return RollcallResponse(**result["rollcall"])
 
 

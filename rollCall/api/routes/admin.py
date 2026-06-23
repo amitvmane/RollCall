@@ -11,6 +11,8 @@ Both routes require the `admin` scope. rc_number in the URL is 1-based
 (matching the display number users see); the service layer expects 0-based.
 """
 
+import logging
+
 from fastapi import APIRouter, Depends, Path
 
 from rollcall_manager import manager
@@ -40,6 +42,7 @@ async def delete_user(
     name: str = Path(..., description="Display name or @username of the user to remove"),
     _token: AuthedToken = Depends(require_scope("admin")),
 ) -> DeleteUserResponse:
+    logging.info("[api] delete_user chat=%d rc#%d name=%r by %s", chat_id, rc_number, name, body.admin_name)
     async with manager.get_chat_write_lock(chat_id):
         result = admin_svc.delete_user_from_rollcall(
             chat_id=chat_id,
@@ -63,6 +66,7 @@ async def set_user_status(
     name: str = Path(..., description="Display name or @username to match"),
     _token: AuthedToken = Depends(require_scope("admin")),
 ) -> SetStatusResponse:
+    logging.info("[api] set_user_status chat=%d rc#%d name=%r → %s by %s", chat_id, rc_number, name, body.new_status, body.admin_name)
     async with manager.get_chat_write_lock(chat_id):
         result = admin_svc.set_user_status(
             chat_id=chat_id,

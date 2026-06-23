@@ -66,7 +66,10 @@ class TestHealthRoute(APIBase):
     def test_health_returns_200(self):
         r = self.client.get("/api/v1/health")
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.json(), {"status": "ok", "api_version": "v1"})
+        body = r.json()
+        self.assertEqual(body["status"], "ok")
+        self.assertEqual(body["api_version"], "v1")
+        self.assertIn("telegram_ok", body)
 
 
 class TestRollcallLifecycle(APIBase):

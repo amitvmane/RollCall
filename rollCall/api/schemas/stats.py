@@ -74,6 +74,15 @@ class HistoryEntry(BaseModel):
     maybe_count: int
 
 
+class ResponseTimeEntry(BaseModel):
+    user_id: int
+    display_name: Optional[str] = None
+    username: Optional[str] = None
+    avg_response_seconds: int
+    best_response_seconds: int
+    rollcall_count: int
+
+
 # ─── Ghost ────────────────────────────────────────────────────────────────────
 
 class GhostSettingsResponse(BaseModel):

@@ -3947,5 +3947,86 @@ def get_group_view_count(group_token: str) -> int:
             release_connection(conn)
 
 
+def get_response_time_leaderboard(chat_id: int, limit: int = 10) -> List[Dict]:
+    """
+    Return per-user average and best response time (seconds from rollcall start
+    to first vote) across ended rollcalls in this chat.
+
+    Uses users.created_at (insert time = first vote) minus rollcalls.created_at.
+    Only ended rollcalls with positive response times are included.
+    Ordered fastest-first.
+    """
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        if db_type == 'postgresql':
+            cursor.execute(f"""
+                SELECT
+                    u.user_id,
+                    u.first_name AS display_name,
+                    u.username,
+                    AVG(EXTRACT(EPOCH FROM (u.created_at - r.created_at)))::bigint AS avg_seconds,
+                    MIN(EXTRACT(EPOCH FROM (u.created_at - r.created_at)))::bigint AS best_seconds,
+                    COUNT(*)::int AS rollcall_count
+                FROM users u
+                JOIN rollcalls r ON u.rollcall_id = r.id
+                WHERE r.chat_id = {ph}
+                  AND r.ended_at IS NOT NULL
+                  AND u.created_at > r.created_at
+                GROUP BY u.user_id, u.first_name, u.username
+                HAVING COUNT(*) >= 1
+                ORDER BY avg_seconds ASC
+                LIMIT {ph}
+            """, (chat_id, limit))
+        else:
+            cursor.execute(f"""
+                SELECT
+                    u.user_id,
+                    u.first_name AS display_name,
+                    u.username,
+                    CAST(AVG((julianday(u.created_at) - julianday(r.created_at)) * 86400) AS INTEGER) AS avg_seconds,
+                    CAST(MIN((julianday(u.created_at) - julianday(r.created_at)) * 86400) AS INTEGER) AS best_seconds,
+                    COUNT(*) AS rollcall_count
+                FROM users u
+                JOIN rollcalls r ON u.rollcall_id = r.id
+                WHERE r.chat_id = {ph}
+                  AND r.ended_at IS NOT NULL
+                  AND u.created_at > r.created_at
+                GROUP BY u.user_id, u.first_name, u.username
+                HAVING COUNT(*) >= 1
+                ORDER BY avg_seconds ASC
+                LIMIT {ph}
+            """, (chat_id, limit))
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            if isinstance(row, dict):
+                r = row
+            else:
+                r = {
+                    'user_id': row[0], 'display_name': row[1], 'username': row[2],
+                    'avg_seconds': row[3], 'best_seconds': row[4], 'rollcall_count': row[5],
+                }
+            result.append({
+                'user_id': int(r['user_id']),
+                'display_name': r['display_name'] or '',
+                'username': r['username'] or '',
+                'avg_response_seconds': int(r['avg_seconds'] or 0),
+                'best_response_seconds': int(r['best_seconds'] or 0),
+                'rollcall_count': int(r['rollcall_count'] or 0),
+            })
+        return result
+    except Exception:
+        logging.exception("get_response_time_leaderboard failed")
+        return []
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
 # Initialize database on import
 init_db()

@@ -22,6 +22,7 @@ from api.schemas.stats import (
     HistoryEntry,
     LeaderboardEntry,
     PersonalStatsResponse,
+    ResponseTimeEntry,
     SetAbsentLimitRequest,
     SetFeeRequest,
     SetLimitRequest,
@@ -91,6 +92,19 @@ async def history(
     _token: AuthedToken = Depends(require_scope("read")),
 ) -> List[HistoryEntry]:
     return [HistoryEntry(**e) for e in stats_svc.history(chat_id, limit, offset)]
+
+
+@router.get(
+    "/chats/{chat_id}/stats/response-times",
+    response_model=List[ResponseTimeEntry],
+    summary="Response-time leaderboard — how quickly each user first votes",
+)
+async def response_time_leaderboard(
+    chat_id: int = Path(...),
+    limit: int = Query(10, ge=1, le=50),
+    _token: AuthedToken = Depends(require_scope("read")),
+) -> List[ResponseTimeEntry]:
+    return [ResponseTimeEntry(**e) for e in stats_svc.response_time_stats(chat_id, limit)]
 
 
 # ── Ghost ─────────────────────────────────────────────────────────────────────

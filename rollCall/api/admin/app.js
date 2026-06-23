@@ -237,7 +237,8 @@ function buildRcPanel(cid,rcs,groupName){
       </div>`;
   const g=S.groups.find(x=>x.chat_id===cid);
   const linkBtn=g?.group_web_token
-    ?`<button class="btn btn-ghost btn-sm" onclick="copyGroupLink(${cid})" title="Copy voting link for members">🔗 Copy link</button>`:"";
+    ?`<button class="btn btn-ghost btn-sm" onclick="copyGroupLink(${cid})" title="Copy voting link for members">🔗 Copy link</button>
+      <button class="btn btn-ghost btn-sm" onclick="showGroupQr(${cid})" title="QR code for member onboarding">&#x25a6; QR</button>`:"";
   const offlineNote=S.telegramOk===false
     ?`<div class="rc-offline-note">📴 Bot is retrying Telegram every 60s — rollcalls started here will be announced to the group automatically once reconnected. Members can vote via the web link now.</div>`
     :"";
@@ -959,6 +960,57 @@ function _fallbackCopy(text){
   document.body.removeChild(inp);
 }
 
+// ─── QR code modal ────────────────────────────────────────────────────────────
+window.showGroupQr=async function(cid){
+  const g=S.groups.find(x=>x.chat_id===cid);
+  if(!g?.group_web_token){toast("No group link configured yet","err");return;}
+
+  // Remove any existing modal
+  document.getElementById("qr-modal")?.remove();
+
+  const modal=document.createElement("div");
+  modal.id="qr-modal";
+  modal.className="qr-modal-overlay";
+  modal.innerHTML=`
+    <div class="qr-modal-box" role="dialog" aria-modal="true">
+      <div class="qr-modal-hdr">
+        <span>Group QR Code</span>
+        <button class="qr-close" onclick="document.getElementById('qr-modal').remove()" aria-label="Close">✕</button>
+      </div>
+      <div class="qr-body">
+        <div class="qr-spinner"><div class="spinner"></div></div>
+      </div>
+      <p class="qr-hint">Members can scan this to open the voting page.<br>Screenshot and share in the group.</p>
+      <div class="qr-actions" style="display:none">
+        <a id="qr-download" class="btn btn-primary btn-sm" download="rollcall-qr.svg">Download SVG</a>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+
+  // Close on backdrop click
+  modal.addEventListener("click",e=>{if(e.target===modal)modal.remove();});
+
+  try{
+    const resp=await fetch(`/api/v1/chats/${cid}/qrcode`,{
+      headers:{"Authorization":"Bearer "+S.token},
+      signal:AbortSignal.timeout(8000),
+    });
+    if(!resp.ok)throw new Error(`Server error ${resp.status}`);
+    const svgText=await resp.text();
+
+    const body=modal.querySelector(".qr-body");
+    body.innerHTML=`<div class="qr-svg-wrap">${svgText}</div>`;
+
+    // Wire download link
+    const dl=modal.querySelector("#qr-download");
+    const blob=new Blob([svgText],{type:"image/svg+xml"});
+    dl.href=URL.createObjectURL(blob);
+    modal.querySelector(".qr-actions").style.display="";
+  }catch(e){
+    modal.querySelector(".qr-body").innerHTML=`<p class="qr-err">Failed to load QR: ${escH(e.message)}</p>`;
+  }
+};
+
 // ─── Utils ────────────────────────────────────────────────────────────────────
 function updateGroupBadge(cid,count){
   const g=S.groups.find(x=>x.chat_id===cid);if(g){g.active_rollcalls=count;renderGList();}
@@ -1037,20 +1089,29 @@ async function loadStatsTab(cid){
       :Promise.resolve(null);
     // Also send admin heartbeat so admin counts in active viewers
     if(token)fetch(`/api/v1/web/group/${token}/heartbeat`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session_id:"admin-"+S.token.slice(-8)})}).catch(()=>{});
-    const [gs,lb,hist,pres]=await Promise.all([
+    const [gs,lb,hist,pres,rt]=await Promise.all([
       apiGet(`/api/v1/chats/${cid}/stats/group`),
       apiGet(`/api/v1/chats/${cid}/stats/leaderboard?limit=10`),
       apiGet(`/api/v1/chats/${cid}/history?limit=8`),
       presPromise,
+      apiGet(`/api/v1/chats/${cid}/stats/response-times?limit=10`).catch(()=>null),
     ]);
     S.statsLoaded[cid]=true;
-    panel.innerHTML=buildStatsPanel(cid,gs,lb,hist,pres);
+    panel.innerHTML=buildStatsPanel(cid,gs,lb,hist,pres,rt);
   }catch(e){
     panel.innerHTML=`<div class="stats-err">Failed to load stats — ${escH(e.message)}</div>`;
   }
 }
 
-function buildStatsPanel(cid,gs,lb,hist,pres){
+function _fmtDuration(secs){
+  if(secs==null||secs<0)return "—";
+  if(secs<60)return `${secs}s`;
+  if(secs<3600){const m=Math.round(secs/60);return `${m} min`;}
+  const h=Math.floor(secs/3600),m=Math.round((secs%3600)/60);
+  return m?`${h}h ${m}m`:`${h}h`;
+}
+
+function buildStatsPanel(cid,gs,lb,hist,pres,rt){
   const pct=v=>v==null?"—":`${v}%`;
   const fmt=v=>v??0;
 
@@ -1092,6 +1153,15 @@ function buildStatsPanel(cid,gs,lb,hist,pres){
       <span class="ghost-stat-ct">${fmt(g.ghost_count)} no-shows</span>
     </div>`).join("");
 
+  const rtRows=(rt||[]).map((e,i)=>`
+    <tr class="slb-row">
+      <td class="slb-rank">${i+1}</td>
+      <td class="slb-name">${escH(e.display_name||'—')}</td>
+      <td class="rt-avg">${_fmtDuration(e.avg_response_seconds)}</td>
+      <td class="rt-best">${_fmtDuration(e.best_response_seconds)}</td>
+      <td class="rt-cnt">${fmt(e.rollcall_count)}</td>
+    </tr>`).join("");
+
   return `
   <div class="stats-panel">
     ${presHtml}
@@ -1105,6 +1175,15 @@ function buildStatsPanel(cid,gs,lb,hist,pres){
       <table class="stats-table">
         <thead><tr><th>#</th><th>Name</th><th>Sessions</th><th>Attendance</th><th>Voted</th></tr></thead>
         <tbody>${lbRows}</tbody>
+      </table>
+    </div>`:''}
+
+    ${rtRows?`
+    <div class="card stats-card">
+      <div class="card-header"><h3>Response Time <span class="sub">(first vote after rollcall opens)</span></h3></div>
+      <table class="stats-table">
+        <thead><tr><th>#</th><th>Name</th><th>Avg</th><th>Best</th><th>Rollcalls</th></tr></thead>
+        <tbody>${rtRows}</tbody>
       </table>
     </div>`:''}
 

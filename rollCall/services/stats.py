@@ -19,6 +19,7 @@ from db import (
     get_proxy_attendance_count,
     get_proxy_stats,
     get_proxy_streaks,
+    get_response_time_leaderboard,
     get_rollcall_history,
     get_user_attendance_count,
     find_proxy_in_chat,
@@ -260,6 +261,14 @@ def history(chat_id: int, limit: int = 10, offset: int = 0) -> list:
         }
         for row in rows
     ]
+
+
+def response_time_stats(chat_id: int, limit: int = 10) -> list:
+    """
+    Return response-time leaderboard: how quickly each user typically casts
+    their first vote after a rollcall opens.  Ordered fastest-first.
+    """
+    return get_response_time_leaderboard(chat_id, limit)
 
 
 def web_group_stats(

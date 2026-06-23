@@ -4,11 +4,27 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
   <title>RollCall</title>
+  <link rel="icon" href="/web/logo.svg" type="image/svg+xml"/>
+  <script>
+  (function(){
+    var p=localStorage.getItem("rc_dark");
+    var sys=window.matchMedia&&window.matchMedia("(prefers-color-scheme:dark)").matches;
+    if(p==="1"||(p!=="0"&&sys))document.documentElement.classList.add("dark");
+  })();
+  </script>
   <script async src="https://telegram.org/js/telegram-web-app.js"></script>
   <link rel="stylesheet" href="/web/style.css"/>
 </head>
 <body>
 <div id="app">
+  <!-- Brand bar — hidden in TG Mini App mode (body.tg-mode) -->
+  <div class="brand-bar" id="brand-bar">
+    <div class="brand-inner">
+      <img src="/web/logo.svg" alt="RollCall" class="brand-logo" width="28" height="28"/>
+      <span class="brand-name">RollCall</span>
+    </div>
+    <button class="brand-theme-btn" id="theme-btn" title="Toggle dark mode" onclick="toggleTheme()">🌙</button>
+  </div>
   <div id="loading" class="center">
     <div class="spinner"></div>
     <p style="color:var(--sub);font-size:.9rem">Loading…</p>

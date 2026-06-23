@@ -38,6 +38,19 @@ let currentVote=null, activeRcData=null, groupData=null, activeTabIdx=0, voting=
 function $(x){return document.getElementById(x)}
 function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
 
+// ── Theme toggle ───────────────────────────────────────────────────────────
+function updateThemeBtn(){
+  const btn=$("theme-btn");if(!btn)return;
+  btn.textContent=document.documentElement.classList.contains("dark")?"☀":"🌙";
+}
+window.toggleTheme=function(){
+  const isDark=document.documentElement.classList.contains("dark");
+  document.documentElement.classList.toggle("dark",!isDark);
+  localStorage.setItem("rc_dark",isDark?"0":"1");
+  updateThemeBtn();
+};
+document.addEventListener("DOMContentLoaded",updateThemeBtn);
+
 // ── Toast ──────────────────────────────────────────────────────────────────
 function toast(msg,ms=2800){
   const el=$("toast-local");el.textContent=msg;el.classList.add("show");
@@ -148,15 +161,19 @@ async function castVote(voteType){
   if(_spinBtn)_spinBtn.classList.add("spinning");
   renderVoteUI();
 
+  const ac=new AbortController();
+  const _tid=setTimeout(()=>ac.abort(),30000);
   try{
     const res=await fetch("/api/v1/web/"+token+"/vote",{
-      method:"POST",headers:{"Content-Type":"application/json"},
+      method:"POST",signal:ac.signal,
+      headers:{"Content-Type":"application/json"},
       body:JSON.stringify({
         name:currentName,vote:voteType,
         ...(TG_USER?.id?{tg_user_id:TG_USER.id}:{}),
         ...(comment?{comment}:{})
       })
     });
+    clearTimeout(_tid);
     if(!res.ok){
       const d=await res.json().catch(()=>({}));
       const msg=d.detail||"Vote failed";
@@ -168,7 +185,11 @@ async function castVote(voteType){
     if(IS_GROUP&&groupData)groupData.rollcalls[activeTabIdx]=updated;
     if($("comment-input"))$("comment-input").value="";
     detectCurrentVote();renderLists();renderCapBar(updated);
-  }catch(err){toast(err.message||"Could not cast vote — try again.");}
+  }catch(err){
+    clearTimeout(_tid);
+    if(err.name==="AbortError"){toast("Vote timed out — server is busy. Try again.",4000);return;}
+    toast(err.message||"Could not cast vote — try again.");
+  }
   finally{
     voting=false;
     if(_spinBtn)_spinBtn.classList.remove("spinning");

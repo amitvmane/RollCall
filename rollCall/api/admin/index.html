@@ -7,6 +7,14 @@
   <meta name="apple-mobile-web-app-capable" content="yes"/>
   <meta name="theme-color" content="#2563eb"/>
   <title>RollCall Admin</title>
+  <link rel="icon" href="/admin/logo.svg" type="image/svg+xml"/>
+  <script>
+  (function(){
+    var p=localStorage.getItem("rc_dark");
+    var sys=window.matchMedia&&window.matchMedia("(prefers-color-scheme:dark)").matches;
+    if(p==="1"||(p!=="0"&&sys))document.documentElement.classList.add("dark");
+  })();
+  </script>
   <link rel="stylesheet" href="/admin/style.css"/>
 </head>
 <body>
@@ -14,7 +22,7 @@
 <div id="login-screen">
   <div class="login-card">
     <div class="login-brand">
-      <div class="logo-icon">📋</div>
+      <img src="/admin/logo.svg" alt="RollCall" class="logo-icon" width="40" height="40"/>
       <h1>RollCall Admin</h1>
     </div>
     <p class="sub">Manage your groups &amp; rollcalls</p>
@@ -30,10 +38,14 @@
   <div class="topbar">
     <div class="topbar-left">
       <button class="hamburger" id="hbtn" aria-label="Menu">☰</button>
+      <img src="/admin/logo.svg" alt="" class="topbar-logo" width="26" height="26" aria-hidden="true"/>
       <span class="logo">RollCall</span>
       <span class="group-crumb" id="crumb"></span>
     </div>
-    <button class="btn-logout" id="logout-btn">Sign out</button>
+    <div class="topbar-right">
+      <button class="btn-theme" id="theme-btn" title="Toggle dark mode" onclick="toggleTheme()">🌙</button>
+      <button class="btn-logout" id="logout-btn">Sign out</button>
+    </div>
   </div>
   <div class="sb-backdrop" id="sbbdrop"></div>
   <div class="main-layout">

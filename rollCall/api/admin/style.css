@@ -27,8 +27,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .topbar-left{display:flex;align-items:center;gap:10px}
 .topbar .logo{font-weight:700;font-size:1rem;letter-spacing:-.01em}
 .topbar .group-crumb{font-size:.82rem;opacity:.8;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.topbar-logo{border-radius:7px;flex-shrink:0}
+.topbar-right{display:flex;align-items:center;gap:8px}
 .hamburger{display:none;background:none;border:none;color:#fff;font-size:1.4rem;cursor:pointer;padding:4px 6px;line-height:1;border-radius:6px}
 .hamburger:hover{background:rgba(255,255,255,.15)}
+.btn-theme{background:rgba(255,255,255,.15);border:none;color:#fff;font-size:1rem;width:32px;height:32px;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.btn-theme:hover{background:rgba(255,255,255,.28)}
 #app{display:none}
 
 /* ── Layout ── */
@@ -214,6 +218,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 /* ── Active edit panel highlight ── */
 .rc-row--editing{background:#eff6ff;border-left:3px solid var(--accent);padding-left:11px;border-radius:4px}
 
+/* ── Manage: in-progress row state ── */
+.ur-loading{opacity:.45;pointer-events:none;transition:opacity .15s}
+.ur-loading .btn-icon,.ur-loading .move-sel{cursor:not-allowed}
+
 /* ── Misc ── */
 .no-sel{display:flex;flex-direction:column;align-items:center;justify-content:center;height:60vh;color:var(--sub);text-align:center;gap:12px}
 .no-sel .icon{font-size:3rem}
@@ -226,6 +234,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .toast.info{background:#1e293b}
 .toast.ok{background:#15803d}
 .toast.err{background:#b91c1c}
+.toast.warn{background:#b45309}
 hr.sep{border:none;border-top:1px solid var(--border);margin:12px 0}
 
 .scope-warn{background:#fef3c7;border:1px solid #fcd34d;border-radius:var(--radius-sm);padding:10px 14px;font-size:.8rem;color:#92400e;margin-bottom:12px;display:none}
@@ -239,6 +248,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:12px 0}
   .props-grid{grid-template-columns:1fr}
   .vote-grid{grid-template-columns:1fr}
   .group-crumb{display:none}
+  .topbar-logo{display:none}
 }
 @media(max-width:480px){
   .login-card{padding:24px 20px}
@@ -246,52 +256,50 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:12px 0}
   .btn-row{flex-wrap:wrap}
 }
 
-/* ── Dark mode ── */
-@media(prefers-color-scheme:dark){
-  :root{
-    --bg:#0f172a;--card:#1e293b;--border:#334155;
-    --text:#f1f5f9;--sub:#94a3b8;
-    --accent:#3b82f6;--accent-dim:rgba(59,130,246,.15);
-    --danger:#f87171;--danger-dim:rgba(248,113,113,.12);
-    --success:#4ade80;--warn:#fbbf24;
-    --shadow:0 1px 3px rgba(0,0,0,.5),0 1px 2px rgba(0,0,0,.4);
-    --shadow-md:0 4px 16px rgba(0,0,0,.5);
-  }
-  #login-screen{background:linear-gradient(135deg,#0f172a 0%,#1e3a8a 100%)}
-  .login-card input{background:var(--card);color:var(--text)}
-  .topbar{box-shadow:0 2px 12px rgba(0,0,0,.6)}
-  .gi{border-bottom-color:var(--border)}
-  .gi:hover{background:#243148}
-  .gi.active{background:var(--accent-dim)}
-  .sb-head{background:var(--card)}
-  input,select,textarea{background:#243148;color:var(--text);border-color:var(--border)}
-  input:focus,select:focus,textarea:focus{border-color:var(--accent)}
-  input[type="datetime-local"],input[type="date"],input[type="time"]{color-scheme:dark}
-  .scope-warn{background:rgba(251,191,36,.12);border-color:#fbbf24;color:#fbbf24}
-  .rename-row{background:#172033;border-bottom-color:var(--border)}
-  .rc-row--editing{background:#172033;border-left-color:var(--accent)}
-  .confirm-row{background:rgba(248,113,113,.12);border-color:#f87171}
-  .proxy-badge{background:rgba(99,102,241,.25);color:#a5b4fc}
-  .real-badge{background:rgba(74,222,128,.15);color:#4ade80}
-  .tg-warn{background:rgba(251,191,36,.1);border-color:#854d0e;color:#fbbf24}
-  .tmpl-row:hover,.rc-row:hover{background:#243148}
-  .tab-link.active{border-bottom-color:var(--accent);color:var(--accent)}
-  .member-picker{background:#243148;color:var(--text);border-color:var(--border)}
-  .reminder-custom{background:#243148;color:var(--text)}
-  .amf-inp{background:#243148;color:var(--text)}
-  .btn-ghost{border-color:var(--border);color:var(--text)}
-  .btn-ghost:hover{background:var(--border)}
-  .btn-icon{background:var(--card);border-color:var(--border);color:var(--sub)}
-  .btn-icon:hover{background:#334155;color:var(--text)}
-  .move-sel{background:#243148;color:var(--text)}
-  /* Manage section — hardcoded light backgrounds invisible in dark mode */
-  .vs-head{background:#1a2744}
-  .edit-panel{background:#162032}
-  .add-member-form{background:#1a2744}
-  .tg-section{background:rgba(59,130,246,.1);border-color:rgba(59,130,246,.35)}
-  .tg-warn{color:#93c5fd}
-  .amf-field label{color:var(--sub)}
-  .rename-inp{background:#243148;color:var(--text);border-color:var(--border)}
-  .tmpl-edit-panel{border-top-color:var(--border)}
-  .tmpl-ef-divider{border-top-color:var(--border)}
+/* ── Dark mode — applied via html.dark class (JS-driven: manual toggle or system pref) ── */
+html.dark{
+  --bg:#0f172a;--card:#1e293b;--border:#334155;
+  --text:#f1f5f9;--sub:#94a3b8;
+  --accent:#3b82f6;--accent-dim:rgba(59,130,246,.15);
+  --danger:#f87171;--danger-dim:rgba(248,113,113,.12);
+  --success:#4ade80;--warn:#fbbf24;
+  --shadow:0 1px 3px rgba(0,0,0,.5),0 1px 2px rgba(0,0,0,.4);
+  --shadow-md:0 4px 16px rgba(0,0,0,.5);
 }
+html.dark #login-screen{background:linear-gradient(135deg,#0f172a 0%,#1e3a8a 100%)}
+html.dark .login-card input{background:var(--card);color:var(--text)}
+html.dark .topbar{box-shadow:0 2px 12px rgba(0,0,0,.6)}
+html.dark .gi{border-bottom-color:var(--border)}
+html.dark .gi:hover{background:#243148}
+html.dark .gi.active{background:var(--accent-dim)}
+html.dark .sb-head{background:var(--card)}
+html.dark input,html.dark select,html.dark textarea{background:#243148;color:var(--text);border-color:var(--border)}
+html.dark input:focus,html.dark select:focus,html.dark textarea:focus{border-color:var(--accent)}
+html.dark input[type="datetime-local"],html.dark input[type="date"],html.dark input[type="time"]{color-scheme:dark}
+html.dark .scope-warn{background:rgba(251,191,36,.12);border-color:#fbbf24;color:#fbbf24}
+html.dark .rename-row{background:#172033;border-bottom-color:var(--border)}
+html.dark .rc-row--editing{background:#172033;border-left-color:var(--accent)}
+html.dark .confirm-row{background:rgba(248,113,113,.12);border-color:#f87171}
+html.dark .proxy-badge{background:rgba(99,102,241,.25);color:#a5b4fc}
+html.dark .real-badge{background:rgba(74,222,128,.15);color:#4ade80}
+html.dark .tmpl-row:hover,html.dark .rc-row:hover{background:#243148}
+html.dark .member-picker{background:#243148;color:var(--text);border-color:var(--border)}
+html.dark .reminder-custom{background:#243148;color:var(--text)}
+html.dark .amf-inp{background:#243148;color:var(--text)}
+html.dark .btn-ghost{border-color:var(--border);color:var(--text)}
+html.dark .btn-ghost:hover{background:var(--border)}
+html.dark .btn-icon{background:var(--card);border-color:var(--border);color:var(--sub)}
+html.dark .btn-icon:hover{background:#334155;color:var(--text)}
+html.dark .move-sel{background:#243148;color:var(--text)}
+html.dark .vs-head{background:#1a2744}
+html.dark .edit-panel{background:#162032}
+html.dark .add-member-form{background:#1a2744}
+html.dark .tg-section{background:rgba(59,130,246,.1);border-color:rgba(59,130,246,.35)}
+html.dark .tg-warn{color:#93c5fd}
+html.dark .amf-field label{color:var(--sub)}
+html.dark .rename-inp{background:#243148;color:var(--text);border-color:var(--border)}
+html.dark .tmpl-edit-panel{border-top-color:var(--border)}
+html.dark .tmpl-ef-divider{border-top-color:var(--border)}
+html.dark .ur-loading{opacity:.45;pointer-events:none}
+html.dark .start-form{background:#1a2744}
+html.dark .start-form input{background:#243148}

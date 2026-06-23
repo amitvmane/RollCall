@@ -27,6 +27,20 @@ function fromInputDT(s){
   return m?`${m[3]}-${m[2]}-${m[1]} ${m[4]}:${m[5]}`:"cancel";
 }
 
+// ─── Theme toggle ─────────────────────────────────────────────────────────────
+function updateThemeBtn(){
+  const btn=$id("theme-btn");if(!btn)return;
+  btn.textContent=document.documentElement.classList.contains("dark")?"☀":"🌙";
+  btn.title=document.documentElement.classList.contains("dark")?"Switch to light mode":"Switch to dark mode";
+}
+window.toggleTheme=function(){
+  const isDark=document.documentElement.classList.contains("dark");
+  document.documentElement.classList.toggle("dark",!isDark);
+  localStorage.setItem("rc_dark",isDark?"0":"1");
+  updateThemeBtn();
+};
+document.addEventListener("DOMContentLoaded",updateThemeBtn);
+
 // ─── Toast ────────────────────────────────────────────────────────────────────
 function toast(msg,type="info",ms=3000){
   const el=$id("toast");
@@ -421,7 +435,7 @@ function buildRcEditPanel(cid,num,rc,groupName){
         <div class="amf-radios">${voteOpts}</div>
       </div>
       <div class="amf-actions">
-        <button class="btn btn-primary btn-sm" onclick="doAddMember(${cid},${num},'${key}')">Add member</button>
+        <button class="btn btn-primary btn-sm" id="amf-addbtn-${cidK(cid)}-${num}-${key}" onclick="doAddMember(${cid},${num},'${key}')">Add member</button>
         <button class="btn btn-ghost btn-sm" onclick="toggleAddForm(${cid},${num},'${key}')">Cancel</button>
       </div>
     </div>`;
@@ -534,9 +548,19 @@ window.saveAllProps=async function(cid,num){
   if(btn){btn.disabled=false;btn.textContent="Save changes";btn.classList.remove("changed-hint");}
   if(rcGone)return;
   if(errors.length){toast("Some saves failed: "+errors.join("; "),"err",5000);}
-  else{toast("Changes saved!","ok");}
+  else{
+    toast("Changes saved!","ok");
+    // Update data-original on each saved field so markChanged reflects the new baseline.
+    // Don't re-render the whole panel — keep in-progress edits intact.
+    const fieldMap={title:"pe-title",location:"pe-location",fee:"pe-fee",limit:"pe-limit",when:"pe-when"};
+    for(const [prop,pfx] of Object.entries(fieldMap)){
+      if(changed.includes(prop)){
+        const el=$id(`${pfx}-${cidK(cid)}-${num}`);
+        if(el)el.dataset.original=el.value;
+      }
+    }
+  }
   await refreshRcList(cid);
-  await showRcDetails(cid,num);
 };
 
 async function saveProp(cid,num,prop,rawVal){
@@ -676,6 +700,8 @@ window.doAddMember=async function(cid,num,key){
   const voteEl=document.querySelector(`[name="amfv-${cidK(cid)}-${num}-${key}"]:checked`);
   const memberType=typeEl?.value||"proxy";
   const vote=voteEl?.value||key;
+  const addBtn=$id(`amf-addbtn-${cidK(cid)}-${num}-${key}`);
+  if(addBtn){addBtn.disabled=true;addBtn.textContent="Adding…";}
   try{
     if(memberType==="proxy"){
       await api(`/chats/${cid}/rollcalls/${num}/proxy-votes`,{
@@ -686,7 +712,7 @@ window.doAddMember=async function(cid,num,key){
       const uidEl=$id(`amf-uid-${cidK(cid)}-${num}-${key}`);
       const unameEl=$id(`amf-uname-${cidK(cid)}-${num}-${key}`);
       const userId=parseInt(uidEl?.value)||0;
-      if(!userId){toast("Telegram User ID is required","err",3500);uidEl?.focus();return;}
+      if(!userId){toast("Telegram User ID is required","err",3500);uidEl?.focus();if(addBtn){addBtn.disabled=false;addBtn.textContent="Add member";}return;}
       const username=(unameEl?.value||"").trim().replace(/^@/,"");
       await api(`/chats/${cid}/rollcalls/${num}/votes`,{
         method:"POST",
@@ -697,7 +723,10 @@ window.doAddMember=async function(cid,num,key){
     if(nameEl)nameEl.value="";
     $id(`amf-${cidK(cid)}-${num}-${key}`).style.display="none";
     await refreshRcList(cid);await showRcDetails(cid,num);
-  }catch(e){if(!handleRcGone(cid,e))toast("Error: "+e.message,"err",4000);}
+  }catch(e){
+    if(addBtn){addBtn.disabled=false;addBtn.textContent="Add member";}
+    if(!handleRcGone(cid,e))toast("Error: "+e.message,"err",4000);
+  }
 };
 
 async function refreshRcList(cid){
@@ -933,22 +962,34 @@ function updateGroupBadge(cid,count){
 // User names are stored in data-uname attributes (HTML-entity-encoded).
 // The browser decodes them back to plain text on dataset read, so all API
 // calls receive the original unescaped name — safe for encodeURIComponent.
-document.addEventListener('change',e=>{
+
+function _setRowLoading(row,loading){
+  if(!row)return;
+  row.classList.toggle("ur-loading",loading);
+}
+
+document.addEventListener('change',async e=>{
   const sel=e.target.closest('.move-sel');
   if(!sel||!sel.value)return;
   const row=sel.closest('.ur');
   if(!row)return;
   const{cid,num,uname}=row.dataset;
-  doMoveUser(Number(cid),Number(num),uname,sel.value);
+  const newStatus=sel.value;
   sel.value='';
+  _setRowLoading(row,true);
+  await doMoveUser(Number(cid),Number(num),uname,newStatus);
 });
 
-document.addEventListener('click',e=>{
+document.addEventListener('click',async e=>{
   // Remove user
   const del=e.target.closest('.ur-del');
   if(del){
     const row=del.closest('.ur');
-    if(row){const{cid,num,uname}=row.dataset;doRemoveUser(Number(cid),Number(num),uname);}
+    if(row){
+      _setRowLoading(row,true);
+      const{cid,num,uname}=row.dataset;
+      await doRemoveUser(Number(cid),Number(num),uname);
+    }
     return;
   }
   // Rename proxy — show inline rename row
@@ -967,7 +1008,8 @@ document.addEventListener('click',e=>{
       const newName=rr.querySelector('.rename-inp')?.value.trim();
       if(!newName){toast("Name cannot be empty","err");return;}
       if(newName===oldname){rr.remove();return;}
-      doRenameProxy(Number(cid),Number(num),oldname,status,newName);
+      sav.disabled=true;sav.textContent="Saving…";
+      await doRenameProxy(Number(cid),Number(num),oldname,status,newName);
     }
     return;
   }

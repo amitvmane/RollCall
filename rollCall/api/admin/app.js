@@ -65,6 +65,7 @@ sbbdrop.addEventListener("click",closeSB);
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 function signOut(){
   localStorage.removeItem(LS);S.token="";
+  if(S.pollTimer){clearInterval(S.pollTimer);S.pollTimer=null;}
   $id("app").style.display="none";$id("login-screen").style.display="flex";$id("ti").value="";
 }
 $id("logout-btn").addEventListener("click",signOut);
@@ -85,7 +86,13 @@ async function doLogin(){
 }
 $id("login-btn").addEventListener("click",doLogin);
 $id("ti").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin()});
-function boot(){$id("login-screen").style.display="none";$id("app").style.display="block";loadGroups()}
+function boot(){
+  $id("login-screen").style.display="none";$id("app").style.display="block";loadGroups();
+  if(S.pollTimer)clearInterval(S.pollTimer);
+  S.pollTimer=setInterval(()=>{
+    if(S.selCid&&(S.tabState[S.selCid]||0)===0)refreshRcList(S.selCid).catch(()=>{});
+  },30000);
+}
 S.token=localStorage.getItem(LS)||"";
 if(S.token)boot();
 

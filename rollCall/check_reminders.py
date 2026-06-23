@@ -184,10 +184,12 @@ async def check(rollcalls, timezone, chat_id):
                             if rollcall in rollcalls:
                                 rollcalls.remove(rollcall)
 
-                            # Clean up panel state for the closed rollcall
+                            # Remove inline keyboard from the panel message so
+                            # vote buttons disappear immediately in Telegram.
+                            panel_msg_id = None
                             try:
                                 from bot_state import _panel_msg_ids
-                                _panel_msg_ids.pop((chat_id, rc_number), None)
+                                panel_msg_id = _panel_msg_ids.pop((chat_id, rc_number), None)
                                 for num in sorted(n for (c, n) in list(_panel_msg_ids) if c == chat_id and n > rc_number):
                                     _panel_msg_ids[(chat_id, num - 1)] = _panel_msg_ids.pop((chat_id, num))
                             except Exception:
@@ -227,6 +229,13 @@ async def check(rollcalls, timezone, chat_id):
                                     logging.exception(f"Failed to reset proxy streak for {name} in chat {chat_id}")
 
                             # ── Telegram messages are best-effort after DB is committed ───
+                            # Remove vote buttons from the existing panel message.
+                            if panel_msg_id:
+                                try:
+                                    await bot.edit_message_reply_markup(chat_id, panel_msg_id, reply_markup=None)
+                                except Exception:
+                                    pass  # Message may have been deleted; non-fatal
+
                             if finish_text:
                                 try:
                                     await bot.send_message(chat_id, finish_text)

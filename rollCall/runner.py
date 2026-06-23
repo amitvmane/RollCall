@@ -542,6 +542,15 @@ async def main():
             # Keep alive — aiohttp serves the webhook endpoint
             await asyncio.Event().wait()
         else:
+            # Always clear any stale webhook before starting long-poll.
+            # If WEBHOOK_URL was previously set and then removed from .env,
+            # Telegram keeps routing updates to the old (now dead) URL and
+            # infinity_polling never receives anything — and logs nothing.
+            try:
+                await bot.remove_webhook()
+                logger.info("✅ Webhook cleared — long-poll mode active")
+            except Exception as _wh_err:
+                logger.warning(f"⚠️  Could not clear webhook (continuing): {_wh_err}")
             logger.info("🚀 Bot is now running via long-polling...")
             logger.info("Press Ctrl+C to stop")
             logger.info("=" * 60)

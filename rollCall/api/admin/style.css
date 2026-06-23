@@ -303,3 +303,41 @@ html.dark .tmpl-ef-divider{border-top-color:var(--border)}
 html.dark .ur-loading{opacity:.45;pointer-events:none}
 html.dark .start-form{background:#1a2744}
 html.dark .start-form input{background:#243148}
+
+/* ── Stats tab ── */
+.stats-panel{display:flex;flex-direction:column;gap:16px;padding:12px 0}
+.stats-placeholder,.stats-loading,.stats-err{padding:32px;text-align:center;color:var(--sub);font-size:.9rem}
+.stats-loading{display:flex;align-items:center;justify-content:center;gap:8px}
+.stat-boxes{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+@media(max-width:600px){.stat-boxes{grid-template-columns:repeat(2,1fr)}}
+.stat-box{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px 12px;text-align:center}
+.stat-box-val{font-size:1.6rem;font-weight:700;color:var(--accent);line-height:1}
+.stat-box-lbl{font-size:.75rem;color:var(--sub);margin-top:4px}
+.stats-card{margin:0}
+.stats-table{width:100%;border-collapse:collapse;font-size:.85rem}
+.stats-table th{text-align:left;padding:8px 10px;border-bottom:2px solid var(--border);color:var(--sub);font-weight:600;white-space:nowrap}
+.stats-table td{padding:8px 10px;border-bottom:1px solid var(--border)}
+.slb-row:hover,.shist-row:hover{background:var(--accent-dim)}
+.slb-proxy .slb-name::after{content:" proxy";font-size:.7rem;color:var(--sub)}
+.slb-rank{font-weight:700;color:var(--sub);width:30px}
+.slb-name{font-weight:500;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.shist-title{max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+.shist-date{color:var(--sub);font-size:.8rem;white-space:nowrap}
+.lb-bar{display:inline-block;width:60px;height:6px;background:var(--border);border-radius:3px;vertical-align:middle;margin-right:4px}
+.lb-fill{height:100%;background:var(--accent);border-radius:3px}
+.ghost-stat-list{padding:8px 16px 12px}
+.ghost-stat-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)}
+.ghost-stat-row:last-child{border-bottom:none}
+.ghost-stat-name{font-weight:500}
+.ghost-stat-ct{font-size:.82rem;color:var(--danger)}
+html.dark .stat-box{background:var(--card);border-color:var(--border)}
+html.dark .stats-table tr:hover td{background:#243148}
+html.dark .slb-row:hover,.dark .shist-row:hover{background:#243148}
+html.dark .lb-bar{background:var(--border)}
+
+/* ── Telegram status banner ── */
+.tg-status-bar{position:fixed;top:0;left:0;right:0;z-index:9999;padding:10px 16px;font-size:.85rem;display:flex;align-items:center;gap:8px}
+.tg-status-down{background:#7f1d1d;color:#fca5a5}
+.tg-status-close{background:none;border:none;cursor:pointer;color:inherit;opacity:.7;font-size:1rem;margin-left:auto;line-height:1}
+.tg-status-close:hover{opacity:1}
+body:has(.tg-status-bar) .topbar{top:40px}

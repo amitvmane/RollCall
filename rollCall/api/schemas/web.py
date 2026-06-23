@@ -1,5 +1,5 @@
 """Schemas for magic-link web voting endpoints."""
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
@@ -49,3 +49,62 @@ class WebVoteRequest(BaseModel):
     vote: Literal["in", "out", "maybe"]
     tg_user_id: Optional[int] = Field(None, description="Telegram user_id when voting from inside Telegram WebApp")
     comment: Optional[str] = Field(None, max_length=100, description="Optional note to attach to the vote")
+
+
+# ── Public stats schemas (no auth required, served via group token) ───────────
+
+class WebStatsPersonal(BaseModel):
+    """Personal stats for the currently identified user."""
+    rank: Optional[int] = None
+    total_participants: int = 0
+    sessions_attended: int = 0
+    total_rollcalls_in_chat: int = 0
+    attendance_rate: Optional[float] = None
+    voting_rate: Optional[float] = None
+    best_streak: int = 0
+    current_streak: int = 0
+    ghost_count: int = 0
+    total_in_votes: int = 0
+    total_out_votes: int = 0
+    total_maybe_votes: int = 0
+    total_waiting_to_in: int = 0
+
+
+class WebStatsLeaderEntry(BaseModel):
+    rank: int
+    display_name: Optional[str] = None
+    user_id: Optional[int] = None
+    kind: str = "real"
+    sessions_attended: int = 0
+    total_sessions_voted: int = 0
+    attendance_rate: Optional[float] = None
+    voting_rate: Optional[float] = None
+
+
+class WebStatsHistoryEntry(BaseModel):
+    id: Optional[int] = None
+    title: Optional[str] = None
+    ended_at: Optional[str] = None
+    in_count: int = 0
+    out_count: int = 0
+    maybe_count: int = 0
+
+
+class WebStatsGhostEntry(BaseModel):
+    name: Optional[str] = None
+    ghost_count: int = 0
+
+
+class WebGroupStatsResponse(BaseModel):
+    total_rollcalls: int = 0
+    avg_attendance: float = 0.0
+    total_participants: int = 0
+    real_participants: int = 0
+    proxy_participants: int = 0
+    real_attendance_slots: int = 0
+    proxy_attendance_slots: int = 0
+    waitlist_promotions: int = 0
+    leaderboard: List[WebStatsLeaderEntry] = Field(default_factory=list)
+    ghost_leaderboard: List[WebStatsGhostEntry] = Field(default_factory=list)
+    recent_history: List[WebStatsHistoryEntry] = Field(default_factory=list)
+    personal: Optional[WebStatsPersonal] = None

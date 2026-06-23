@@ -217,6 +217,10 @@ async def safe_edit_markup(cid: int, msg_id: int, reply_markup=None) -> bool:
 # Last unhandled-error signal for /health diagnostics
 _last_error_state = {'at': None, 'msg': None}
 
+# Telegram connectivity status — set in runner.py after startup get_me() check.
+# ok=None means the check has not run yet (REST API started before bot init).
+_telegram_status: dict = {"ok": None, "checked_at": None, "bot_username": None}
+
 
 def _record_error(exc: BaseException) -> None:
     """Record the last unhandled error so /health can surface it."""

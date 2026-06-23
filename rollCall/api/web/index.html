@@ -16,6 +16,10 @@
   <link rel="stylesheet" href="/web/style.css"/>
 </head>
 <body>
+<div id="tg-offline-bar" class="tg-offline-bar hidden" role="alert">
+  ⚠️ <strong>Bot is offline</strong> — web voting still works, but Telegram notifications may be delayed.
+  <button class="tg-offline-close" onclick="this.parentElement.classList.add('hidden')">✕</button>
+</div>
 <div id="app">
   <!-- Brand bar — hidden in TG Mini App mode (body.tg-mode) -->
   <div class="brand-bar" id="brand-bar">
@@ -108,6 +112,9 @@
       <div class="refresh-bar"><div id="refresh-fill" class="refresh-fill"></div></div>
       <span id="refresh-label" class="refresh-label"></span>
     </div>
+
+    <!-- Stats card — group mode only, lazy-loaded after identity is known -->
+    <div id="stats-card" class="card hidden"></div>
   </div>
 </div>
 <div class="toast-local" id="toast-local" role="alert" aria-live="assertive" aria-atomic="true"></div>

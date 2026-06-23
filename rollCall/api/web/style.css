@@ -185,3 +185,53 @@ html.dark .copy-btn:hover{border-color:var(--accent);color:var(--accent)}
 html.dark .no-rc{color:var(--sub)}
 html.dark .brand-bar{background:#1e3a8a}
 html.dark input[type="text"],html.dark input[type="number"]{background:var(--card);color:var(--text);border-color:var(--border)}
+
+/* ── Telegram offline banner ── */
+.tg-offline-bar{background:#7f1d1d;color:#fca5a5;padding:10px 14px;font-size:.82rem;display:flex;align-items:center;gap:8px;margin-bottom:8px;border-radius:8px}
+.tg-offline-close{background:none;border:none;cursor:pointer;color:inherit;opacity:.7;font-size:1rem;margin-left:auto;line-height:1}
+.tg-offline-close:hover{opacity:1}
+
+/* ── Stats card ── */
+.stats-section-hdr{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--sub);padding:0 0 10px}
+.sp-group-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}
+.sp-g{text-align:center;padding:10px 6px;background:var(--bg);border-radius:8px}
+.sp-g-val{font-size:1.4rem;font-weight:700;color:var(--accent)}
+.sp-g-lbl{font-size:.72rem;color:var(--sub);margin-top:2px}
+.sp-personal{background:var(--bg);border-radius:10px;padding:14px;margin-bottom:14px}
+.sp-you-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.sp-you-label{font-weight:700;font-size:.9rem}
+.sp-rank{font-size:.8rem;color:var(--accent);font-weight:600;background:rgba(59,130,246,.12);padding:2px 8px;border-radius:10px}
+.sp-mini-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
+.sp-mini{text-align:center}
+.sp-mini-val{font-size:1.1rem;font-weight:700;color:var(--text)}
+.sp-mini-lbl{font-size:.68rem;color:var(--sub);margin-top:1px}
+.sp-bar-row{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.sp-bar{flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden}
+.sp-bar-fill{height:100%;background:var(--accent);border-radius:3px;transition:width .4s}
+.sp-bar-lbl{font-size:.78rem;color:var(--sub);white-space:nowrap}
+.sp-vote-row{display:flex;flex-wrap:wrap;gap:6px}
+.sp-pill{font-size:.75rem;padding:2px 8px;border-radius:10px;font-weight:500}
+.sp-in{background:rgba(74,222,128,.15);color:#16a34a}
+.sp-out{background:rgba(248,113,113,.15);color:#dc2626}
+.sp-maybe{background:rgba(251,191,36,.15);color:#d97706}
+.sp-ghost{background:rgba(100,116,139,.15);color:#64748b}
+.slb-list{display:flex;flex-direction:column;gap:0}
+.slb-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);font-size:.85rem}
+.slb-row:last-child{border-bottom:none}
+.slb-you{background:rgba(59,130,246,.07);border-radius:6px;padding:8px 6px;margin:2px 0}
+.slb-you .slb-name{color:var(--accent);font-weight:700}
+.slb-proxy .slb-name{color:var(--sub)}
+.slb-rank{width:28px;font-weight:700;color:var(--sub);flex-shrink:0;font-size:.8rem}
+.slb-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+.slb-bar-wrap{width:60px;flex-shrink:0}
+.slb-bar{height:5px;background:var(--border);border-radius:3px;overflow:hidden}
+.slb-fill{height:100%;background:var(--accent);border-radius:3px}
+.slb-pct{width:38px;text-align:right;color:var(--sub);flex-shrink:0;font-size:.78rem}
+html.dark .sp-g{background:#0f172a}
+html.dark .sp-personal{background:#0f172a}
+html.dark .sp-in{background:rgba(74,222,128,.12);color:#4ade80}
+html.dark .sp-out{background:rgba(248,113,113,.12);color:#f87171}
+html.dark .sp-maybe{background:rgba(251,191,36,.12);color:#fbbf24}
+html.dark .sp-ghost{background:rgba(148,163,184,.12);color:#94a3b8}
+html.dark .slb-you{background:rgba(59,130,246,.12)}
+html.dark .slb-bar{background:var(--border)}

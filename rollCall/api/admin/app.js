@@ -2,7 +2,7 @@
 "use strict";
 
 const API="/api/v1", LS="rc_admin_token";
-const S={token:"",groups:[],selCid:null,tabState:{},memberCache:{},groupNames:{}};
+const S={token:"",groups:[],selCid:null,tabState:{},memberCache:{},groupNames:{},statsLoaded:{}};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function $id(x){return document.getElementById(x)}
@@ -201,7 +201,7 @@ function renderGDetail(settings,rcs,tmpls){
       </div>
     </div>`;
 
-  const tabs=["Rollcalls","Templates","Settings"];
+  const tabs=["Rollcalls","Templates","Settings","Stats"];
   el.innerHTML+=`<div class="tab-wrap">
     <div class="tab-bar" id="tabs-${cidK(cid)}">
       ${tabs.map((t,i)=>`<button class="tab${(S.tabState[cid]||0)===i?" active":""}" onclick="switchTab(${cid},${i})">${t}</button>`).join("")}
@@ -211,17 +211,19 @@ function renderGDetail(settings,rcs,tmpls){
   el.innerHTML+=`
     <div id="panel-${cidK(cid)}-0">${buildRcPanel(cid,rcs,name)}</div>
     <div id="panel-${cidK(cid)}-1">${buildTmplPanel(cid,tmpls)}</div>
-    <div id="panel-${cidK(cid)}-2">${buildSettingsPanel(cid,settings)}</div>`;
+    <div id="panel-${cidK(cid)}-2">${buildSettingsPanel(cid,settings)}</div>
+    <div id="panel-${cidK(cid)}-3"><div class="stats-placeholder">Click Stats to load</div></div>`;
 
   switchTab(cid,S.tabState[cid]||0);
 }
 
 window.switchTab=function(cid,idx){
   S.tabState[cid]=idx;
-  [0,1,2].forEach(i=>{
+  [0,1,2,3].forEach(i=>{
     const p=$id(`panel-${cidK(cid)}-${i}`);if(p)p.style.display=i===idx?"block":"none";
   });
   document.querySelectorAll(`#tabs-${cidK(cid)} .tab`).forEach((t,i)=>t.classList.toggle("active",i===idx));
+  if(idx===3&&!S.statsLoaded[cid])loadStatsTab(cid);
 };
 
 // ─── Rollcalls panel ──────────────────────────────────────────────────────────
@@ -1017,5 +1019,108 @@ document.addEventListener('click',async e=>{
   const can=e.target.closest('.do-rename-cancel');
   if(can){can.closest('.rename-row')?.remove();return;}
 });
+
+// ─── Admin stats tab ──────────────────────────────────────────────────────────
+async function loadStatsTab(cid){
+  const panel=$id(`panel-${cidK(cid)}-3`);
+  if(!panel)return;
+  panel.innerHTML=`<div class="stats-loading"><div class="spinner"></div> Loading stats…</div>`;
+  try{
+    const [gs,lb,hist]=await Promise.all([
+      apiGet(`/api/v1/chats/${cid}/stats/group`),
+      apiGet(`/api/v1/chats/${cid}/stats/leaderboard?limit=10`),
+      apiGet(`/api/v1/chats/${cid}/history?limit=8`),
+    ]);
+    S.statsLoaded[cid]=true;
+    panel.innerHTML=buildStatsPanel(cid,gs,lb,hist);
+  }catch(e){
+    panel.innerHTML=`<div class="stats-err">Failed to load stats — ${escH(e.message)}</div>`;
+  }
+}
+
+function buildStatsPanel(cid,gs,lb,hist){
+  const pct=v=>v==null?"—":`${v}%`;
+  const fmt=v=>v??0;
+
+  const boxes=[
+    {label:"Sessions",val:fmt(gs.total_rollcalls)},
+    {label:"Avg Attendance",val:fmt(gs.avg_attendance)},
+    {label:"Real Members",val:fmt(gs.real_participants)},
+    {label:"Proxy Members",val:fmt(gs.proxy_participants)},
+  ];
+
+  const lbRows=(lb||[]).map((e,i)=>`
+    <tr class="slb-row${e.kind==='proxy'?' slb-proxy':''}">
+      <td class="slb-rank">${e.rank??i+1}</td>
+      <td class="slb-name">${escH(e.display_name||'—')}</td>
+      <td>${fmt(e.sessions_attended)}</td>
+      <td>
+        <div class="lb-bar"><div class="lb-fill" style="width:${Math.min(100,e.attendance_rate||0)}%"></div></div>
+        ${pct(e.attendance_rate)}
+      </td>
+      <td>${pct(e.voting_rate)}</td>
+    </tr>`).join("");
+
+  const histRows=(hist||[]).map(h=>`
+    <tr class="shist-row">
+      <td class="shist-title">${escH(h.title||'Untitled')}</td>
+      <td class="shist-date">${escH((h.ended_at||'').slice(0,10))}</td>
+      <td><span class="pill pill-in">${fmt(h.in_count)} IN</span></td>
+      <td><span class="pill pill-out">${fmt(h.out_count)} OUT</span></td>
+      ${h.maybe_count?`<td><span class="pill pill-maybe">${fmt(h.maybe_count)} MAY</span></td>`:'<td></td>'}
+    </tr>`).join("");
+
+  const ghostRows=(gs.ghost_leaderboard||[]).slice(0,5).map(g=>`
+    <div class="ghost-stat-row">
+      <span class="ghost-stat-name">${escH(g.name||'?')}</span>
+      <span class="ghost-stat-ct">${fmt(g.ghost_count)} no-shows</span>
+    </div>`).join("");
+
+  return `
+  <div class="stats-panel">
+    <div class="stat-boxes">
+      ${boxes.map(b=>`<div class="stat-box"><div class="stat-box-val">${b.val}</div><div class="stat-box-lbl">${b.label}</div></div>`).join("")}
+    </div>
+
+    ${lbRows?`
+    <div class="card stats-card">
+      <div class="card-header"><h3>Attendance Leaderboard</h3></div>
+      <table class="stats-table">
+        <thead><tr><th>#</th><th>Name</th><th>Sessions</th><th>Attendance</th><th>Voted</th></tr></thead>
+        <tbody>${lbRows}</tbody>
+      </table>
+    </div>`:''}
+
+    ${histRows?`
+    <div class="card stats-card">
+      <div class="card-header"><h3>Recent Sessions</h3></div>
+      <table class="stats-table">
+        <thead><tr><th>Title</th><th>Date</th><th>IN</th><th>OUT</th><th>MAYBE</th></tr></thead>
+        <tbody>${histRows}</tbody>
+      </table>
+    </div>`:''}
+
+    ${ghostRows?`
+    <div class="card stats-card">
+      <div class="card-header"><h3>Ghost Board <span class="sub">(most no-shows)</span></h3></div>
+      <div class="ghost-stat-list">${ghostRows}</div>
+    </div>`:''}
+  </div>`;
+}
+
+// ─── Telegram status banner ───────────────────────────────────────────────────
+(async function checkTgStatus(){
+  try{
+    const h=await fetch("/api/v1/health",{signal:AbortSignal.timeout(4000)});
+    if(!h.ok)return;
+    const d=await h.json();
+    if(d.telegram_ok===false){
+      const bar=document.createElement("div");
+      bar.className="tg-status-bar tg-status-down";
+      bar.innerHTML=`⚠️ <strong>Telegram is offline</strong> — bot cannot relay messages. Web admin and voting still work. <button class="tg-status-close" onclick="this.parentElement.remove()">✕</button>`;
+      document.body.prepend(bar);
+    }
+  }catch(_){}
+})();
 
 })();

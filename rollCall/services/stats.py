@@ -262,6 +262,93 @@ def history(chat_id: int, limit: int = 10, offset: int = 0) -> list:
     ]
 
 
+def web_group_stats(
+    group_token: str,
+    *,
+    lookup_name: Optional[str] = None,
+    lookup_user_id: Optional[int] = None,
+) -> dict:
+    """
+    Aggregate stats for the public web stats endpoint.
+
+    Calls the same service functions used by the Telegram /stats handler so
+    numbers are always consistent across all platforms.
+
+    personal is populated only when lookup_name or lookup_user_id is given
+    and a match is found in ended rollcalls.
+    """
+    import db as _db
+    from exceptions import incorrectParameter as _ie
+
+    chat = _db.get_chat_by_group_web_token(group_token)
+    if not chat:
+        raise _ie("This group link is invalid.")
+    chat_id = chat["chat_id"]
+
+    gs = group_stats(chat_id)               # same data as /stats group in Telegram
+    lb_data = leaderboard(chat_id, limit=10)  # same as /stats top (top 10)
+    hist = history(chat_id, limit=5)
+
+    total_pax = gs["real_participants"] + gs["proxy_participants"]
+
+    personal: dict | None = None
+    if lookup_user_id or lookup_name:
+        uid: int | None = None
+        pname: str | None = None
+        kind: str | None = None
+
+        if lookup_user_id:
+            uid = lookup_user_id
+            kind = "real"
+        elif lookup_name:
+            resolved = resolve_user(chat_id, lookup_name.strip())
+            if resolved and resolved[0] not in ("ambiguous",):
+                kind = resolved[0]
+                if kind == "proxy":
+                    pname = resolved[1]
+                else:
+                    uid = resolved[1]
+
+        p: dict | None = None
+        try:
+            if kind == "real" and uid:
+                p = personal_stats(chat_id, uid)
+            elif kind == "proxy" and pname:
+                p = proxy_stats(chat_id, pname)
+        except Exception:
+            pass
+
+        if p:
+            # Find rank by scanning the full leaderboard (up to 100 entries)
+            full_lb = leaderboard(chat_id, limit=100)
+            rank: int | None = None
+            for entry in full_lb["entries"]:
+                if uid and entry.get("user_id") == uid:
+                    rank = entry["rank"]
+                    break
+                elif pname and entry.get("kind") == "proxy" and entry.get("display_name") == pname:
+                    rank = entry["rank"]
+                    break
+            p["rank"] = rank
+            p["total_participants"] = total_pax
+            personal = p
+
+    return {
+        "total_rollcalls": gs["total_rollcalls"],
+        "avg_attendance": gs["avg_attendance"],
+        "total_participants": total_pax,
+        "real_participants": gs["real_participants"],
+        "proxy_participants": gs["proxy_participants"],
+        "real_attendance_slots": gs["real_attendance_slots"],
+        "proxy_attendance_slots": gs["proxy_attendance_slots"],
+        "waitlist_promotions": gs["waitlist_promotions"],
+        "leaderboard": lb_data["entries"],
+        "ghost_leaderboard": gs["ghost_leaderboard"],
+        "recent_history": hist,
+        "personal": personal,
+    }
+
+
 def bot_stats() -> dict:
     """
     Bot-wide aggregate statistics (admin-only view).

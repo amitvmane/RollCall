@@ -496,6 +496,14 @@ async def main():
         logger.warning(f"⚠️  Telegram unreachable at startup: {e}")
         logger.warning("Running in degraded mode — web/REST API available, bot polling will retry when Telegram is reachable")
 
+    # Publish status so REST /health and web UI can surface it.
+    from bot_state import _telegram_status
+    from datetime import timezone
+    _telegram_status["ok"] = telegram_available
+    _telegram_status["checked_at"] = datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
+    if telegram_available:
+        _telegram_status["bot_username"] = f"@{me.username}"
+
     if telegram_available:
         # Register bot command menu
         try:

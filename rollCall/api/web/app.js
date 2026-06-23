@@ -105,6 +105,7 @@ function saveName(){
   if(TG_NAME)localStorage.setItem(LS_NAME_OVERRIDE,currentName);
   else localStorage.setItem(LS_NAME,currentName);
   renderIdentity();detectCurrentVote();
+  if(IS_GROUP)loadWebStats();
 }
 
 // ── Vote detection ─────────────────────────────────────────────────────────
@@ -367,6 +368,7 @@ async function loadGroup(){
     ["identity-card","vote-card","lists-card"].forEach(id=>$(id)?.classList.add("hidden"));
   }else if(rcs.length===1){$("tab-card").classList.add("hidden");renderRollcall(rcs[0]);}
   else{$("tab-card").classList.remove("hidden");if(activeTabIdx>=rcs.length)activeTabIdx=0;renderTabs(rcs);renderRollcall(rcs[activeTabIdx]);}
+  loadWebStats();
 }
 
 // ── Auto-refresh ───────────────────────────────────────────────────────────
@@ -427,6 +429,99 @@ async function silentRefresh(){
 
 function showError(msg){$("loading").classList.add("hidden");$("main").classList.add("hidden");$("error-msg").textContent=msg;$("error-screen").classList.remove("hidden");}
 $("retry-btn").addEventListener("click",()=>{$("error-screen").classList.add("hidden");$("loading").classList.remove("hidden");activeTabIdx=0;load();});
+
+// ── Stats ──────────────────────────────────────────────────────────────────
+const TG_USER_ID=TG_USER?.id||null;
+
+async function loadWebStats(){
+  const sc=$("stats-card");if(!sc)return;
+  const params=new URLSearchParams();
+  if(TG_USER_ID)params.set("user_id",TG_USER_ID);
+  else if(currentName)params.set("name",currentName);
+  const url=`/api/v1/web/group/${URL_TOKEN}/stats${params.size?"?"+params:""}`;
+  try{
+    const res=await fetch(url,{signal:AbortSignal.timeout(8000)});
+    if(!res.ok)return;
+    const data=await res.json();
+    renderStats(data);
+    sc.classList.remove("hidden");
+  }catch(_){}
+}
+
+function renderStats(d){
+  const sc=$("stats-card");if(!sc)return;
+  const pct=v=>v==null?"—":`${v}%`;
+  const n=v=>v??0;
+  const me=d.personal;
+
+  let personalHtml="";
+  if(me){
+    const rankStr=me.rank&&d.total_participants?`#${me.rank} of ${d.total_participants}`:"";
+    const attRate=pct(me.attendance_rate);
+    const attW=Math.min(100,me.attendance_rate||0);
+    personalHtml=`
+    <div class="sp-personal">
+      <div class="sp-you-header">
+        <span class="sp-you-label">👤 You</span>
+        ${rankStr?`<span class="sp-rank">${rankStr}</span>`:""}
+      </div>
+      <div class="sp-mini-stats">
+        <div class="sp-mini"><div class="sp-mini-val">${n(me.sessions_attended)}</div><div class="sp-mini-lbl">Sessions</div></div>
+        <div class="sp-mini"><div class="sp-mini-val">${attRate}</div><div class="sp-mini-lbl">Attended</div></div>
+        <div class="sp-mini"><div class="sp-mini-val">${n(me.current_streak)}</div><div class="sp-mini-lbl">Streak</div></div>
+        <div class="sp-mini"><div class="sp-mini-val">${n(me.best_streak)}</div><div class="sp-mini-lbl">Best</div></div>
+      </div>
+      <div class="sp-bar-row">
+        <div class="sp-bar"><div class="sp-bar-fill" style="width:${attW}%"></div></div>
+        <span class="sp-bar-lbl">${attRate} attendance</span>
+      </div>
+      <div class="sp-vote-row">
+        <span class="sp-pill sp-in">✅ ${n(me.total_in_votes)} IN</span>
+        <span class="sp-pill sp-out">❌ ${n(me.total_out_votes)} OUT</span>
+        <span class="sp-pill sp-maybe">🤔 ${n(me.total_maybe_votes)} MAYBE</span>
+        ${me.ghost_count?`<span class="sp-pill sp-ghost">👻 ${me.ghost_count} ghost</span>`:""}
+      </div>
+    </div>`;
+  }
+
+  const lbRows=(d.leaderboard||[]).map((e,i)=>{
+    const isMe=me&&(
+      (TG_USER_ID&&e.user_id===TG_USER_ID)||
+      (currentName&&e.display_name&&e.display_name.toLowerCase()===currentName.toLowerCase())
+    );
+    const w=Math.min(100,e.attendance_rate||0);
+    return `<div class="slb-row${isMe?" slb-you":""}${e.kind==="proxy"?" slb-proxy":""}">
+      <span class="slb-rank">#${e.rank??i+1}</span>
+      <span class="slb-name">${esc(e.display_name||"—")}${isMe?" ← you":""}</span>
+      <div class="slb-bar-wrap"><div class="slb-bar"><div class="slb-fill" style="width:${w}%"></div></div></div>
+      <span class="slb-pct">${pct(e.attendance_rate)}</span>
+    </div>`;
+  }).join("");
+
+  sc.innerHTML=`
+  <div class="stats-section-hdr">📊 Group Stats</div>
+  <div class="sp-group-row">
+    <div class="sp-g"><div class="sp-g-val">${n(d.total_rollcalls)}</div><div class="sp-g-lbl">Sessions</div></div>
+    <div class="sp-g"><div class="sp-g-val">${n(d.avg_attendance)}</div><div class="sp-g-lbl">Avg Attendance</div></div>
+    <div class="sp-g"><div class="sp-g-val">${n(d.total_participants)}</div><div class="sp-g-lbl">Members</div></div>
+  </div>
+  ${personalHtml}
+  ${lbRows?`<div class="stats-section-hdr">🏆 Leaderboard</div><div class="slb-list">${lbRows}</div>`:""}`;
+}
+
+// ── Telegram connectivity banner ───────────────────────────────────────────
+(async function checkTgStatus(){
+  if(!IS_GROUP)return;
+  try{
+    const r=await fetch("/api/v1/health",{signal:AbortSignal.timeout(4000)});
+    if(!r.ok)return;
+    const d=await r.json();
+    if(d.telegram_ok===false){
+      const bar=$("tg-offline-bar");
+      if(bar)bar.classList.remove("hidden");
+    }
+  }catch(_){}
+})();
 
 if(URL_TOKEN&&(URL_MODE==="join"||URL_MODE==="group"))load();
 })();

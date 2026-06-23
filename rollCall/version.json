@@ -248,7 +248,7 @@
     {
         "Version": 8.4,
         "Description": "QR code + Response-time leaderboard. Admin panel: 'QR' button generates a scannable SVG QR code for the group web link — modal with download, zero friction member onboarding. Response-time leaderboard in admin Stats tab: avg and best time from rollcall open to first vote, ordered fastest-first. Data sourced from users.created_at vs rollcalls.created_at (no schema change). New endpoints: GET /api/v1/chats/{id}/qrcode (SVG), GET /api/v1/chats/{id}/stats/response-times. Adds qrcode 8.2 (SVG, no PIL) to deps.",
-        "DeployedOnProd": "N",
-        "DeployedDatetime": "23-06-2026 14:00 UTC"
+        "DeployedOnProd": "Y",
+        "DeployedDatetime": "23-06-2026 15:00 UTC"
     }
 ]

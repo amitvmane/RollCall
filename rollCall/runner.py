@@ -436,6 +436,124 @@ async def memory_prune_loop(interval_seconds: int = 600):
         await asyncio.sleep(interval_seconds)
 
 
+async def _post_connect_setup(me) -> None:
+    """Register commands and wire Mini App button after a successful Telegram connection."""
+    try:
+        await register_commands()
+    except Exception as e:
+        logger.warning(f"⚠️  Failed to register bot commands: {e}")
+
+    if _rest_api_enabled():
+        _miniapp_url = os.environ.get("MINIAPP_URL", "").strip()
+        if _miniapp_url:
+            try:
+                from telebot.types import MenuButtonWebApp, WebAppInfo
+                await bot.set_chat_menu_button(
+                    menu_button=MenuButtonWebApp(
+                        text="Open RollCall",
+                        web_app=WebAppInfo(url=_miniapp_url),
+                    )
+                )
+                logger.info(f"✅ Mini App menu button set → {_miniapp_url}")
+            except Exception as _e:
+                logger.warning(f"⚠️  Could not set Mini App menu button: {_e}")
+
+
+async def _telegram_retry_loop():
+    """Retry get_me() every 60 s until Telegram is reachable. Returns the Me object.
+
+    Called when Telegram is unreachable at startup.  The bot stays in degraded
+    mode (REST API + web voting active) while this loop runs; once it succeeds
+    the caller proceeds to register commands and start polling/webhook normally.
+    """
+    from bot_state import _telegram_status
+    RETRY_INTERVAL = 60
+    attempt = 0
+    while True:
+        attempt += 1
+        await asyncio.sleep(RETRY_INTERVAL)
+        logger.info(f"⏳ Telegram retry #{attempt} …")
+        try:
+            me = await asyncio.wait_for(bot.get_me(), timeout=15)
+            logger.info("=" * 60)
+            logger.info(f"✅ Telegram reachable again (attempt #{attempt})")
+            logger.info(f"   Bot: {me.first_name}  @{me.username}")
+            logger.info("=" * 60)
+            _telegram_status["ok"] = True
+            _telegram_status["bot_username"] = f"@{me.username}"
+            _telegram_status["checked_at"] = datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
+            return me
+        except Exception as e:
+            logger.info(
+                f"⏳ Still unreachable ({type(e).__name__}) — next retry in {RETRY_INTERVAL}s"
+            )
+            _telegram_status["checked_at"] = datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
+
+
+async def _recover_telegram_panels() -> None:
+    """Send Telegram rollcall panels for rollcalls started via web admin while offline.
+
+    When Telegram was down, admins could start rollcalls through the web UI.
+    Those rollcalls exist in the DB but were never announced in the group chat.
+    This fires once after the bot reconnects and posts a panel for each.
+    """
+    from bot_state import _panel_msg_ids
+    from handlers.lifecycle import show_panel_for_rollcall
+
+    pending = []
+    for cid, chat in list(manager._cache.items()):
+        rcs = chat.get("rollCalls", [])
+        for i, rc in enumerate(rcs):
+            if (
+                getattr(rc, "panel_msg_id", None) is None
+                and (cid, i + 1) not in _panel_msg_ids
+            ):
+                pending.append((cid, i + 1, getattr(rc, "title", "Untitled")))
+
+    if not pending:
+        logger.info("📋 No offline-started rollcalls to announce")
+        return
+
+    logger.info(f"📋 Announcing {len(pending)} rollcall(s) started while Telegram was offline")
+    for cid, rc_num, title in pending:
+        try:
+            await show_panel_for_rollcall(cid, rc_num, force_new=True)
+            logger.info(f"  ✅ Announced: chat {cid} rollcall #{rc_num} '{title}'")
+        except Exception as e:
+            logger.warning(f"  ⚠️  Could not announce rollcall {cid}#{rc_num}: {e}")
+
+
+async def _run_polling_or_webhook() -> None:
+    """Start the Telegram listener (webhook or long-poll) and block until shutdown."""
+    if WEBHOOK_URL:
+        logger.info(f"🔗 Webhook mode enabled → {WEBHOOK_URL}")
+        logger.info("🚀 Bot is now running via webhook...")
+        logger.info("=" * 60)
+        await bot.remove_webhook()
+        await bot.set_webhook(url=WEBHOOK_URL)
+        logger.info("✅ Webhook registered with Telegram")
+        await asyncio.Event().wait()
+    else:
+        # Always clear any stale webhook before starting long-poll.
+        # If WEBHOOK_URL was previously set and then removed from .env,
+        # Telegram keeps routing updates to the old (now dead) URL and
+        # infinity_polling never receives anything — and logs nothing.
+        try:
+            await bot.remove_webhook()
+            logger.info("✅ Webhook cleared — long-poll mode active")
+        except Exception as _wh_err:
+            logger.warning(f"⚠️  Could not clear webhook (continuing): {_wh_err}")
+        logger.info("🚀 Bot is now running via long-polling...")
+        logger.info("Press Ctrl+C to stop")
+        logger.info("=" * 60)
+        await bot.infinity_polling(
+            timeout=10,         # long-poll: Telegram responds in ≤10s
+            request_timeout=35, # aiohttp HTTP timeout: 25s headroom over long-poll
+            skip_pending=True,
+            interval=1,         # 1s backoff between retries to avoid hammering
+        )
+
+
 async def main():
     """Main bot execution with graceful shutdown"""
     logger.info("=" * 60)
@@ -509,69 +627,25 @@ async def main():
         _telegram_status["bot_username"] = f"@{me.username}"
 
     if telegram_available:
-        # Register bot command menu
-        try:
-            await register_commands()
-        except Exception as e:
-            logger.warning(f"⚠️  Failed to register bot commands: {e}")
-
-        # Wire Telegram menu button to Mini App if MINIAPP_URL is configured.
-        if _rest_api_enabled():
-            _miniapp_url = os.environ.get("MINIAPP_URL", "").strip()
-            if _miniapp_url:
-                try:
-                    from telebot.types import MenuButtonWebApp, WebAppInfo
-                    await bot.set_chat_menu_button(
-                        menu_button=MenuButtonWebApp(
-                            text="Open RollCall",
-                            web_app=WebAppInfo(url=_miniapp_url),
-                        )
-                    )
-                    logger.info(f"✅ Mini App menu button set → {_miniapp_url}")
-                except Exception as _e:
-                    logger.warning(f"⚠️  Could not set Mini App menu button: {_e}")
+        await _post_connect_setup(me)
 
     # Resume reminder/auto-close loops for rollcalls already in DB with a finalizeDate.
     # Without this, any rollcall created before a bot restart would never auto-close.
     await resume_reminder_loops()
     logger.info("✅ Reminder loop resumption complete")
 
-    # Start bot — webhook or polling
+    # Start bot — with self-healing retry if Telegram was unreachable at startup
     try:
         if not telegram_available:
-            # Telegram is unreachable (banned, outage, etc.). Keep the process
-            # alive so the REST API / web voting continues to work. A container
-            # restart after Telegram is reachable again will resume polling.
-            logger.info("⏳ Telegram unreachable — REST API running, polling skipped until restart")
-            await asyncio.Event().wait()
-        elif WEBHOOK_URL:
-            logger.info(f"🔗 Webhook mode enabled → {WEBHOOK_URL}")
-            logger.info("🚀 Bot is now running via webhook...")
-            logger.info("=" * 60)
-            await bot.remove_webhook()
-            await bot.set_webhook(url=WEBHOOK_URL)
-            logger.info("✅ Webhook registered with Telegram")
-            # Keep alive — aiohttp serves the webhook endpoint
-            await asyncio.Event().wait()
-        else:
-            # Always clear any stale webhook before starting long-poll.
-            # If WEBHOOK_URL was previously set and then removed from .env,
-            # Telegram keeps routing updates to the old (now dead) URL and
-            # infinity_polling never receives anything — and logs nothing.
-            try:
-                await bot.remove_webhook()
-                logger.info("✅ Webhook cleared — long-poll mode active")
-            except Exception as _wh_err:
-                logger.warning(f"⚠️  Could not clear webhook (continuing): {_wh_err}")
-            logger.info("🚀 Bot is now running via long-polling...")
-            logger.info("Press Ctrl+C to stop")
-            logger.info("=" * 60)
-            await bot.infinity_polling(
-                timeout=10,        # long-poll: Telegram responds in ≤10s
-                request_timeout=35, # aiohttp HTTP timeout: 25s headroom over long-poll
-                skip_pending=True,
-                interval=1,        # 1s backoff between retries to avoid hammering
-            )
+            logger.info("⏳ Telegram unreachable — auto-retry every 60s; REST API + web voting active")
+            me = await _telegram_retry_loop()
+            await _post_connect_setup(me)
+            # Re-run reminder loops: new rollcalls may have been created via web while offline
+            await resume_reminder_loops()
+            # Post panels for any rollcalls started via web admin during the outage
+            await _recover_telegram_panels()
+
+        await _run_polling_or_webhook()
     except KeyboardInterrupt:
         logger.info("\n" + "=" * 60)
         logger.info("⏹️  Received shutdown signal (Ctrl+C)")

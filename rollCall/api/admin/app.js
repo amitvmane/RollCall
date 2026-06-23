@@ -2,7 +2,7 @@
 "use strict";
 
 const API="/api/v1", LS="rc_admin_token";
-const S={token:"",groups:[],selCid:null,tabState:{},memberCache:{},groupNames:{},statsLoaded:{}};
+const S={token:"",groups:[],selCid:null,tabState:{},memberCache:{},groupNames:{},statsLoaded:{},telegramOk:null};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function $id(x){return document.getElementById(x)}
@@ -238,6 +238,9 @@ function buildRcPanel(cid,rcs,groupName){
   const g=S.groups.find(x=>x.chat_id===cid);
   const linkBtn=g?.group_web_token
     ?`<button class="btn btn-ghost btn-sm" onclick="copyGroupLink(${cid})" title="Copy voting link for members">🔗 Copy link</button>`:"";
+  const offlineNote=S.telegramOk===false
+    ?`<div class="rc-offline-note">📴 Bot is retrying Telegram every 60s — rollcalls started here will be announced to the group automatically once reconnected. Members can vote via the web link now.</div>`
+    :"";
   return `<div class="card" id="rc-card-${cidK(cid)}">
     <div class="card-header">
       <h2>Active Rollcalls <span style="font-size:.8rem;font-weight:400;color:var(--sub)">(${rcs.length})</span></h2>
@@ -246,6 +249,7 @@ function buildRcPanel(cid,rcs,groupName){
         <button class="btn btn-primary btn-sm" onclick="showStartForm(${cid})">+ Start new</button>
       </div>
     </div>
+    ${offlineNote}
     <div id="start-form-${cidK(cid)}" class="start-form" style="display:none">
       <label>Title (optional)</label>
       <input id="sft-${cidK(cid)}" type="text" placeholder="e.g. Friday Football" maxlength="100" autocorrect="off" autocapitalize="words"/>
@@ -1127,10 +1131,11 @@ function buildStatsPanel(cid,gs,lb,hist,pres){
     const h=await fetch("/api/v1/health",{signal:AbortSignal.timeout(4000)});
     if(!h.ok)return;
     const d=await h.json();
+    S.telegramOk=d.telegram_ok;
     if(d.telegram_ok===false){
       const bar=document.createElement("div");
       bar.className="tg-status-bar tg-status-down";
-      bar.innerHTML=`⚠️ <strong>Telegram is offline</strong> — bot cannot relay messages. Web admin and voting still work. <button class="tg-status-close" onclick="this.parentElement.remove()">✕</button>`;
+      bar.innerHTML=`⚠️ <strong>Telegram is offline</strong> — bot is retrying every 60s. Rollcalls started here will be posted to the group once reconnected. <button class="tg-status-close" onclick="this.parentElement.remove()">✕</button>`;
       document.body.prepend(bar);
     }
   }catch(_){}

@@ -304,6 +304,10 @@ html.dark .ur-loading{opacity:.45;pointer-events:none}
 html.dark .start-form{background:#1a2744}
 html.dark .start-form input{background:#243148}
 
+/* ── Telegram offline note (inside rollcall card) ── */
+.rc-offline-note{background:#fef3c7;border:1px solid #f59e0b;color:#92400e;border-radius:8px;padding:10px 14px;font-size:.82rem;line-height:1.5;margin-bottom:12px}
+html.dark .rc-offline-note{background:rgba(245,158,11,.12);border-color:#f59e0b;color:#fbbf24}
+
 /* ── Presence row ── */
 .presence-row{display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--accent-dim);border-radius:8px;margin-bottom:14px;font-size:.85rem}
 .presence-now{font-weight:700;color:var(--accent)}

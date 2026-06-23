@@ -157,7 +157,12 @@ async function castVote(voteType){
         ...(comment?{comment}:{})
       })
     });
-    if(!res.ok){const d=await res.json().catch(()=>({}));throw new Error(d.detail||"Vote failed");}
+    if(!res.ok){
+      const d=await res.json().catch(()=>({}));
+      const msg=d.detail||"Vote failed";
+      if(res.status===404){showError("This rollcall has ended.");return;}
+      throw new Error(msg);
+    }
     const updated=await res.json();
     activeRcData=updated;
     if(IS_GROUP&&groupData)groupData.rollcalls[activeTabIdx]=updated;
@@ -348,6 +353,11 @@ async function silentRefresh(){
     }else{
       const res=await fetch("/api/v1/web/"+URL_TOKEN);
       if(res.ok){activeRcData=await res.json();detectCurrentVote();renderLists();renderCapBar(activeRcData);}
+      else if(res.status===404||res.status===422){
+        const d=await res.json().catch(()=>({}));
+        showError(d.detail||"This rollcall has ended.");
+        return;
+      }
     }
   }catch{}
   scheduleRefresh();

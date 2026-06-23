@@ -35,20 +35,31 @@ function toast(msg,type="info",ms=3000){
 }
 
 // ─── API ──────────────────────────────────────────────────────────────────────
+class ApiError extends Error{constructor(msg,status){super(msg);this.status=status;}}
 async function api(path,opts={}){
   const res=await fetch(API+path,{...opts,headers:{"Content-Type":"application/json","Authorization":"Bearer "+S.token,...(opts.headers||{})}});
   if(res.status===401){
     toast("Session expired — please sign in again.","err",4000);
     signOut();
-    throw new Error("Unauthorized");
+    throw new ApiError("Unauthorized",401);
   }
   if(!res.ok){
     const b=await res.json().catch(()=>({}));
     const msg=b.detail||("HTTP "+res.status);
     if(res.status===403&&msg.includes("Token bound to")){showScopeWarn();}
-    throw new Error(msg);
+    throw new ApiError(msg,res.status);
   }
   return res.status===204?null:res.json();
+}
+// If a rollcall operation fails because the rollcall no longer exists,
+// immediately refresh the list so the stale row disappears.
+function handleRcGone(cid,e){
+  if(e instanceof ApiError&&e.status===404){
+    toast("This rollcall has already ended — refreshing.","warn",4000);
+    refreshRcList(cid).catch(()=>{});
+    return true;
+  }
+  return false;
 }
 
 function showScopeWarn(){
@@ -292,7 +303,7 @@ window.doEndRc=async function(cid,num){
       ?rcs.map((rc,i)=>buildRcRowHtml(cid,rc,i,name)).join("")
       :`<div class="rc-empty"><div class="icon">📋</div><p>No active rollcalls</p><p class="rc-empty-sub">Tap <strong>+ Start new</strong> above, or use <code>/rc</code> in Telegram.</p></div>`;
     updateGroupBadge(cid,rcs.length);
-  }catch(e){toast("Error: "+e.message,"err",4000);}
+  }catch(e){if(!handleRcGone(cid,e))toast("Error: "+e.message,"err",4000);}
 };
 
 // ─── Rollcall detail / edit panel ─────────────────────────────────────────────
@@ -319,7 +330,10 @@ window.showRcDetails=async function(cid,num){
       if(custom)custom.style.display=rsel.value==="custom"?"block":"none";
       markChanged(cid,num);
     });
-  }catch(e){area.innerHTML=`<p style="color:var(--danger);padding:10px">Error: ${escH(e.message)}</p>`;}
+  }catch(e){
+    if(handleRcGone(cid,e))area.innerHTML=`<p style="color:var(--sub);padding:10px">This rollcall has ended.</p>`;
+    else area.innerHTML=`<p style="color:var(--danger);padding:10px">Error: ${escH(e.message)}</p>`;
+  }
 };
 
 function markChanged(cid,num){
@@ -509,11 +523,16 @@ window.saveAllProps=async function(cid,num){
   if(!changed.length){toast("No changes to save.","info");return;}
   if(btn){btn.disabled=true;btn.textContent="Saving…";}
   const errors=[];
+  let rcGone=false;
   for(const prop of changed){
     try{await saveProp(cid,num,prop,vals[prop]);}
-    catch(e){errors.push(`${prop}: ${e.message}`);}
+    catch(e){
+      if(handleRcGone(cid,e)){rcGone=true;break;}
+      errors.push(`${prop}: ${e.message}`);
+    }
   }
   if(btn){btn.disabled=false;btn.textContent="Save changes";btn.classList.remove("changed-hint");}
+  if(rcGone)return;
   if(errors.length){toast("Some saves failed: "+errors.join("; "),"err",5000);}
   else{toast("Changes saved!","ok");}
   await refreshRcList(cid);
@@ -547,7 +566,7 @@ window.doRemoveUser=async function(cid,num,name){
       {method:"DELETE",body:JSON.stringify({admin_user_id:0,admin_name:"Admin (web)"})});
     toast(`${name} removed.`,"ok");
     await refreshRcList(cid);await showRcDetails(cid,num);
-  }catch(e){toast("Error: "+e.message,"err",4000);}
+  }catch(e){if(!handleRcGone(cid,e))toast("Error: "+e.message,"err",4000);}
 };
 
 window.doMoveUser=async function(cid,num,name,newStatus){
@@ -557,7 +576,7 @@ window.doMoveUser=async function(cid,num,name,newStatus){
       {method:"PATCH",body:JSON.stringify({admin_user_id:0,admin_name:"Admin (web)",new_status:newStatus})});
     toast(`${name} → ${newStatus.toUpperCase()}`,"ok");
     await refreshRcList(cid);await showRcDetails(cid,num);
-  }catch(e){toast("Error: "+e.message,"err",4000);}
+  }catch(e){if(!handleRcGone(cid,e))toast("Error: "+e.message,"err",4000);}
 };
 
 // ─── Rename proxy (delete + re-add) ──────────────────────────────────────────
@@ -596,7 +615,7 @@ window.doRenameProxy=async function(cid,num,oldName,currentStatus,newName){
     }
     toast(`Renamed to ${newName}`,"ok");
     await refreshRcList(cid);await showRcDetails(cid,num);
-  }catch(e){toast("Error: "+e.message,"err",4000);}
+  }catch(e){if(!handleRcGone(cid,e))toast("Error: "+e.message,"err",4000);}
 };
 
 // ─── Add member ───────────────────────────────────────────────────────────────
@@ -678,7 +697,7 @@ window.doAddMember=async function(cid,num,key){
     if(nameEl)nameEl.value="";
     $id(`amf-${cidK(cid)}-${num}-${key}`).style.display="none";
     await refreshRcList(cid);await showRcDetails(cid,num);
-  }catch(e){toast("Error: "+e.message,"err",4000);}
+  }catch(e){if(!handleRcGone(cid,e))toast("Error: "+e.message,"err",4000);}
 };
 
 async function refreshRcList(cid){

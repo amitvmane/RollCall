@@ -150,29 +150,59 @@ async def check(rollcalls, timezone, chat_id):
                             # rollcall renumbered the list while we waited.
                             rc_number = current_rcs.index(rollcall) + 1
 
-                            logging.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Rollcall #{rc_number} started: {rollcall.title}")
-                            if not manager.get_shh_mode(chat_id):
-                                finish_text = rollcall.finishList().replace('__RCID__', str(rc_number))
-                                finish_text = f"{finish_text}\n\n🕐 Auto-closed at scheduled time"
-                                await bot.send_message(chat_id, finish_text)
+                            logging.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Auto-closing rollcall #{rc_number}: {rollcall.title}")
 
                             rc_db_id = getattr(rollcall, "db_id", None) or getattr(rollcall, "id", None)
 
-                            # Update attendance streaks for real users who were IN
+                            # Build finish text before any state changes.
+                            finish_text = None
+                            if not manager.get_shh_mode(chat_id):
+                                finish_text = rollcall.finishList().replace('__RCID__', str(rc_number))
+                                finish_text = f"{finish_text}\n\n🕐 Auto-closed at scheduled time"
+
+                            # Snapshot user lists before clearing state.
                             in_user_ids = {u.user_id for u in rollcall.inList if isinstance(u.user_id, int)}
+                            participants = set(
+                                u.user_id for u in (rollcall.inList + rollcall.outList + rollcall.maybeList + rollcall.waitList)
+                                if isinstance(u.user_id, int)
+                            )
+                            proxy_in_names = {
+                                u.name for u in rollcall.inList
+                                if not isinstance(u.user_id, int)
+                            }
+                            proxy_participants = {
+                                u.name for u in (rollcall.inList + rollcall.outList + rollcall.maybeList + rollcall.waitList)
+                                if not isinstance(u.user_id, int)
+                            }
+
+                            # ── Commit DB close and in-memory teardown FIRST ──────────────
+                            # If the Telegram send below fails (network outage, timeout),
+                            # the rollcall is already properly ended — next check won't retry.
+                            if rc_db_id is not None:
+                                end_rollcall(rc_db_id)
+
+                            if rollcall in rollcalls:
+                                rollcalls.remove(rollcall)
+
+                            # Clean up panel state for the closed rollcall
+                            try:
+                                from bot_state import _panel_msg_ids
+                                _panel_msg_ids.pop((chat_id, rc_number), None)
+                                for num in sorted(n for (c, n) in list(_panel_msg_ids) if c == chat_id and n > rc_number):
+                                    _panel_msg_ids[(chat_id, num - 1)] = _panel_msg_ids.pop((chat_id, num))
+                            except Exception:
+                                pass
+
+                            rollcall.finalizeDate = None
+
+                            # ── Update attendance streaks ─────────────────────────────────
                             for uid in in_user_ids:
                                 try:
                                     update_streak_on_checkin(chat_id, uid)
                                 except Exception:
                                     logging.exception(f"Failed to update streak for user {uid} in chat {chat_id}")
 
-                            # Bump per-user total_rollcalls so /stats attendance rate works
-                            participants = set(
-                                u.user_id for u in (rollcall.inList + rollcall.outList + rollcall.maybeList + rollcall.waitList)
-                                if isinstance(u.user_id, int)
-                            )
                             # Reset streak for participants who voted OUT/MAYBE (didn't end up IN).
-                            # No-shows aren't penalised here — ghost-marking handles them.
                             for uid in participants - in_user_ids:
                                 try:
                                     reset_user_streak(chat_id, uid)
@@ -184,18 +214,7 @@ async def check(rollcalls, timezone, chat_id):
                                 except Exception:
                                     logging.warning(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to increment total_rollcalls for user {uid}")
 
-                            # Proxy streaks — parallel to the real-user paths
-                            # above. Proxies have string user_ids so they fall
-                            # through every isinstance(int) filter; we key on
-                            # u.name and store in the proxy_stats table.
-                            proxy_in_names = {
-                                u.name for u in rollcall.inList
-                                if not isinstance(u.user_id, int)
-                            }
-                            proxy_participants = {
-                                u.name for u in (rollcall.inList + rollcall.outList + rollcall.maybeList + rollcall.waitList)
-                                if not isinstance(u.user_id, int)
-                            }
+                            # Proxy streaks
                             for name in proxy_in_names:
                                 try:
                                     update_proxy_streak_on_checkin(chat_id, name)
@@ -207,10 +226,18 @@ async def check(rollcalls, timezone, chat_id):
                                 except Exception:
                                     logging.exception(f"Failed to reset proxy streak for {name} in chat {chat_id}")
 
-                            if rc_db_id is not None:
-                                end_rollcall(rc_db_id)
+                            # ── Telegram messages are best-effort after DB is committed ───
+                            if finish_text:
+                                try:
+                                    await bot.send_message(chat_id, finish_text)
+                                except Exception:
+                                    logging.exception(
+                                        f"[auto-close] Failed to send close message for rollcall #{rc_number} "
+                                        "(rollcall is ended in DB — message will not be retried)"
+                                    )
 
-                                # Fire ghost prompt if tracking is enabled and rollcall had IN users
+                            # Fire ghost prompt if tracking is enabled and rollcall had IN users
+                            if rc_db_id is not None:
                                 try:
                                     from db import get_rollcall_in_users
                                     ghost_tracking_on = manager.get_ghost_tracking_enabled(chat_id)
@@ -226,19 +253,6 @@ async def check(rollcalls, timezone, chat_id):
                                 except Exception:
                                     logging.exception("Error sending ghost prompt after auto-close")
 
-                            if rollcall in rollcalls:
-                                rollcalls.remove(rollcall)
-
-                            # Clean up panel state for the closed rollcall
-                            try:
-                                from bot_state import _panel_msg_ids
-                                _panel_msg_ids.pop((chat_id, rc_number), None)
-                                for num in sorted(n for (c, n) in list(_panel_msg_ids) if c == chat_id and n > rc_number):
-                                    _panel_msg_ids[(chat_id, num - 1)] = _panel_msg_ids.pop((chat_id, num))
-                            except Exception:
-                                pass
-
-                            rollcall.finalizeDate = None
                         continue
 
             except Exception:
@@ -404,6 +418,10 @@ async def _auto_start_from_template(chat_id: int, tmpl: dict):
 # fire a "stale" rollcall but generous enough to absorb any realistic skew.
 SCHEDULE_CATCHUP_MINUTES = 30
 
+# Multi-day catch-up: if the bot was down and missed a scheduled run, fire
+# it on restart as long as the miss was within this many days.
+SCHEDULE_CATCHUP_DAYS = 2
+
 
 def _parse_hhmm(raw):
     """Parse a schedule_time string into (hour, minute). Tolerates "9:00",
@@ -481,6 +499,32 @@ def _is_due_now(schedule_time, schedule_day, last_date, now, recurrence_type):
     return True
 
 
+def _missed_within_days(schedule_day, schedule_time, last_date, now, max_days):
+    """Return True if a weekly template missed its scheduled run within max_days.
+
+    Used for startup catch-up: if the bot was offline and the weekly run was
+    missed (e.g. yesterday or the day before), fire it now.  Biweekly and
+    monthly templates are excluded — their cadence is long enough that a
+    2-day catch-up window could legitimately double-fire.
+    """
+    from datetime import timedelta
+    hm = _parse_hhmm(schedule_time)
+    if hm is None:
+        return False
+    sh, sm = hm
+    for delta in range(1, max_days + 1):
+        past = now - timedelta(days=delta)
+        if past.strftime("%A").lower() != (schedule_day or "").lower():
+            continue
+        past_date_str = past.strftime("%Y-%m-%d")
+        if last_date == past_date_str:
+            return False  # Already fired on that day
+        past_scheduled_dt = past.replace(hour=sh, minute=sm, second=0, microsecond=0)
+        if now > past_scheduled_dt:
+            return True
+    return False
+
+
 async def check_template_schedules():
     """Persistent loop that fires scheduled templates at their configured day/time.
 
@@ -517,7 +561,12 @@ async def check_template_schedules():
                 today_date = now.strftime("%Y-%m-%d")
                 recurrence_type = tmpl.get("recurrence_type", "weekly") or "weekly"
 
-                if not _is_due_now(schedule_time, schedule_day, last_date, now, recurrence_type):
+                due = _is_due_now(schedule_time, schedule_day, last_date, now, recurrence_type)
+                if not due and recurrence_type == "weekly":
+                    due = _missed_within_days(
+                        schedule_day, schedule_time, last_date, now, SCHEDULE_CATCHUP_DAYS
+                    )
+                if not due:
                     continue
 
                 try:

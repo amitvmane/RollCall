@@ -14,6 +14,10 @@ function cidK(cid){return "c"+String(cid).replace(/[-]/g,"_")}
 // Datetime: "DD-MM-YYYY HH:MM" ↔ "YYYY-MM-DDTHH:MM"
 function toInputDT(s){
   if(!s)return "";
+  // API returns ISO 8601 e.g. "2026-06-23T10:35:00+05:30"
+  const iso=s.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if(iso)return `${iso[1]}-${iso[2]}-${iso[3]}T${iso[4]}:${iso[5]}`;
+  // Legacy "DD-MM-YYYY HH:MM" format
   const m=s.match(/^(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2})$/);
   return m?`${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}`:"";
 }

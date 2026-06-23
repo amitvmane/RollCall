@@ -259,6 +259,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:12px 0}
   .sb-head{background:var(--card)}
   input,select,textarea{background:#243148;color:var(--text);border-color:var(--border)}
   input:focus,select:focus,textarea:focus{border-color:var(--accent)}
+  input[type="datetime-local"],input[type="date"],input[type="time"]{color-scheme:dark}
   .scope-warn{background:rgba(251,191,36,.12);border-color:#fbbf24;color:#fbbf24}
   .rename-row{background:#172033;border-bottom-color:var(--border)}
   .rc-row--editing{background:#172033;border-left-color:var(--accent)}

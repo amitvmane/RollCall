@@ -238,5 +238,11 @@
         "Description": "bump pyTelegramBotAPI 4.14.1 → 4.34.0 (Bot API 6.x → 10.0) (#15)",
         "DeployedOnProd": "Y",
         "DeployedDatetime": "16-06-2026 12:29 UTC"
+    },
+    {
+        "Version": 8.3,
+        "Description": "🌐 Web & Admin UI overhaul — (1) Dark mode: manual toggle (🌙/☀ button) persisted to localStorage, applied before first paint to eliminate FOUC, works on both admin and user web pages. (2) Favicon + RollCall logo (SVG) on all pages. (3) Admin manage section UX: row-level loading states during move/remove, async event delegation, add-member button shows 'Adding…' spinner, saveAllProps no longer re-renders the edit panel (updates data-original in-place). (4) Vote timeout: AbortController 30 s on castVote so the spinner never hangs if the server is busy — user sees 'Vote timed out' toast. (5) Upcoming scheduled rollcalls card on the user web page — shows events due this week, sorted by next occurrence. (6) Admin template schedule editor: inline form to set/clear schedule_day + schedule_time directly from the admin panel. (7) Stats dashboard — single source of truth in services/stats.py; same numbers on Telegram /stats, REST API, and web. Admin: 4th lazy-loaded Stats tab with stat boxes, leaderboard (attendance bars), recent sessions, ghost board. User web: personal card showing rank, attendance rate, streak, vote breakdown + group leaderboard with 'you' highlighted; refreshes when name is entered or changed. New public endpoint GET /api/v1/web/group/{token}/stats (no auth). (8) Telegram offline banner: health endpoint now exposes telegram_ok; both admin and user web pages show a red banner when the bot cannot reach Telegram, reassuring users that web voting still works.",
+        "DeployedOnProd": "N",
+        "DeployedDatetime": "23-06-2026 12:45 UTC"
     }
 ]

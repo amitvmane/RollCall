@@ -12,11 +12,15 @@ from typing import Optional
 
 from fastapi import APIRouter, Path, Query, status
 
+import db as _db
 from services import web as web_svc
 from services import stats as stats_svc
+from services import presence as presence_svc
 from api.schemas.web import (
     WebGroupResponse,
     WebGroupStatsResponse,
+    WebHeartbeatRequest,
+    WebPresenceResponse,
     WebRollcallResponse,
     WebVoteRequest,
     UpcomingRollcall,
@@ -26,6 +30,34 @@ router = APIRouter()
 
 
 # ── Group endpoint (permanent) ────────────────────────────────────────────────
+
+@router.post(
+    "/web/group/{group_token}/heartbeat",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Record viewer heartbeat (no auth) — increments view count on first visit",
+)
+async def web_group_heartbeat(
+    body: WebHeartbeatRequest,
+    group_token: str = Path(..., description="Permanent group token"),
+) -> None:
+    is_new = presence_svc.heartbeat(group_token, body.session_id)
+    if is_new:
+        _db.increment_group_view_count(group_token)
+
+
+@router.get(
+    "/web/group/{group_token}/presence",
+    response_model=WebPresenceResponse,
+    summary="Active viewers now + total views (no auth)",
+)
+async def web_group_presence(
+    group_token: str = Path(..., description="Permanent group token"),
+) -> WebPresenceResponse:
+    return WebPresenceResponse(
+        active_now=presence_svc.active_count(group_token),
+        total_views=_db.get_group_view_count(group_token),
+    )
+
 
 @router.get(
     "/web/group/{group_token}/stats",

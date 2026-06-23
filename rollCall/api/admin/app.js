@@ -1026,21 +1026,33 @@ async function loadStatsTab(cid){
   if(!panel)return;
   panel.innerHTML=`<div class="stats-loading"><div class="spinner"></div> Loading stats…</div>`;
   try{
-    const [gs,lb,hist]=await Promise.all([
+    const g=S.groups.find(x=>x.chat_id===cid);
+    const token=g?.group_web_token||null;
+    const presPromise=token
+      ?fetch(`/api/v1/web/group/${token}/presence`,{signal:AbortSignal.timeout(5000)}).then(r=>r.ok?r.json():null).catch(()=>null)
+      :Promise.resolve(null);
+    // Also send admin heartbeat so admin counts in active viewers
+    if(token)fetch(`/api/v1/web/group/${token}/heartbeat`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session_id:"admin-"+S.token.slice(-8)})}).catch(()=>{});
+    const [gs,lb,hist,pres]=await Promise.all([
       apiGet(`/api/v1/chats/${cid}/stats/group`),
       apiGet(`/api/v1/chats/${cid}/stats/leaderboard?limit=10`),
       apiGet(`/api/v1/chats/${cid}/history?limit=8`),
+      presPromise,
     ]);
     S.statsLoaded[cid]=true;
-    panel.innerHTML=buildStatsPanel(cid,gs,lb,hist);
+    panel.innerHTML=buildStatsPanel(cid,gs,lb,hist,pres);
   }catch(e){
     panel.innerHTML=`<div class="stats-err">Failed to load stats — ${escH(e.message)}</div>`;
   }
 }
 
-function buildStatsPanel(cid,gs,lb,hist){
+function buildStatsPanel(cid,gs,lb,hist,pres){
   const pct=v=>v==null?"—":`${v}%`;
   const fmt=v=>v??0;
+
+  const presHtml=pres
+    ?`<div class="presence-row"><span class="presence-now">👁 ${fmt(pres.active_now)} viewing now</span><span class="presence-total">· ${fmt(pres.total_views)} total views</span></div>`
+    :"";
 
   const boxes=[
     {label:"Sessions",val:fmt(gs.total_rollcalls)},
@@ -1078,6 +1090,7 @@ function buildStatsPanel(cid,gs,lb,hist){
 
   return `
   <div class="stats-panel">
+    ${presHtml}
     <div class="stat-boxes">
       ${boxes.map(b=>`<div class="stat-box"><div class="stat-box-val">${b.val}</div><div class="stat-box-lbl">${b.label}</div></div>`).join("")}
     </div>

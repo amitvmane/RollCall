@@ -307,6 +307,7 @@ async function load(){
   $("loading").classList.add("hidden");
   $("main").classList.remove("hidden");
   renderIdentity();scheduleRefresh();
+  if(IS_GROUP)fetchPresence();
 }
 
 async function loadJoin(){
@@ -507,6 +508,50 @@ function renderStats(d){
   </div>
   ${personalHtml}
   ${lbRows?`<div class="stats-section-hdr">🏆 Leaderboard</div><div class="slb-list">${lbRows}</div>`:""}`;
+}
+
+// ── Presence / heartbeat ──────────────────────────────────────────────────
+let _sessionId = sessionStorage.getItem("rc_sid");
+if (!_sessionId) {
+  _sessionId = ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
+    (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+  sessionStorage.setItem("rc_sid", _sessionId);
+}
+
+async function sendHeartbeat() {
+  if (!IS_GROUP) return;
+  try {
+    await fetch(`/api/v1/web/group/${URL_TOKEN}/heartbeat`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({session_id: _sessionId}),
+      signal: AbortSignal.timeout(5000),
+    });
+  } catch(_) {}
+}
+
+async function fetchPresence() {
+  if (!IS_GROUP) return;
+  try {
+    const r = await fetch(`/api/v1/web/group/${URL_TOKEN}/presence`, {signal: AbortSignal.timeout(5000)});
+    if (!r.ok) return;
+    const d = await r.json();
+    const badge = $("presence-badge");
+    if (!badge) return;
+    const now = d.active_now || 0;
+    const total = d.total_views || 0;
+    if (total > 0) {
+      badge.textContent = now > 1 ? `👁 ${now} viewing` : `👁 ${total} views`;
+      badge.title = `${now} viewing now · ${total} total views`;
+      badge.classList.remove("hidden");
+    }
+  } catch(_) {}
+}
+
+if (IS_GROUP) {
+  sendHeartbeat();
+  setInterval(sendHeartbeat, 30000);
+  setInterval(fetchPresence, 35000);
 }
 
 // ── Telegram connectivity banner ───────────────────────────────────────────

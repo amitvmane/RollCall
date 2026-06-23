@@ -51,6 +51,15 @@ class WebVoteRequest(BaseModel):
     comment: Optional[str] = Field(None, max_length=100, description="Optional note to attach to the vote")
 
 
+class WebHeartbeatRequest(BaseModel):
+    session_id: str = Field(..., min_length=1, max_length=64, description="Client-generated session UUID (per browser tab)")
+
+
+class WebPresenceResponse(BaseModel):
+    active_now: int = 0
+    total_views: int = 0
+
+
 # ── Public stats schemas (no auth required, served via group token) ───────────
 
 class WebStatsPersonal(BaseModel):

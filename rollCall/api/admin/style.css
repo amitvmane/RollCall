@@ -304,6 +304,12 @@ html.dark .ur-loading{opacity:.45;pointer-events:none}
 html.dark .start-form{background:#1a2744}
 html.dark .start-form input{background:#243148}
 
+/* ── Presence row ── */
+.presence-row{display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--accent-dim);border-radius:8px;margin-bottom:14px;font-size:.85rem}
+.presence-now{font-weight:700;color:var(--accent)}
+.presence-total{color:var(--sub)}
+html.dark .presence-row{background:rgba(37,99,235,.15)}
+
 /* ── Stats tab ── */
 .stats-panel{display:flex;flex-direction:column;gap:16px;padding:12px 0}
 .stats-placeholder,.stats-loading,.stats-err{padding:32px;text-align:center;color:var(--sub);font-size:.9rem}

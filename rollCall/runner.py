@@ -385,6 +385,7 @@ async def memory_prune_loop(interval_seconds: int = 600):
         _rate_limits, _buzz_cooldowns, _pending_deletes, _pending_overrides,
         _pending_proxy_add, _pending_reconf, _prune_pending, _panel_msg_ids,
     )
+    from services import presence as presence_svc
 
     RATE_LIMIT_AGE = 300   # individual vote rate-limit window is 2s; 5 min is well past stale
     BUZZ_COOLDOWN_AGE = 300  # /buzz cooldown is 30s; 5 min flushes any straggler
@@ -419,6 +420,9 @@ async def memory_prune_loop(interval_seconds: int = 600):
                 chat = manager._cache.get(cid)
                 if (not chat or not chat.get('rollCalls')) and not manager._erc_locks[cid].locked():
                     manager._erc_locks.pop(cid, None)
+
+            # Drop stale web-presence sessions
+            presence_svc.prune()
 
             logger.debug(
                 f"prune: rl={len(_rate_limits)} buzz={len(_buzz_cooldowns)} "

@@ -186,6 +186,9 @@ html.dark .no-rc{color:var(--sub)}
 html.dark .brand-bar{background:#1e3a8a}
 html.dark input[type="text"],html.dark input[type="number"]{background:var(--card);color:var(--text);border-color:var(--border)}
 
+/* ── Presence badge ── */
+.presence-badge{font-size:.72rem;color:rgba(255,255,255,.8);background:rgba(255,255,255,.18);padding:2px 8px;border-radius:10px;margin-left:6px;white-space:nowrap}
+
 /* ── Telegram offline banner ── */
 .tg-offline-bar{background:#7f1d1d;color:#fca5a5;padding:10px 14px;font-size:.82rem;display:flex;align-items:center;gap:8px;margin-bottom:8px;border-radius:8px}
 .tg-offline-close{background:none;border:none;cursor:pointer;color:inherit;opacity:.7;font-size:1rem;margin-left:auto;line-height:1}

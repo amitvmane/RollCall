@@ -935,6 +935,32 @@ def _run_migrations(conn, cursor):
         except Exception:
             conn.rollback()  # column already exists — safe to ignore
 
+    # web_view_stats — persistent total page-view counter per group token
+    if db_type == 'postgresql':
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS web_view_stats (
+                    group_token TEXT PRIMARY KEY,
+                    view_count  BIGINT NOT NULL DEFAULT 0,
+                    last_viewed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    else:
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS web_view_stats (
+                    group_token TEXT PRIMARY KEY,
+                    view_count  INTEGER NOT NULL DEFAULT 0,
+                    last_viewed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
 
 def get_or_create_chat(chat_id: int) -> Dict:
     """Get or create chat settings"""
@@ -3848,6 +3874,72 @@ def revoke_api_token(token_hash: str) -> bool:
     except Exception:
         logging.exception("revoke_api_token failed")
         return False
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+# ── Web presence / view-count helpers ────────────────────────────────────────
+
+def increment_group_view_count(group_token: str) -> int:
+    """Upsert a view-count row for group_token and return the new total."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        if db_type == 'postgresql':
+            cursor.execute(f"""
+                INSERT INTO web_view_stats (group_token, view_count, last_viewed_at)
+                VALUES ({ph}, 1, CURRENT_TIMESTAMP)
+                ON CONFLICT (group_token)
+                DO UPDATE SET view_count = web_view_stats.view_count + 1,
+                              last_viewed_at = CURRENT_TIMESTAMP
+                RETURNING view_count
+            """, (group_token,))
+            row = cursor.fetchone()
+            count = int(row[0] if row else 1)
+        else:
+            cursor.execute(f"""
+                INSERT INTO web_view_stats (group_token, view_count, last_viewed_at)
+                VALUES ({ph}, 1, CURRENT_TIMESTAMP)
+                ON CONFLICT (group_token)
+                DO UPDATE SET view_count = view_count + 1,
+                              last_viewed_at = CURRENT_TIMESTAMP
+            """, (group_token,))
+            cursor.execute(f"SELECT view_count FROM web_view_stats WHERE group_token = {ph}", (group_token,))
+            row = cursor.fetchone()
+            count = int(row[0] if row else 1)
+        conn.commit()
+        return count
+    except Exception:
+        logging.exception("increment_group_view_count failed")
+        return 0
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def get_group_view_count(group_token: str) -> int:
+    """Return the total view count for group_token (0 if none recorded yet)."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(
+            f"SELECT view_count FROM web_view_stats WHERE group_token = {ph}",
+            (group_token,),
+        )
+        row = cursor.fetchone()
+        return int(row[0] if row else 0)
+    except Exception:
+        logging.exception("get_group_view_count failed")
+        return 0
     finally:
         if cursor is not None:
             cursor.close()

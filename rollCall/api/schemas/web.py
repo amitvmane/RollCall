@@ -25,9 +25,23 @@ class WebRollcallResponse(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class UpcomingRollcall(BaseModel):
+    name: str
+    title: Optional[str] = None
+    schedule_day: Optional[str] = None
+    schedule_time: Optional[str] = None
+    recurrence_type: str = "weekly"
+    event_day: Optional[str] = None
+    event_time: Optional[str] = None
+    location: Optional[str] = None
+    fee: Optional[str] = None
+    limit: Optional[int] = None
+
+
 class WebGroupResponse(BaseModel):
     group_token: str
     rollcalls: list[WebRollcallResponse]
+    upcoming: list[UpcomingRollcall] = Field(default_factory=list)
 
 
 class WebVoteRequest(BaseModel):

@@ -294,11 +294,51 @@ async function loadJoin(){
   renderRollcall(await res.json());
 }
 
+// ── Upcoming scheduled rollcalls ───────────────────────────────────────────
+const DAYS=["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
+function nextScheduledDate(schedDay,schedTime){
+  const tgt=DAYS.indexOf((schedDay||"").toLowerCase());
+  if(tgt<0||!schedTime)return null;
+  const[h,m]=(schedTime||"00:00").split(":").map(Number);
+  const now=new Date();
+  let diff=(tgt-now.getDay()+7)%7;
+  if(diff===0&&(now.getHours()*60+now.getMinutes())>=h*60+m)diff=7;
+  const d=new Date(now);
+  d.setDate(now.getDate()+diff);d.setHours(h,m,0,0);
+  return d;
+}
+function renderUpcoming(upcoming){
+  const el=$("upcoming-card");
+  if(!el)return;
+  const thisWeek=(upcoming||[]).filter(u=>{
+    const d=nextScheduledDate(u.schedule_day,u.schedule_time);
+    return d&&(d-new Date())<=7*24*60*60*1000;
+  }).sort((a,b)=>{
+    const da=nextScheduledDate(a.schedule_day,a.schedule_time);
+    const db=nextScheduledDate(b.schedule_day,b.schedule_time);
+    return (da||0)-(db||0);
+  });
+  if(!thisWeek.length){el.classList.add("hidden");return;}
+  el.classList.remove("hidden");
+  el.innerHTML=`<div class="upcoming-header">📅 Coming Up This Week</div>`
+    +thisWeek.map(u=>{
+      const d=nextScheduledDate(u.schedule_day,u.schedule_time);
+      const dateStr=d?d.toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"}):"";
+      const timeStr=d?d.toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"}):"";
+      const title=u.title||u.name;
+      const meta=[u.location?`📍 ${u.location}`:"",u.fee?`💰 ${u.fee}`:"",u.limit?`👥 Cap: ${u.limit}`:""].filter(Boolean).join(" · ");
+      return `<div class="upcoming-row">
+        <div class="upcoming-when"><span class="upcoming-day">${dateStr}</span><span class="upcoming-time">${timeStr}</span></div>
+        <div class="upcoming-info"><div class="upcoming-title">${title}</div>${meta?`<div class="upcoming-meta">${meta}</div>`:""}</div>
+      </div>`;
+    }).join("");
+}
 async function loadGroup(){
   const res=await fetch(API_GROUP);
   if(!res.ok){const d=await res.json().catch(()=>({}));throw new Error(d.detail||"This group link is invalid.");}
   groupData=await res.json();
   const rcs=groupData.rollcalls;
+  renderUpcoming(groupData.upcoming||[]);
   if(!rcs.length){
     ["rc-title","rc-meta","count-badge"].forEach(id=>{$(id)&&($(id).textContent="")});
     $("tab-card").classList.add("hidden");
@@ -331,6 +371,7 @@ async function silentRefresh(){
       const res=await fetch(API_GROUP);
       if(res.ok){
         groupData=await res.json();const rcs=groupData.rollcalls;
+        renderUpcoming(groupData.upcoming||[]);
         if(!rcs.length){
           $("tab-card").classList.add("hidden");$("no-rollcalls").classList.remove("hidden");
           ["identity-card","vote-card","lists-card"].forEach(id=>$(id)?.classList.add("hidden"));

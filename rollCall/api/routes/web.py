@@ -11,7 +11,7 @@ Permanent group token (never expires, bookmarkable):
 from fastapi import APIRouter, Path, status
 
 from services import web as web_svc
-from api.schemas.web import WebGroupResponse, WebRollcallResponse, WebVoteRequest
+from api.schemas.web import WebGroupResponse, WebRollcallResponse, WebVoteRequest, UpcomingRollcall
 
 router = APIRouter()
 

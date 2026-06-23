@@ -713,18 +713,42 @@ async function refreshRcList(cid){
 }
 
 // ─── Templates ────────────────────────────────────────────────────────────────
+const ADM_DAYS=["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
+function admNextRun(schedDay,schedTime){
+  const tgt=ADM_DAYS.indexOf((schedDay||"").toLowerCase());
+  if(tgt<0||!schedTime)return null;
+  const[h,m]=(schedTime||"00:00").split(":").map(Number);
+  const now=new Date();
+  let diff=(tgt-now.getDay()+7)%7;
+  if(diff===0&&(now.getHours()*60+now.getMinutes())>=h*60+m)diff=7;
+  const d=new Date(now);
+  d.setDate(now.getDate()+diff);d.setHours(h,m,0,0);
+  return d;
+}
 function buildTmplPanel(cid,tmpls){
   const rows=tmpls.length?tmpls.map(t=>{
-    const sched=t.schedule_enabled?`📅 ${escH(t.schedule_day||"")} ${escH(t.event_time||"")}`.trim():"No schedule";
-    const meta=[t.limit?`Cap: ${t.limit}`:"",t.location?`📍${escH(t.location)}`:"",t.fee?`💰${escH(t.fee)}`:"",sched].filter(Boolean).join(" · ");
-    return `<div class="tmpl-row">
+    const schedEnabled=t.schedule_enabled;
+    let schedBadge="";
+    if(schedEnabled&&t.schedule_day&&t.schedule_time){
+      const next=admNextRun(t.schedule_day,t.schedule_time);
+      const nextStr=next?next.toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"})+" "+next.toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"}):"";
+      schedBadge=`<span class="sched-badge">📅 ${escH(t.schedule_day)} ${escH(t.schedule_time)}${t.recurrence_type==="biweekly"?" (biweekly)":t.recurrence_type==="monthly"?" (monthly)":""}${nextStr?" · next: "+nextStr:""}</span>`;
+    }
+    const meta=[t.limit?`👥 ${t.limit}`:"",t.location?`📍 ${escH(t.location)}`:"",t.fee?`💰 ${escH(t.fee)}`:""].filter(Boolean).join("  ");
+    const eid=`te-${cidK(cid)}-${CSS.escape?CSS.escape(t.name):t.name.replace(/[^a-z0-9]/gi,"_")}`;
+    return `<div class="tmpl-row" id="tmplrow-${eid}">
       <div style="flex:1;min-width:0">
         <div class="tmpl-name">${escH(t.name)}</div>
-        <div class="tmpl-meta">${escH(t.title||"No title")}${meta?" · "+meta:""}</div>
+        <div class="tmpl-meta">${escH(t.title||"")}${meta?"  "+meta:""}</div>
+        ${schedBadge}
       </div>
-      <div style="display:flex;gap:6px">
+      <div style="display:flex;gap:6px;flex-shrink:0">
+        <button class="btn btn-ghost btn-sm" onclick="toggleTmplEdit(${cid},${JSON.stringify(t.name)})">✎ Edit</button>
         <button class="btn btn-success btn-sm" onclick="doStartTmpl(${cid},${JSON.stringify(escH(t.name))},this)">▶ Start</button>
       </div>
+    </div>
+    <div class="tmpl-edit-panel" id="tmpledit-${eid}" style="display:none">
+      ${buildTmplEditForm(cid,t,eid)}
     </div>`;
   }).join("")
   :`<div class="tmpl-empty">
@@ -734,6 +758,81 @@ function buildTmplPanel(cid,tmpls){
     </div>`;
   return `<div class="card"><div class="card-header"><h2>Templates</h2></div><div id="tmpl-list-${cidK(cid)}">${rows}</div></div>`;
 }
+function buildTmplEditForm(cid,t,eid){
+  const days=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+  const dayOpts=days.map(d=>`<option value="${d.toLowerCase()}"${(t.schedule_day||"").toLowerCase()===d.toLowerCase()?" selected":""}>${d}</option>`).join("");
+  const recOpts=["weekly","biweekly","monthly"].map(r=>`<option value="${r}"${(t.recurrence_type||"weekly")===r?" selected":""}>${r}</option>`).join("");
+  return `<div class="tmpl-ef">
+    <div class="tmpl-ef-row">
+      <label>Title</label>
+      <input id="tef-title-${eid}" class="amf-inp" value="${escH(t.title||"")}" placeholder="Rollcall title"/>
+    </div>
+    <div class="tmpl-ef-row">
+      <label>Location</label>
+      <input id="tef-loc-${eid}" class="amf-inp" value="${escH(t.location||"")}" placeholder="Location"/>
+    </div>
+    <div class="tmpl-ef-row" style="display:flex;gap:8px">
+      <div style="flex:1"><label>Fee</label><input id="tef-fee-${eid}" class="amf-inp" value="${escH(t.fee||"")}" placeholder="₹0"/></div>
+      <div style="flex:1"><label>Cap</label><input id="tef-limit-${eid}" class="amf-inp" type="number" min="1" value="${t.limit||""}" placeholder="No limit"/></div>
+    </div>
+    <div class="tmpl-ef-divider">Auto-schedule</div>
+    <div class="tmpl-ef-row" style="display:flex;gap:8px;align-items:flex-end">
+      <div style="flex:2">
+        <label>Day</label>
+        <select id="tef-sday-${eid}" class="amf-inp">${dayOpts}</select>
+      </div>
+      <div style="flex:1">
+        <label>Time</label>
+        <input id="tef-stime-${eid}" class="amf-inp" type="time" value="${t.schedule_time||""}"/>
+      </div>
+      <div style="flex:1">
+        <label>Repeat</label>
+        <select id="tef-rec-${eid}" class="amf-inp">${recOpts}</select>
+      </div>
+    </div>
+    <div class="tmpl-ef-row" style="display:flex;gap:8px">
+      <div style="flex:2"><label>Event day (rollcall closes on)</label><select id="tef-eday-${eid}" class="amf-inp"><option value="">Same as schedule day</option>${days.map(d=>`<option value="${d.toLowerCase()}"${(t.event_day||"").toLowerCase()===d.toLowerCase()?" selected":""}>${d}</option>`).join("")}</select></div>
+      <div style="flex:1"><label>Event time</label><input id="tef-etime-${eid}" class="amf-inp" type="time" value="${t.event_time||""}"/></div>
+    </div>
+    <div class="tmpl-ef-actions">
+      <button class="btn btn-primary btn-sm" onclick="saveTmplEdit(${cid},${JSON.stringify(t.name)},'${eid}')">Save</button>
+      <button class="btn btn-ghost btn-sm" onclick="toggleTmplEdit(${cid},${JSON.stringify(t.name)})">Cancel</button>
+    </div>
+  </div>`;
+}
+window.toggleTmplEdit=function(cid,name){
+  const eid=`te-${cidK(cid)}-${name.replace(/[^a-z0-9]/gi,"_")}`;
+  const el=$id(`tmpledit-${eid}`);
+  if(el)el.style.display=el.style.display==="none"?"block":"none";
+};
+window.saveTmplEdit=async function(cid,name,eid){
+  const g=id=>{const el=$id(id);return el?el.value.trim():""};
+  const body={
+    admin_user_id:0,admin_name:"Admin (web)",
+    title:g(`tef-title-${eid}`)||null,
+    location:g(`tef-loc-${eid}`)||null,
+    fee:g(`tef-fee-${eid}`)||null,
+    limit:parseInt(g(`tef-limit-${eid}`))||null,
+    event_day:g(`tef-eday-${eid}`)||null,
+    event_time:g(`tef-etime-${eid}`)||null,
+  };
+  const schedDay=g(`tef-sday-${eid}`);
+  const schedTime=g(`tef-stime-${eid}`);
+  const recType=g(`tef-rec-${eid}`)||"weekly";
+  try{
+    await api(`/chats/${cid}/templates/${encodeURIComponent(name)}`,{method:"PUT",body:JSON.stringify(body)});
+    if(schedDay&&schedTime){
+      await api(`/chats/${cid}/templates/${encodeURIComponent(name)}/schedule`,{
+        method:"PUT",
+        body:JSON.stringify({admin_user_id:0,admin_name:"Admin (web)",schedule_day:schedDay,schedule_time:schedTime,recurrence_type:recType})
+      });
+    }
+    toast("Template saved!","ok");
+    const tmpls=await api(`/chats/${cid}/templates`);
+    const el=$id(`panel-${cidK(cid)}-1`);
+    if(el)el.innerHTML=buildTmplPanel(cid,tmpls);
+  }catch(e){toast("Error: "+e.message,"err",4000);}
+};
 
 window.doStartTmpl=async function(cid,name,btn){
   if(btn){btn.disabled=true;btn.textContent="Starting…";}

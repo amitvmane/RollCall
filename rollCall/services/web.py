@@ -174,9 +174,9 @@ def get_group_web_token(chat_id: int) -> str:
 
 def get_rollcalls_by_group_token(group_token: str) -> dict:
     """
-    Return all active rollcalls for the group identified by group_token.
+    Return all active rollcalls and upcoming scheduled templates for the group.
 
-    Returns {"group_token": ..., "rollcalls": [...]}.
+    Returns {"group_token": ..., "rollcalls": [...], "upcoming": [...]}.
     Raises incorrectParameter if the token is unknown.
     """
     if not group_token:
@@ -186,7 +186,27 @@ def get_rollcalls_by_group_token(group_token: str) -> dict:
         raise incorrectParameter("This group link is invalid.")
     chat_id = chat["chat_id"]
     rollcalls = manager.get_rollcalls(chat_id)
+
+    templates = db.get_templates(chat_id)
+    upcoming = [
+        {
+            "name": t["name"],
+            "title": t.get("title"),
+            "schedule_day": t.get("schedule_day"),
+            "schedule_time": t.get("schedule_time"),
+            "recurrence_type": t.get("recurrence_type") or "weekly",
+            "event_day": t.get("event_day"),
+            "event_time": t.get("event_time"),
+            "location": t.get("location"),
+            "fee": t.get("eventfee"),
+            "limit": t.get("inlistlimit"),
+        }
+        for t in templates
+        if t.get("schedule_enabled") and t.get("schedule_day") and t.get("schedule_time")
+    ]
+
     return {
         "group_token": group_token,
         "rollcalls": [_serialize_web_rollcall(rc) for rc in rollcalls],
+        "upcoming": upcoming,
     }

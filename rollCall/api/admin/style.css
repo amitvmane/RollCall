@@ -177,6 +177,13 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .tmpl-empty p{font-size:.86rem}
 .te-hint{margin-top:6px;font-size:.78rem;line-height:1.5}
 .te-hint code{background:#f1f5f9;border-radius:4px;padding:1px 5px;font-size:.76rem;color:var(--text)}
+.sched-badge{display:inline-block;margin-top:4px;font-size:.72rem;color:var(--accent);font-weight:500}
+.tmpl-edit-panel{border-top:1px solid var(--border);padding:12px 0 4px}
+.tmpl-ef{display:flex;flex-direction:column;gap:10px}
+.tmpl-ef-row{display:flex;flex-direction:column;gap:4px}
+.tmpl-ef-row label{font-size:.73rem;font-weight:600;color:var(--sub)}
+.tmpl-ef-divider{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--sub);border-top:1px solid var(--border);padding-top:10px;margin-top:2px}
+.tmpl-ef-actions{display:flex;gap:8px;padding-top:4px}
 
 /* ── Rollcall empty state ── */
 .rc-empty{text-align:center;padding:20px 12px;color:var(--sub)}
@@ -285,4 +292,6 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:12px 0}
   .tg-warn{color:#93c5fd}
   .amf-field label{color:var(--sub)}
   .rename-inp{background:#243148;color:var(--text);border-color:var(--border)}
+  .tmpl-edit-panel{border-top-color:var(--border)}
+  .tmpl-ef-divider{border-top-color:var(--border)}
 }

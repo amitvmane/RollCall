@@ -133,3 +133,14 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .toast-local{position:fixed;bottom:20px;right:14px;left:14px;max-width:360px;margin:0 auto;padding:10px 16px;border-radius:10px;font-size:.87rem;background:#1e293b;color:#fff;box-shadow:0 4px 16px rgba(0,0,0,.2);opacity:0;transform:translateY(8px);transition:opacity .2s,transform .2s;pointer-events:none;z-index:999}
 .toast-local.show{opacity:1;transform:none}
 .hidden{display:none!important}
+
+/* ── Upcoming scheduled rollcalls ── */
+.upcoming-header{font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--sub);padding:4px 0 10px}
+.upcoming-row{display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border)}
+.upcoming-row:last-child{border-bottom:none;padding-bottom:0}
+.upcoming-when{display:flex;flex-direction:column;align-items:center;min-width:52px;gap:2px}
+.upcoming-day{font-size:.72rem;font-weight:600;color:var(--accent);text-transform:uppercase}
+.upcoming-time{font-size:.82rem;font-weight:700;color:var(--text)}
+.upcoming-info{flex:1;min-width:0}
+.upcoming-title{font-weight:600;font-size:.92rem;margin-bottom:2px}
+.upcoming-meta{font-size:.78rem;color:var(--sub)}

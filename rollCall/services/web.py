@@ -207,6 +207,7 @@ def get_rollcalls_by_group_token(group_token: str) -> dict:
 
     return {
         "group_token": group_token,
+        "group_name": chat.get("group_name") or "",
         "rollcalls": [_serialize_web_rollcall(rc) for rc in rollcalls],
         "upcoming": upcoming,
     }

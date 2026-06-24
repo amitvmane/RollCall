@@ -40,6 +40,7 @@ class UpcomingRollcall(BaseModel):
 
 class WebGroupResponse(BaseModel):
     group_token: str
+    group_name: str = ""
     rollcalls: list[WebRollcallResponse]
     upcoming: list[UpcomingRollcall] = Field(default_factory=list)
 
@@ -130,6 +131,7 @@ class PushSubscribeKeys(BaseModel):
 class PushSubscribeRequest(BaseModel):
     endpoint: str = Field(..., min_length=10)
     keys: PushSubscribeKeys
+    tg_user_id: Optional[int] = Field(None, description="Verified Telegram user_id to link this subscription to an identity")
 
 
 class PushUnsubscribeRequest(BaseModel):
@@ -138,3 +140,12 @@ class PushUnsubscribeRequest(BaseModel):
 
 class VapidPublicKeyResponse(BaseModel):
     public_key: str
+
+
+class WebStartRollcallRequest(BaseModel):
+    tg_user_id: int = Field(..., description="Verified Telegram user_id of the admin starting the rollcall")
+    title: str = Field(..., min_length=1, max_length=200, description="Rollcall title")
+
+
+class WebAdminStatusResponse(BaseModel):
+    is_admin: bool

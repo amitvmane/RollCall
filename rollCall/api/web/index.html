@@ -23,6 +23,41 @@
   <link rel="stylesheet" href="/web/style.css"/>
 </head>
 <body>
+<!-- Home screen — shown when PWA opens with no URL token -->
+<div id="home-screen" class="hidden">
+  <div class="brand-bar">
+    <div class="brand-inner">
+      <img src="/web/logo.svg" alt="RollCall" class="brand-logo" width="28" height="28"/>
+      <span class="brand-name">RollCall</span>
+    </div>
+  </div>
+  <div id="home-content" style="padding:16px;max-width:480px;margin:0 auto">
+    <h2 style="font-size:1.1rem;font-weight:700;margin-bottom:4px">Your groups</h2>
+    <p style="font-size:.82rem;color:var(--sub);margin-bottom:16px">Tap a group to open its rollcall page.</p>
+    <div id="home-groups"></div>
+    <div style="margin-top:24px">
+      <div style="font-size:.82rem;font-weight:600;color:var(--sub);margin-bottom:8px">Open a new group by pasting its link</div>
+      <div style="display:flex;gap:8px">
+        <input id="home-link-input" type="url" placeholder="https://…/web/group/…" style="flex:1;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:.9rem;background:var(--card);color:var(--text)"/>
+        <button class="btn btn-primary" onclick="homeOpenLink()" style="padding:10px 16px">Go</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Start rollcall modal -->
+<div id="start-modal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;display:flex;align-items:flex-end;justify-content:center">
+  <div style="background:var(--card);border-radius:18px 18px 0 0;padding:20px 16px 32px;width:100%;max-width:480px">
+    <div style="font-size:1rem;font-weight:700;margin-bottom:16px">Start a Rollcall</div>
+    <label style="font-size:.8rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">Title</label>
+    <input id="start-title" type="text" placeholder="e.g. Sunday Cricket" maxlength="200" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:.95rem;background:var(--card);color:var(--text);margin-bottom:16px"/>
+    <div style="display:flex;gap:10px">
+      <button class="btn" id="start-cancel-btn" style="flex:1;padding:12px;background:var(--border);color:var(--text);border-radius:10px;font-weight:600" onclick="closeStartModal()">Cancel</button>
+      <button class="btn btn-primary" id="start-submit-btn" style="flex:1;padding:12px;border-radius:10px;font-weight:600" onclick="submitStartRollcall()">Start →</button>
+    </div>
+  </div>
+</div>
+
 <div id="tg-offline-bar" class="tg-offline-bar hidden" role="alert">
   ⚠️ <strong>Bot is offline</strong> — web voting still works, but Telegram notifications may be delayed.
   <button class="tg-offline-close" onclick="this.parentElement.classList.add('hidden')">✕</button>
@@ -126,6 +161,22 @@
 
     <!-- Stats card — group mode only, lazy-loaded after identity is known -->
     <div id="stats-card" class="card hidden"></div>
+
+    <!-- Admin action — start rollcall (visible only to web admins) -->
+    <div id="admin-card" class="card hidden" style="border:1.5px dashed var(--border)">
+      <div style="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:10px">Admin actions</div>
+      <button class="btn btn-primary" style="width:100%;padding:12px" onclick="openStartModal()">＋ Start Rollcall</button>
+    </div>
+
+    <!-- Bookmark section — always visible in group mode -->
+    <div id="bookmark-card" class="card hidden">
+      <div style="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:8px">📌 Permanent group link</div>
+      <p style="font-size:.8rem;color:var(--sub);margin-bottom:10px">Bookmark or share this link — it always works, even when Telegram is down.</p>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary" style="flex:1;padding:10px" onclick="copyGroupLink()">📋 Copy link</button>
+        <button class="btn" id="share-btn" style="flex:1;padding:10px;background:var(--border);color:var(--text);border-radius:10px;font-weight:600;display:none" onclick="shareGroupLink()">↗ Share</button>
+      </div>
+    </div>
   </div>
 </div>
 <div class="toast-local" id="toast-local" role="alert" aria-live="assertive" aria-atomic="true"></div>

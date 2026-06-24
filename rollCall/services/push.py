@@ -65,9 +65,9 @@ def get_public_key() -> str:
     return pub
 
 
-def subscribe(group_token: str, endpoint: str, p256dh: str, auth: str) -> None:
-    _db.save_push_subscription(group_token, endpoint, p256dh, auth)
-    logging.info("[push] subscribe: group=%s endpoint=%.40s", group_token[:12], endpoint)
+def subscribe(group_token: str, endpoint: str, p256dh: str, auth: str, tg_user_id: Optional[int] = None) -> None:
+    _db.save_push_subscription(group_token, endpoint, p256dh, auth, tg_user_id=tg_user_id)
+    logging.info("[push] subscribe: group=%s tg_user_id=%s endpoint=%.40s", group_token[:12], tg_user_id, endpoint)
 
 
 def unsubscribe(endpoint: str) -> None:
@@ -97,6 +97,34 @@ def _send_one(sub: dict, payload: str, priv_pem: str) -> None:
             logging.warning("[push] send failed %.40s: %s", sub["endpoint"], exc)
     except Exception:
         logging.exception("[push] send_one unexpected error %.40s", sub["endpoint"])
+
+
+async def notify_rollcall_ended(group_token: str, title: str, url: str) -> None:
+    """Fire push to all active subscribers when a rollcall closes."""
+    if not group_token:
+        return
+    try:
+        subs = _db.get_push_subscriptions(group_token)
+        if not subs:
+            return
+        priv_pem, _ = _load_or_create_vapid()
+        payload = json.dumps({
+            "title": f"📋 {title} closed",
+            "body": "The rollcall has ended — tap to see the final list",
+            "url": url,
+            "icon": "/web/logo.svg",
+            "badge": "/web/logo.svg",
+        })
+        loop = asyncio.get_running_loop()
+        tasks = [
+            loop.run_in_executor(_executor, _send_one, sub, payload, priv_pem)
+            for sub in subs
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        sent = sum(1 for r in results if not isinstance(r, Exception))
+        logging.info("[push] notify_ended: sent=%d/%d group=%s title=%r", sent, len(subs), group_token[:12], title)
+    except Exception:
+        logging.exception("[push] notify_rollcall_ended failed for group=%s", group_token[:12])
 
 
 async def notify_rollcall_started(group_token: str, title: str, url: str) -> None:

@@ -7,6 +7,12 @@ const IS_GROUP=URL_MODE==="group";
 const API_GROUP="/api/v1/web/group/"+URL_TOKEN;
 const LS_NAME="rollcall_name";
 const LS_NAME_OVERRIDE="rollcall_name_override";
+const LS_TG_USER_ID="rc_verified_tg_user_id";
+const LS_TG_NAME="rc_verified_tg_name";
+
+// Verified Telegram identity from deep-link verification (persists across sessions)
+let _verifiedUserId=parseInt(localStorage.getItem(LS_TG_USER_ID))||null;
+let _verifiedName=localStorage.getItem(LS_TG_NAME)||null;
 
 if(!URL_TOKEN||(URL_MODE!=="join"&&URL_MODE!=="group")){
   $("loading").classList.add("hidden");
@@ -100,7 +106,29 @@ function renderIdentity(){
       badge.innerHTML=`✈ ${esc(currentName)} <span style="font-size:.72rem;font-weight:500;opacity:.75">${label}</span>`;
     }else{
       badge.className="id-badge guest";
-      badge.innerHTML=`👤 ${esc(currentName)}`;
+      if(_verifiedUserId){
+        badge.innerHTML=`✅ ${esc(currentName)} <span style="font-size:.72rem;font-weight:500;opacity:.75">Telegram verified</span>`;
+      }else{
+        badge.innerHTML=`👤 ${esc(currentName)}`;
+      }
+    }
+    // Show "Verify with Telegram" only for non-TG, non-verified users in group mode
+    const actions=document.querySelector(".id-inner .id-actions");
+    if(actions){
+      let vBtn=document.getElementById("verify-tg-btn");
+      const needsVerify=IS_GROUP&&!TG_NAME&&!_verifiedUserId;
+      if(needsVerify&&!vBtn){
+        vBtn=document.createElement("button");
+        vBtn.id="verify-tg-btn";
+        vBtn.className="id-change";
+        vBtn.style.color="var(--tg-theme-link-color,#2563eb)";
+        vBtn.title="Link your Telegram identity to this browser";
+        vBtn.textContent="🔗 Verify with Telegram";
+        vBtn.onclick=()=>startTgVerify();
+        actions.appendChild(vBtn);
+      }else if(!needsVerify&&vBtn){
+        vBtn.remove();
+      }
     }
   }else{
     $("name-input-row").classList.remove("hidden");
@@ -111,6 +139,13 @@ function renderIdentity(){
 $("name-save-btn").addEventListener("click",saveName);
 $("name-input").addEventListener("keydown",e=>{if(e.key==="Enter")saveName()});
 $("name-change-btn").addEventListener("click",()=>{
+  if(_verifiedUserId){
+    const ok=confirm("Changing your name will unlink your Telegram verification.\nYou can re-verify after setting a new name.");
+    if(!ok)return;
+    _verifiedUserId=null;_verifiedName=null;
+    localStorage.removeItem(LS_TG_USER_ID);localStorage.removeItem(LS_TG_NAME);
+    _stopVerifyPoll();
+  }
   currentName="";
   if(TG_NAME)localStorage.removeItem(LS_NAME_OVERRIDE);
   else localStorage.removeItem(LS_NAME);
@@ -192,7 +227,7 @@ async function castVote(voteType){
       method:"POST",signal:ac.signal,headers:_hdrs,
       body:JSON.stringify({
         name:currentName,vote:voteType,
-        ...(TG_USER?.id?{tg_user_id:TG_USER.id}:{}),
+        ...(TG_USER?.id||_verifiedUserId?{tg_user_id:TG_USER?.id||_verifiedUserId}:{}),
         ...(comment?{comment}:{})
       })
     });
@@ -331,7 +366,7 @@ async function load(){
   $("loading").classList.add("hidden");
   $("main").classList.remove("hidden");
   renderIdentity();scheduleRefresh();
-  if(IS_GROUP)fetchPresence();
+  if(IS_GROUP){fetchPresence();_checkWebAdmin().catch(()=>{});}
 }
 
 async function loadJoin(){
@@ -385,6 +420,10 @@ async function loadGroup(){
   if(!res.ok){const d=await res.json().catch(()=>({}));throw new Error(d.detail||"This group link is invalid.");}
   groupData=await res.json();
   const rcs=groupData.rollcalls;
+  // Persist this group in recents + update page title
+  const gname=groupData.group_name||"RollCall Group";
+  _saveGroup(URL_TOKEN,gname);
+  if(gname)document.title=`RollCall — ${gname}`;
   renderUpcoming(groupData.upcoming||[]);
   if(!rcs.length){
     ["rc-title","rc-meta","count-badge"].forEach(id=>{$(id)&&($(id).textContent="")});
@@ -394,6 +433,11 @@ async function loadGroup(){
   }else if(rcs.length===1){$("tab-card").classList.add("hidden");renderRollcall(rcs[0]);}
   else{$("tab-card").classList.remove("hidden");if(activeTabIdx>=rcs.length)activeTabIdx=0;renderTabs(rcs);renderRollcall(rcs[activeTabIdx]);}
   loadWebStats();
+  // Show bookmark card + share button in group mode
+  const bc=document.getElementById("bookmark-card");
+  if(bc)bc.classList.remove("hidden");
+  const sb=document.getElementById("share-btn");
+  if(sb&&navigator.share)sb.style.display="";
 }
 
 // ── Auto-refresh ───────────────────────────────────────────────────────────
@@ -456,7 +500,7 @@ function showError(msg){$("loading").classList.add("hidden");$("main").classList
 $("retry-btn").addEventListener("click",()=>{$("error-screen").classList.add("hidden");$("loading").classList.remove("hidden");activeTabIdx=0;load();});
 
 // ── Stats ──────────────────────────────────────────────────────────────────
-const TG_USER_ID=TG_USER?.id||null;
+const TG_USER_ID=TG_USER?.id||_verifiedUserId||null;
 
 async function loadWebStats(){
   const sc=$("stats-card");if(!sc)return;
@@ -617,6 +661,74 @@ if (IS_GROUP) {
   }catch(_){}
 })();
 
+// ── Telegram deep-link identity verification ───────────────────────────────
+let _verifyCode=null, _verifyPollTimer=null;
+
+window.startTgVerify=async function(){
+  const btn=document.getElementById("verify-tg-btn");
+  if(btn){btn.textContent="⏳ Opening Telegram…";btn.disabled=true;}
+  try{
+    const res=await fetch("/api/v1/auth/tg-verify/start",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      signal:AbortSignal.timeout(8000),
+    });
+    if(!res.ok)throw new Error("Server error");
+    const{code,deep_link}=await res.json();
+    _verifyCode=code;
+    window.open(deep_link,"_blank");
+    toast("Telegram opened — tap the verify button, then return here",5000);
+    if(btn){btn.textContent="⏳ Waiting for Telegram…";}
+    _verifyPollTimer=setInterval(_pollVerify,2000);
+    // Auto-stop after 11 minutes (code TTL is 10 min)
+    setTimeout(()=>{
+      if(_verifyPollTimer){_stopVerifyPoll();if(btn){btn.textContent="🔗 Verify with Telegram";btn.disabled=false;}}
+    },660000);
+  }catch(e){
+    toast("Could not start verification — try again",3500);
+    if(btn){btn.textContent="🔗 Verify with Telegram";btn.disabled=false;}
+  }
+};
+
+async function _pollVerify(){
+  if(!_verifyCode)return;
+  try{
+    const res=await fetch(`/api/v1/auth/tg-verify/status/${_verifyCode}`,{signal:AbortSignal.timeout(5000)});
+    if(res.status===404||res.status===410){_stopVerifyPoll();toast("Verification link expired — try again",4000);renderIdentity();return;}
+    if(!res.ok)return;
+    const data=await res.json();
+    if(!data.verified)return;
+    _stopVerifyPoll();
+    _verifiedUserId=data.user_id;
+    _verifiedName=data.name;
+    localStorage.setItem(LS_TG_USER_ID,String(_verifiedUserId));
+    localStorage.setItem(LS_TG_NAME,_verifiedName);
+    toast(`✅ Verified as ${data.name}! Your votes now count as your Telegram identity.`,4000);
+    renderIdentity();
+    _checkWebAdmin().catch(()=>{});
+    // Re-link any existing push subscription with the now-known user ID
+    _relinkPushSubscription(_verifiedUserId);
+  }catch(_){}
+}
+
+function _stopVerifyPoll(){
+  if(_verifyPollTimer){clearInterval(_verifyPollTimer);_verifyPollTimer=null;}
+  _verifyCode=null;
+}
+
+async function _relinkPushSubscription(userId){
+  try{
+    if(!_swReg)return;
+    const existing=await _swReg.pushManager.getSubscription();
+    if(!existing)return;
+    const j=existing.toJSON();
+    await fetch(`/api/v1/web/group/${URL_TOKEN}/push-subscribe`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({endpoint:j.endpoint,keys:{p256dh:j.keys.p256dh,auth:j.keys.auth},tg_user_id:userId}),
+      signal:AbortSignal.timeout(5000),
+    });
+  }catch(_){}
+}
+
 // ── PWA: service worker + push notifications ───────────────────────────────
 let _swReg = null;
 
@@ -711,7 +823,11 @@ window.toggleNotifications = async function() {
     await fetch(`/api/v1/web/group/${URL_TOKEN}/push-subscribe`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ endpoint: j.endpoint, keys: { p256dh: j.keys.p256dh, auth: j.keys.auth } }),
+      body: JSON.stringify({
+        endpoint: j.endpoint,
+        keys: { p256dh: j.keys.p256dh, auth: j.keys.auth },
+        ...(TG_USER?.id||_verifiedUserId?{tg_user_id:TG_USER?.id||_verifiedUserId}:{}),
+      }),
       signal: AbortSignal.timeout(5000),
     });
     toast("🔔 You'll be notified when a rollcall opens!", 3500);
@@ -733,5 +849,129 @@ window.addEventListener("beforeinstallprompt", e => {
   _installPrompt = e;
 });
 
-if(URL_TOKEN&&(URL_MODE==="join"||URL_MODE==="group"))load();
+// ── Recent groups (localStorage) ───────────────────────────────────────────
+const LS_GROUPS="rc_groups";
+
+function _loadGroups(){
+  try{return JSON.parse(localStorage.getItem(LS_GROUPS)||"[]");}catch(_){return[];}
+}
+function _saveGroup(token,name){
+  const groups=_loadGroups().filter(g=>g.token!==token);
+  groups.unshift({token,name:name||"Group",last_visit:Date.now()});
+  localStorage.setItem(LS_GROUPS,JSON.stringify(groups.slice(0,10)));
+}
+function _removeGroup(token){
+  localStorage.setItem(LS_GROUPS,JSON.stringify(_loadGroups().filter(g=>g.token!==token)));
+}
+
+// ── Home screen (no URL token) ────────────────────────────────────────────
+function renderHomeScreen(){
+  const hs=document.getElementById("home-screen");
+  if(!hs)return;
+  hs.classList.remove("hidden");
+  document.getElementById("app").classList.add("hidden");
+  const groups=_loadGroups();
+  const container=document.getElementById("home-groups");
+  if(!container)return;
+  if(!groups.length){
+    container.innerHTML='<p style="color:var(--sub);font-size:.85rem">No saved groups yet. Paste a group link below.</p>';
+    return;
+  }
+  container.innerHTML=groups.map(g=>`
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border)">
+      <div>
+        <div style="font-weight:600;font-size:.95rem">${esc(g.name)}</div>
+        <div style="font-size:.75rem;color:var(--sub)">${new Date(g.last_visit).toLocaleDateString()}</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary" style="padding:8px 14px;font-size:.85rem" onclick="window.location.href='/web/group/${esc(g.token)}'">Open</button>
+        <button class="btn" style="padding:8px 10px;font-size:.85rem;background:var(--border);color:var(--sub);border-radius:8px" onclick="_removeGroup('${esc(g.token)}');renderHomeScreen()">✕</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+window.homeOpenLink=function(){
+  const val=(document.getElementById("home-link-input")?.value||"").trim();
+  if(!val){return;}
+  // Accept full URL or just the token
+  const m=val.match(/\/web\/group\/([a-f0-9]+)/);
+  if(m){window.location.href=`/web/group/${m[1]}`;return;}
+  // Try as a bare token
+  if(/^[a-f0-9]{24,}$/.test(val)){window.location.href=`/web/group/${val}`;return;}
+  toast("That doesn't look like a valid group link.",3500);
+};
+
+// ── Web admin check + start rollcall ─────────────────────────────────────
+let _isWebAdmin=false;
+
+async function _checkWebAdmin(){
+  if(!IS_GROUP||!_verifiedUserId)return;
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/admin-status?tg_user_id=${_verifiedUserId}`,{signal:AbortSignal.timeout(5000)});
+    if(!res.ok)return;
+    const d=await res.json();
+    _isWebAdmin=!!d.is_admin;
+    const card=document.getElementById("admin-card");
+    if(card)card.classList.toggle("hidden",!_isWebAdmin);
+  }catch(_){}
+}
+
+window.openStartModal=function(){
+  const m=document.getElementById("start-modal");
+  if(m){m.style.display="flex";m.classList.remove("hidden");}
+  const inp=document.getElementById("start-title");
+  if(inp){inp.value="";inp.focus();}
+};
+window.closeStartModal=function(){
+  const m=document.getElementById("start-modal");
+  if(m){m.style.display="none";}
+};
+window.submitStartRollcall=async function(){
+  if(!_verifiedUserId){toast("Verify your Telegram identity first.",3500);return;}
+  const title=(document.getElementById("start-title")?.value||"").trim();
+  if(!title){toast("Enter a title for the rollcall.",2500);return;}
+  const btn=document.getElementById("start-submit-btn");
+  if(btn){btn.disabled=true;btn.textContent="Starting…";}
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/start-rollcall`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({tg_user_id:_verifiedUserId,title}),
+      signal:AbortSignal.timeout(10000),
+    });
+    if(!res.ok){
+      const d=await res.json().catch(()=>({}));
+      throw new Error(d.detail||"Failed to start rollcall");
+    }
+    closeStartModal();
+    toast("✅ Rollcall started!",2500);
+    // Reload group data to show the new rollcall
+    activeTabIdx=0;
+    await loadGroup();
+  }catch(e){
+    toast(e.message||"Could not start rollcall",4000);
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent="Start →";}
+  }
+};
+
+// ── Bookmark / share group URL ────────────────────────────────────────────
+window.copyGroupLink=function(){
+  const url=window.location.origin+`/web/group/${URL_TOKEN}`;
+  if(navigator.clipboard){
+    navigator.clipboard.writeText(url).then(()=>toast("📋 Link copied — share it!",2800)).catch(()=>toast(url,5000));
+  }else{toast(url,5000);}
+};
+window.shareGroupLink=function(){
+  const url=window.location.origin+`/web/group/${URL_TOKEN}`;
+  if(navigator.share){navigator.share({title:"RollCall",url}).catch(()=>{});}
+};
+
+// ── Entry point ────────────────────────────────────────────────────────────
+if(URL_TOKEN&&(URL_MODE==="join"||URL_MODE==="group")){
+  load();
+}else{
+  // No token in URL — show home screen
+  renderHomeScreen();
+}
 })();

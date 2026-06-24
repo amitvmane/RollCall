@@ -109,6 +109,32 @@ def _suggest_command(query):
     return None
 
 
+@bot.message_handler(func=lambda m: (
+    m.chat.type == "private"
+    and m.text.split()[0].split("@")[0].lower() == "/start"
+    and len(m.text.split()) > 1
+    and m.text.split()[1].startswith("v_")
+))
+async def handle_tg_verify(message):
+    """Telegram deep-link identity verification: /start v_{code}"""
+    import db as _db
+    code = message.text.split()[1][2:]  # strip "v_" prefix
+    user = message.from_user
+    tg_name = user.first_name or (f"@{user.username}" if user.username else str(user.id))
+    success = _db.mark_web_verify_token(code, user.id, tg_name)
+    if success:
+        await bot.send_message(
+            message.chat.id,
+            f"✅ *{tg_name}*, your browser has been verified.\n\nReturn to the web page — it will update automatically.",
+            parse_mode="Markdown",
+        )
+    else:
+        await bot.send_message(
+            message.chat.id,
+            "⚠️ This verification link has expired or already been used. Go back to the web page and try again.",
+        )
+
+
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/start")
 async def welcome_and_explanation(message):
     cid = message.chat.id

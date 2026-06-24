@@ -113,6 +113,22 @@ async def _push_rollcall_started(chat_id: int, title: str) -> None:
         logging.exception("[push] _push_rollcall_started failed chat=%s", chat_id)
 
 
+async def _push_rollcall_ended(chat_id: int, title: str) -> None:
+    """Background task: send web push when a rollcall closes."""
+    try:
+        import os as _os
+        from services import push as push_svc
+        chat = manager.get_chat(chat_id)
+        group_token = chat.get("group_web_token") if chat else None
+        if not group_token:
+            return
+        web_base = _os.environ.get("WEB_BASE_URL", "").rstrip("/")
+        url = f"{web_base}/web/group/{group_token}" if web_base else f"/web/group/{group_token}"
+        await push_svc.notify_rollcall_ended(group_token, title, url)
+    except Exception:
+        logging.exception("[push] _push_rollcall_ended failed chat=%s", chat_id)
+
+
 async def end_rollcall(
     chat_id: int,
     rc_number: int,
@@ -208,6 +224,10 @@ async def end_rollcall(
         chat_id, ended_by_user_id, ended_by_name,
         "end_rollcall", target_name=title,
     )
+
+    # Fire web-push to subscribers — non-blocking, best-effort
+    from bot_state import _log_task_exc
+    asyncio.create_task(_push_rollcall_ended(chat_id, title)).add_done_callback(_log_task_exc)
 
     # Renumber map: after removing rollcall #N, every later rollcall shifts
     # down by 1. Adapters use this to update panel msg ids and announce

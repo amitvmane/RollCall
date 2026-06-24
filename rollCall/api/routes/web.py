@@ -30,11 +30,13 @@ from api.schemas.web import (
     PushSubscribeRequest,
     PushUnsubscribeRequest,
     VapidPublicKeyResponse,
+    WebAdminStatusResponse,
     WebGroupResponse,
     WebGroupStatsResponse,
     WebHeartbeatRequest,
     WebPresenceResponse,
     WebRollcallResponse,
+    WebStartRollcallRequest,
     WebVoteRequest,
     UpcomingRollcall,
 )
@@ -65,7 +67,7 @@ async def push_subscribe(
     chat = _db.get_chat_by_group_web_token(group_token)
     if not chat:
         raise HTTPException(404, "Invalid group token")
-    push_svc.subscribe(group_token, body.endpoint, body.keys.p256dh, body.keys.auth)
+    push_svc.subscribe(group_token, body.endpoint, body.keys.p256dh, body.keys.auth, tg_user_id=body.tg_user_id)
 
 
 @router.post(
@@ -169,6 +171,56 @@ async def get_web_group(
 ) -> WebGroupResponse:
     data = web_svc.get_rollcalls_by_group_token(group_token)
     return WebGroupResponse(**data)
+
+
+# ── Web admin endpoints ───────────────────────────────────────────────────────
+
+@router.get(
+    "/web/group/{group_token}/admin-status",
+    response_model=WebAdminStatusResponse,
+    summary="Check whether a verified Telegram user is a web admin for this group",
+)
+async def web_admin_status(
+    group_token: str = Path(...),
+    tg_user_id: int = 0,
+) -> WebAdminStatusResponse:
+    chat = _db.get_chat_by_group_web_token(group_token)
+    if not chat or not tg_user_id:
+        return WebAdminStatusResponse(is_admin=False)
+    return WebAdminStatusResponse(
+        is_admin=_db.is_web_admin(int(chat["chat_id"]), tg_user_id)
+    )
+
+
+@router.post(
+    "/web/group/{group_token}/start-rollcall",
+    response_model=WebRollcallResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Start a rollcall via web (requires web-admin identity)",
+)
+async def web_start_rollcall(
+    body: WebStartRollcallRequest,
+    group_token: str = Path(...),
+) -> WebRollcallResponse:
+    chat = _db.get_chat_by_group_web_token(group_token)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Invalid group token")
+
+    chat_id = int(chat["chat_id"])
+    if not _db.is_web_admin(chat_id, body.tg_user_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not a web admin for this group. Run /weblink in Telegram first.",
+        )
+
+    from services import rollcalls as rc_svc
+    result = await rc_svc.start_rollcall(
+        chat_id=chat_id,
+        title=body.title,
+        started_by_user_id=body.tg_user_id,
+        started_by_name="(web)",
+    )
+    return WebRollcallResponse(**result)
 
 
 # ── Per-rollcall endpoints (expire with rollcall) ────────────────────────────

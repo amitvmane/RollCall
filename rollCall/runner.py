@@ -424,6 +424,22 @@ async def memory_prune_loop(interval_seconds: int = 600):
             # Drop stale web-presence sessions
             presence_svc.prune()
 
+            # Purge expired Telegram deep-link verify tokens (TTL 10 min, purge after 1 h)
+            try:
+                from db import get_connection, release_connection, db_type as _db_type
+                _conn = get_connection()
+                _cur = _conn.cursor()
+                if _db_type == 'postgresql':
+                    _cur.execute("DELETE FROM web_verify_tokens WHERE expires_at < NOW() - INTERVAL '1 hour'")
+                else:
+                    _cur.execute("DELETE FROM web_verify_tokens WHERE expires_at < datetime('now', '-1 hour')")
+                _conn.commit()
+                _cur.close()
+                if _db_type == 'postgresql':
+                    release_connection(_conn)
+            except Exception:
+                logger.exception("Error pruning web_verify_tokens")
+
             logger.debug(
                 f"prune: rl={len(_rate_limits)} buzz={len(_buzz_cooldowns)} "
                 f"pd={len(_pending_deletes)} po={len(_pending_overrides)} "

@@ -1007,6 +1007,75 @@ def _run_migrations(conn, cursor):
     except Exception:
         conn.rollback()
 
+    # tg_user_id on push_subscriptions — links a verified Telegram identity to a push endpoint
+    if db_type == 'postgresql':
+        try:
+            cursor.execute("ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS tg_user_id BIGINT DEFAULT NULL")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    else:
+        try:
+            cursor.execute("ALTER TABLE push_subscriptions ADD COLUMN tg_user_id INTEGER DEFAULT NULL")
+            conn.commit()
+        except Exception:
+            conn.rollback()  # column already exists — safe to ignore
+
+    # web_admins — Telegram users granted web-admin rights for a chat (cached from /weblink caller)
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS web_admins (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id     INTEGER NOT NULL,
+                tg_user_id  INTEGER NOT NULL,
+                tg_name     TEXT,
+                added_at    TEXT DEFAULT (datetime('now')),
+                UNIQUE(chat_id, tg_user_id)
+            )
+        """ if db_type != 'postgresql' else """
+            CREATE TABLE IF NOT EXISTS web_admins (
+                id          SERIAL PRIMARY KEY,
+                chat_id     BIGINT NOT NULL,
+                tg_user_id  BIGINT NOT NULL,
+                tg_name     TEXT,
+                added_at    TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE(chat_id, tg_user_id)
+            )
+        """)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+    try:
+        cursor.execute("CREATE INDEX IF NOT EXISTS web_admins_chat ON web_admins(chat_id)")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+
+    # web_verify_tokens — one-time codes for the Telegram deep-link identity bridge
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS web_verify_tokens (
+                code        TEXT PRIMARY KEY,
+                tg_user_id  INTEGER DEFAULT NULL,
+                tg_name     TEXT DEFAULT NULL,
+                expires_at  TEXT NOT NULL,
+                used_at     TEXT DEFAULT NULL,
+                created_at  TEXT DEFAULT (datetime('now'))
+            )
+        """ if db_type != 'postgresql' else """
+            CREATE TABLE IF NOT EXISTS web_verify_tokens (
+                code        TEXT PRIMARY KEY,
+                tg_user_id  BIGINT DEFAULT NULL,
+                tg_name     TEXT DEFAULT NULL,
+                expires_at  TIMESTAMPTZ NOT NULL,
+                used_at     TIMESTAMPTZ DEFAULT NULL,
+                created_at  TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+
 
 def get_or_create_chat(chat_id: int) -> Dict:
     """Get or create chat settings"""
@@ -4072,7 +4141,7 @@ def set_system_config(key: str, value: str) -> None:
             release_connection(conn)
 
 
-def save_push_subscription(group_token: str, endpoint: str, p256dh: str, auth: str) -> None:
+def save_push_subscription(group_token: str, endpoint: str, p256dh: str, auth: str, tg_user_id: Optional[int] = None) -> None:
     """Upsert a push subscription for a group. Re-activates if previously unsubscribed."""
     conn = get_connection()
     cursor = None
@@ -4081,20 +4150,21 @@ def save_push_subscription(group_token: str, endpoint: str, p256dh: str, auth: s
         ph = '%s' if db_type == 'postgresql' else '?'
         if db_type == 'postgresql':
             cursor.execute(f"""
-                INSERT INTO push_subscriptions (group_token, endpoint, p256dh, auth, active)
-                VALUES ({ph}, {ph}, {ph}, {ph}, TRUE)
+                INSERT INTO push_subscriptions (group_token, endpoint, p256dh, auth, active, tg_user_id)
+                VALUES ({ph}, {ph}, {ph}, {ph}, TRUE, {ph})
                 ON CONFLICT (endpoint) DO UPDATE SET
                     group_token = EXCLUDED.group_token,
                     p256dh      = EXCLUDED.p256dh,
                     auth        = EXCLUDED.auth,
                     active      = TRUE,
+                    tg_user_id  = COALESCE(EXCLUDED.tg_user_id, push_subscriptions.tg_user_id),
                     created_at  = CURRENT_TIMESTAMP
-            """, (group_token, endpoint, p256dh, auth))
+            """, (group_token, endpoint, p256dh, auth, tg_user_id))
         else:
             cursor.execute(f"""
-                INSERT OR REPLACE INTO push_subscriptions (group_token, endpoint, p256dh, auth, active)
-                VALUES ({ph}, {ph}, {ph}, {ph}, 1)
-            """, (group_token, endpoint, p256dh, auth))
+                INSERT OR REPLACE INTO push_subscriptions (group_token, endpoint, p256dh, auth, active, tg_user_id)
+                VALUES ({ph}, {ph}, {ph}, {ph}, 1, {ph})
+            """, (group_token, endpoint, p256dh, auth, tg_user_id))
         conn.commit()
     except Exception:
         conn.rollback()
@@ -4151,6 +4221,180 @@ def delete_push_subscription(endpoint: str) -> None:
     except Exception:
         conn.rollback()
         logging.exception("delete_push_subscription failed")
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def create_web_verify_token(code: str, expires_at: "datetime") -> None:
+    """Store a new one-time verification code."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(
+            f"INSERT INTO web_verify_tokens (code, expires_at) VALUES ({ph}, {ph})",
+            (code, expires_at.isoformat()),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logging.exception("create_web_verify_token failed")
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def mark_web_verify_token(code: str, tg_user_id: int, tg_name: str) -> bool:
+    """Bot calls this once the user opens the deep link. Returns True if code was found and unmarked."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        now = __import__('datetime').datetime.utcnow().isoformat()
+        if db_type == 'postgresql':
+            cursor.execute(
+                f"UPDATE web_verify_tokens SET tg_user_id={ph}, tg_name={ph} "
+                f"WHERE code={ph} AND tg_user_id IS NULL AND used_at IS NULL AND expires_at > {ph}",
+                (tg_user_id, tg_name, code, now),
+            )
+        else:
+            cursor.execute(
+                f"UPDATE web_verify_tokens SET tg_user_id={ph}, tg_name={ph} "
+                f"WHERE code={ph} AND tg_user_id IS NULL AND used_at IS NULL AND expires_at > {ph}",
+                (tg_user_id, tg_name, code, now),
+            )
+        updated = cursor.rowcount > 0
+        conn.commit()
+        return updated
+    except Exception:
+        conn.rollback()
+        logging.exception("mark_web_verify_token failed")
+        return False
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def get_web_verify_token(code: str) -> Optional[Dict]:
+    """Return the token row if it exists and is not expired, else None."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        now = __import__('datetime').datetime.utcnow().isoformat()
+        cursor.execute(
+            f"SELECT code, tg_user_id, tg_name, used_at FROM web_verify_tokens "
+            f"WHERE code={ph} AND expires_at > {ph}",
+            (code, now),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        if isinstance(row, dict):
+            return dict(row)
+        return {'code': row[0], 'tg_user_id': row[1], 'tg_name': row[2], 'used_at': row[3]}
+    except Exception:
+        logging.exception("get_web_verify_token failed")
+        return None
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def consume_web_verify_token(code: str) -> Optional[Dict]:
+    """Mark the token used and return {tg_user_id, tg_name}, or None if not ready."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        now = __import__('datetime').datetime.utcnow().isoformat()
+        cursor.execute(
+            f"UPDATE web_verify_tokens SET used_at={ph} "
+            f"WHERE code={ph} AND tg_user_id IS NOT NULL AND used_at IS NULL AND expires_at > {ph}",
+            (now, code, now),
+        )
+        if cursor.rowcount == 0:
+            conn.commit()
+            return None
+        conn.commit()
+        cursor.execute(
+            f"SELECT tg_user_id, tg_name FROM web_verify_tokens WHERE code={ph}",
+            (code,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        if isinstance(row, dict):
+            return {'tg_user_id': row['tg_user_id'], 'tg_name': row['tg_name']}
+        return {'tg_user_id': row[0], 'tg_name': row[1]}
+    except Exception:
+        conn.rollback()
+        logging.exception("consume_web_verify_token failed")
+        return None
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def set_web_admin(chat_id: int, tg_user_id: int, tg_name: str) -> None:
+    """Upsert a web admin for a chat (called when admin runs /weblink)."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        if db_type == 'postgresql':
+            cursor.execute(
+                f"INSERT INTO web_admins (chat_id, tg_user_id, tg_name) VALUES ({ph},{ph},{ph}) "
+                f"ON CONFLICT (chat_id, tg_user_id) DO UPDATE SET tg_name = EXCLUDED.tg_name, added_at = NOW()",
+                (chat_id, tg_user_id, tg_name),
+            )
+        else:
+            cursor.execute(
+                f"INSERT OR REPLACE INTO web_admins (chat_id, tg_user_id, tg_name) VALUES ({ph},{ph},{ph})",
+                (chat_id, tg_user_id, tg_name),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logging.exception("set_web_admin failed")
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def is_web_admin(chat_id: int, tg_user_id: int) -> bool:
+    """Return True if the user is a cached web admin for this chat."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(
+            f"SELECT 1 FROM web_admins WHERE chat_id={ph} AND tg_user_id={ph}",
+            (chat_id, tg_user_id),
+        )
+        return cursor.fetchone() is not None
+    except Exception:
+        logging.exception("is_web_admin failed")
+        return False
     finally:
         if cursor is not None:
             cursor.close()

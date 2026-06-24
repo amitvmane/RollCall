@@ -32,7 +32,7 @@ from exceptions import (
     timeError,
 )
 from api.rate_limit import rate_limit_middleware
-from api.routes import admin, auth, groups, health, proxy_votes, rollcalls, stats, templates, votes, web as web_routes
+from api.routes import admin, auth, groups, health, proxy_votes, rollcalls, stats, templates, tg_verify, votes, web as web_routes
 from api.schemas.common import ErrorResponse
 
 
@@ -130,6 +130,7 @@ def create_app() -> FastAPI:
 
     # Route mounting
     app.include_router(auth.router, prefix=API_PREFIX, tags=["auth"])
+    app.include_router(tg_verify.router, prefix=API_PREFIX, tags=["auth"])
     app.include_router(health.router, prefix=API_PREFIX, tags=["health"])
     app.include_router(rollcalls.router, prefix=API_PREFIX, tags=["rollcalls"])
     app.include_router(votes.router, prefix=API_PREFIX, tags=["votes"])

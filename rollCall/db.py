@@ -3938,6 +3938,34 @@ def get_active_members(chat_id: int) -> List[Dict]:
             release_connection(conn)
 
 
+def get_member_display_name(chat_id: int, user_id: int) -> Optional[str]:
+    """Return the stored first_name for a verified user in a chat, or None.
+
+    Used by the web voting layer to enforce the canonical Telegram display name
+    so that a crafted request with a valid id_token but a forged name field
+    cannot corrupt the attendance list.
+    """
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(
+            f"SELECT first_name FROM chat_members WHERE chat_id = {ph} AND user_id = {ph}",
+            (chat_id, user_id),
+        )
+        row = cursor.fetchone()
+        return row["first_name"] if row else None
+    except Exception as e:
+        logging.error(f"Error getting member display name: {e}")
+        return None
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
 # ────────────────────────────────────────────────────────────────────────
 # api_tokens CRUD (REST API auth — PR 3)
 # ────────────────────────────────────────────────────────────────────────

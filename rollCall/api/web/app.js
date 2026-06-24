@@ -132,7 +132,7 @@ function renderIdentity(){
     // Style change button: lock icon + muted when identity is Telegram-verified
     const changeBtn=$("name-change-btn");
     if(changeBtn){
-      if(_verifiedUserId){
+      if(_verifiedUserId||(TG_NAME&&_idToken)){
         changeBtn.textContent="🔒 Locked";
         changeBtn.style.opacity="0.55";
         changeBtn.title="Your name is locked to your Telegram identity. Click to unlink.";
@@ -169,6 +169,12 @@ function renderIdentity(){
 $("name-save-btn").addEventListener("click",saveName);
 $("name-input").addEventListener("keydown",e=>{if(e.key==="Enter")saveName()});
 $("name-change-btn").addEventListener("click",()=>{
+  if(TG_NAME&&_idToken){
+    // Inside Telegram Mini App: name is set by Telegram and cannot be changed
+    // while the user is authenticated. There's no local override possible.
+    toast("Your name is set by Telegram and cannot be changed here.",3500);
+    return;
+  }
   if(_verifiedUserId){
     const ok=confirm("Changing your name will unlink your Telegram verification.\nYou can re-verify after setting a new name.");
     if(!ok)return;

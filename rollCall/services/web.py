@@ -141,8 +141,17 @@ async def vote_by_token(
 
     is_real_user = isinstance(tg_user_id, int) and tg_user_id > 0
 
-    # For proxy votes, normalise to canonical casing of any existing same-name entry
-    if not is_real_user:
+    if is_real_user:
+        # Prefer the canonical Telegram display name stored in chat_members over
+        # whatever the client submitted. This prevents a crafted request with a
+        # valid id_token but a forged name field from corrupting the attendance
+        # list. Falls back to the submitted name for first-time web voters who
+        # haven't voted via the bot yet and have no chat_members record.
+        canonical = db.get_member_display_name(chat_id, tg_user_id)
+        if canonical:
+            name = canonical
+    else:
+        # For proxy votes, normalise to canonical casing of any existing same-name entry
         name = _find_canonical_name(rc_pre, name)
 
     try:

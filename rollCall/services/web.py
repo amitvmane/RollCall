@@ -192,11 +192,11 @@ async def vote_by_token(
             else:
                 await proxy_svc.set_maybe_for(chat_id, 0, "web", name, rc_number=rc_index, comment=comment)
     except Exception as e:
-        # alreadyInList / duplicateProxy / repeatlyName all mean the user is
-        # already in the target bucket — treat as idempotent success so the
-        # UI gets back fresh state rather than an error toast.
-        from exceptions import alreadyInList, duplicateProxy, repeatlyName
-        if not isinstance(e, (alreadyInList, duplicateProxy, repeatlyName)):
+        # duplicateProxy / repeatlyName — proxy double-tap, treat as idempotent.
+        # alreadyInList is NOT caught here: a verified user who is already IN/OUT
+        # should see the same "already IN" message as they would from the bot.
+        from exceptions import duplicateProxy, repeatlyName
+        if not isinstance(e, (duplicateProxy, repeatlyName)):
             raise
 
     # Re-resolve so we return the updated state

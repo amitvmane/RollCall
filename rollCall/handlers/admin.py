@@ -308,31 +308,36 @@ async def gentoken_command(message):
         expires_at=expires_at,
     )
 
+    # Build the DM in HTML, not Markdown: the token is `rc_<hex>` and contains
+    # an underscore, which legacy Markdown reads as an unterminated italic when
+    # the token appears in a plain URL (the one-click login link) — producing
+    # "can't parse entities". HTML escapes cleanly and handles URLs in <a href>.
     web_base = os.environ.get("WEB_BASE_URL", "").rstrip("/")
     if web_base:
-        # Pass the token in the URL fragment, not the query string: fragments
-        # are never sent to the server (so the token can't land in access logs
-        # or a Referer header) — the SPA reads it client-side from location.hash.
+        # Token goes in the URL fragment (#token=), never the query string, so
+        # it can't land in server access logs or a Referer header — the SPA
+        # reads it client-side from location.hash.
+        login_url = f"{web_base}/admin/#token={token}"
         dashboard_line = (
-            f"\n🖥 One-click login: {web_base}/admin/#token={token}\n"
-            f"_(link logs you in directly — don't share it)_\n"
+            f"\n🖥 <a href=\"{html.escape(login_url, quote=True)}\">One-click login</a>\n"
+            f"<i>(link logs you in directly — don't share it)</i>\n"
         )
     else:
         dashboard_line = ""
 
     dm_text = (
-        f"🔑 *API Token — {_esc_md(chat_title)}*\n\n"
-        f"`{token}`\n\n"
-        f"⚠️ _Save this now — it won't be shown again._\n\n"
-        f"*Chat ID:* `{cid}`\n"
-        f"*Scopes:* read, vote, admin\n"
-        f"*Expires:* {expires_at.strftime('%d %b %Y')}\n"
+        f"🔑 <b>API Token — {html.escape(chat_title)}</b>\n\n"
+        f"<code>{html.escape(token)}</code>\n\n"
+        f"⚠️ <i>Save this now — it won't be shown again.</i>\n\n"
+        f"<b>Chat ID:</b> <code>{cid}</code>\n"
+        f"<b>Scopes:</b> read, vote, admin\n"
+        f"<b>Expires:</b> {expires_at.strftime('%d %b %Y')}\n"
         f"{dashboard_line}\n"
         f"When it expires, run /gentoken in the group again."
     )
 
     try:
-        await bot.send_message(uid, dm_text, parse_mode="Markdown")
+        await bot.send_message(uid, dm_text, parse_mode="HTML")
         await bot.send_message(
             cid,
             f"✅ Token sent to you via DM, {requester_name}.\n"

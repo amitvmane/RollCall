@@ -223,6 +223,36 @@ class TestVoteWebRollcall(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Web → Telegram mirroring: web actions must reflect in the group chat
+# ---------------------------------------------------------------------------
+
+@unittest.skipUnless(FASTAPI_AVAILABLE, "fastapi not installed")
+class TestWebActionMirrorsToTelegram(unittest.TestCase):
+
+    def test_web_vote_refreshes_telegram_panel(self):
+        vote_fn = AsyncMock(return_value=_WEB_RC_DICT)
+        mirror = AsyncMock()
+        with patch("services.web.vote_by_token", vote_fn), \
+             patch("services.web.locate_rollcall", return_value=(-100200, 2)), \
+             patch("api.routes.web._mirror_panel_to_telegram", mirror):
+            resp = _client().post("/api/v1/web/tok/vote",
+                                  json={"name": "Alice", "vote": "in"})
+        self.assertEqual(resp.status_code, 200)
+        mirror.assert_awaited_once_with(-100200, 2)
+
+    def test_web_vote_unresolvable_token_skips_mirror(self):
+        vote_fn = AsyncMock(return_value=_WEB_RC_DICT)
+        mirror = AsyncMock()
+        with patch("services.web.vote_by_token", vote_fn), \
+             patch("services.web.locate_rollcall", return_value=None), \
+             patch("api.routes.web._mirror_panel_to_telegram", mirror):
+            resp = _client().post("/api/v1/web/tok/vote",
+                                  json={"name": "Alice", "vote": "in"})
+        self.assertEqual(resp.status_code, 200)
+        mirror.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
 # GET /api/v1/web/group/{group_token}  — group state
 # ---------------------------------------------------------------------------
 

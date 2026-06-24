@@ -15,6 +15,7 @@ Push notifications:
   GET  /api/v1/web/group/{token}/manifest.json   → dynamic PWA manifest
 """
 import json
+import logging
 import os
 from typing import Optional
 
@@ -43,6 +44,24 @@ from api.schemas.web import (
 )
 
 router = APIRouter()
+
+
+async def _mirror_panel_to_telegram(chat_id: int, rc_number_1based: int, force_new: bool = False) -> None:
+    """Reflect a web/portal/Mini-App rollcall action in the Telegram group chat.
+
+    Best-effort and fully swallowed: if Telegram is unreachable the web action
+    has already succeeded in the DB, and staying usable while Telegram is down
+    is the entire point of the web surface. Reuses the bot's own panel
+    machinery so the mirrored panel is identical to a native one.
+    """
+    try:
+        from handlers.lifecycle import show_panel_for_rollcall
+        await show_panel_for_rollcall(chat_id, rc_number_1based, force_new=force_new)
+    except Exception:
+        logging.debug(
+            "[web] telegram panel mirror skipped chat=%s rc=%s",
+            chat_id, rc_number_1based, exc_info=True,
+        )
 
 
 # ── VAPID / push endpoints ────────────────────────────────────────────────────
@@ -238,6 +257,11 @@ async def web_start_rollcall(
     rc = _mgr.get_rollcall(chat_id, result["rc_index"])
     if rc is None:
         raise HTTPException(status_code=500, detail="Rollcall created but could not be retrieved")
+
+    # Post the panel into the Telegram group so a web-started rollcall is
+    # visible and votable there too (best-effort — see helper).
+    await _mirror_panel_to_telegram(chat_id, result["rc_index"] + 1, force_new=True)
+
     return WebRollcallResponse(**_serialize_web_rollcall(rc))
 
 
@@ -273,4 +297,10 @@ async def vote_web(
         token, body.name, body.vote,
         tg_user_id=verified_user_id, comment=body.comment,
     )
+
+    # Reflect the web vote on the Telegram panel for this rollcall (best-effort).
+    loc = web_svc.locate_rollcall(token)
+    if loc:
+        await _mirror_panel_to_telegram(loc[0], loc[1])
+
     return WebRollcallResponse(**data)

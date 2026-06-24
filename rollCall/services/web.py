@@ -85,6 +85,19 @@ def get_rollcall_by_token(token: str) -> dict:
     return _serialize_web_rollcall(rc)
 
 
+def locate_rollcall(token: str):
+    """Return (chat_id, rc_number_1based) for a per-rollcall token, or None.
+
+    Lets the Telegram-aware route layer mirror a web action back to the group
+    chat without this framework-agnostic service touching the bot directly.
+    """
+    try:
+        chat_id, idx, _ = _resolve_rc(token)
+        return chat_id, idx + 1
+    except Exception:
+        return None
+
+
 def _find_canonical_name(rc, name: str) -> str:
     """Return the existing display name from any list that matches case-insensitively, else name as-is."""
     n_lower = name.lower()

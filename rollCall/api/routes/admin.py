@@ -25,6 +25,7 @@ from api.schemas.admin import (
     SetStatusRequest,
     SetStatusResponse,
 )
+from api.telegram_mirror import mirror_panel_to_telegram
 
 
 router = APIRouter()
@@ -51,6 +52,7 @@ async def delete_user(
             admin_user_id=body.admin_user_id,
             admin_name=body.admin_name,
         )
+    await mirror_panel_to_telegram(chat_id, rc_number)
     return DeleteUserResponse(**result)
 
 
@@ -76,4 +78,5 @@ async def set_user_status(
             admin_user_id=body.admin_user_id,
             admin_name=body.admin_name,
         )
+    await mirror_panel_to_telegram(chat_id, rc_number)
     return SetStatusResponse(**result)

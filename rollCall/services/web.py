@@ -147,9 +147,27 @@ async def vote_by_token(
         # valid id_token but a forged name field from corrupting the attendance
         # list. Falls back to the submitted name for first-time web voters who
         # haven't voted via the bot yet and have no chat_members record.
+        submitted_name = name  # save original before potential override
         canonical = db.get_member_display_name(chat_id, tg_user_id)
         if canonical:
             name = canonical
+
+        # If the user previously voted as a proxy under their display name (e.g.
+        # they typed their name before verifying via Telegram), remove that stale
+        # proxy entry now so the real-user vote replaces it rather than appearing
+        # as a duplicate. Check both the canonical name and the originally
+        # submitted name to cover the common case.
+        async with manager.get_chat_write_lock(chat_id):
+            rc_check = manager.get_rollcall(chat_id, rc_index)
+            if rc_check is not None:
+                for check_name in {name.lower(), submitted_name.lower()}:
+                    for lst in (rc_check.inList, rc_check.outList, rc_check.maybeList, rc_check.waitList):
+                        for u in list(lst):
+                            uid = getattr(u, "user_id", None)
+                            is_proxy_entry = not (isinstance(uid, int) and uid > 0)
+                            if is_proxy_entry and u.name.lower() == check_name:
+                                rc_check.delete_user(u.name)
+                                break
     else:
         # For proxy votes, normalise to canonical casing of any existing same-name entry
         name = _find_canonical_name(rc_pre, name)

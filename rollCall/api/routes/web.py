@@ -15,7 +15,6 @@ Push notifications:
   GET  /api/v1/web/group/{token}/manifest.json   → dynamic PWA manifest
 """
 import json
-import logging
 import os
 from typing import Optional
 
@@ -24,6 +23,7 @@ from fastapi.responses import JSONResponse, Response
 
 import db as _db
 from api.identity import verify_identity_token
+from api.telegram_mirror import mirror_panel_to_telegram as _mirror_panel_to_telegram
 from services import web as web_svc
 from services import stats as stats_svc
 from services import presence as presence_svc
@@ -44,24 +44,6 @@ from api.schemas.web import (
 )
 
 router = APIRouter()
-
-
-async def _mirror_panel_to_telegram(chat_id: int, rc_number_1based: int, force_new: bool = False) -> None:
-    """Reflect a web/portal/Mini-App rollcall action in the Telegram group chat.
-
-    Best-effort and fully swallowed: if Telegram is unreachable the web action
-    has already succeeded in the DB, and staying usable while Telegram is down
-    is the entire point of the web surface. Reuses the bot's own panel
-    machinery so the mirrored panel is identical to a native one.
-    """
-    try:
-        from handlers.lifecycle import show_panel_for_rollcall
-        await show_panel_for_rollcall(chat_id, rc_number_1based, force_new=force_new)
-    except Exception:
-        logging.debug(
-            "[web] telegram panel mirror skipped chat=%s rc=%s",
-            chat_id, rc_number_1based, exc_info=True,
-        )
 
 
 # ── VAPID / push endpoints ────────────────────────────────────────────────────

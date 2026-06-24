@@ -13,8 +13,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .brand-inner{display:flex;align-items:center;gap:8px}
 .brand-logo{border-radius:6px;flex-shrink:0}
 .brand-name{font-size:.95rem;font-weight:700;color:#fff;letter-spacing:-.01em}
-.brand-theme-btn{background:rgba(255,255,255,.18);border:none;color:#fff;font-size:1rem;width:32px;height:32px;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center}
-.brand-theme-btn:hover{background:rgba(255,255,255,.28)}
+.brand-actions{display:flex;align-items:center;gap:6px}
+.brand-theme-btn,.brand-notify-btn{background:rgba(255,255,255,.18);border:none;color:#fff;font-size:1rem;width:32px;height:32px;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s}
+.brand-theme-btn:hover,.brand-notify-btn:hover{background:rgba(255,255,255,.28)}
+.brand-notify-btn.notify-on{background:rgba(255,255,255,.32)}
+.brand-notify-btn.notify-blocked{opacity:.5;cursor:default}
 /* Hide brand bar inside Telegram Mini App (has native chrome) */
 body.tg-mode .brand-bar{display:none}
 body.tg-mode #app{padding:12px 14px 32px}

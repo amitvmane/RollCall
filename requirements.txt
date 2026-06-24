@@ -1,5 +1,6 @@
 pyTelegramBotAPI==4.34.0
 qrcode==8.2
+pywebpush==2.3.0
 pytz==2026.2
 Levenshtein==0.27.1
 matplotlib==3.9.4

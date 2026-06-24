@@ -961,6 +961,52 @@ def _run_migrations(conn, cursor):
         except Exception:
             conn.rollback()
 
+    # system_config — arbitrary key/value store (VAPID keys etc.)
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS system_config (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+
+    # push_subscriptions — web-push subscriber endpoints per group
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS push_subscriptions (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_token TEXT NOT NULL,
+                endpoint   TEXT NOT NULL UNIQUE,
+                p256dh     TEXT NOT NULL,
+                auth       TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                active     INTEGER NOT NULL DEFAULT 1
+            )
+        """ if db_type != 'postgresql' else """
+            CREATE TABLE IF NOT EXISTS push_subscriptions (
+                id         SERIAL PRIMARY KEY,
+                group_token TEXT NOT NULL,
+                endpoint   TEXT NOT NULL UNIQUE,
+                p256dh     TEXT NOT NULL,
+                auth       TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                active     BOOLEAN NOT NULL DEFAULT TRUE
+            )
+        """)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+    try:
+        idx = "CREATE INDEX IF NOT EXISTS push_subscriptions_group_token ON push_subscriptions(group_token)"
+        cursor.execute(idx)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+
 
 def get_or_create_chat(chat_id: int) -> Dict:
     """Get or create chat settings"""
@@ -3940,6 +3986,143 @@ def get_group_view_count(group_token: str) -> int:
     except Exception:
         logging.exception("get_group_view_count failed")
         return 0
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def get_system_config(key: str) -> Optional[str]:
+    """Return a value from system_config, or None if not set."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(f"SELECT value FROM system_config WHERE key = {ph}", (key,))
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        return row[0] if not isinstance(row, dict) else row['value']
+    except Exception:
+        logging.exception("get_system_config failed for key=%s", key)
+        return None
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def set_system_config(key: str, value: str) -> None:
+    """Upsert a key/value pair in system_config."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        if db_type == 'postgresql':
+            cursor.execute(f"""
+                INSERT INTO system_config (key, value, updated_at)
+                VALUES ({ph}, {ph}, CURRENT_TIMESTAMP)
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
+            """, (key, value))
+        else:
+            cursor.execute(f"""
+                INSERT OR REPLACE INTO system_config (key, value, updated_at)
+                VALUES ({ph}, {ph}, CURRENT_TIMESTAMP)
+            """, (key, value))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logging.exception("set_system_config failed for key=%s", key)
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def save_push_subscription(group_token: str, endpoint: str, p256dh: str, auth: str) -> None:
+    """Upsert a push subscription for a group. Re-activates if previously unsubscribed."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        if db_type == 'postgresql':
+            cursor.execute(f"""
+                INSERT INTO push_subscriptions (group_token, endpoint, p256dh, auth, active)
+                VALUES ({ph}, {ph}, {ph}, {ph}, TRUE)
+                ON CONFLICT (endpoint) DO UPDATE SET
+                    group_token = EXCLUDED.group_token,
+                    p256dh      = EXCLUDED.p256dh,
+                    auth        = EXCLUDED.auth,
+                    active      = TRUE,
+                    created_at  = CURRENT_TIMESTAMP
+            """, (group_token, endpoint, p256dh, auth))
+        else:
+            cursor.execute(f"""
+                INSERT OR REPLACE INTO push_subscriptions (group_token, endpoint, p256dh, auth, active)
+                VALUES ({ph}, {ph}, {ph}, {ph}, 1)
+            """, (group_token, endpoint, p256dh, auth))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logging.exception("save_push_subscription failed")
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def get_push_subscriptions(group_token: str) -> List[Dict]:
+    """Return all active push subscriptions for a group."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        active_val = 'TRUE' if db_type == 'postgresql' else '1'
+        cursor.execute(
+            f"SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE group_token = {ph} AND active = {active_val}",
+            (group_token,)
+        )
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            if isinstance(row, dict):
+                result.append({'endpoint': row['endpoint'], 'p256dh': row['p256dh'], 'auth': row['auth']})
+            else:
+                result.append({'endpoint': row[0], 'p256dh': row[1], 'auth': row[2]})
+        return result
+    except Exception:
+        logging.exception("get_push_subscriptions failed")
+        return []
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def delete_push_subscription(endpoint: str) -> None:
+    """Mark a push subscription inactive (expired or unsubscribed)."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(
+            f"UPDATE push_subscriptions SET active = {'FALSE' if db_type == 'postgresql' else '0'} WHERE endpoint = {ph}",
+            (endpoint,)
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logging.exception("delete_push_subscription failed")
     finally:
         if cursor is not None:
             cursor.close()

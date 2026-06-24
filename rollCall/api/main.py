@@ -43,11 +43,27 @@ API_PREFIX = f"/api/{API_VERSION}"
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     logging.info("[api] REST API ready at %s (docs: /api/docs)", API_PREFIX)
-    logging.warning(
-        "[api] No authentication configured — endpoints are OPEN. "
-        "Bind to localhost only and gate via reverse proxy until "
-        "PR 3 (auth tokens) lands."
-    )
+    # Warn only if no tokens have been issued yet
+    try:
+        from db import get_connection, release_connection, db_type
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM api_tokens WHERE revoked_at IS NULL")
+        row = cur.fetchone()
+        cur.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+        count = int(row[0] if not isinstance(row, dict) else next(iter(row.values())))
+        if count == 0:
+            logging.warning(
+                "[api] No API tokens issued — web endpoints are open to anyone "
+                "who can reach this port. Issue tokens via scripts/issue_api_token.py "
+                "or restrict access via reverse proxy."
+            )
+        else:
+            logging.info("[api] Auth active — %d API token(s) in use", count)
+    except Exception:
+        logging.warning("[api] Could not check token count — auth status unknown")
     yield
 
 

@@ -568,5 +568,121 @@ if (IS_GROUP) {
   }catch(_){}
 })();
 
+// ── PWA: service worker + push notifications ───────────────────────────────
+let _swReg = null;
+
+if ("serviceWorker" in navigator && IS_GROUP) {
+  navigator.serviceWorker.register("/web/sw.js", { scope: "/web/" })
+    .then(reg => {
+      _swReg = reg;
+      _initPushUI();
+    })
+    .catch(e => console.warn("[sw] registration failed", e));
+}
+
+// Inject dynamic manifest once we know the group token
+if (IS_GROUP && URL_TOKEN) {
+  const link = document.createElement("link");
+  link.rel = "manifest";
+  link.href = `/api/v1/web/group/${URL_TOKEN}/manifest.json`;
+  document.head.appendChild(link);
+}
+
+function _urlB64ToUint8Array(b64) {
+  const pad = "=".repeat((4 - b64.length % 4) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+
+function _initPushUI() {
+  const btn = $("notify-btn");
+  if (!btn || !("PushManager" in window)) return;
+  // Show the bell button only in group mode (not TG mini-app — Telegram has its own notifications)
+  if (tg) return;
+  btn.classList.remove("hidden");
+  _updateNotifyBtn();
+}
+
+function _updateNotifyBtn() {
+  const btn = $("notify-btn");
+  if (!btn) return;
+  const perm = Notification.permission;
+  if (perm === "granted") {
+    btn.textContent = "🔔";
+    btn.title = "Notifications ON — tap to turn off";
+    btn.classList.add("notify-on");
+  } else if (perm === "denied") {
+    btn.textContent = "🔕";
+    btn.title = "Notifications blocked in browser settings";
+    btn.classList.add("notify-blocked");
+  } else {
+    btn.textContent = "🔔";
+    btn.title = "Get notified when a rollcall opens";
+    btn.classList.remove("notify-on", "notify-blocked");
+  }
+}
+
+window.toggleNotifications = async function() {
+  if (!_swReg) { toast("Notifications not available on this browser"); return; }
+  const perm = Notification.permission;
+
+  if (perm === "denied") {
+    toast("Notifications are blocked — enable them in browser settings", 4000);
+    return;
+  }
+
+  // Check if already subscribed
+  const existing = await _swReg.pushManager.getSubscription();
+
+  if (existing) {
+    // Unsubscribe
+    try {
+      await fetch(`/api/v1/web/group/${URL_TOKEN}/push-unsubscribe`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ endpoint: existing.endpoint }),
+        signal: AbortSignal.timeout(5000),
+      });
+      await existing.unsubscribe();
+      toast("Notifications turned off");
+      _updateNotifyBtn();
+    } catch (e) { toast("Could not unsubscribe: " + e.message, 3000); }
+    return;
+  }
+
+  // Subscribe
+  try {
+    const keyResp = await fetch("/api/v1/web/vapid-public-key", { signal: AbortSignal.timeout(5000) });
+    const { public_key } = await keyResp.json();
+    const sub = await _swReg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: _urlB64ToUint8Array(public_key),
+    });
+    const j = sub.toJSON();
+    await fetch(`/api/v1/web/group/${URL_TOKEN}/push-subscribe`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ endpoint: j.endpoint, keys: { p256dh: j.keys.p256dh, auth: j.keys.auth } }),
+      signal: AbortSignal.timeout(5000),
+    });
+    toast("🔔 You'll be notified when a rollcall opens!", 3500);
+    _updateNotifyBtn();
+  } catch (e) {
+    if (e.name === "NotAllowedError") {
+      toast("Notification permission denied", 3000);
+    } else {
+      toast("Could not enable notifications: " + e.message, 4000);
+    }
+    _updateNotifyBtn();
+  }
+};
+
+// ── PWA install prompt ─────────────────────────────────────────────────────
+let _installPrompt = null;
+window.addEventListener("beforeinstallprompt", e => {
+  e.preventDefault();
+  _installPrompt = e;
+});
+
 if(URL_TOKEN&&(URL_MODE==="join"||URL_MODE==="group"))load();
 })();

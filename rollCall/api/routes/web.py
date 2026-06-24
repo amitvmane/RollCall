@@ -7,16 +7,29 @@ Per-rollcall token (expires with rollcall):
 
 Permanent group token (never expires, bookmarkable):
   GET  /api/v1/web/group/{token}    → fetch all active rollcalls for the group
+
+Push notifications:
+  GET  /api/v1/web/vapid-public-key              → VAPID public key for browser subscription
+  POST /api/v1/web/group/{token}/push-subscribe  → register a push subscription
+  POST /api/v1/web/group/{token}/push-unsubscribe → remove a push subscription
+  GET  /api/v1/web/group/{token}/manifest.json   → dynamic PWA manifest
 """
+import json
+import os
 from typing import Optional
 
-from fastapi import APIRouter, Path, Query, status
+from fastapi import APIRouter, HTTPException, Path, Query, Request, status
+from fastapi.responses import JSONResponse, Response
 
 import db as _db
 from services import web as web_svc
 from services import stats as stats_svc
 from services import presence as presence_svc
+from services import push as push_svc
 from api.schemas.web import (
+    PushSubscribeRequest,
+    PushUnsubscribeRequest,
+    VapidPublicKeyResponse,
     WebGroupResponse,
     WebGroupStatsResponse,
     WebHeartbeatRequest,
@@ -27,6 +40,79 @@ from api.schemas.web import (
 )
 
 router = APIRouter()
+
+
+# ── VAPID / push endpoints ────────────────────────────────────────────────────
+
+@router.get(
+    "/web/vapid-public-key",
+    response_model=VapidPublicKeyResponse,
+    summary="Return the VAPID public key so browsers can subscribe to push",
+)
+async def vapid_public_key() -> VapidPublicKeyResponse:
+    return VapidPublicKeyResponse(public_key=push_svc.get_public_key())
+
+
+@router.post(
+    "/web/group/{group_token}/push-subscribe",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Register a web-push subscription for this group",
+)
+async def push_subscribe(
+    body: PushSubscribeRequest,
+    group_token: str = Path(...),
+) -> None:
+    chat = _db.get_chat_by_group_web_token(group_token)
+    if not chat:
+        raise HTTPException(404, "Invalid group token")
+    push_svc.subscribe(group_token, body.endpoint, body.keys.p256dh, body.keys.auth)
+
+
+@router.post(
+    "/web/group/{group_token}/push-unsubscribe",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove a web-push subscription",
+)
+async def push_unsubscribe(
+    body: PushUnsubscribeRequest,
+    group_token: str = Path(...),
+) -> None:
+    push_svc.unsubscribe(body.endpoint)
+
+
+@router.get(
+    "/web/group/{group_token}/manifest.json",
+    summary="Dynamic PWA manifest for this group",
+    include_in_schema=False,
+)
+async def group_manifest(
+    group_token: str = Path(...),
+) -> Response:
+    chat = _db.get_chat_by_group_web_token(group_token)
+    group_name = (chat or {}).get("group_name") or "RollCall"
+    web_base = os.environ.get("WEB_BASE_URL", "").rstrip("/")
+    start_url = f"{web_base}/web/group/{group_token}" if web_base else f"/web/group/{group_token}"
+    manifest = {
+        "name": f"RollCall — {group_name}",
+        "short_name": "RollCall",
+        "description": f"Vote on rollcalls for {group_name}",
+        "start_url": start_url,
+        "scope": "/web/",
+        "display": "standalone",
+        "orientation": "portrait",
+        "theme_color": "#2563eb",
+        "background_color": "#f0f4f8",
+        "icons": [
+            {"src": "/web/logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"},
+            {"src": "/web/icon-192.png", "sizes": "192x192", "type": "image/png"},
+            {"src": "/web/icon-512.png", "sizes": "512x512", "type": "image/png"},
+        ],
+    }
+    return Response(
+        content=json.dumps(manifest),
+        media_type="application/manifest+json",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 # ── Group endpoint (permanent) ────────────────────────────────────────────────

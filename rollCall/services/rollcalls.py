@@ -10,6 +10,7 @@ their input, calling these services, and formatting the returned dicts.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 
@@ -89,7 +90,27 @@ async def start_rollcall(
         "new_rollcall", target_name=clean_title,
     )
 
+    # Fire web-push notifications to subscribers — non-blocking, best-effort
+    from bot_state import _log_task_exc
+    asyncio.create_task(_push_rollcall_started(chat_id, clean_title)).add_done_callback(_log_task_exc)
+
     return serialize_rollcall(rc, rc_index)
+
+
+async def _push_rollcall_started(chat_id: int, title: str) -> None:
+    """Background task: send web push to group subscribers when a rollcall opens."""
+    try:
+        import os as _os
+        from services import push as push_svc
+        chat = manager.get_chat(chat_id)
+        group_token = chat.get("group_web_token") if chat else None
+        if not group_token:
+            return
+        web_base = _os.environ.get("WEB_BASE_URL", "").rstrip("/")
+        url = f"{web_base}/web/group/{group_token}" if web_base else f"/web/group/{group_token}"
+        await push_svc.notify_rollcall_started(group_token, title, url)
+    except Exception:
+        logging.exception("[push] _push_rollcall_started failed chat=%s", chat_id)
 
 
 async def end_rollcall(

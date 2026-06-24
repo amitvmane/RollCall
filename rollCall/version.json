@@ -250,5 +250,11 @@
         "Description": "QR code + Response-time leaderboard. Admin panel: 'QR' button generates a scannable SVG QR code for the group web link — modal with download, zero friction member onboarding. Response-time leaderboard in admin Stats tab: avg and best time from rollcall open to first vote, ordered fastest-first. Data sourced from users.created_at vs rollcalls.created_at (no schema change). New endpoints: GET /api/v1/chats/{id}/qrcode (SVG), GET /api/v1/chats/{id}/stats/response-times. Adds qrcode 8.2 (SVG, no PIL) to deps.",
         "DeployedOnProd": "Y",
         "DeployedDatetime": "23-06-2026 15:00 UTC"
+    },
+    {
+        "Version": 8.5,
+        "Description": "PWA + Web Push notifications. Service worker (sw.js) enables offline caching and push delivery. Dynamic manifest per group with app name, icons (192+512 PNG), standalone display. Bell button in brand bar — one tap subscribes; browser asks permission; push arrives when a rollcall opens. VAPID keys auto-generated on first boot and stored in new system_config table. New push_subscriptions table (group-scoped, endpoint-unique, soft-delete on 410). New endpoints: GET /api/v1/web/vapid-public-key, POST/DELETE /web/group/{token}/push-subscribe/unsubscribe, GET /web/group/{token}/manifest.json. Push fires from services/rollcalls.py start_rollcall — works whether started via Telegram or web admin. Fix: requirements.lock now includes qrcode 8.2 + pywebpush 2.3.0 + crypto deps (was missing — caused QR 500 in Docker). Fix: startup 'endpoints OPEN' warning now only fires when zero tokens exist.",
+        "DeployedOnProd": "N",
+        "DeployedDatetime": "24-06-2026 08:00 UTC"
     }
 ]

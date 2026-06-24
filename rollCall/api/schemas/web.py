@@ -117,3 +117,23 @@ class WebGroupStatsResponse(BaseModel):
     ghost_leaderboard: List[WebStatsGhostEntry] = Field(default_factory=list)
     recent_history: List[WebStatsHistoryEntry] = Field(default_factory=list)
     personal: Optional[WebStatsPersonal] = None
+
+
+# ── Web push schemas ──────────────────────────────────────────────────────────
+
+class PushSubscribeKeys(BaseModel):
+    p256dh: str
+    auth: str
+
+
+class PushSubscribeRequest(BaseModel):
+    endpoint: str = Field(..., min_length=10)
+    keys: PushSubscribeKeys
+
+
+class PushUnsubscribeRequest(BaseModel):
+    endpoint: str = Field(..., min_length=10)
+
+
+class VapidPublicKeyResponse(BaseModel):
+    public_key: str

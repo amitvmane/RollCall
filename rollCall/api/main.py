@@ -32,7 +32,7 @@ from exceptions import (
     timeError,
 )
 from api.rate_limit import rate_limit_middleware
-from api.routes import admin, auth, groups, health, proxy_votes, rollcalls, stats, templates, tg_verify, votes, web as web_routes
+from api.routes import admin, auth, groups, health, portal, proxy_votes, rollcalls, stats, templates, tg_verify, votes, web as web_routes
 from api.schemas.common import ErrorResponse
 
 
@@ -140,6 +140,7 @@ def create_app() -> FastAPI:
     app.include_router(admin.router, prefix=API_PREFIX, tags=["admin"])
     app.include_router(groups.router, prefix=API_PREFIX, tags=["admin", "groups"])
     app.include_router(web_routes.router, prefix=API_PREFIX, tags=["web-voting"])
+    app.include_router(portal.router, prefix=API_PREFIX, tags=["portal"])
 
     # Map proxy-specific exceptions to HTTP status codes
     from exceptions import duplicateProxy, repeatlyName
@@ -168,6 +169,14 @@ def create_app() -> FastAPI:
     async def _web_group_page(group_token: str):
         return HTMLResponse(content=_web_index.read_text())
 
+    # Clean /join/{token} alias — redirects to the web group page.
+    # Gives admins a shorter, shareable invite URL.
+    from fastapi.responses import RedirectResponse
+
+    @app.get("/join/{token}", include_in_schema=False)
+    async def _join_redirect(token: str):
+        return RedirectResponse(url=f"/web/group/{token}", status_code=302)
+
     # Serve Mini App static files at /miniapp/
     _miniapp_dir = Path(__file__).parent / "miniapp"
     if _miniapp_dir.is_dir():
@@ -185,6 +194,12 @@ def create_app() -> FastAPI:
     if _admin_dir.is_dir():
         app.mount("/admin", StaticFiles(directory=str(_admin_dir), html=True), name="admin")
         logging.info("[api] Admin dashboard served at /admin/")
+
+    # Serve member portal at /portal/
+    _portal_dir = Path(__file__).parent / "portal"
+    if _portal_dir.is_dir():
+        app.mount("/portal", StaticFiles(directory=str(_portal_dir), html=True), name="portal")
+        logging.info("[api] Member portal served at /portal/")
 
     return app
 

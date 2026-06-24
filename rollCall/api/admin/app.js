@@ -129,7 +129,16 @@ function boot(){
   },30000);
 }
 S.token=localStorage.getItem(LS)||"";
-if(S.token)boot();
+// Auto-login when token arrives via URL param (from /gentoken one-click link).
+// Strip the token from the URL after reading so it doesn't linger in history.
+(function(){
+  const p=new URLSearchParams(window.location.search);
+  const t=p.get("token");
+  if(t&&!S.token){S.token=t;doLogin();}
+  else if(S.token)boot();
+  if(t){p.delete("token");const u=window.location.pathname+(p.toString()?"?"+p:"");history.replaceState(null,"",u);}
+  else if(S.token&&!t){}
+})();
 
 // ─── Groups ───────────────────────────────────────────────────────────────────
 async function loadGroups(){

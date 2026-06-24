@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=5.0"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="theme-color" content="#2563eb"/>
+  <title>RollCall — My Groups</title>
+  <link rel="icon" href="/admin/logo.svg" type="image/svg+xml"/>
+  <script>
+  (function(){
+    var p=localStorage.getItem("rc_dark");
+    var sys=window.matchMedia&&window.matchMedia("(prefers-color-scheme:dark)").matches;
+    if(p==="1"||(p!=="0"&&sys))document.documentElement.classList.add("dark");
+  })();
+  </script>
+  <link rel="stylesheet" href="/admin/style.css"/>
+  <link rel="stylesheet" href="/portal/style.css"/>
+</head>
+<body>
+
+<!-- Verify screen shown when user has no tg identity -->
+<div id="verify-screen" style="display:none">
+  <div class="login-card">
+    <div class="login-brand">
+      <img src="/admin/logo.svg" alt="RollCall" class="logo-icon" width="40" height="40"/>
+      <h1>My Groups</h1>
+    </div>
+    <p class="sub">Verify your Telegram identity to see your attendance history across all groups.</p>
+    <button class="btn btn-primary" id="verify-btn" style="width:100%;padding:12px;justify-content:center;margin-top:8px">Verify with Telegram →</button>
+    <div id="verify-status" style="margin-top:12px;font-size:.85rem;color:var(--sub);text-align:center;display:none"></div>
+  </div>
+</div>
+
+<div id="app" style="display:none">
+  <div class="topbar">
+    <div class="topbar-left">
+      <img src="/admin/logo.svg" alt="" class="topbar-logo" width="26" height="26" aria-hidden="true"/>
+      <span class="logo">My Groups</span>
+    </div>
+    <div class="topbar-right">
+      <span id="portal-identity" style="font-size:.8rem;color:var(--sub);margin-right:8px"></span>
+      <button class="btn-theme" title="Toggle dark mode" onclick="toggleTheme()">🌙</button>
+      <button class="btn-logout" id="unlink-btn" title="Unlink Telegram identity">Unlink</button>
+    </div>
+  </div>
+
+  <div class="content" style="max-width:720px;margin:0 auto;padding:16px">
+    <div id="groups-loading" style="text-align:center;padding:48px;color:var(--sub)">Loading your groups…</div>
+    <div id="groups-empty" style="display:none;text-align:center;padding:48px;color:var(--sub)">
+      <div style="font-size:2rem;margin-bottom:12px">🗓</div>
+      <p style="font-weight:600">No groups yet</p>
+      <p style="font-size:.85rem;margin-top:4px">You'll appear here after voting in your first rollcall.</p>
+    </div>
+    <div id="groups-list"></div>
+  </div>
+</div>
+
+<!-- Group detail drawer -->
+<div id="detail-overlay" class="detail-overlay" onclick="closeDetail()"></div>
+<div id="detail-panel" class="detail-panel">
+  <div class="detail-header">
+    <h2 id="detail-title">Group</h2>
+    <button class="detail-close" onclick="closeDetail()">✕</button>
+  </div>
+  <div id="detail-body" style="padding:16px;overflow-y:auto;flex:1"></div>
+</div>
+
+<div class="toast" id="toast" role="alert" aria-live="assertive" aria-atomic="true"></div>
+<script src="/portal/app.js"></script>
+</body>
+</html>

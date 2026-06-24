@@ -309,10 +309,13 @@ async def gentoken_command(message):
     )
 
     web_base = os.environ.get("WEB_BASE_URL", "").rstrip("/")
-    dashboard_line = (
-        f"\n🖥 Admin dashboard: {web_base}/admin/\n"
-        if web_base else ""
-    )
+    if web_base:
+        dashboard_line = (
+            f"\n🖥 One-click login: {web_base}/admin/?token={token}\n"
+            f"_(link logs you in directly — don't share it)_\n"
+        )
+    else:
+        dashboard_line = ""
 
     dm_text = (
         f"🔑 *API Token — {_esc_md(chat_title)}*\n\n"

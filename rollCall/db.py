@@ -3677,6 +3677,91 @@ def get_user_session_history(chat_id: int, user_id: int, limit: int = 15) -> Lis
             release_connection(conn)
 
 
+def get_user_voted_chats(tg_user_id: int) -> List[Dict]:
+    """Return all chats where tg_user_id has voting history.
+
+    Each entry: chat_id, group_name, timezone, group_web_token,
+    sessions_attended (final IN in ended sessions), total_sessions (all
+    ended sessions in that chat), current_streak, best_streak.
+    """
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        active_false = 'FALSE' if db_type == 'postgresql' else '0'
+        cursor.execute(f"""
+            SELECT
+                us.chat_id,
+                c.group_name,
+                COALESCE(c.timezone, 'Asia/Kolkata') AS timezone,
+                c.group_web_token,
+                COALESCE(us.current_streak, 0) AS current_streak,
+                COALESCE(us.best_streak, 0)    AS best_streak,
+                (SELECT COUNT(*) FROM users u2
+                 JOIN rollcalls r2 ON u2.rollcall_id = r2.id
+                 WHERE r2.chat_id = us.chat_id AND u2.user_id = us.user_id
+                   AND u2.status = 'in' AND r2.is_active = {active_false}
+                ) AS sessions_attended,
+                (SELECT COUNT(*) FROM rollcalls r3
+                 WHERE r3.chat_id = us.chat_id AND r3.is_active = {active_false}
+                ) AS total_sessions
+            FROM user_stats us
+            JOIN chats c ON c.chat_id = us.chat_id
+            WHERE us.user_id = {ph}
+            ORDER BY sessions_attended DESC
+        """, (tg_user_id,))
+        return [dict(row) for row in cursor.fetchall()]
+    except Exception as e:
+        logging.error("Error in get_user_voted_chats: %s", e)
+        return []
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def get_user_rank_in_chat(chat_id: int, user_id: int) -> Optional[int]:
+    """Return 1-based leaderboard rank for user in this chat (by final-IN count)."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        active_false = 'FALSE' if db_type == 'postgresql' else '0'
+        cursor.execute(f"""
+            SELECT COUNT(*) + 1 AS rank FROM (
+                SELECT u.user_id, COUNT(*) AS attended
+                FROM users u
+                JOIN rollcalls r ON u.rollcall_id = r.id
+                WHERE r.chat_id = {ph} AND u.status = 'in'
+                  AND r.is_active = {active_false}
+                  AND u.user_id IS NOT NULL
+                GROUP BY u.user_id
+            ) sub
+            WHERE sub.attended > (
+                SELECT COUNT(*) FROM users u2
+                JOIN rollcalls r2 ON u2.rollcall_id = r2.id
+                WHERE r2.chat_id = {ph} AND u2.user_id = {ph}
+                  AND u2.status = 'in' AND r2.is_active = {active_false}
+            )
+        """, (chat_id, chat_id, user_id))
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        val = row[0] if not isinstance(row, dict) else row.get('rank', 1)
+        return int(val) if val is not None else None
+    except Exception as e:
+        logging.error("Error in get_user_rank_in_chat: %s", e)
+        return None
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
 def log_admin_action(
     chat_id: int,
     admin_id: int,

@@ -285,7 +285,9 @@ async def end_roll_call(message):
                     InlineKeyboardButton("👻 Yes, select ghosts", callback_data=f"ghost_yes_{result['ghost_rc_db_id']}"),
                     InlineKeyboardButton("✅ No, all showed up", callback_data=f"ghost_no_{result['ghost_rc_db_id']}")
                 )
-                await bot.send_message(cid, "👻 Did anyone ghost today's session?", reply_markup=ghost_markup)
+                # Name the rollcall so multiple prompts (when several rollcalls
+                # end close together) are distinguishable rather than identical.
+                await bot.send_message(cid, f"👻 Did anyone ghost '{rc.title}'?", reply_markup=ghost_markup)
 
             updated_rollcalls = manager.get_rollcalls(cid)
             if updated_rollcalls:
@@ -671,7 +673,7 @@ async def callback_handler(call):
                         InlineKeyboardButton("👻 Yes, select ghosts", callback_data=f"ghost_yes_{result['ghost_rc_db_id']}"),
                         InlineKeyboardButton("✅ No, all showed up", callback_data=f"ghost_no_{result['ghost_rc_db_id']}")
                     )
-                    await bot.send_message(cid, "👻 Did anyone ghost today's session?", reply_markup=ghost_markup)
+                    await bot.send_message(cid, f"👻 Did anyone ghost '{rc.title}'?", reply_markup=ghost_markup)
 
                 updated_rollcalls = manager.get_rollcalls(cid)
                 if updated_rollcalls and not manager.get_shh_mode(cid):

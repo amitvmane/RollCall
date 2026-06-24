@@ -11,6 +11,7 @@ from db import (
     update_template_last_scheduled_date, get_all_chat_ids, increment_user_stat,
     clear_rollcall_reminder,
     update_proxy_streak_on_checkin, reset_proxy_streak,
+    update_chat_group_name,
 )
 
 logging.basicConfig(
@@ -20,6 +21,34 @@ logging.basicConfig(
 
 # Registry to track active reminder loops per chat_id to prevent duplicates
 _active_loops = set()
+
+# Date (UTC, YYYY-MM-DD) of the last group-name refresh sweep, so it runs at
+# most once a day. Group titles change rarely, so a daily check is plenty.
+_last_group_name_refresh = None
+
+
+async def _refresh_all_group_names():
+    """Once-a-day sweep: fetch each chat's current Telegram title and persist it
+    if it changed. Best-effort — a failure on one chat never aborts the sweep,
+    and the whole thing is skipped silently if Telegram is unreachable."""
+    chat_ids = get_all_chat_ids()
+    updated = 0
+    for chat_id in chat_ids:
+        try:
+            chat_info = await bot.get_chat(chat_id)
+            title = chat_info.title or chat_info.first_name
+            if title:
+                update_chat_group_name(chat_id, title)
+                updated += 1
+        except Exception:
+            # Private chats, kicked-from groups, transient API errors — skip.
+            logging.debug("[group-name-refresh] skipped chat %s", chat_id)
+        # Gentle pacing so a large install doesn't burst the Telegram API.
+        await asyncio.sleep(0.2)
+    logging.info(
+        f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+        f"[group-name-refresh] swept {len(chat_ids)} chat(s), updated {updated}"
+    )
 
 
 def _ensure_aware(dt, tz):
@@ -258,7 +287,7 @@ async def check(rollcalls, timezone, chat_id):
                                             InlineKeyboardButton("👻 Yes, select ghosts", callback_data=f"ghost_yes_{rc_db_id}"),
                                             InlineKeyboardButton("✅ No, all showed up", callback_data=f"ghost_no_{rc_db_id}"),
                                         )
-                                        await bot.send_message(chat_id, "👻 Did anyone ghost today's session?", reply_markup=markup)
+                                        await bot.send_message(chat_id, f"👻 Did anyone ghost '{rollcall.title}'?", reply_markup=markup)
                                 except Exception:
                                     logging.exception("Error sending ghost prompt after auto-close")
 
@@ -547,7 +576,18 @@ async def check_template_schedules():
     if current_sec != 0:
         await asyncio.sleep(60 - current_sec)
 
+    global _last_group_name_refresh
     while True:
+        # Daily group-name refresh — group titles change rarely, so a once-a-day
+        # sweep is enough. Piggybacks on this persistent loop's minute tick.
+        try:
+            today_utc = datetime.utcnow().strftime("%Y-%m-%d")
+            if _last_group_name_refresh != today_utc:
+                _last_group_name_refresh = today_utc
+                await _refresh_all_group_names()
+        except Exception:
+            logging.exception("Error in daily group-name refresh")
+
         try:
             scheduled = get_all_scheduled_templates()
             for tmpl in scheduled:

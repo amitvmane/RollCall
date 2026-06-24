@@ -112,8 +112,8 @@ async def notify_rollcall_ended(group_token: str, title: str, url: str) -> None:
             "title": f"📋 {title} closed",
             "body": "The rollcall has ended — tap to see the final list",
             "url": url,
-            "icon": "/web/logo.svg",
-            "badge": "/web/logo.svg",
+            "icon": "/web/icon-192.png",
+            "badge": "/web/icon-192.png",
         })
         loop = asyncio.get_running_loop()
         tasks = [
@@ -143,8 +143,8 @@ async def notify_rollcall_started(group_token: str, title: str, url: str) -> Non
             "title": f"\U0001f3af {title}",
             "body": "Rollcall just opened — tap to vote",
             "url": url,
-            "icon": "/web/logo.svg",
-            "badge": "/web/logo.svg",
+            "icon": "/web/icon-192.png",
+            "badge": "/web/icon-192.png",
         })
         loop = asyncio.get_running_loop()
         tasks = [

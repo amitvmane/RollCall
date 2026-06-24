@@ -214,13 +214,18 @@ async def web_start_rollcall(
         )
 
     from services import rollcalls as rc_svc
+    from services.web import _serialize_web_rollcall
+    from rollcall_manager import manager as _mgr
     result = await rc_svc.start_rollcall(
         chat_id=chat_id,
         title=body.title,
         started_by_user_id=body.tg_user_id,
         started_by_name="(web)",
     )
-    return WebRollcallResponse(**result)
+    rc = _mgr.get_rollcall(chat_id, result["rc_index"])
+    if rc is None:
+        raise HTTPException(status_code=500, detail="Rollcall created but could not be retrieved")
+    return WebRollcallResponse(**_serialize_web_rollcall(rc))
 
 
 # ── Per-rollcall endpoints (expire with rollcall) ────────────────────────────

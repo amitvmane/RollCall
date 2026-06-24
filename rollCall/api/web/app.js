@@ -14,7 +14,9 @@ const LS_TG_NAME="rc_verified_tg_name";
 let _verifiedUserId=parseInt(localStorage.getItem(LS_TG_USER_ID))||null;
 let _verifiedName=localStorage.getItem(LS_TG_NAME)||null;
 
-if(!URL_TOKEN||(URL_MODE!=="join"&&URL_MODE!=="group")){
+// Only show "invalid URL" when a token IS present but the mode is wrong (corrupted link).
+// No token = home screen, handled at the bottom of the file.
+if(URL_TOKEN&&(URL_MODE!=="join"&&URL_MODE!=="group")){
   $("loading").classList.add("hidden");
   showError("Invalid URL. Use the link shared in your group.");
 }

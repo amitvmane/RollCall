@@ -22,6 +22,7 @@ from fastapi import APIRouter, HTTPException, Path, Query, Request, status
 from fastapi.responses import JSONResponse, Response
 
 import db as _db
+from api.identity import verify_identity_token
 from services import web as web_svc
 from services import stats as stats_svc
 from services import presence as presence_svc
@@ -182,8 +183,11 @@ async def get_web_group(
 )
 async def web_admin_status(
     group_token: str = Path(...),
-    tg_user_id: int = 0,
+    id_token: str = "",
 ) -> WebAdminStatusResponse:
+    # Identity must be proven by a signed token; a raw user id can't grant
+    # admin status because the server never trusts it.
+    tg_user_id = verify_identity_token(id_token)
     chat = _db.get_chat_by_group_web_token(group_token)
     if not chat or not tg_user_id:
         return WebAdminStatusResponse(is_admin=False)
@@ -206,8 +210,17 @@ async def web_start_rollcall(
     if not chat:
         raise HTTPException(status_code=404, detail="Invalid group token")
 
+    # Resolve the actor from the signed identity token — never from a
+    # client-supplied user id — before checking web-admin rights.
+    actor_user_id = verify_identity_token(body.id_token)
+    if not actor_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Verify with Telegram before starting a rollcall.",
+        )
+
     chat_id = int(chat["chat_id"])
-    if not _db.is_web_admin(chat_id, body.tg_user_id):
+    if not _db.is_web_admin(chat_id, actor_user_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You are not a web admin for this group. Run /weblink in Telegram first.",
@@ -219,7 +232,7 @@ async def web_start_rollcall(
     result = await rc_svc.start_rollcall(
         chat_id=chat_id,
         title=body.title,
-        started_by_user_id=body.tg_user_id,
+        started_by_user_id=actor_user_id,
         started_by_name="(web)",
     )
     rc = _mgr.get_rollcall(chat_id, result["rc_index"])
@@ -252,5 +265,12 @@ async def vote_web(
     body: WebVoteRequest,
     token: str = Path(..., description="Per-rollcall magic-link token"),
 ) -> WebRollcallResponse:
-    data = await web_svc.vote_by_token(token, body.name, body.vote, tg_user_id=body.tg_user_id, comment=body.comment)
+    # Only attribute a vote to a real Telegram account when the caller proves
+    # that identity with a signed token. Otherwise it's a name-only proxy entry,
+    # so nobody can forge another member's attendance via the magic link.
+    verified_user_id = verify_identity_token(body.id_token)
+    data = await web_svc.vote_by_token(
+        token, body.name, body.vote,
+        tg_user_id=verified_user_id, comment=body.comment,
+    )
     return WebRollcallResponse(**data)

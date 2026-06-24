@@ -42,6 +42,9 @@ class MiniAppAuthResponse(BaseModel):
     expires_in: int
     user_id: int
     chat_id: int
+    # Signed identity proof (see api/identity.py) for endpoints that key off
+    # the user rather than a chat-scoped bearer token.
+    id_token: Optional[str] = None
 
 
 def _validate_init_data(init_data: str, bot_token: str) -> dict:
@@ -177,6 +180,14 @@ async def miniapp_auth(body: MiniAppAuthRequest) -> MiniAppAuthResponse:
         expires_at=expires_at,
     )
 
+    # initData HMAC just proved this user's Telegram identity — mint a signed
+    # identity token alongside the chat-scoped bearer token.
+    from api.identity import issue_identity_token, IdentityError
+    try:
+        id_token = issue_identity_token(user_id)
+    except IdentityError:
+        id_token = None
+
     logging.info(
         "[miniapp_auth] issued token chat=%s user=%s expires=%s",
         chat_id, user_id, expires_at.isoformat(),
@@ -187,4 +198,5 @@ async def miniapp_auth(body: MiniAppAuthRequest) -> MiniAppAuthResponse:
         expires_in=_TOKEN_TTL_SECONDS,
         user_id=user_id,
         chat_id=chat_id,
+        id_token=id_token,
     )

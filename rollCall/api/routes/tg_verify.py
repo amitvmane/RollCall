@@ -107,8 +107,18 @@ async def tg_verify_status(
         # Return not-verified; client will get a 410 on next poll.
         return TgVerifyStatusResponse(verified=False)
 
+    # Identity is now cryptographically established (the user proved control of
+    # the Telegram account via the deep link). Mint a signed token the client
+    # can present on identity-sensitive endpoints.
+    from api.identity import issue_identity_token, IdentityError
+    try:
+        id_token = issue_identity_token(int(result["tg_user_id"]))
+    except IdentityError:
+        id_token = None
+
     return TgVerifyStatusResponse(
         verified=True,
         user_id=result["tg_user_id"],
         name=result["tg_name"],
+        id_token=id_token,
     )

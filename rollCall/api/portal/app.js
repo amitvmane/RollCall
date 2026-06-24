@@ -4,10 +4,12 @@
 const API="/api/v1";
 const LS_TG_USER_ID="rc_verified_tg_user_id";
 const LS_TG_NAME="rc_verified_tg_name";
+const LS_ID_TOKEN="rc_identity_token";
 const LS_VERIFY_CODE="rc_verify_code";
 
 let _userId=parseInt(localStorage.getItem(LS_TG_USER_ID))||null;
 let _userName=localStorage.getItem(LS_TG_NAME)||null;
+let _idToken=localStorage.getItem(LS_ID_TOKEN)||null;
 let _pollTimer=null;
 let _groups=[];
 
@@ -75,9 +77,10 @@ async function _checkVerify(code){
     if(res.verified){
       clearInterval(_pollTimer);_pollTimer=null;
       localStorage.removeItem(LS_VERIFY_CODE);
-      _userId=res.user_id;_userName=res.name;
+      _userId=res.user_id;_userName=res.name;_idToken=res.id_token||null;
       localStorage.setItem(LS_TG_USER_ID,String(_userId));
       localStorage.setItem(LS_TG_NAME,_userName);
+      if(_idToken)localStorage.setItem(LS_ID_TOKEN,_idToken);
       showApp();
     }
   }catch(e){
@@ -112,8 +115,9 @@ $id("unlink-btn").addEventListener("click",()=>{
   if(!confirm("Unlink your Telegram identity? You'll need to verify again to see your groups."))return;
   localStorage.removeItem(LS_TG_USER_ID);
   localStorage.removeItem(LS_TG_NAME);
+  localStorage.removeItem(LS_ID_TOKEN);
   localStorage.removeItem(LS_VERIFY_CODE);
-  _userId=null;_userName=null;
+  _userId=null;_userName=null;_idToken=null;
   $id("groups-list").innerHTML="";
   showVerifyScreen();
 });
@@ -125,7 +129,7 @@ async function loadGroups(){
   $id("groups-empty").style.display="none";
   $id("groups-list").innerHTML="";
   try{
-    const data=await apiFetch("/portal/groups?tg_user_id="+_userId);
+    const data=await apiFetch("/portal/groups?id_token="+encodeURIComponent(_idToken));
     _groups=data.groups||[];
     $id("groups-loading").style.display="none";
     if(!_groups.length){$id("groups-empty").style.display="block";return;}
@@ -215,7 +219,7 @@ window.openDetail=async function(idx){
   $id("detail-body").innerHTML=html+'<div id="history-body"><div style="color:var(--sub)">Loading…</div></div>';
 
   try{
-    const data=await apiFetch(`/portal/groups/${g.chat_id}/history?tg_user_id=${_userId}&limit=30`);
+    const data=await apiFetch(`/portal/groups/${g.chat_id}/history?id_token=${encodeURIComponent(_idToken)}&limit=30`);
     const sessions=data.sessions||[];
     if(!sessions.length){
       $id("history-body").innerHTML='<div style="color:var(--sub);font-size:.85rem">No sessions yet.</div>';
@@ -257,7 +261,10 @@ document.addEventListener("keydown",e=>{if(e.key==="Escape")closeDetail();});
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
 _updateThemeBtn();
-if(_userId){
+// Require a signed identity token, not just a remembered user id. Users
+// verified before this token existed will have _userId but no _idToken and
+// must re-verify once.
+if(_userId&&_idToken){
   showApp();
 }else{
   showVerifyScreen();

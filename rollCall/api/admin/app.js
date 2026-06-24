@@ -129,15 +129,22 @@ function boot(){
   },30000);
 }
 S.token=localStorage.getItem(LS)||"";
-// Auto-login when token arrives via URL param (from /gentoken one-click link).
-// Strip the token from the URL after reading so it doesn't linger in history.
+// Auto-login when a token arrives via the one-click /gentoken link. The token
+// is delivered in the URL fragment (#token=…) so it never reaches the server
+// (no access-log / Referer exposure); we read it client-side and immediately
+// strip it from the URL so it doesn't linger in history. Older links used the
+// ?token= query param, still accepted for backward compatibility.
 (function(){
-  const p=new URLSearchParams(window.location.search);
-  const t=p.get("token");
+  const hp=new URLSearchParams((window.location.hash||"").replace(/^#/,""));
+  const qp=new URLSearchParams(window.location.search);
+  const t=hp.get("token")||qp.get("token");
   if(t&&!S.token){S.token=t;doLogin();}
   else if(S.token)boot();
-  if(t){p.delete("token");const u=window.location.pathname+(p.toString()?"?"+p:"");history.replaceState(null,"",u);}
-  else if(S.token&&!t){}
+  if(t){
+    qp.delete("token");
+    const u=window.location.pathname+(qp.toString()?"?"+qp:"");
+    history.replaceState(null,"",u);
+  }
 })();
 
 // ─── Groups ───────────────────────────────────────────────────────────────────

@@ -48,7 +48,10 @@ class WebGroupResponse(BaseModel):
 class WebVoteRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=64, description="Display name for the voter")
     vote: Literal["in", "out", "maybe"]
-    tg_user_id: Optional[int] = Field(None, description="Telegram user_id when voting from inside Telegram WebApp")
+    # A raw tg_user_id is no longer trusted on its own — attributing a vote to a
+    # real Telegram account requires a signed identity token proving that
+    # account. Without one the vote is recorded as a name-only proxy entry.
+    id_token: Optional[str] = Field(None, description="Signed identity token to attribute the vote to a real Telegram user")
     comment: Optional[str] = Field(None, max_length=100, description="Optional note to attach to the vote")
 
 
@@ -143,7 +146,7 @@ class VapidPublicKeyResponse(BaseModel):
 
 
 class WebStartRollcallRequest(BaseModel):
-    tg_user_id: int = Field(..., description="Verified Telegram user_id of the admin starting the rollcall")
+    id_token: str = Field(..., description="Signed identity token of the admin starting the rollcall")
     title: str = Field(..., min_length=1, max_length=200, description="Rollcall title")
 
 

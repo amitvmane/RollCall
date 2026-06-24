@@ -9,10 +9,14 @@ const LS_NAME="rollcall_name";
 const LS_NAME_OVERRIDE="rollcall_name_override";
 const LS_TG_USER_ID="rc_verified_tg_user_id";
 const LS_TG_NAME="rc_verified_tg_name";
+const LS_ID_TOKEN="rc_identity_token";
 
 // Verified Telegram identity from deep-link verification (persists across sessions)
 let _verifiedUserId=parseInt(localStorage.getItem(LS_TG_USER_ID))||null;
 let _verifiedName=localStorage.getItem(LS_TG_NAME)||null;
+// Signed proof of identity (from tg-verify or Mini App auth). Presented to the
+// server in place of a raw, forgeable user id on identity-sensitive calls.
+let _idToken=localStorage.getItem(LS_ID_TOKEN)||null;
 
 // Only show "invalid URL" when a token IS present but the mode is wrong (corrupted link).
 // No token = home screen, handled at the bottom of the file.
@@ -47,6 +51,7 @@ async function _miniappAuth(){
     const d=await r.json();
     _maToken=d.token;
     sessionStorage.setItem(MA_TOKEN_KEY,_maToken);
+    if(d.id_token){_idToken=d.id_token;localStorage.setItem(LS_ID_TOKEN,_idToken);}
     renderIdentity();
   }catch(_){}
 }
@@ -157,8 +162,8 @@ $("name-change-btn").addEventListener("click",()=>{
   if(_verifiedUserId){
     const ok=confirm("Changing your name will unlink your Telegram verification.\nYou can re-verify after setting a new name.");
     if(!ok)return;
-    _verifiedUserId=null;_verifiedName=null;
-    localStorage.removeItem(LS_TG_USER_ID);localStorage.removeItem(LS_TG_NAME);
+    _verifiedUserId=null;_verifiedName=null;_idToken=null;
+    localStorage.removeItem(LS_TG_USER_ID);localStorage.removeItem(LS_TG_NAME);localStorage.removeItem(LS_ID_TOKEN);
     _stopVerifyPoll();
   }
   currentName="";
@@ -242,7 +247,7 @@ async function castVote(voteType){
       method:"POST",signal:ac.signal,headers:_hdrs,
       body:JSON.stringify({
         name:currentName,vote:voteType,
-        ...(TG_USER?.id||_verifiedUserId?{tg_user_id:TG_USER?.id||_verifiedUserId}:{}),
+        ...(_idToken?{id_token:_idToken}:{}),
         ...(comment?{comment}:{})
       })
     });
@@ -715,8 +720,10 @@ async function _pollVerify(){
     _stopVerifyPoll();
     _verifiedUserId=data.user_id;
     _verifiedName=data.name;
+    _idToken=data.id_token||null;
     localStorage.setItem(LS_TG_USER_ID,String(_verifiedUserId));
     localStorage.setItem(LS_TG_NAME,_verifiedName);
+    if(_idToken)localStorage.setItem(LS_ID_TOKEN,_idToken);
     // Auto-populate name from verified Telegram identity and lock it
     currentName=_verifiedName;
     localStorage.setItem(LS_NAME,currentName);
@@ -924,9 +931,9 @@ window.homeOpenLink=function(){
 let _isWebAdmin=false;
 
 async function _checkWebAdmin(){
-  if(!IS_GROUP||!_verifiedUserId)return;
+  if(!IS_GROUP||!_idToken)return;
   try{
-    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/admin-status?tg_user_id=${_verifiedUserId}`,{signal:AbortSignal.timeout(5000)});
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/admin-status?id_token=${encodeURIComponent(_idToken)}`,{signal:AbortSignal.timeout(5000)});
     if(!res.ok)return;
     const d=await res.json();
     _isWebAdmin=!!d.is_admin;
@@ -946,7 +953,7 @@ window.closeStartModal=function(){
   if(m){m.style.display="none";}
 };
 window.submitStartRollcall=async function(){
-  if(!_verifiedUserId){toast("Verify your Telegram identity first.",3500);return;}
+  if(!_idToken){toast("Verify your Telegram identity first.",3500);return;}
   const title=(document.getElementById("start-title")?.value||"").trim();
   if(!title){toast("Enter a title for the rollcall.",2500);return;}
   const btn=document.getElementById("start-submit-btn");
@@ -954,7 +961,7 @@ window.submitStartRollcall=async function(){
   try{
     const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/start-rollcall`,{
       method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({tg_user_id:_verifiedUserId,title}),
+      body:JSON.stringify({id_token:_idToken,title}),
       signal:AbortSignal.timeout(10000),
     });
     if(!res.ok){

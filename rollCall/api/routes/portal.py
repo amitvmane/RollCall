@@ -1,13 +1,18 @@
 """
 Portal routes — personal cross-group stats for verified members.
 
-No bearer token required. Accepts tg_user_id as a query parameter
-(obtained from tg-verify). Rate-limited by the shared middleware.
+No bearer token required, but every route returns data for exactly one
+Telegram user, so it must prove that identity. The caller presents a signed
+identity token (`id_token`, from tg-verify or Mini App auth); the user id is
+derived from its signature server-side. A raw numeric tg_user_id is NOT
+accepted — trusting one would let anyone read any user's attendance history.
+Rate-limited by the shared middleware.
 """
-from fastapi import APIRouter, HTTPException, Path, Query
+from fastapi import APIRouter, HTTPException, Path, Query, status
 
 import db as _db
 from rollcall_manager import manager
+from api.identity import verify_identity_token
 from api.schemas.portal import (
     PortalGroupHistoryResponse,
     PortalGroupsResponse,
@@ -18,16 +23,26 @@ from api.schemas.portal import (
 router = APIRouter()
 
 
+def _require_identity(id_token: str) -> int:
+    """Resolve a signed identity token to a verified user id, or 401."""
+    user_id = verify_identity_token(id_token)
+    if user_id is None or user_id <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Verify with Telegram to view your portal.",
+        )
+    return user_id
+
+
 @router.get(
     "/portal/groups",
     response_model=PortalGroupsResponse,
     summary="All groups where this Telegram user has voted, with per-group stats",
 )
 async def portal_groups(
-    tg_user_id: int = Query(..., description="Telegram user ID (from tg-verify)"),
+    id_token: str = Query(..., description="Signed identity token (from tg-verify / Mini App auth)"),
 ) -> PortalGroupsResponse:
-    if tg_user_id <= 0:
-        raise HTTPException(status_code=422, detail="tg_user_id must be a positive integer")
+    tg_user_id = _require_identity(id_token)
 
     chats = _db.get_user_voted_chats(tg_user_id)
     groups = []
@@ -63,11 +78,10 @@ async def portal_groups(
 )
 async def portal_group_history(
     chat_id: int = Path(...),
-    tg_user_id: int = Query(..., description="Telegram user ID (from tg-verify)"),
+    id_token: str = Query(..., description="Signed identity token (from tg-verify / Mini App auth)"),
     limit: int = Query(20, ge=1, le=50),
 ) -> PortalGroupHistoryResponse:
-    if tg_user_id <= 0:
-        raise HTTPException(status_code=422, detail="tg_user_id must be a positive integer")
+    tg_user_id = _require_identity(id_token)
 
     sessions = _db.get_user_session_history(chat_id, tg_user_id, limit=limit)
     return PortalGroupHistoryResponse(

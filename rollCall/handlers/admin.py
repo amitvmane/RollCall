@@ -310,8 +310,11 @@ async def gentoken_command(message):
 
     web_base = os.environ.get("WEB_BASE_URL", "").rstrip("/")
     if web_base:
+        # Pass the token in the URL fragment, not the query string: fragments
+        # are never sent to the server (so the token can't land in access logs
+        # or a Referer header) — the SPA reads it client-side from location.hash.
         dashboard_line = (
-            f"\n🖥 One-click login: {web_base}/admin/?token={token}\n"
+            f"\n🖥 One-click login: {web_base}/admin/#token={token}\n"
             f"_(link logs you in directly — don't share it)_\n"
         )
     else:

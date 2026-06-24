@@ -374,23 +374,21 @@ async def ghost_callback_handler(call):
             rc_number = int(parts[2])
             proxy_name = parts[3]
 
-            rc = manager.get_rollcall(cid, rc_number)
-            if not rc:
-                await bot.answer_callback_query(call.id, "Rollcall not found")
-                return
-
             proxy_owner_id = call.from_user.id
             pending = _pending_proxy_add.pop((cid, proxy_owner_id, proxy_name), {})
             comment = pending.get('comment', '')
 
-            user = User(proxy_name, None, proxy_name, rc.allNames)
-            user.comment = comment
-            rc.set_proxy_owner(proxy_name, proxy_owner_id)
+            async with manager.get_chat_write_lock(cid):
+                rc = manager.get_rollcall(cid, rc_number)
+                if not rc:
+                    await bot.answer_callback_query(call.id, "Rollcall not found")
+                    return
 
-            # rc.addIn → _save_user_to_db writes the proxy row with the right
-            # status (in or waitlist), preserving comment and owner from above.
-            rc.addIn(user)
-            rc.save()
+                user = User(proxy_name, None, proxy_name, rc.allNames)
+                user.comment = comment
+                rc.set_proxy_owner(proxy_name, proxy_owner_id)
+                rc.addIn(user)
+                rc.save()
 
             await bot.answer_callback_query(call.id, f"✅ Added {proxy_name}")
             await safe_edit_text(cid, call.message.message_id, f"✅ {proxy_name} added to IN list")

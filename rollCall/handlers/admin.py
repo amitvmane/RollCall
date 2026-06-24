@@ -317,12 +317,12 @@ async def gentoken_command(message):
     dm_text = (
         f"🔑 *API Token — {_esc_md(chat_title)}*\n\n"
         f"`{token}`\n\n"
-        f"⚠️ _Save this now — it won't be shown again\\._\n\n"
+        f"⚠️ _Save this now — it won't be shown again._\n\n"
         f"*Chat ID:* `{cid}`\n"
         f"*Scopes:* read, vote, admin\n"
         f"*Expires:* {expires_at.strftime('%d %b %Y')}\n"
         f"{dashboard_line}\n"
-        f"When it expires, run /gentoken in the group again\\."
+        f"When it expires, run /gentoken in the group again."
     )
 
     try:

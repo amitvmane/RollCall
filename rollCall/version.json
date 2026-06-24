@@ -91,19 +91,19 @@
     },
     {
         "Version": 5.0,
-        "Description": "Major release: Ghost Tracking feature. Bot now tracks session no-shows per user. After /erc, organiser is asked if anyone ghosted \u2014 tap to select from the IN list. Repeat ghosts get a reconfirmation prompt when voting IN again. New commands: /absent_stats (public leaderboard), /set_absent_limit, /mark_absent, /clear_absent, /toggle_ghost_tracking. Ghost tracking is enabled by default with a limit of 1 missed session.",
+        "Description": "Major release: Ghost Tracking feature. Bot now tracks session no-shows per user. After /erc, organiser is asked if anyone ghosted — tap to select from the IN list. Repeat ghosts get a reconfirmation prompt when voting IN again. New commands: /absent_stats (public leaderboard), /set_absent_limit, /mark_absent, /clear_absent, /toggle_ghost_tracking. Ghost tracking is enabled by default with a limit of 1 missed session.",
         "DeployedOnProd": "N",
         "DeployedDatetime": "24-04-2026 00:00 UTC"
     },
     {
         "Version": 5.1,
-        "Description": "Ghost Tracking \u2014 session no-show tracking with reconfirmation (v5.0)",
+        "Description": "Ghost Tracking — session no-show tracking with reconfirmation (v5.0)",
         "DeployedOnProd": "N",
         "DeployedDatetime": "24-04-2026 09:51 UTC"
     },
     {
         "Version": 5.3,
-        "Description": "Ghost Tracking \u2014 fix proxy user (/sif) ghost count tracking and support /stats ghost, /clear_absent commands for proxy users",
+        "Description": "Ghost Tracking — fix proxy user (/sif) ghost count tracking and support /stats ghost, /clear_absent commands for proxy users",
         "DeployedOnProd": "N",
         "DeployedDatetime": "26-04-2026 12:00 UTC"
     },
@@ -175,86 +175,92 @@
     },
     {
         "Version": 7.2,
-        "Description": "🔧 Bot Freeze Fix — bot no longer freezes at night or mid-day; silently-dead TCP connections now cleared every 5 min, poll timeout reduced to 35 s for faster recovery, expired button-tap errors quietly suppressed. 📋 Audit Log 2.0 — /audit_log rebuilt with paginated ← page → navigation (15/page default), compact one-liner entries showing rollcall name instead of shifting ID, 6 new tracked actions (new rollcall, end rollcall, buzz, quiet mode on/off, timezone change, panel end), panel end-rollcall was completely unlogged before. 🕐 Auto-Close Fix — scheduled template rollcalls now correctly close at event time even after a bot restart; reminder loops resume on startup so nothing is silently skipped. 🐛 Edge-case fix: get_next_weekday_datetime returned next-week date when schedule and event time were identical; double minute-alignment delay in reminder loop removed.",
+        "Description": "Bot Freeze Fix — silently-dead TCP connections cleared every 5 min, poll timeout reduced for faster recovery. Audit Log 2.0 — paginated navigation, compact entries, 6 new tracked actions. Auto-Close Fix — scheduled rollcalls now correctly close after bot restart. Edge-case fix: get_next_weekday_datetime returned wrong date when schedule and event times matched.",
         "DeployedOnProd": "N",
         "DeployedDatetime": "16-05-2026 00:00 UTC"
     },
     {
         "Version": 7.3,
-        "Description": "🔊 Louder Mode Fixes — /sif, /sof, /smf proxy commands now send correct ack messages in louder mode (dead code path fixed: addIn() returns None on success, not a User object); /in and /maybe also show 'X is now IN/MAYBE!' acks; all proxy command messages properly gated by shh mode. 📌 Panel Debounce — in louder mode, panel sends are debounced 5 minutes so rapid votes produce one panel update instead of flooding the chat; implemented with non-blocking asyncio.sleep. 💾 Panel Persistence — panel_msg_id column added to rollcalls table and lazily restored on restart so in-place edits continue working after a bot reboot. 🐛 SQLite cursor leak fix in get_all_chat_ids().",
+        "Description": "Louder Mode Fixes — proxy ack messages fixed. Panel Debounce — rapid votes produce one panel update. Panel Persistence — panel_msg_id survives bot restart. SQLite cursor leak fix.",
         "DeployedOnProd": "N",
         "DeployedDatetime": "21-05-2026 00:00 UTC"
     },
     {
         "Version": 7.4,
-        "Description": "🚀 Auto Panel on Start — /src and scheduled template auto-starts now immediately send the full inline vote panel (instead of plain text), so members can vote without any extra steps. 🎉 Ended-by Attribution — /erc and panel end now append 'Ended by <name>' to the finish message. 🐛 Production fix: panel_msg_id was never actually persisted (name 'db' is not defined error in _persist_panel_msg_id — update_rollcall was not imported as a function); panel persistence now works correctly across restarts. 🛡️ Guard: _dm_promoted_real_user is now only called when user_id is an int (all 5 call sites guarded), preventing silent errors for proxy users promoted from waitlist. 📌 Debounce cancel on end — pending panel debounce tasks are now cancelled when a rollcall ends (/erc or panel end) to prevent stale panel sends. ⚡ Rate limit on panel buttons — btn_in/out/maybe callbacks now apply the same rate-limit check as the equivalent commands.",
+        "Description": "Auto Panel on Start — /rc and templates send inline vote panel immediately. Ended-by Attribution on /erc. panel_msg_id persistence fix. Guard for proxy waitlist promotions. Debounce cancel on end. Rate limit on panel buttons.",
         "DeployedOnProd": "N",
         "DeployedDatetime": "21-05-2026 00:00 UTC"
     },
     {
         "Version": 7.5,
-        "Description": "🏗️ Major code refactoring for effective LLM token utilization — telegram_helper.py split into focused handler modules (core, voting, lifecycle, settings, ghost, admin, lists, proxy, templates, stats); each module is single-responsibility and significantly smaller, reducing token overhead for AI-assisted development and code review. 🐛 7 bug fixes: 3-segment timezone parsing (/timezone America/Indiana/Indianapolis), string-vs-int comparison in /reminder, uncaught exceptions in /wait_limit and /set_rollcall_time, ghost reconf double-counting stats on comment update, SQL aggregate column alias mismatch (SQLite vs PostgreSQL), traceback print statements replaced with structured logging throughout.",
+        "Description": "Major handler refactor — telegram_helper.py split into focused modules (core, voting, lifecycle, settings, ghost, admin, lists, proxy, templates, stats). 7 bug fixes: timezone parsing, /reminder string comparison, ghost reconf double-counting, SQL alias mismatch, traceback logging.",
         "DeployedOnProd": "N",
         "DeployedDatetime": "26-05-2026 00:00 UTC"
     },
     {
         "Version": 7.6,
-        "Description": "🛡️ Markdown injection hardening — usernames/titles with _, *, `, [ no longer crash Telegram parse_mode='Markdown' sends. New _esc_md() and format_mention_with_name_md() helpers in bot_state applied across stats, lifecycle, voting, proxy, admin, ghost, settings, templates, lists, check_reminders. Fixes production 'can't parse entities' errors for users like @Nasri_Gunner. 📖 /help split — /help shows user commands, /help admin shows admin commands; cleaner discovery and shorter scroll. 🕐 IST log timestamps — TZ=Asia/Kolkata in docker-compose so log timestamps and datetime.now() match the operator's timezone. 🐛 4 bug fixes from deep audit: (1) stale wait_pos/out_pos after promotion caused unfair waitlist ordering — positions now reset when leaving a bucket so re-entry is FIFO at the back; (2) auto-close vs /erc race condition — check_reminders now takes the same erc_lock and re-verifies before double-sending finish text or ghost prompt; (3) /maybe and /smf were missing notify_proxy_owner_wait_to_in for WAITLIST→IN promotions — now consistent with /out, /sof, panel, /set_limit; (4) stats._esc() None guard; bare except in models.delete_user replaced with except Exception. ⚙️ Misc: 429 retry-on-error, panel persistence DB migrations, debounce removed (immediate panel updates).",
+        "Description": "Markdown injection hardening — usernames with special chars no longer crash Telegram sends. /help split into user/admin views. IST log timestamps. 4 audit fixes: waitlist position reset, auto-close vs /erc race, /maybe waitlist promotion parity, stats None guard.",
         "DeployedOnProd": "N",
         "DeployedDatetime": "29-05-2026 00:00 UTC"
     },
     {
         "Version": 7.7,
-        "Description": "🛡️ Hardening release — 17 bug fixes + reliability pass. ✅ /stats attendance rate now works (was always blank). 💬 /out shows a confirmation message like /in and /maybe. 🤫 Panel-end respects /shh mode. 🔠 Display names with ] no longer break formatting. 🧹 /delete_user refuses to wipe two users sharing a first name — use @username to disambiguate. 📨 Users moved IN→WAITLIST by /set_limit now get a DM. 🔁 /set_status is a no-op if you're already in that bucket (no more list reorder). 📋 Cleaner command menu — regular members see user commands, admins see admin commands. 🔒 Votes that race with /erc fail cleanly instead of silently breaking. 🩺 /health reports background-task liveness and DB pool usage. 🐛 Plus many internal fixes for memory growth, panel recovery after restart, and proxy-comment loss in ghost prompts.",
+        "Description": "17 bug fixes + reliability pass: attendance rate display, /out confirmation, panel-end respects /shh, display name ] fix, /delete_user ambiguity guard, set_limit DM, /set_status no-op, cleaner command menu, vote-vs-/erc race fix, /health background task liveness.",
         "DeployedOnProd": "N",
         "DeployedDatetime": "03-06-2026 00:00 UTC"
     },
     {
         "Version": 7.8,
-        "Description": "👻 Ghost feature polish — (1) confirmed attendance now decrements ghost_count by 1 (floored at 0) for every IN user who wasn't selected as a ghost. The decrement fires on all three finalize paths: ghost_no_ ('everyone attended' button), ghost_done_ with no selection, and ghost_done_ with selection. Initial v7.8 attempt only covered the third path, so 'No ghosts' button (the common case) was a no-op — fixed. (2) reconfirmation prompt no longer duplicates — spamming /in (or the panel IN button) while a prompt is already pending is silently ignored, and the prompt is skipped entirely if the user is already on the IN list; (3) the warning message now @-mentions the user by name on both the /in path and the panel-button path so it's clear who it's directed at. 🧹 Memory hygiene — abandoned reconfirmation prompts (user ignored the buttons) now carry a _ts and are pruned by the memory_prune_loop after 1h, so the dict no longer leaks until restart. 📣 /buzz upgrades — (a) new tracking middleware records every real user on any group message or button tap, not just on /in/out/maybe votes, so /buzz finally reaches lurkers who have never voted; (b) defensive dedup of the mention list guarantees one ping per user per buzz even if the chat_members table ever ends up with duplicate rows; (c) when multiple rollcalls are active, /buzz (no ::N) now spares anyone who voted on ANY of them — admins can still target one with /buzz ::N. Message text adapts: per-rollcall title when targeted or only one rollcall is open, otherwise lists all active rollcall titles. 🛠️ Duplicate-vote message fix — /in, /out, /maybe used to reply with 'No duplicate proxy please :-)' for real-user re-votes, which made no sense to non-admin members. New alreadyInList exception now gives 'You're already IN / OUT / MAYBE for <title>.' with the actual bucket and rollcall name. /sif, /sof, /smf still use duplicateProxy since those really are proxy-name collisions.",
+        "Description": "Ghost feature polish — attendance now decrements ghost_count. Reconfirmation dedup fix. /buzz tracks lurkers via middleware, dedup guarantee, multi-rollcall sparing. Duplicate-vote message now names the correct bucket and rollcall title.",
         "DeployedOnProd": "N",
         "DeployedDatetime": "06-06-2026 11:06 UTC"
     },
     {
         "Version": 7.9,
-        "Description": "📦 Tier A dependency bumps — pyTelegramBotAPI held at 4.14.1 (separate decision for the Telegram API surface). All other pins moved to latest stable: pytz 2023.3→2026.2 (tz data refresh), Levenshtein 0.23.0→0.27.1, matplotlib 3.6.3→3.9.4 (only used in stats charts), urllib3 1.26.12→2.6.3 (MAJOR — dropped legacy SSL/TLS code, changed Retry defaults), python-dotenv 1.0.0→1.2.1, aiohttp 3.9.0→3.13.5, psycopg2-binary 2.9.9→2.9.12. Verified against the full test suite (295 unit + 315 integration + 9 smoke checks) before shipping. urllib3 2.x is the only major bump; watch /health and the polling loop post-deploy for any unexpected retry behavior.",
+        "Description": "Tier A dependency bumps — pytz, Levenshtein, matplotlib, urllib3 2.x, python-dotenv, aiohttp, psycopg2-binary all moved to latest stable. Full test suite green.",
         "DeployedOnProd": "N",
         "DeployedDatetime": "09-06-2026 06:50 UTC"
     },
     {
         "Version": 8.0,
-        "Description": "🔒 Reproducible builds — requirements.lock pins the full transitive dep tree (8 direct → 33 total) generated via pip-compile against Python 3.12. Dockerfile and CI now install from the lock file instead of requirements.txt, so prod and CI run the exact same package versions; eliminates silent transitive drift between environments. 🐍 Python 3.12 — Dockerfile base image bumped python:3.11-slim → python:3.12-slim to match the version already validated in CI. CI matrix collapsed from {3.10, 3.11, 3.12} to a single 3.12 job, reducing test runtime to ~1/3 and validating only what prod actually runs. Smoke + 295 unit + 315 integration tests all green on the locked 3.12 env. Sets the stage for safer Tier B (pyTelegramBotAPI) bumps next.",
+        "Description": "Reproducible builds — requirements.lock pins full transitive dep tree. Dockerfile + CI install from lock file. Python 3.12 base image. CI matrix collapsed to single 3.12 job.",
         "DeployedOnProd": "N",
         "DeployedDatetime": "11-06-2026 12:30 UTC"
     },
     {
         "Version": 8.1,
-        "Description": "🧹 Python 3.12 deprecation cleanup — pure hygiene PR, zero behavior change. (1) datetime.utcnow() replaced everywhere in production code (rollCall/db.py, rollCall/models.py — 3 call sites) with a local _utcnow_naive() helper that returns datetime.now(timezone.utc).replace(tzinfo=None). Same naive-UTC value the bot has always used, just without the 3.12 deprecation warning that will become an error in a future Python release. (2) sqlite3 default datetime adapter (also deprecated in 3.12) replaced with an explicit register_adapter at db.py module import; produces byte-identical 'YYYY-MM-DD HH:MM:SS[.ffffff]' output that the existing _parse_db_datetime reader already handles, so DB round-trips are unchanged and existing rows still parse cleanly. Result: deprecation warning count from the full test suite dropped from ~1500 → 1 (the lone remaining warning is asyncio.get_event_loop() inside test code, out of scope). Full suite still green: smoke + 295 unit + 315 integration on locked Python 3.12, plus smoke inside the Docker image. Future-proofs the bot for Python 3.13/3.14 where these deprecations become hard errors. Also bundles same-day fixes shipped under the v8.1 train: (a) /buzz no longer surfaces UnboundLocalError from log_admin_action's finally block (d9c2793); (b) /stats Voting% + Attendance% split with real attendance, leaderboard ranks by actual attendance, streak resets on OUT/MAYBE (bd43d4b); (c) /stats correctness for /stats group, /stats bot, /stats <name> resolver (incl. proxy fallback + ambiguous-name hint), proxy users counted as first-class participants in personal/leaderboard/group stats, and /help refactor with COMMANDS-driven single source of truth + /help <name> detail view (0330011). Full test suite at deploy time: smoke 9/9, unit 296/296, integration 341/341 on Python 3.12 + locked deps; docker build + in-image smoke also green.",
+        "Description": "Python 3.12 deprecation cleanup — datetime.utcnow() replaced, sqlite3 adapter explicit. /stats correctness overhaul. /help rebuilt from COMMANDS registry. Smoke + unit + integration all green on locked 3.12.",
         "DeployedOnProd": "N",
         "DeployedDatetime": "12-06-2026 13:00 UTC"
     },
     {
         "Version": 8.2,
-        "Description": "bump pyTelegramBotAPI 4.14.1 → 4.34.0 (Bot API 6.x → 10.0) (#15)",
+        "Description": "bump pyTelegramBotAPI 4.14.1 → 4.34.0 (Bot API 6.x → 10.0)",
         "DeployedOnProd": "N",
         "DeployedDatetime": "16-06-2026 12:29 UTC"
     },
     {
         "Version": 8.3,
-        "Description": "🌐 Web & Admin UI overhaul + Stats dashboard. Dark mode toggle (persisted, no FOUC) on both pages. RollCall favicon/logo. Admin: row-level loading states in manage section, in-place save without panel re-render, template schedule editor. User web: vote AbortController timeout (30 s), upcoming rollcalls card. Stats: single source of truth in services/stats.py — same numbers on Telegram /stats and web. Admin gets a lazy-loaded Stats tab (stat boxes, leaderboard, recent sessions, ghost board). User web gets a personal stats card (rank, attendance rate, streak, vote breakdown) + group leaderboard with 'you' highlighted. New public endpoint GET /api/v1/web/group/{token}/stats. Telegram offline banner on both pages when bot can't reach Telegram.",
-        "DeployedOnProd": "Y",
+        "Description": "Web & Admin UI overhaul + Stats dashboard. Dark mode (no FOUC). Admin: lazy Stats tab with leaderboard, sessions, ghost board. User web: personal stats card, group leaderboard with 'you' highlight. Single source of truth in services/stats.py — same numbers on Telegram and web. Telegram offline banner on both pages.",
+        "DeployedOnProd": "N",
         "DeployedDatetime": "23-06-2026 12:45 UTC"
     },
     {
         "Version": 8.4,
-        "Description": "QR code + Response-time leaderboard. Admin panel: 'QR' button generates a scannable SVG QR code for the group web link — modal with download, zero friction member onboarding. Response-time leaderboard in admin Stats tab: avg and best time from rollcall open to first vote, ordered fastest-first. Data sourced from users.created_at vs rollcalls.created_at (no schema change). New endpoints: GET /api/v1/chats/{id}/qrcode (SVG), GET /api/v1/chats/{id}/stats/response-times. Adds qrcode 8.2 (SVG, no PIL) to deps.",
-        "DeployedOnProd": "Y",
+        "Description": "QR code button in admin panel — generates scannable SVG QR for the group web link, modal with download. Response-time leaderboard in Stats tab (avg and best time from rollcall open to first vote). New endpoints: GET /chats/{id}/qrcode, GET /chats/{id}/stats/response-times.",
+        "DeployedOnProd": "N",
         "DeployedDatetime": "23-06-2026 15:00 UTC"
     },
     {
         "Version": 8.5,
-        "Description": "PWA + Web Push notifications. Service worker (sw.js) enables offline caching and push delivery. Dynamic manifest per group with app name, icons (192+512 PNG), standalone display. Bell button in brand bar — one tap subscribes; browser asks permission; push arrives when a rollcall opens. VAPID keys auto-generated on first boot and stored in new system_config table. New push_subscriptions table (group-scoped, endpoint-unique, soft-delete on 410). New endpoints: GET /api/v1/web/vapid-public-key, POST/DELETE /web/group/{token}/push-subscribe/unsubscribe, GET /web/group/{token}/manifest.json. Push fires from services/rollcalls.py start_rollcall — works whether started via Telegram or web admin. Fix: requirements.lock now includes qrcode 8.2 + pywebpush 2.3.0 + crypto deps (was missing — caused QR 500 in Docker). Fix: startup 'endpoints OPEN' warning now only fires when zero tokens exist.",
+        "Description": "PWA + Web Push notifications. Service worker for offline caching. Dynamic manifest per group (standalone display, 192/512 icons). Bell button subscribes in one tap; push fires on every rollcall start from any platform. VAPID keys auto-generated and stored in DB. Fix: requirements.lock now includes qrcode + pywebpush (was causing QR 500 in Docker).",
         "DeployedOnProd": "N",
         "DeployedDatetime": "24-06-2026 08:00 UTC"
+    },
+    {
+        "Version": 9.0,
+        "Description": "Major release — Web Platform & Intelligence sprint (17–24 June 2026). Seven days, five shipped versions. (1) Web & Admin UI overhaul: dark mode with no FOUC, sticky brand bar, responsive cards on both admin and user-facing pages. (2) Stats everywhere: single source of truth in services/stats.py — /stats Telegram command, REST API, and web page all share the same query functions; admin gets a lazy-loaded Stats tab (attendance leaderboard, recent sessions, ghost board); user web gets a personal card (rank, attendance rate, streak, vote pills) and group leaderboard with 'you' highlighted. (3) Live presence: heartbeat-based active-viewer count (90s TTL) + persistent total-view counter per group, shown in admin Stats tab and user brand bar. (4) Telegram offline resilience: self-healing 60s retry loop replaces dead asyncio.Event wait; on reconnect the bot sends Telegram panels for all rollcalls started offline via web admin; admin and user web pages show a red banner when Telegram is down. (5) QR code onboarding: admin panel 'QR' button generates a server-side SVG QR for the group web voting link — modal with inline preview and SVG download; zero-friction member onboarding. (6) Response-time leaderboard: avg and best time from rollcall open to first vote per user, ordered fastest-first, sourced directly from users.created_at vs rollcalls.created_at with no schema change. (7) PWA + Web Push notifications: service worker (sw.js) handles offline caching and push delivery; dynamic manifest per group with group name, standalone display, and 192/512 PNG icons; bell button in brand bar subscribes in one tap; VAPID keys auto-generated on first boot and stored in new system_config table; push fires automatically on every rollcall start regardless of whether it was started from Telegram or the web admin. New DB tables: web_view_stats, system_config, push_subscriptions. New endpoints: vapid-public-key, push-subscribe/unsubscribe, manifest.json, qrcode, response-times, group stats, presence, heartbeat. Fix: requirements.lock now includes qrcode 8.2 + pywebpush 2.3.0 + crypto deps (missing from lock caused QR 500 in Docker on every deploy). Fix: startup 'endpoints OPEN' warning now suppressed when API tokens exist.",
+        "DeployedOnProd": "Y",
+        "DeployedDatetime": "24-06-2026 09:00 UTC"
     }
 ]

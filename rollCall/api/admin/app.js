@@ -1171,6 +1171,22 @@ function buildStatsPanel(cid,gs,lb,hist,pres,rt){
       ${h.maybe_count?`<td><span class="pill pill-maybe">${fmt(h.maybe_count)} MAY</span></td>`:'<td></td>'}
     </tr>`).join("");
 
+  // Attendance trend chart (oldest → newest)
+  const histChron=(hist||[]).slice().reverse();
+  const maxIn=histChron.length?Math.max(...histChron.map(h=>h.in_count||0),1):1;
+  const attChartHtml=histChron.length>=2?`
+    <div class="att-chart">
+      ${histChron.map(h=>{
+        const barH=Math.round((h.in_count||0)/maxIn*70)+10;
+        const label=(h.ended_at||'').slice(5,10)||'';
+        return`<div class="att-bar-wrap" title="${escH(h.title||'')} · ${fmt(h.in_count)} IN">
+          <div class="att-bar-val">${fmt(h.in_count)}</div>
+          <div class="att-bar" style="height:${barH}%"></div>
+          <div class="att-bar-lbl">${escH(label)}</div>
+        </div>`;
+      }).join('')}
+    </div>`:'<p class="sub" style="font-size:.8rem">Not enough sessions yet</p>';
+
   const ghostRows=(gs.ghost_leaderboard||[]).slice(0,5).map(g=>`
     <div class="ghost-stat-row">
       <span class="ghost-stat-name">${escH(g.name||'?')}</span>
@@ -1194,6 +1210,11 @@ function buildStatsPanel(cid,gs,lb,hist,pres,rt){
     ${presHtml}
     <div class="stat-boxes">
       ${boxes.map(b=>`<div class="stat-box"><div class="stat-box-val">${b.val}</div><div class="stat-box-lbl">${b.label}</div></div>`).join("")}
+    </div>
+
+    <div class="card stats-card">
+      <div class="card-header"><h3>📈 Attendance Trend</h3></div>
+      ${attChartHtml}
     </div>
 
     ${lbRows?`

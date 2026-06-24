@@ -23,6 +23,26 @@ if(tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user){
 }
 const TG_NAME=TG_USER?(TG_USER.first_name||(TG_USER.username?"@"+TG_USER.username:null))||null:null;
 
+// ── Mini App session token (HMAC-verified identity) ────────────────────────
+const MA_TOKEN_KEY="rc_ma_token";
+let _maToken=sessionStorage.getItem(MA_TOKEN_KEY);
+
+async function _miniappAuth(){
+  if(!tg||!tg.initData)return;
+  try{
+    const r=await fetch("/api/v1/auth/telegram/miniapp",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({init_data:tg.initData}),
+      signal:AbortSignal.timeout(8000),
+    });
+    if(!r.ok)return;
+    const d=await r.json();
+    _maToken=d.token;
+    sessionStorage.setItem(MA_TOKEN_KEY,_maToken);
+    renderIdentity();
+  }catch(_){}
+}
+
 // ── State ──────────────────────────────────────────────────────────────────
 // TG users can override display name; stored under a separate LS key so it
 // doesn't bleed into guest sessions on the same device.
@@ -76,7 +96,8 @@ function renderIdentity(){
     if(TG_NAME){
       const isOverride=currentName!==TG_NAME;
       badge.className="id-badge tg";
-      badge.innerHTML=`✈ ${esc(currentName)} <span style="font-size:.72rem;font-weight:500;opacity:.75">${isOverride?"via Telegram ✎":"via Telegram"}</span>`;
+      const label=isOverride?"via Telegram ✎":_maToken?"✅ Verified":"via Telegram";
+      badge.innerHTML=`✈ ${esc(currentName)} <span style="font-size:.72rem;font-weight:500;opacity:.75">${label}</span>`;
     }else{
       badge.className="id-badge guest";
       badge.innerHTML=`👤 ${esc(currentName)}`;
@@ -165,9 +186,10 @@ async function castVote(voteType){
   const ac=new AbortController();
   const _tid=setTimeout(()=>ac.abort(),30000);
   try{
+    const _hdrs={"Content-Type":"application/json"};
+    if(_maToken)_hdrs["Authorization"]="Bearer "+_maToken;
     const res=await fetch("/api/v1/web/"+token+"/vote",{
-      method:"POST",signal:ac.signal,
-      headers:{"Content-Type":"application/json"},
+      method:"POST",signal:ac.signal,headers:_hdrs,
       body:JSON.stringify({
         name:currentName,vote:voteType,
         ...(TG_USER?.id?{tg_user_id:TG_USER.id}:{}),
@@ -302,6 +324,8 @@ function switchTab(idx){
 
 // ── Load ───────────────────────────────────────────────────────────────────
 async function load(){
+  // Mini App auth fires in parallel with page data; errors are silent
+  if(tg&&tg.initData)_miniappAuth().catch(()=>{});
   try{IS_GROUP?await loadGroup():await loadJoin();}
   catch(e){showError(e.message||"Could not connect. Check your internet and tap Retry.");return;}
   $("loading").classList.add("hidden");
@@ -482,6 +506,13 @@ function renderStats(d){
         <span class="sp-pill sp-maybe">🤔 ${n(me.total_maybe_votes)} MAYBE</span>
         ${me.ghost_count?`<span class="sp-pill sp-ghost">👻 ${me.ghost_count} ghost</span>`:""}
       </div>
+      ${(me.recent_sessions||[]).length>=3?`
+      <div class="sp-spark-label">Last ${me.recent_sessions.length} sessions</div>
+      <div class="sp-spark">${(me.recent_sessions).slice().reverse().map(s=>{
+        const cls=s.status==="in"?"sp-dot-in":s.status==="out"?"sp-dot-out":s.status==="maybe"?"sp-dot-maybe":"sp-dot-miss";
+        const ttl=s.status==="miss"?"Didn't vote":(s.status||"").toUpperCase();
+        return`<span class="sp-dot ${cls}" title="${esc(ttl)} · ${esc((s.ended_at||'').slice(0,10))}"></span>`;
+      }).join('')}</div>`:""}
     </div>`;
   }
 
@@ -499,6 +530,23 @@ function renderStats(d){
     </div>`;
   }).join("");
 
+  // Attendance trend chart from recent_history (oldest→newest)
+  const histArr=(d.recent_history||[]).slice().reverse();
+  const maxIn=histArr.length?Math.max(...histArr.map(h=>h.in_count||0),1):1;
+  const trendHtml=histArr.length>=2?`
+  <div class="sp-trend-label">📈 Recent Attendance</div>
+  <div class="sp-trend">
+    ${histArr.map(h=>{
+      const barH=Math.round((h.in_count||0)/maxIn*70)+10;
+      const label=(h.ended_at||'').slice(5,10)||'';
+      return`<div class="sp-tbar-wrap" title="${esc(h.title||'')} · ${h.in_count} IN">
+        <div class="sp-tbar-val">${h.in_count}</div>
+        <div class="sp-tbar" style="height:${barH}%"></div>
+        <div class="sp-tbar-lbl">${esc(label)}</div>
+      </div>`;
+    }).join('')}
+  </div>`:'';
+
   sc.innerHTML=`
   <div class="stats-section-hdr">📊 Group Stats</div>
   <div class="sp-group-row">
@@ -506,6 +554,7 @@ function renderStats(d){
     <div class="sp-g"><div class="sp-g-val">${n(d.avg_attendance)}</div><div class="sp-g-lbl">Avg Attendance</div></div>
     <div class="sp-g"><div class="sp-g-val">${n(d.total_participants)}</div><div class="sp-g-lbl">Members</div></div>
   </div>
+  ${trendHtml}
   ${personalHtml}
   ${lbRows?`<div class="stats-section-hdr">🏆 Leaderboard</div><div class="slb-list">${lbRows}</div>`:""}`;
 }

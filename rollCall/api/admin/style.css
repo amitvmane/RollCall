@@ -374,3 +374,11 @@ html.dark .qr-body{background:#fff}
 .tg-status-close{background:none;border:none;cursor:pointer;color:inherit;opacity:.7;font-size:1rem;margin-left:auto;line-height:1}
 .tg-status-close:hover{opacity:1}
 body:has(.tg-status-bar) .topbar{top:40px}
+
+/* ── Attendance trend chart ── */
+.att-chart{display:flex;align-items:flex-end;gap:6px;height:110px;padding:8px 0 0}
+.att-bar-wrap{display:flex;flex-direction:column;align-items:center;flex:1;min-width:28px;max-width:60px;height:100%}
+.att-bar-val{font-size:.7rem;font-weight:600;color:var(--text);margin-bottom:3px;line-height:1}
+.att-bar{width:100%;background:var(--accent);border-radius:4px 4px 0 0;transition:height .3s;min-height:4px}
+.att-bar-lbl{font-size:.62rem;color:var(--sub);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;text-align:center}
+html.dark .att-bar{background:#3b82f6}

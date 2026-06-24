@@ -22,6 +22,7 @@ from db import (
     get_response_time_leaderboard,
     get_rollcall_history,
     get_user_attendance_count,
+    get_user_session_history,
     find_proxy_in_chat,
 )
 from rollcall_manager import manager
@@ -340,6 +341,15 @@ def web_group_stats(
                     break
             p["rank"] = rank
             p["total_participants"] = total_pax
+            # Per-session history for sparkline (real users only)
+            if kind == "real" and uid:
+                rows = get_user_session_history(chat_id, uid, limit=15)
+                p["recent_sessions"] = [
+                    {"status": r.get("status", "miss"), "ended_at": str(r.get("ended_at") or "")}
+                    for r in rows
+                ]
+            else:
+                p["recent_sessions"] = []
             personal = p
 
     return {

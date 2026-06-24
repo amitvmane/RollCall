@@ -77,6 +77,7 @@ class WebStatsPersonal(BaseModel):
     total_out_votes: int = 0
     total_maybe_votes: int = 0
     total_waiting_to_in: int = 0
+    recent_sessions: List[dict] = Field(default_factory=list)
 
 
 class WebStatsLeaderEntry(BaseModel):

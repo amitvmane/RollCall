@@ -3580,6 +3580,34 @@ def get_rollcall_history(chat_id: int, limit: int = 10, offset: int = 0) -> List
             release_connection(conn)
 
 
+def get_user_session_history(chat_id: int, user_id: int, limit: int = 15) -> List[Dict]:
+    """Return recent ended rollcalls with the user's status for each (NULL = did not vote)."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        active_false = 'FALSE' if db_type == 'postgresql' else '0'
+        cursor.execute(f"""
+            SELECT r.id, r.title, r.ended_at,
+                   COALESCE(u.status, 'miss') AS status
+            FROM rollcalls r
+            LEFT JOIN users u ON u.rollcall_id = r.id AND u.user_id = {ph}
+            WHERE r.chat_id = {ph} AND r.is_active = {active_false}
+            ORDER BY r.ended_at DESC
+            LIMIT {ph}
+        """, (user_id, chat_id, limit))
+        return [dict(row) for row in cursor.fetchall()]
+    except Exception as e:
+        logging.error("Error getting user session history: %s", e)
+        return []
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
 def log_admin_action(
     chat_id: int,
     admin_id: int,

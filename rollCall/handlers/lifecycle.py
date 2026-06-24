@@ -7,7 +7,7 @@ import logging
 import os
 from datetime import datetime
 
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 
 from bot_state import (
     bot, _panel_msg_ids, _pending_deletes, _pending_overrides,
@@ -56,9 +56,23 @@ def _build_panel_text(rc, rc_number: int) -> str:
     return text
 
 
+def _group_web_url(cid: int) -> str:
+    """Return the permanent group web URL for the keyboard button, or empty string."""
+    base = os.environ.get("WEB_BASE_URL", "").rstrip("/")
+    if not base:
+        return ""
+    try:
+        from db import get_or_create_chat
+        chat = get_or_create_chat(cid)
+        token = chat.get("group_web_token")
+        return f"{base}/web/group/{token}" if token else ""
+    except Exception:
+        return ""
+
+
 # ── Inline keyboards ──────────────────────────────────────────────────────────
 
-async def get_status_keyboard(rc_number: int = 0) -> InlineKeyboardMarkup:
+async def get_status_keyboard(rc_number: int = 0, web_url: str = "") -> InlineKeyboardMarkup:
     markup = InlineKeyboardMarkup(row_width=3)
     markup.add(
         InlineKeyboardButton("✅ IN",       callback_data=f"btn_in_{rc_number}"),
@@ -69,6 +83,11 @@ async def get_status_keyboard(rc_number: int = 0) -> InlineKeyboardMarkup:
         InlineKeyboardButton("📋 Lists",   callback_data=f"btn_lists_{rc_number}"),
         InlineKeyboardButton("🔄 Refresh", callback_data=f"btn_refresh_{rc_number}"),
     )
+    if web_url:
+        if web_url.startswith("https://"):
+            markup.add(InlineKeyboardButton("🌐 Vote on Web", web_app=WebAppInfo(url=web_url)))
+        else:
+            markup.add(InlineKeyboardButton("🌐 Vote on Web", url=web_url))
     markup.add(
         InlineKeyboardButton(f"🛑 End RollCall #{rc_number}", callback_data=f"btn_end_{rc_number}")
     )
@@ -121,7 +140,7 @@ async def _update_panel(cid: int, rc_number: int, rc, force_new: bool = False) -
         _panel_msg_ids[key] = rc.panel_msg_id
 
     text = _build_panel_text(rc, rc_number)
-    markup = await get_status_keyboard(rc_number)
+    markup = await get_status_keyboard(rc_number, web_url=_group_web_url(cid))
 
     if not force_new:
         existing_msg_id = _panel_msg_ids.get(key)
@@ -206,7 +225,7 @@ async def start_roll_call(message):
         )
         rc_number_1based = result["number"]
         rc = manager.get_rollcall(cid, result["rc_index"])
-        markup = await get_status_keyboard(rc_number_1based)
+        markup = await get_status_keyboard(rc_number_1based, web_url=_group_web_url(cid))
         text = _build_panel_text(rc, rc_number_1based)
         sent = await bot.send_message(message.chat.id, text, reply_markup=markup)
         _panel_msg_ids[(cid, rc_number_1based)] = sent.message_id
@@ -359,7 +378,7 @@ async def show_panel(message):
 
         rc = manager.get_rollcall(cid, rc_number)
         text = _build_panel_text(rc, rc_number + 1)
-        markup = await get_status_keyboard(rc_number + 1)
+        markup = await get_status_keyboard(rc_number + 1, web_url=_group_web_url(cid))
 
         sent = await bot.send_message(cid, text, reply_markup=markup)
         _panel_msg_ids[(cid, rc_number + 1)] = sent.message_id
@@ -501,7 +520,7 @@ async def callback_handler(call):
                 await notify_proxy_owner_wait_to_in(rc, _p_obj, cid, rc.title, rc_number)
 
             text = _build_panel_text(rc, rc_number)
-            markup = await get_status_keyboard(rc_number)
+            markup = await get_status_keyboard(rc_number, web_url=_group_web_url(cid))
             try:
                 await bot.edit_message_text(text, cid, call.message.message_id, reply_markup=markup)
                 _panel_msg_ids[(cid, rc_number)] = call.message.message_id
@@ -546,7 +565,7 @@ async def callback_handler(call):
         if action == "status":
             await bot.answer_callback_query(call.id)
             text = _build_panel_text(rc, rc_number)
-            markup = await get_status_keyboard(rc_number)
+            markup = await get_status_keyboard(rc_number, web_url=_group_web_url(cid))
             try:
                 await bot.edit_message_text(text, cid, call.message.message_id, reply_markup=markup)
             except Exception as e:
@@ -558,7 +577,7 @@ async def callback_handler(call):
         if action == "refresh":
             await bot.answer_callback_query(call.id, "Refreshed")
             text = _build_panel_text(rc, rc_number)
-            markup = await get_status_keyboard(rc_number)
+            markup = await get_status_keyboard(rc_number, web_url=_group_web_url(cid))
             try:
                 await bot.edit_message_text(text, cid, call.message.message_id, reply_markup=markup)
                 _panel_msg_ids[(cid, rc_number)] = call.message.message_id
@@ -666,7 +685,7 @@ async def callback_handler(call):
                     for idx, rollcall in enumerate(updated_rollcalls):
                         new_id = idx + 1
                         text = _build_panel_text(rollcall, new_id)
-                        panel_markup = await get_status_keyboard(new_id)
+                        panel_markup = await get_status_keyboard(new_id, web_url=_group_web_url(cid))
                         sent = await bot.send_message(cid, text, reply_markup=panel_markup)
                         _panel_msg_ids[(cid, new_id)] = sent.message_id
                         _persist_panel_msg_id(rollcall, sent.message_id)
@@ -676,7 +695,7 @@ async def callback_handler(call):
         if action == "endcancel":
             await bot.answer_callback_query(call.id, "Cancelled")
             text = _build_panel_text(rc, rc_number)
-            markup = await get_status_keyboard(rc_number)
+            markup = await get_status_keyboard(rc_number, web_url=_group_web_url(cid))
             try:
                 await bot.edit_message_text(text, cid, call.message.message_id, reply_markup=markup)
             except Exception as e:

@@ -1,7 +1,7 @@
 /* RollCall Service Worker — offline cache + web push */
 "use strict";
 
-const CACHE = "rc-v2";
+const CACHE = "rc-v3";
 const PRECACHE = ["/web/", "/web/app.js", "/web/style.css", "/web/logo.svg", "/web/icon-192.png"];
 
 // ── Install: precache shell ───────────────────────────────────────────────────

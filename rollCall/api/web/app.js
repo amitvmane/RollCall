@@ -9,11 +9,15 @@ const LS_NAME="rollcall_name";
 const LS_NAME_OVERRIDE="rollcall_name_override";
 const LS_TG_USER_ID="rc_verified_tg_user_id";
 const LS_TG_NAME="rc_verified_tg_name";
+const LS_TG_USERNAME="rc_verified_tg_username";
 const LS_ID_TOKEN="rc_identity_token";
 
 // Verified Telegram identity from deep-link verification (persists across sessions)
 let _verifiedUserId=parseInt(localStorage.getItem(LS_TG_USER_ID))||null;
 let _verifiedName=localStorage.getItem(LS_TG_NAME)||null;
+// For Mini App sessions TG_USER.username is already set from the SDK; for
+// tg-verify sessions it comes back from the status endpoint and is stored.
+let _verifiedUsername=localStorage.getItem(LS_TG_USERNAME)||null;
 // Signed proof of identity (from tg-verify or Mini App auth). Presented to the
 // server in place of a raw, forgeable user id on identity-sensitive calls.
 let _idToken=localStorage.getItem(LS_ID_TOKEN)||null;
@@ -178,8 +182,8 @@ $("name-change-btn").addEventListener("click",()=>{
   if(_verifiedUserId){
     const ok=confirm("Changing your name will unlink your Telegram verification.\nYou can re-verify after setting a new name.");
     if(!ok)return;
-    _verifiedUserId=null;_verifiedName=null;_idToken=null;
-    localStorage.removeItem(LS_TG_USER_ID);localStorage.removeItem(LS_TG_NAME);localStorage.removeItem(LS_ID_TOKEN);
+    _verifiedUserId=null;_verifiedName=null;_verifiedUsername=null;_idToken=null;
+    localStorage.removeItem(LS_TG_USER_ID);localStorage.removeItem(LS_TG_NAME);localStorage.removeItem(LS_TG_USERNAME);localStorage.removeItem(LS_ID_TOKEN);
     _stopVerifyPoll();
   }
   currentName="";
@@ -269,6 +273,10 @@ async function castVote(voteType){
       body:JSON.stringify({
         name:currentName,vote:voteType,
         ...(_idToken?{id_token:_idToken}:{}),
+        // Username sent so server can format "First (@handle)" when a proxy
+        // with the same first name exists (tg-verify stores _verifiedUsername;
+        // Mini App has it from the SDK).
+        ...((_verifiedUsername||TG_USER?.username)?{username:_verifiedUsername||TG_USER?.username}:{}),
         ...(comment?{comment}:{})
       })
     });
@@ -708,6 +716,10 @@ let _verifyCode=null, _verifyPollTimer=null;
 window.startTgVerify=async function(){
   const btn=document.getElementById("verify-tg-btn");
   if(btn){btn.textContent="⏳ Opening Telegram…";btn.disabled=true;}
+  // Disable the name input while verification is in progress so the user
+  // can't accidentally type a different name after starting the flow.
+  const nameInput=$("name-input");
+  if(nameInput){nameInput.disabled=true;nameInput.placeholder="Verifying with Telegram…";}
   try{
     const res=await fetch("/api/v1/auth/tg-verify/start",{
       method:"POST",headers:{"Content-Type":"application/json"},
@@ -722,10 +734,15 @@ window.startTgVerify=async function(){
     _verifyPollTimer=setInterval(_pollVerify,2000);
     // Auto-stop after 11 minutes (code TTL is 10 min)
     setTimeout(()=>{
-      if(_verifyPollTimer){_stopVerifyPoll();if(btn){btn.textContent="🔗 Verify with Telegram";btn.disabled=false;}}
+      if(_verifyPollTimer){
+        _stopVerifyPoll();
+        if(nameInput){nameInput.disabled=false;nameInput.placeholder="";}
+        if(btn){btn.textContent="🔗 Verify with Telegram";btn.disabled=false;}
+      }
     },660000);
   }catch(e){
     toast("Could not start verification — try again",3500);
+    if(nameInput){nameInput.disabled=false;nameInput.placeholder="";}
     if(btn){btn.textContent="🔗 Verify with Telegram";btn.disabled=false;}
   }
 };
@@ -739,11 +756,16 @@ async function _pollVerify(){
     const data=await res.json();
     if(!data.verified)return;
     _stopVerifyPoll();
+    // Re-enable name input (it was disabled during polling — now locked via identity)
+    const nameInput=$("name-input");
+    if(nameInput){nameInput.disabled=false;nameInput.placeholder="";}
     _verifiedUserId=data.user_id;
     _verifiedName=data.name;
+    _verifiedUsername=data.username||null;
     _idToken=data.id_token||null;
     localStorage.setItem(LS_TG_USER_ID,String(_verifiedUserId));
     localStorage.setItem(LS_TG_NAME,_verifiedName);
+    if(_verifiedUsername)localStorage.setItem(LS_TG_USERNAME,_verifiedUsername);
     if(_idToken)localStorage.setItem(LS_ID_TOKEN,_idToken);
     // Auto-populate name from verified Telegram identity and lock it
     currentName=_verifiedName;

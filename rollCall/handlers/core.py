@@ -121,7 +121,7 @@ async def handle_tg_verify(message):
     code = message.text.split()[1][2:]  # strip "v_" prefix
     user = message.from_user
     tg_name = user.first_name or (f"@{user.username}" if user.username else str(user.id))
-    success = _db.mark_web_verify_token(code, user.id, tg_name)
+    success = _db.mark_web_verify_token(code, user.id, tg_name, tg_username=user.username or None)
     if success:
         await bot.send_message(
             message.chat.id,

@@ -278,6 +278,7 @@ async def vote_web(
     data = await web_svc.vote_by_token(
         token, body.name, body.vote,
         tg_user_id=verified_user_id, comment=body.comment,
+        username=body.username or None,
     )
 
     # Reflect the web vote on the Telegram panel for this rollcall (best-effort).

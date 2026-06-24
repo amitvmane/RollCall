@@ -1055,26 +1055,40 @@ def _run_migrations(conn, cursor):
     try:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS web_verify_tokens (
-                code        TEXT PRIMARY KEY,
-                tg_user_id  INTEGER DEFAULT NULL,
-                tg_name     TEXT DEFAULT NULL,
-                expires_at  TEXT NOT NULL,
-                used_at     TEXT DEFAULT NULL,
-                created_at  TEXT DEFAULT (datetime('now'))
+                code         TEXT PRIMARY KEY,
+                tg_user_id   INTEGER DEFAULT NULL,
+                tg_name      TEXT DEFAULT NULL,
+                tg_username  TEXT DEFAULT NULL,
+                expires_at   TEXT NOT NULL,
+                used_at      TEXT DEFAULT NULL,
+                created_at   TEXT DEFAULT (datetime('now'))
             )
         """ if db_type != 'postgresql' else """
             CREATE TABLE IF NOT EXISTS web_verify_tokens (
-                code        TEXT PRIMARY KEY,
-                tg_user_id  BIGINT DEFAULT NULL,
-                tg_name     TEXT DEFAULT NULL,
-                expires_at  TIMESTAMPTZ NOT NULL,
-                used_at     TIMESTAMPTZ DEFAULT NULL,
-                created_at  TIMESTAMPTZ DEFAULT NOW()
+                code         TEXT PRIMARY KEY,
+                tg_user_id   BIGINT DEFAULT NULL,
+                tg_name      TEXT DEFAULT NULL,
+                tg_username  TEXT DEFAULT NULL,
+                expires_at   TIMESTAMPTZ NOT NULL,
+                used_at      TIMESTAMPTZ DEFAULT NULL,
+                created_at   TIMESTAMPTZ DEFAULT NOW()
             )
         """)
         conn.commit()
     except Exception:
         conn.rollback()
+
+    # Migrate existing web_verify_tokens tables that predate tg_username column
+    try:
+        if db_type == 'postgresql':
+            cursor.execute(
+                "ALTER TABLE web_verify_tokens ADD COLUMN IF NOT EXISTS tg_username TEXT DEFAULT NULL"
+            )
+        else:
+            cursor.execute("ALTER TABLE web_verify_tokens ADD COLUMN tg_username TEXT DEFAULT NULL")
+        conn.commit()
+    except Exception:
+        conn.rollback()  # column already exists — safe to ignore
 
 
 def get_or_create_chat(chat_id: int) -> Dict:
@@ -3938,12 +3952,11 @@ def get_active_members(chat_id: int) -> List[Dict]:
             release_connection(conn)
 
 
-def get_member_display_name(chat_id: int, user_id: int) -> Optional[str]:
-    """Return the stored first_name for a verified user in a chat, or None.
+def get_member_display_info(chat_id: int, user_id: int) -> Optional[Dict]:
+    """Return {'first_name': ..., 'username': ...} for a verified user in a chat, or None.
 
     Used by the web voting layer to enforce the canonical Telegram display name
-    so that a crafted request with a valid id_token but a forged name field
-    cannot corrupt the attendance list.
+    and username so that name conflicts are resolved the same way as in-bot voting.
     """
     conn = get_connection()
     cursor = None
@@ -3951,13 +3964,17 @@ def get_member_display_name(chat_id: int, user_id: int) -> Optional[str]:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
         cursor.execute(
-            f"SELECT first_name FROM chat_members WHERE chat_id = {ph} AND user_id = {ph}",
+            f"SELECT first_name, username FROM chat_members WHERE chat_id = {ph} AND user_id = {ph}",
             (chat_id, user_id),
         )
         row = cursor.fetchone()
-        return row["first_name"] if row else None
+        if not row:
+            return None
+        if isinstance(row, dict):
+            return {'first_name': row['first_name'], 'username': row.get('username')}
+        return {'first_name': row[0], 'username': row[1]}
     except Exception as e:
-        logging.error(f"Error getting member display name: {e}")
+        logging.error(f"Error getting member display info: {e}")
         return None
     finally:
         if cursor is not None:
@@ -4363,7 +4380,7 @@ def create_web_verify_token(code: str, expires_at: "datetime") -> None:
             release_connection(conn)
 
 
-def mark_web_verify_token(code: str, tg_user_id: int, tg_name: str) -> bool:
+def mark_web_verify_token(code: str, tg_user_id: int, tg_name: str, tg_username: Optional[str] = None) -> bool:
     """Bot calls this once the user opens the deep link. Returns True if code was found and unmarked."""
     conn = get_connection()
     cursor = None
@@ -4371,18 +4388,11 @@ def mark_web_verify_token(code: str, tg_user_id: int, tg_name: str) -> bool:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
         now = __import__('datetime').datetime.utcnow().isoformat()
-        if db_type == 'postgresql':
-            cursor.execute(
-                f"UPDATE web_verify_tokens SET tg_user_id={ph}, tg_name={ph} "
-                f"WHERE code={ph} AND tg_user_id IS NULL AND used_at IS NULL AND expires_at > {ph}",
-                (tg_user_id, tg_name, code, now),
-            )
-        else:
-            cursor.execute(
-                f"UPDATE web_verify_tokens SET tg_user_id={ph}, tg_name={ph} "
-                f"WHERE code={ph} AND tg_user_id IS NULL AND used_at IS NULL AND expires_at > {ph}",
-                (tg_user_id, tg_name, code, now),
-            )
+        cursor.execute(
+            f"UPDATE web_verify_tokens SET tg_user_id={ph}, tg_name={ph}, tg_username={ph} "
+            f"WHERE code={ph} AND tg_user_id IS NULL AND used_at IS NULL AND expires_at > {ph}",
+            (tg_user_id, tg_name, tg_username, code, now),
+        )
         updated = cursor.rowcount > 0
         conn.commit()
         return updated
@@ -4406,7 +4416,7 @@ def get_web_verify_token(code: str) -> Optional[Dict]:
         ph = '%s' if db_type == 'postgresql' else '?'
         now = __import__('datetime').datetime.utcnow().isoformat()
         cursor.execute(
-            f"SELECT code, tg_user_id, tg_name, used_at FROM web_verify_tokens "
+            f"SELECT code, tg_user_id, tg_name, tg_username, used_at FROM web_verify_tokens "
             f"WHERE code={ph} AND expires_at > {ph}",
             (code, now),
         )
@@ -4415,7 +4425,7 @@ def get_web_verify_token(code: str) -> Optional[Dict]:
             return None
         if isinstance(row, dict):
             return dict(row)
-        return {'code': row[0], 'tg_user_id': row[1], 'tg_name': row[2], 'used_at': row[3]}
+        return {'code': row[0], 'tg_user_id': row[1], 'tg_name': row[2], 'tg_username': row[3], 'used_at': row[4]}
     except Exception:
         logging.exception("get_web_verify_token failed")
         return None
@@ -4444,15 +4454,15 @@ def consume_web_verify_token(code: str) -> Optional[Dict]:
             return None
         conn.commit()
         cursor.execute(
-            f"SELECT tg_user_id, tg_name FROM web_verify_tokens WHERE code={ph}",
+            f"SELECT tg_user_id, tg_name, tg_username FROM web_verify_tokens WHERE code={ph}",
             (code,),
         )
         row = cursor.fetchone()
         if row is None:
             return None
         if isinstance(row, dict):
-            return {'tg_user_id': row['tg_user_id'], 'tg_name': row['tg_name']}
-        return {'tg_user_id': row[0], 'tg_name': row[1]}
+            return {'tg_user_id': row['tg_user_id'], 'tg_name': row['tg_name'], 'tg_username': row.get('tg_username')}
+        return {'tg_user_id': row[0], 'tg_name': row[1], 'tg_username': row[2]}
     except Exception:
         conn.rollback()
         logging.exception("consume_web_verify_token failed")

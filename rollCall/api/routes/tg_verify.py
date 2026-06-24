@@ -120,5 +120,6 @@ async def tg_verify_status(
         verified=True,
         user_id=result["tg_user_id"],
         name=result["tg_name"],
+        username=result.get("tg_username"),
         id_token=id_token,
     )

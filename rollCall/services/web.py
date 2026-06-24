@@ -116,6 +116,7 @@ async def vote_by_token(
     vote_type: str,
     tg_user_id: Optional[int] = None,
     comment: Optional[str] = None,
+    username: Optional[str] = None,
 ) -> dict:
     """
     Submit a vote via magic link.
@@ -142,15 +143,14 @@ async def vote_by_token(
     is_real_user = isinstance(tg_user_id, int) and tg_user_id > 0
 
     if is_real_user:
-        # Prefer the canonical Telegram display name stored in chat_members over
-        # whatever the client submitted. This prevents a crafted request with a
-        # valid id_token but a forged name field from corrupting the attendance
-        # list. Falls back to the submitted name for first-time web voters who
-        # haven't voted via the bot yet and have no chat_members record.
+        # Prefer the canonical Telegram first_name and username stored in
+        # chat_members over whatever the client submitted. Falls back to the
+        # submitted name/username for first-time web voters with no bot history.
         submitted_name = name  # save original before potential override
-        canonical = db.get_member_display_name(chat_id, tg_user_id)
-        if canonical:
-            name = canonical
+        member_info = db.get_member_display_info(chat_id, tg_user_id)
+        if member_info:
+            name = member_info["first_name"] or name
+            username = member_info.get("username") or username
 
         # If the user previously voted as a proxy under their display name (e.g.
         # they typed their name before verifying via Telegram), remove that stale
@@ -178,11 +178,11 @@ async def vote_by_token(
             # so stats, ghost tracking, and is_proxy=false all work correctly.
             from services import voting as voting_svc
             if vote_type == "in":
-                await voting_svc.vote_in(chat_id, tg_user_id, name, rc_number=rc_index, comment=comment)
+                await voting_svc.vote_in(chat_id, tg_user_id, name, username=username, rc_number=rc_index, comment=comment)
             elif vote_type == "out":
-                await voting_svc.vote_out(chat_id, tg_user_id, name, rc_number=rc_index, comment=comment)
+                await voting_svc.vote_out(chat_id, tg_user_id, name, username=username, rc_number=rc_index, comment=comment)
             else:
-                await voting_svc.vote_maybe(chat_id, tg_user_id, name, rc_number=rc_index, comment=comment)
+                await voting_svc.vote_maybe(chat_id, tg_user_id, name, username=username, rc_number=rc_index, comment=comment)
         else:
             # Guest / external user — proxy entry identified by display name
             if vote_type == "in":

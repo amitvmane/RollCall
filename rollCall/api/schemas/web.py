@@ -52,6 +52,9 @@ class WebVoteRequest(BaseModel):
     # real Telegram account requires a signed identity token proving that
     # account. Without one the vote is recorded as a name-only proxy entry.
     id_token: Optional[str] = Field(None, description="Signed identity token to attribute the vote to a real Telegram user")
+    # Telegram @handle (without @) passed alongside the name so the model can
+    # format "First (@handle)" when a proxy with the same first name exists.
+    username: Optional[str] = Field(None, max_length=64, description="Telegram username (without @) for display-name disambiguation")
     comment: Optional[str] = Field(None, max_length=100, description="Optional note to attach to the vote")
 
 

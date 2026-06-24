@@ -173,7 +173,7 @@ class TestVoteWebRollcall(unittest.TestCase):
 
     def test_service_called_with_correct_args(self):
         _, mock_fn = self._post("mytok", {"name": "Dave", "vote": "in"})
-        mock_fn.assert_awaited_once_with("mytok", "Dave", "in", tg_user_id=None, comment=None)
+        mock_fn.assert_awaited_once_with("mytok", "Dave", "in", tg_user_id=None, comment=None, username=None)
 
     def test_response_is_updated_rollcall(self):
         updated = {**_WEB_RC_DICT, "in": [{"name": "Alice", "comment": ""}]}

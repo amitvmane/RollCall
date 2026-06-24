@@ -127,20 +127,44 @@ def set_wait_limit(
     """
     rc = resolve_rollcall_or_raise(chat_id, rc_number)
 
-    if limit <= 0:
-        raise incorrectParameter("Input limit is missing or it's not a positive number")
+    if limit < 0:
+        raise incorrectParameter("Limit must be 0 (no cap) or a positive integer.")
 
     old_limit = rc.inListLimit
     was_full = old_limit is not None and len(rc.inList) >= int(old_limit)
+    demoted = []
+    promoted = []
+
+    # limit=0 means "clear the cap" — promote everyone on waitlist to IN
+    if limit == 0:
+        rc.inListLimit = None
+        moving = list(rc.waitList)
+        rc.inList.extend(moving)
+        rc.waitList = []
+        rc_db_id = _rc_db_id(rc)
+        for u in moving:
+            rc._save_user_to_db(u, "in")
+            if rc_db_id is not None and isinstance(u.user_id, int):
+                increment_user_stat(chat_id, u.user_id, "total_waiting_to_in")
+                increment_user_stat(chat_id, u.user_id, "total_in")
+                increment_rollcall_stat(rc_db_id, "total_in")
+        rc.save()
+        log_admin_action(chat_id, admin_user_id, admin_name, "set_limit", details="0 (cleared)")
+        promoted = [serialize_user(u) for u in moving]
+        return {
+            "rollcall": serialize_rollcall(rc, rc_number),
+            "old_limit": old_limit,
+            "new_limit": None,
+            "was_full": was_full,
+            "demoted": demoted,
+            "promoted": promoted,
+        }
 
     rc.inListLimit = limit
     rc.save()
 
     log_admin_action(chat_id, admin_user_id, admin_name,
                      "set_limit", details=str(limit))
-
-    demoted = []
-    promoted = []
 
     if len(rc.inList) > limit:
         excess = rc.inList[limit:]

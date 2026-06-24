@@ -315,8 +315,8 @@ async def wait_limit(message):
             except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
-        if len(pmts) == 0 or not str(pmts[0]).isdigit() or int(pmts[0]) <= 0:
-            raise parameterMissing("Input limit is missing or it's not a positive number")
+        if len(pmts) == 0 or not str(pmts[0]).isdigit() or int(pmts[0]) < 0:
+            raise parameterMissing("Input limit is missing or it's not a valid number (use 0 to remove the cap)")
 
         limit = int(pmts[0])
 
@@ -336,9 +336,14 @@ async def wait_limit(message):
         rc_number_1 = rc_number + 1
         shh = manager.get_shh_mode(cid)
 
-        logging.info(f"[{_ts()}] Max limit of attendees is set to {limit}")
-        if not shh:
-            await bot.send_message(cid, f"Max limit of attendees is set to {limit}")
+        if limit == 0:
+            logging.info(f"[{_ts()}] Attendance limit cleared for rollcall #{rc_number_1}")
+            if not shh:
+                await bot.send_message(cid, f"Attendance limit cleared for '{rc_title}' (#{rc_number_1}) — no cap.")
+        else:
+            logging.info(f"[{_ts()}] Max limit of attendees is set to {limit}")
+            if not shh:
+                await bot.send_message(cid, f"Max limit of attendees is set to {limit}")
 
         for u in result["demoted"]:
             uid = u["user_id"]
@@ -385,7 +390,7 @@ async def wait_limit(message):
                 if rc_user is not None:
                     await notify_proxy_owner_wait_to_in(rc, rc_user, cid, rc_title, rc_number_1)
 
-        if len(rc.inList) == limit and not result["was_full"]:
+        if limit > 0 and len(rc.inList) == limit and not result["was_full"]:
             if not shh:
                 await bot.send_message(
                     cid,

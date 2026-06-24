@@ -931,6 +931,25 @@ class TestSetLimit(HandlerTestBase):
         self.assertIn(u2, self.rc.waitList)
         self.assertEqual(self.rc.inList, [u1])
 
+    async def test_limit_zero_clears_cap(self):
+        """Regression: /sl 0 must clear the cap and succeed — not raise an error."""
+        u1 = MagicMock(); u1.name = "Alice"; u1.user_id = 1
+        self.rc.inList = [u1]
+        self.rc.waitList = []
+        self.rc.inListLimit = 5
+        msg = self._make_message("/sl 0")
+        with self._rc_started(), self._patch_manager(), \
+             patch('handlers.lifecycle.notify_proxy_owner_wait_to_in', new=AsyncMock()), \
+             patch('handlers.settings.get_rc_db_id', return_value=1), \
+             patch('handlers.lifecycle._update_panel', new=AsyncMock()):
+            await self.wait_limit(msg)
+        # Limit should be cleared to None
+        self.assertIsNone(self.rc.inListLimit)
+        # Confirmation message sent (not an error)
+        sent_texts = [c[0][1] for c in self.bot_state.bot.send_message.call_args_list]
+        self.assertTrue(any("cleared" in t.lower() for t in sent_texts),
+                        f"Expected 'cleared' in one of: {sent_texts}")
+
 
 # ===========================================================================
 # /delete_user

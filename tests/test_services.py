@@ -566,15 +566,22 @@ class TestSettingsService(unittest.TestCase):
             with self.assertRaises(incorrectParameter):
                 set_rollcall_limit(100, -1, 1, "Admin")
 
-    def test_set_wait_limit_zero_raises(self):
-        from exceptions import incorrectParameter
-        rc = _make_rc()
+    def test_set_wait_limit_zero_clears_cap_and_promotes_waitlist(self):
+        """limit=0 should remove the cap and move all waitlist users to IN."""
+        waiter = _make_user("Bob", user_id=2)
+        rc = _make_rc(in_list=[], wait_list=[waiter], limit=5)
         mgr = self._mgr([rc])
         with patch("services.settings.manager", mgr), \
-             patch("rollcall_manager.manager", mgr):
+             patch("rollcall_manager.manager", mgr), \
+             patch("services.settings.log_admin_action"), \
+             patch("services.settings.increment_user_stat"), \
+             patch("services.settings.increment_rollcall_stat"):
             from services.settings import set_wait_limit
-            with self.assertRaises(incorrectParameter):
-                set_wait_limit(100, 0, 1, "Admin")
+            result = set_wait_limit(100, 0, 1, "Admin")
+        self.assertIsNone(result["new_limit"])
+        self.assertEqual(len(result["promoted"]), 1)
+        self.assertEqual(result["promoted"][0]["name"], "Bob")
+        self.assertIsNone(rc.inListLimit)
 
     def test_set_wait_limit_promotes_from_waitlist(self):
         waiter = _make_user("Bob", user_id=2)

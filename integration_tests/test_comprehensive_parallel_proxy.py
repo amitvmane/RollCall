@@ -654,11 +654,11 @@ class TestCommandCornerCases(IntegrationBase):
         await self.wait_limit(self.msg("/sl 10", ADMIN_USER))
         self.assertEqual(self.rc(0).inListLimit, 10)
 
-    async def test_sl_zero_is_rejected(self):
+    async def test_sl_zero_clears_cap(self):
         await self.start_rc()
         await self.wait_limit(self.msg("/sl 0", ADMIN_USER))
         texts = self.sent_texts()
-        self.assertTrue(any("missing" in t.lower() or "positive" in t.lower() for t in texts))
+        self.assertTrue(any("cleared" in t.lower() or "no cap" in t.lower() for t in texts))
 
     async def test_whos_in_empty_rollcall_sends_status(self):
         await self.start_rc()

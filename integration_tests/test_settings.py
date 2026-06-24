@@ -48,11 +48,11 @@ class TestWaitLimit(IntegrationBase):
         texts = self.sent_texts()
         self.assertTrue(any("not active" in t.lower() for t in texts))
 
-    async def test_sl_zero_sends_error(self):
+    async def test_sl_zero_clears_cap(self):
         await self.start_rc()
         await self.wait_limit(self.msg("/sl 0", ADMIN_USER))
         texts = self.sent_texts()
-        self.assertTrue(any("positive" in t.lower() or "missing" in t.lower() for t in texts))
+        self.assertTrue(any("cleared" in t.lower() or "no cap" in t.lower() for t in texts))
 
     async def test_sl_non_numeric_sends_error(self):
         await self.start_rc()

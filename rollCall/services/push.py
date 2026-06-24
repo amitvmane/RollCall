@@ -118,7 +118,7 @@ async def notify_rollcall_started(group_token: str, title: str, url: str) -> Non
             "icon": "/web/logo.svg",
             "badge": "/web/logo.svg",
         })
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         tasks = [
             loop.run_in_executor(_executor, _send_one, sub, payload, priv_pem)
             for sub in subs

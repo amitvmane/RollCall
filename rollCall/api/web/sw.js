@@ -1,8 +1,8 @@
 /* RollCall Service Worker — offline cache + web push */
 "use strict";
 
-const CACHE = "rc-v1";
-const PRECACHE = ["/web/", "/web/app.js", "/web/style.css", "/web/logo.svg"];
+const CACHE = "rc-v2";
+const PRECACHE = ["/web/", "/web/app.js", "/web/style.css", "/web/logo.svg", "/web/icon-192.png"];
 
 // ── Install: precache shell ───────────────────────────────────────────────────
 self.addEventListener("install", e => {
@@ -58,8 +58,8 @@ self.addEventListener("push", e => {
   e.waitUntil(
     self.registration.showNotification(data.title, {
       body:    data.body,
-      icon:    "/web/logo.svg",
-      badge:   "/web/logo.svg",
+      icon:    "/web/icon-192.png",
+      badge:   "/web/icon-192.png",
       vibrate: [200, 100, 200],
       data:    { url: data.url },
       actions: [

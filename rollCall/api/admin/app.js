@@ -47,6 +47,7 @@ function toast(msg,type="info",ms=3000){
   el.textContent=msg;el.className="toast "+type+" show";
   clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove("show"),ms);
 }
+window.rcToast=toast;
 
 // ─── API ──────────────────────────────────────────────────────────────────────
 class ApiError extends Error{constructor(msg,status){super(msg);this.status=status;}}
@@ -65,6 +66,15 @@ async function api(path,opts={}){
   }
   return res.status===204?null:res.json();
 }
+// apiGet: fetch a full URL path with Bearer auth (used by stats tab where paths
+// already include the /api/v1 prefix so we can't use the api() helper).
+async function apiGet(url){
+  const res=await fetch(url,{headers:{"Authorization":"Bearer "+S.token},signal:AbortSignal.timeout(8000)});
+  if(res.status===401){toast("Session expired — please sign in again.","err",4000);signOut();throw new ApiError("Unauthorized",401);}
+  if(!res.ok){const b=await res.json().catch(()=>({}));throw new ApiError(b.detail||("HTTP "+res.status),res.status);}
+  return res.status===204?null:res.json();
+}
+
 // If a rollcall operation fails because the rollcall no longer exists,
 // immediately refresh the list so the stale row disappears.
 function handleRcGone(cid,e){
@@ -162,8 +172,9 @@ function selectGroup(cid){
 
 // ─── Group detail ─────────────────────────────────────────────────────────────
 async function loadGDetail(cid){
-  // Invalidate member cache for this group on every explicit refresh/tab switch
+  // Invalidate caches on every explicit refresh so Stats/member data is fresh
   delete S.memberCache[cid];
+  S.statsLoaded[cid]=false;
   const el=$id("gdetail");el.innerHTML='<div class="lc"><div class="spinner"></div></div>';
   try{
     const [settings,rcs,tmpls]=await Promise.all([
@@ -964,6 +975,7 @@ function _fallbackCopy(text){
 window.showGroupQr=async function(cid){
   const g=S.groups.find(x=>x.chat_id===cid);
   if(!g?.group_web_token){toast("No group link configured yet","err");return;}
+  const webUrl=window.location.origin+"/web/group/"+g.group_web_token;
 
   // Remove any existing modal
   document.getElementById("qr-modal")?.remove();
@@ -971,24 +983,32 @@ window.showGroupQr=async function(cid){
   const modal=document.createElement("div");
   modal.id="qr-modal";
   modal.className="qr-modal-overlay";
+  modal.setAttribute("role","dialog");
+  modal.setAttribute("aria-modal","true");
   modal.innerHTML=`
-    <div class="qr-modal-box" role="dialog" aria-modal="true">
+    <div class="qr-modal-box">
       <div class="qr-modal-hdr">
         <span>Group QR Code</span>
-        <button class="qr-close" onclick="document.getElementById('qr-modal').remove()" aria-label="Close">✕</button>
+        <button class="qr-close" aria-label="Close">✕</button>
       </div>
       <div class="qr-body">
         <div class="qr-spinner"><div class="spinner"></div></div>
       </div>
-      <p class="qr-hint">Members can scan this to open the voting page.<br>Screenshot and share in the group.</p>
+      <p class="qr-url-text"></p>
+      <p class="qr-hint">Members scan this to open the voting page.<br>Screenshot and share in the group.</p>
       <div class="qr-actions" style="display:none">
-        <a id="qr-download" class="btn btn-primary btn-sm" download="rollcall-qr.svg">Download SVG</a>
+        <a id="qr-download" class="btn btn-primary btn-sm" download="rollcall-qr.svg">⬇ Download SVG</a>
+        <button class="btn btn-ghost btn-sm" onclick="navigator.clipboard?.writeText('${webUrl}').then(()=>window.rcToast&&rcToast('Link copied','ok'))">🔗 Copy link</button>
       </div>
     </div>`;
   document.body.appendChild(modal);
 
-  // Close on backdrop click
-  modal.addEventListener("click",e=>{if(e.target===modal)modal.remove();});
+  // Dismiss: backdrop click, close button, Escape key
+  const closeModal=()=>{modal.remove();document.removeEventListener("keydown",onKey);};
+  const onKey=e=>{if(e.key==="Escape")closeModal();};
+  modal.addEventListener("click",e=>{if(e.target===modal)closeModal();});
+  modal.querySelector(".qr-close").addEventListener("click",closeModal);
+  document.addEventListener("keydown",onKey);
 
   try{
     const resp=await fetch(`/api/v1/chats/${cid}/qrcode`,{
@@ -998,13 +1018,12 @@ window.showGroupQr=async function(cid){
     if(!resp.ok)throw new Error(`Server error ${resp.status}`);
     const svgText=await resp.text();
 
-    const body=modal.querySelector(".qr-body");
-    body.innerHTML=`<div class="qr-svg-wrap">${svgText}</div>`;
+    modal.querySelector(".qr-body").innerHTML=`<div class="qr-svg-wrap">${svgText}</div>`;
+    modal.querySelector(".qr-url-text").textContent=webUrl;
 
     // Wire download link
-    const dl=modal.querySelector("#qr-download");
     const blob=new Blob([svgText],{type:"image/svg+xml"});
-    dl.href=URL.createObjectURL(blob);
+    modal.querySelector("#qr-download").href=URL.createObjectURL(blob);
     modal.querySelector(".qr-actions").style.display="";
   }catch(e){
     modal.querySelector(".qr-body").innerHTML=`<p class="qr-err">Failed to load QR: ${escH(e.message)}</p>`;
@@ -1105,11 +1124,16 @@ async function loadStatsTab(cid){
 
 function _fmtDuration(secs){
   if(secs==null||secs<0)return "—";
-  if(secs<60)return `${secs}s`;
+  if(secs<60)return `${Math.round(secs)}s`;
   if(secs<3600){const m=Math.round(secs/60);return `${m} min`;}
   const h=Math.floor(secs/3600),m=Math.round((secs%3600)/60);
   return m?`${h}h ${m}m`:`${h}h`;
 }
+
+window.reloadStats=function(cid){
+  S.statsLoaded[cid]=false;
+  loadStatsTab(cid);
+};
 
 function buildStatsPanel(cid,gs,lb,hist,pres,rt){
   const pct=v=>v==null?"—":`${v}%`;
@@ -1164,6 +1188,9 @@ function buildStatsPanel(cid,gs,lb,hist,pres,rt){
 
   return `
   <div class="stats-panel">
+    <div class="stats-reload-row">
+      <button class="btn btn-ghost btn-sm" onclick="reloadStats(${cid})">↻ Reload</button>
+    </div>
     ${presHtml}
     <div class="stat-boxes">
       ${boxes.map(b=>`<div class="stat-box"><div class="stat-box-val">${b.val}</div><div class="stat-box-lbl">${b.label}</div></div>`).join("")}

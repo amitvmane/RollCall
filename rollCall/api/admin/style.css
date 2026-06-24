@@ -316,6 +316,7 @@ html.dark .presence-row{background:rgba(37,99,235,.15)}
 
 /* ── Stats tab ── */
 .stats-panel{display:flex;flex-direction:column;gap:16px;padding:12px 0}
+.stats-reload-row{display:flex;justify-content:flex-end}
 .stats-placeholder,.stats-loading,.stats-err{padding:32px;text-align:center;color:var(--sub);font-size:.9rem}
 .stats-loading{display:flex;align-items:center;justify-content:center;gap:8px}
 .stat-boxes{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
@@ -361,7 +362,8 @@ html.dark .lb-bar{background:var(--border)}
 .qr-svg-wrap svg{width:100%;height:100%;display:block}
 .qr-spinner{display:flex;justify-content:center;align-items:center;width:200px;height:200px}
 .qr-hint{font-size:.78rem;color:var(--sub);text-align:center;margin-top:10px;line-height:1.5}
-.qr-actions{margin-top:12px;display:flex;justify-content:center;gap:8px}
+.qr-url-text{font-size:.7rem;color:var(--sub);text-align:center;margin-top:6px;word-break:break-all;opacity:.75}
+.qr-actions{margin-top:12px;display:flex;justify-content:center;gap:8px;flex-wrap:wrap}
 .qr-err{color:var(--danger);font-size:.82rem;text-align:center;padding:16px}
 html.dark .qr-modal-box{background:#1e2a3a;border:1px solid var(--border)}
 html.dark .qr-body{background:#fff}

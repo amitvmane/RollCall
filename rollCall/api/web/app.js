@@ -541,7 +541,7 @@ async function fetchPresence() {
     const now = d.active_now || 0;
     const total = d.total_views || 0;
     if (total > 0) {
-      badge.textContent = now > 1 ? `👁 ${now} viewing` : `👁 ${total} views`;
+      badge.textContent = now >= 1 ? `👁 ${now} viewing` : `👁 ${total} views`;
       badge.title = `${now} viewing now · ${total} total views`;
       badge.classList.remove("hidden");
     }

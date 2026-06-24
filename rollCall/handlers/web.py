@@ -7,7 +7,7 @@ deep links for active rollcalls. Requires WEB_BASE_URL env var.
 import logging
 import os
 
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 import db as _db
 from bot_state import bot, reply_error, _esc_md
@@ -63,10 +63,7 @@ async def weblink_cmd(message):
         lines += ["", "_Share the bookmark link with anyone — no Telegram needed._"]
 
         markup = InlineKeyboardMarkup(row_width=1)
-        if group_url.startswith("https://"):
-            markup.add(InlineKeyboardButton("🌐 Open Voting Page", web_app=WebAppInfo(url=group_url)))
-        else:
-            markup.add(InlineKeyboardButton("🌐 Open Voting Page", url=group_url))
+        markup.add(InlineKeyboardButton("🌐 Open Voting Page", url=group_url))
 
         await bot.send_message(cid, "\n".join(lines), parse_mode="Markdown", reply_markup=markup)
     except Exception as e:

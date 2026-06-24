@@ -14,8 +14,9 @@ import logging
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 
+import db as _db
 from db import get_active_members, get_or_create_chat
 from services import settings as settings_svc
 
@@ -64,6 +65,26 @@ async def list_group_members(
     _token: AuthedToken = Depends(require_scope("read")),
 ) -> List[GroupMemberEntry]:
     return [GroupMemberEntry(**m) for m in get_active_members(chat_id)]
+
+
+@router.post(
+    "/admin/groups/{chat_id}/refresh-name",
+    summary="Fetch current group title from Telegram and update the DB",
+)
+async def refresh_group_name(
+    chat_id: int = Path(..., description="Telegram chat id"),
+    _token: AuthedToken = Depends(require_scope("admin")),
+) -> JSONResponse:
+    try:
+        from bot_state import bot
+        chat_info = await bot.get_chat(chat_id)
+        title = chat_info.title or chat_info.first_name or str(chat_id)
+        _db.update_chat_group_name(chat_id, title)
+        logging.info("[api] refresh_group_name chat=%d title=%r", chat_id, title)
+        return JSONResponse({"group_name": title})
+    except Exception as exc:
+        logging.warning("[api] refresh_group_name chat=%d failed: %s", chat_id, exc)
+        raise HTTPException(status_code=502, detail="Could not fetch group name from Telegram")
 
 
 @router.patch(

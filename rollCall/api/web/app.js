@@ -58,7 +58,7 @@ let currentName;
 if(TG_NAME){
   currentName=localStorage.getItem(LS_NAME_OVERRIDE)||TG_NAME;
 }else{
-  currentName=localStorage.getItem(LS_NAME)||"";
+  currentName=localStorage.getItem(LS_NAME)||_verifiedName||"";
 }
 let currentVote=null, activeRcData=null, groupData=null, activeTabIdx=0, voting=false;
 
@@ -112,6 +112,19 @@ function renderIdentity(){
         badge.innerHTML=`✅ ${esc(currentName)} <span style="font-size:.72rem;font-weight:500;opacity:.75">Telegram verified</span>`;
       }else{
         badge.innerHTML=`👤 ${esc(currentName)}`;
+      }
+    }
+    // Style change button: lock icon + muted when identity is Telegram-verified
+    const changeBtn=$("name-change-btn");
+    if(changeBtn){
+      if(_verifiedUserId){
+        changeBtn.textContent="🔒 Locked";
+        changeBtn.style.opacity="0.55";
+        changeBtn.title="Your name is locked to your Telegram identity. Click to unlink.";
+      }else{
+        changeBtn.textContent="✎ Change";
+        changeBtn.style.opacity="";
+        changeBtn.title="Change name";
       }
     }
     // Show "Verify with Telegram" only for non-TG, non-verified users in group mode
@@ -704,8 +717,11 @@ async function _pollVerify(){
     _verifiedName=data.name;
     localStorage.setItem(LS_TG_USER_ID,String(_verifiedUserId));
     localStorage.setItem(LS_TG_NAME,_verifiedName);
-    toast(`✅ Verified as ${data.name}! Your votes now count as your Telegram identity.`,4000);
-    renderIdentity();
+    // Auto-populate name from verified Telegram identity and lock it
+    currentName=_verifiedName;
+    localStorage.setItem(LS_NAME,currentName);
+    toast(`✅ Verified as ${data.name}! Your identity is now locked to your Telegram account.`,4500);
+    renderIdentity();detectCurrentVote();
     _checkWebAdmin().catch(()=>{});
     // Re-link any existing push subscription with the now-known user ID
     _relinkPushSubscription(_verifiedUserId);

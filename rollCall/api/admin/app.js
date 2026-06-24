@@ -140,6 +140,12 @@ async function loadGroups(){
     S.groups=await api("/admin/groups");
     S.groups.forEach(g=>{S.groupNames[g.chat_id]=g.group_name||("Chat "+g.chat_id)});
     renderGList();
+    // Background-refresh names for groups that only have a numeric fallback
+    S.groups.filter(g=>!g.group_name).forEach(g=>{
+      api("/admin/groups/"+g.chat_id+"/refresh-name",{method:"POST",body:"{}"}).then(r=>{
+        if(r&&r.group_name){S.groupNames[g.chat_id]=r.group_name;g.group_name=r.group_name;renderGList();}
+      }).catch(()=>{});
+    });
   }catch(e){el.innerHTML=`<div style="padding:16px;color:var(--danger);font-size:.85rem">Error: ${escH(e.message)}</div>`;}
 }
 window.loadGroups=loadGroups;

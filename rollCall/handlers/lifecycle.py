@@ -7,7 +7,7 @@ import logging
 import os
 from datetime import datetime
 
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot_state import (
     bot, _panel_msg_ids, _pending_deletes, _pending_overrides,
@@ -84,10 +84,7 @@ async def get_status_keyboard(rc_number: int = 0, web_url: str = "") -> InlineKe
         InlineKeyboardButton("🔄 Refresh", callback_data=f"btn_refresh_{rc_number}"),
     )
     if web_url:
-        if web_url.startswith("https://"):
-            markup.add(InlineKeyboardButton("🌐 Vote on Web", web_app=WebAppInfo(url=web_url)))
-        else:
-            markup.add(InlineKeyboardButton("🌐 Vote on Web", url=web_url))
+        markup.add(InlineKeyboardButton("🌐 Vote on Web", url=web_url))
     markup.add(
         InlineKeyboardButton(f"🛑 End RollCall #{rc_number}", callback_data=f"btn_end_{rc_number}")
     )

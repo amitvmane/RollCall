@@ -18,6 +18,16 @@ let _verifiedName=localStorage.getItem(LS_TG_NAME)||null;
 // server in place of a raw, forgeable user id on identity-sensitive calls.
 let _idToken=localStorage.getItem(LS_ID_TOKEN)||null;
 
+// Migration: users who verified before id_tokens existed have a remembered
+// user id but no signed token, leaving them unable to attribute votes or use
+// admin actions and with no visible way to re-verify. Drop the stale verified
+// flag (keeping their name) so the "Verify with Telegram" CTA reappears. TG
+// (Mini App) users mint a fresh token via _miniappAuth and are unaffected.
+if(_verifiedUserId&&!_idToken){
+  _verifiedUserId=null;
+  localStorage.removeItem(LS_TG_USER_ID);
+}
+
 // Only show "invalid URL" when a token IS present but the mode is wrong (corrupted link).
 // No token = home screen, handled at the bottom of the file.
 if(URL_TOKEN&&(URL_MODE!=="join"&&URL_MODE!=="group")){
@@ -231,6 +241,11 @@ async function castVote(voteType){
   const token=activeRcData.web_token;
   if(!token){toast("This rollcall can't be voted on via web.");return;}
   const comment=($("comment-input")?.value||"").trim()||null;
+
+  // Inside Telegram the identity proof is fetched in the background; if the
+  // user taps before it lands, finish it first so the vote attributes to their
+  // real account instead of falling back to a name-only proxy entry.
+  if(tg&&tg.initData&&!_idToken){try{await _miniappAuth();}catch(_){}}
 
   voting=true;
   // Show spinner on the tapped button

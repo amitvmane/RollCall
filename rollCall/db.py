@@ -4108,17 +4108,25 @@ def lookup_api_token(token_hash: str) -> Optional[Dict]:
             now = datetime.now(timezone.utc).replace(tzinfo=None)
             try:
                 if isinstance(expires_at, str):
-                    # SQLite stores datetimes as strings; normalise to naive UTC.
-                    for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S",
-                                "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%fZ",
-                                "%Y-%m-%dT%H:%M:%S.%f"):
+                    # SQLite stores datetimes as strings (datetime.__str__ gives
+                    # "YYYY-MM-DD HH:MM:SS.ffffff"). Try all plausible formats.
+                    parsed = None
+                    for fmt in (
+                        "%Y-%m-%d %H:%M:%S.%f",
+                        "%Y-%m-%d %H:%M:%S",
+                        "%Y-%m-%dT%H:%M:%SZ",
+                        "%Y-%m-%dT%H:%M:%S",
+                        "%Y-%m-%dT%H:%M:%S.%fZ",
+                        "%Y-%m-%dT%H:%M:%S.%f",
+                    ):
                         try:
                             parsed = datetime.strptime(expires_at, fmt).replace(tzinfo=None)
                             break
                         except ValueError:
                             continue
-                    else:
-                        parsed = None
+                    # Unparseable expiry → treat as expired (safe default).
+                    if parsed is None:
+                        return None
                 else:
                     parsed = expires_at
                 if parsed is not None and parsed < now:

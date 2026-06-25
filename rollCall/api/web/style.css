@@ -260,3 +260,21 @@ html.dark .sp-tbar{background:#3b82f6}
 .sp-dot-maybe{background:#f59e0b}
 .sp-dot-miss{background:var(--border)}
 html.dark .sp-dot-miss{background:#334155}
+
+/* ── Admin toggle switch ── */
+.admin-toggle{position:relative;display:inline-block;width:44px;height:24px;flex-shrink:0}
+.admin-toggle input{opacity:0;width:0;height:0}
+.admin-toggle-slider{position:absolute;inset:0;background:var(--border);border-radius:24px;cursor:pointer;transition:background .2s}
+.admin-toggle-slider::before{content:"";position:absolute;left:3px;top:3px;width:18px;height:18px;background:#fff;border-radius:50%;transition:transform .2s}
+.admin-toggle input:checked+.admin-toggle-slider{background:var(--accent)}
+.admin-toggle input:checked+.admin-toggle-slider::before{transform:translateX(20px)}
+
+/* ── Scheduled rollcall list inside modal ── */
+.sched-item{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:.83rem;gap:8px}
+.sched-item:last-child{border-bottom:none}
+.sched-item-info{flex:1;min-width:0}
+.sched-item-title{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sched-item-time{color:var(--sub);font-size:.75rem;margin-top:2px}
+.sched-cancel-btn{background:var(--danger-dim);color:var(--danger);border:1px solid var(--danger);border-radius:6px;padding:3px 10px;font-size:.78rem;cursor:pointer;white-space:nowrap;flex-shrink:0}
+.sched-cancel-btn:hover{background:var(--danger);color:#fff}
+.sched-empty{color:var(--sub);font-size:.82rem;text-align:center;padding:10px 0}

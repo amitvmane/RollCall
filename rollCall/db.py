@@ -1090,6 +1090,44 @@ def _run_migrations(conn, cursor):
     except Exception:
         conn.rollback()  # column already exists — safe to ignore
 
+    # scheduled_rollcalls — one-shot web-scheduled rollcalls (fire at a specific datetime)
+    if db_type == 'postgresql':
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS scheduled_rollcalls (
+                    id              SERIAL PRIMARY KEY,
+                    chat_id         BIGINT NOT NULL,
+                    title           TEXT NOT NULL,
+                    scheduled_at    TEXT NOT NULL,
+                    created_by_uid  BIGINT NOT NULL,
+                    created_by_name TEXT NOT NULL,
+                    is_fired        BOOLEAN NOT NULL DEFAULT FALSE,
+                    fired_at        TEXT DEFAULT NULL,
+                    created_at      TEXT NOT NULL
+                )
+            """)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    else:
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS scheduled_rollcalls (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id         INTEGER NOT NULL,
+                    title           TEXT NOT NULL,
+                    scheduled_at    TEXT NOT NULL,
+                    created_by_uid  INTEGER NOT NULL,
+                    created_by_name TEXT NOT NULL,
+                    is_fired        INTEGER NOT NULL DEFAULT 0,
+                    fired_at        TEXT DEFAULT NULL,
+                    created_at      TEXT NOT NULL
+                )
+            """)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
 
 def get_or_create_chat(chat_id: int) -> Dict:
     """Get or create chat settings"""
@@ -4070,7 +4108,17 @@ def lookup_api_token(token_hash: str) -> Optional[Dict]:
             now = datetime.now(timezone.utc).replace(tzinfo=None)
             try:
                 if isinstance(expires_at, str):
-                    parsed = _parse_db_datetime(expires_at)
+                    # SQLite stores datetimes as strings; normalise to naive UTC.
+                    for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S",
+                                "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%fZ",
+                                "%Y-%m-%dT%H:%M:%S.%f"):
+                        try:
+                            parsed = datetime.strptime(expires_at, fmt).replace(tzinfo=None)
+                            break
+                        except ValueError:
+                            continue
+                    else:
+                        parsed = None
                 else:
                     parsed = expires_at
                 if parsed is not None and parsed < now:
@@ -4603,6 +4651,161 @@ def get_response_time_leaderboard(chat_id: int, limit: int = 10) -> List[Dict]:
         if cursor is not None:
             cursor.close()
         if db_type == 'postgresql':
+            release_connection(conn)
+
+
+# ── Scheduled rollcalls ────────────────────────────────────────────────────────
+
+def create_scheduled_rollcall(
+    chat_id: int,
+    title: str,
+    scheduled_at: str,  # ISO datetime string (UTC)
+    created_by_uid: int,
+    created_by_name: str,
+) -> int:
+    """Create a one-shot scheduled rollcall. Returns the new row id."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        cursor.execute(
+            f"INSERT INTO scheduled_rollcalls (chat_id, title, scheduled_at, created_by_uid, created_by_name, created_at)"
+            f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph})",
+            (chat_id, title, scheduled_at, created_by_uid, created_by_name, now),
+        )
+        conn.commit()
+        if db_type == "postgresql":
+            cursor.execute("SELECT lastval()")
+        else:
+            cursor.execute("SELECT last_insert_rowid()")
+        return cursor.fetchone()[0]
+    except Exception:
+        logging.exception("create_scheduled_rollcall failed")
+        conn.rollback()
+        raise
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def get_pending_scheduled_rollcalls() -> List[Dict]:
+    """Return all unfired scheduled rollcalls whose fire time has passed (UTC)."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        if db_type == "postgresql":
+            cursor.execute(
+                "SELECT * FROM scheduled_rollcalls WHERE is_fired = FALSE AND scheduled_at <= %s ORDER BY scheduled_at",
+                (now,),
+            )
+        else:
+            cursor.execute(
+                "SELECT * FROM scheduled_rollcalls WHERE is_fired = 0 AND scheduled_at <= ? ORDER BY scheduled_at",
+                (now,),
+            )
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        logging.exception("get_pending_scheduled_rollcalls failed")
+        return []
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def get_upcoming_scheduled_rollcalls(chat_id: int) -> List[Dict]:
+    """Return unfired future scheduled rollcalls for a chat, sorted by fire time."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        if db_type == "postgresql":
+            cursor.execute(
+                "SELECT * FROM scheduled_rollcalls WHERE chat_id = %s AND is_fired = FALSE ORDER BY scheduled_at",
+                (chat_id,),
+            )
+        else:
+            cursor.execute(
+                "SELECT * FROM scheduled_rollcalls WHERE chat_id = ? AND is_fired = 0 ORDER BY scheduled_at",
+                (chat_id,),
+            )
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        logging.exception("get_upcoming_scheduled_rollcalls failed")
+        return []
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def mark_scheduled_rollcall_fired(row_id: int) -> None:
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        if db_type == "postgresql":
+            cursor.execute(
+                "UPDATE scheduled_rollcalls SET is_fired = TRUE, fired_at = %s WHERE id = %s",
+                (now, row_id),
+            )
+        else:
+            cursor.execute(
+                "UPDATE scheduled_rollcalls SET is_fired = 1, fired_at = ? WHERE id = ?",
+                (now, row_id),
+            )
+        conn.commit()
+    except Exception:
+        logging.exception("mark_scheduled_rollcall_fired failed")
+        conn.rollback()
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def delete_scheduled_rollcall(row_id: int, chat_id: int) -> bool:
+    """Delete an unfired scheduled rollcall. Returns True if a row was deleted."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        if db_type == "postgresql":
+            cursor.execute(
+                "DELETE FROM scheduled_rollcalls WHERE id = %s AND chat_id = %s AND is_fired = FALSE",
+                (row_id, chat_id),
+            )
+        else:
+            cursor.execute(
+                "DELETE FROM scheduled_rollcalls WHERE id = ? AND chat_id = ? AND is_fired = 0",
+                (row_id, chat_id),
+            )
+        deleted = cursor.rowcount > 0
+        conn.commit()
+        return deleted
+    except Exception:
+        logging.exception("delete_scheduled_rollcall failed")
+        conn.rollback()
+        return False
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
             release_connection(conn)
 
 

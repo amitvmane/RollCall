@@ -43,6 +43,29 @@ class WebGroupResponse(BaseModel):
     group_name: str = ""
     rollcalls: list[WebRollcallResponse]
     upcoming: list[UpcomingRollcall] = Field(default_factory=list)
+    shh_mode: bool = False
+
+
+class WebGroupSettingsRequest(BaseModel):
+    id_token: str = Field(..., description="Signed identity token of the admin making the change")
+    shh_mode: Optional[bool] = Field(None, description="Silent mode — suppresses per-vote bot notifications")
+
+
+class ScheduledRollcallRequest(BaseModel):
+    id_token: str = Field(..., description="Signed identity token of the admin")
+    title: str = Field(..., min_length=1, max_length=200, description="Rollcall title")
+    scheduled_at: str = Field(..., description="ISO 8601 UTC datetime when the rollcall should auto-start, e.g. 2026-07-01T09:00:00Z")
+
+
+class ScheduledRollcallItem(BaseModel):
+    id: int
+    title: str
+    scheduled_at: str
+    created_by_name: str
+
+
+class ScheduledRollcallsResponse(BaseModel):
+    items: List[ScheduledRollcallItem] = Field(default_factory=list)
 
 
 class WebVoteRequest(BaseModel):

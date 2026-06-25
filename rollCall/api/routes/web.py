@@ -34,6 +34,7 @@ from api.schemas.web import (
     VapidPublicKeyResponse,
     WebAdminStatusResponse,
     WebGroupResponse,
+    WebGroupSettingsRequest,
     WebGroupStatsResponse,
     WebHeartbeatRequest,
     WebPresenceResponse,
@@ -157,8 +158,12 @@ async def web_group_presence(
 async def get_web_group_stats(
     group_token: str = Path(..., description="Permanent group token"),
     name: Optional[str] = Query(None, description="Display name to personalise the response with personal stats"),
-    user_id: Optional[int] = Query(None, description="Telegram user_id to personalise the response"),
+    id_token: Optional[str] = Query(None, description="Signed identity token to personalise the response with personal stats"),
 ) -> WebGroupStatsResponse:
+    # Resolve the requesting identity from a signed token only — never from a
+    # raw user_id so callers cannot supply an arbitrary Telegram id and read
+    # another member's personal stats (IDOR).
+    user_id = verify_identity_token(id_token) if id_token else None
     data = stats_svc.web_group_stats(group_token, lookup_name=name, lookup_user_id=user_id)
     return WebGroupStatsResponse(**data)
 
@@ -195,6 +200,29 @@ async def web_admin_status(
     return WebAdminStatusResponse(
         is_admin=_db.is_web_admin(int(chat["chat_id"]), tg_user_id)
     )
+
+
+@router.patch(
+    "/web/group/{group_token}/settings",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Update group settings (requires web-admin identity)",
+)
+async def update_group_settings(
+    body: WebGroupSettingsRequest,
+    group_token: str = Path(...),
+) -> None:
+    chat = _db.get_chat_by_group_web_token(group_token)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Invalid group token")
+    actor_user_id = verify_identity_token(body.id_token)
+    if not actor_user_id:
+        raise HTTPException(status_code=401, detail="Verify with Telegram first.")
+    chat_id = int(chat["chat_id"])
+    if not _db.is_web_admin(chat_id, actor_user_id):
+        raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
+    if body.shh_mode is not None:
+        from rollcall_manager import manager as _mgr
+        _mgr.set_shh_mode(chat_id, body.shh_mode)
 
 
 @router.post(
@@ -245,6 +273,108 @@ async def web_start_rollcall(
     await _mirror_panel_to_telegram(chat_id, result["rc_index"] + 1, force_new=True)
 
     return WebRollcallResponse(**_serialize_web_rollcall(rc))
+
+
+# ── Scheduled rollcalls ───────────────────────────────────────────────────────
+
+@router.post(
+    "/web/group/{group_token}/scheduled-rollcalls",
+    status_code=status.HTTP_201_CREATED,
+    summary="Schedule a one-shot rollcall to auto-start at a future time (admin only)",
+)
+async def create_scheduled_rollcall(
+    body: "ScheduledRollcallRequest",
+    group_token: str = Path(...),
+) -> dict:
+    from api.schemas.web import ScheduledRollcallRequest as _Req
+    chat = _db.get_chat_by_group_web_token(group_token)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Invalid group token")
+    actor_user_id = verify_identity_token(body.id_token)
+    if not actor_user_id:
+        raise HTTPException(status_code=401, detail="Verify with Telegram first.")
+    chat_id = int(chat["chat_id"])
+    if not _db.is_web_admin(chat_id, actor_user_id):
+        raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
+
+    # Basic ISO datetime validation
+    import re as _re
+    if not _re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}", body.scheduled_at):
+        raise HTTPException(status_code=422, detail="scheduled_at must be ISO 8601 datetime (e.g. 2026-07-01T09:00:00Z)")
+
+    from db import upsert_chat_member as _upsert
+    actor_name = "(web admin)"
+    try:
+        from db import get_member_display_info as _gmi
+        info = _gmi(chat_id, actor_user_id)
+        if info:
+            actor_name = info.get("first_name") or actor_name
+    except Exception:
+        pass
+
+    row_id = _db.create_scheduled_rollcall(
+        chat_id=chat_id,
+        title=body.title,
+        scheduled_at=body.scheduled_at,
+        created_by_uid=actor_user_id,
+        created_by_name=actor_name,
+    )
+    return {"id": row_id, "title": body.title, "scheduled_at": body.scheduled_at}
+
+
+@router.get(
+    "/web/group/{group_token}/scheduled-rollcalls",
+    summary="List upcoming scheduled rollcalls for a group (admin only)",
+)
+async def list_scheduled_rollcalls(
+    group_token: str = Path(...),
+    id_token: Optional[str] = Query(None),
+) -> dict:
+    chat = _db.get_chat_by_group_web_token(group_token)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Invalid group token")
+    actor_user_id = verify_identity_token(id_token) if id_token else None
+    if not actor_user_id:
+        raise HTTPException(status_code=401, detail="Verify with Telegram first.")
+    chat_id = int(chat["chat_id"])
+    if not _db.is_web_admin(chat_id, actor_user_id):
+        raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
+    rows = _db.get_upcoming_scheduled_rollcalls(chat_id)
+    return {
+        "items": [
+            {
+                "id": r["id"],
+                "title": r["title"],
+                "scheduled_at": r["scheduled_at"],
+                "created_by_name": r["created_by_name"],
+            }
+            for r in rows
+        ]
+    }
+
+
+@router.delete(
+    "/web/group/{group_token}/scheduled-rollcalls/{item_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Cancel a pending scheduled rollcall (admin only)",
+)
+async def delete_scheduled_rollcall(
+    group_token: str = Path(...),
+    item_id: int = Path(..., ge=1),
+    id_token: Optional[str] = Query(None),
+) -> None:
+    chat = _db.get_chat_by_group_web_token(group_token)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Invalid group token")
+    actor_user_id = verify_identity_token(id_token) if id_token else None
+    if not actor_user_id:
+        raise HTTPException(status_code=401, detail="Verify with Telegram first.")
+    chat_id = int(chat["chat_id"])
+    if not _db.is_web_admin(chat_id, actor_user_id):
+        raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
+    deleted = _db.delete_scheduled_rollcall(item_id, chat_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Scheduled rollcall not found or already fired.")
 
 
 # ── Per-rollcall endpoints (expire with rollcall) ────────────────────────────

@@ -273,8 +273,9 @@ html.dark .gi{border-bottom-color:var(--border)}
 html.dark .gi:hover{background:#243148}
 html.dark .gi.active{background:var(--accent-dim)}
 html.dark .sb-head{background:var(--card)}
-html.dark input,html.dark select,html.dark textarea{background:#243148;color:var(--text);border-color:var(--border)}
-html.dark input:focus,html.dark select:focus,html.dark textarea:focus{border-color:var(--accent)}
+html.dark input,html.dark select,html.dark textarea{background:#243148;color:var(--text);border-color:#4d6a88}
+html.dark input::placeholder,html.dark textarea::placeholder{color:#6b8499}
+html.dark input:focus,html.dark select:focus,html.dark textarea:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(59,130,246,.2);outline:none}
 html.dark input[type="datetime-local"],html.dark input[type="date"],html.dark input[type="time"]{color-scheme:dark}
 html.dark .scope-warn{background:rgba(251,191,36,.12);border-color:#fbbf24;color:#fbbf24}
 html.dark .rename-row{background:#172033;border-bottom-color:var(--border)}
@@ -283,7 +284,7 @@ html.dark .confirm-row{background:rgba(248,113,113,.12);border-color:#f87171}
 html.dark .proxy-badge{background:rgba(99,102,241,.25);color:#a5b4fc}
 html.dark .real-badge{background:rgba(74,222,128,.15);color:#4ade80}
 html.dark .tmpl-row:hover,html.dark .rc-row:hover{background:#243148}
-html.dark .member-picker{background:#243148;color:var(--text);border-color:var(--border)}
+html.dark .member-picker{background:#243148;color:var(--text);border-color:#4d6a88}
 html.dark .reminder-custom{background:#243148;color:var(--text)}
 html.dark .amf-inp{background:#243148;color:var(--text)}
 html.dark .btn-ghost{border-color:var(--border);color:var(--text)}
@@ -297,7 +298,7 @@ html.dark .add-member-form{background:#1a2744}
 html.dark .tg-section{background:rgba(59,130,246,.1);border-color:rgba(59,130,246,.35)}
 html.dark .tg-warn{color:#93c5fd}
 html.dark .amf-field label{color:var(--sub)}
-html.dark .rename-inp{background:#243148;color:var(--text);border-color:var(--border)}
+html.dark .rename-inp{background:#243148;color:var(--text);border-color:#4d6a88}
 html.dark .tmpl-edit-panel{border-top-color:var(--border)}
 html.dark .tmpl-ef-divider{border-top-color:var(--border)}
 html.dark .ur-loading{opacity:.45;pointer-events:none}

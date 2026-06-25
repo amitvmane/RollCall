@@ -554,7 +554,9 @@ const TG_USER_ID=TG_USER?.id||_verifiedUserId||null;
 async function loadWebStats(){
   const sc=$("stats-card");if(!sc)return;
   const params=new URLSearchParams();
-  if(TG_USER_ID)params.set("user_id",TG_USER_ID);
+  // Pass a signed identity token (never a raw user_id) so the server can
+  // verify who is requesting personal stats and prevent IDOR.
+  if(_idToken)params.set("id_token",_idToken);
   else if(currentName)params.set("name",currentName);
   const url=`/api/v1/web/group/${URL_TOKEN}/stats${params.size?"?"+params:""}`;
   try{
@@ -982,8 +984,34 @@ async function _checkWebAdmin(){
     _isWebAdmin=!!d.is_admin;
     const card=document.getElementById("admin-card");
     if(card)card.classList.toggle("hidden",!_isWebAdmin);
+    if(_isWebAdmin)_syncShhToggle();
   }catch(_){}
 }
+
+function _syncShhToggle(){
+  const tog=document.getElementById("shh-toggle");
+  if(!tog||!groupData)return;
+  tog.checked=!!groupData.shh_mode;
+}
+
+window.toggleShhMode=async function(enabled){
+  if(!_idToken){toast("Verify with Telegram first.",3000);return;}
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/settings`,{
+      method:"PATCH",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({id_token:_idToken,shh_mode:enabled}),
+      signal:AbortSignal.timeout(8000),
+    });
+    if(!res.ok){const d=await res.json().catch(()=>({}));throw new Error(d.detail||"Failed");}
+    if(groupData)groupData.shh_mode=enabled;
+    toast(enabled?"🔇 Silent mode ON":"🔔 Silent mode OFF",2000);
+  }catch(e){
+    toast(e.message||"Could not update silent mode",3500);
+    // Revert toggle on error
+    const tog=document.getElementById("shh-toggle");
+    if(tog)tog.checked=!enabled;
+  }
+};
 
 window.openStartModal=function(){
   const m=document.getElementById("start-modal");
@@ -1020,6 +1048,91 @@ window.submitStartRollcall=async function(){
     toast(e.message||"Could not start rollcall",4000);
   }finally{
     if(btn){btn.disabled=false;btn.textContent="Start →";}
+  }
+};
+
+// ── Schedule rollcall ────────────────────────────────────────────────────
+window.openScheduleModal=async function(){
+  const m=document.getElementById("schedule-modal");
+  if(m){m.style.display="flex";m.classList.remove("hidden");}
+  // Pre-fill date to 1 hour from now (local time)
+  const inp=document.getElementById("sched-at");
+  if(inp){
+    const d=new Date(Date.now()+60*60*1000);
+    // datetime-local needs "YYYY-MM-DDTHH:MM"
+    const pad=n=>String(n).padStart(2,"0");
+    inp.value=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+  const titleInp=document.getElementById("sched-title");
+  if(titleInp)titleInp.value="";
+  await _loadScheduledList();
+};
+window.closeScheduleModal=function(){
+  const m=document.getElementById("schedule-modal");
+  if(m){m.style.display="none";}
+};
+
+async function _loadScheduledList(){
+  const container=document.getElementById("sched-list");
+  if(!container||!_idToken)return;
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/scheduled-rollcalls?id_token=${encodeURIComponent(_idToken)}`,{signal:AbortSignal.timeout(5000)});
+    if(!res.ok){container.innerHTML="";return;}
+    const d=await res.json();
+    if(!d.items||!d.items.length){container.innerHTML=`<div class="sched-empty">No scheduled rollcalls yet.</div>`;return;}
+    container.innerHTML=d.items.map(item=>{
+      const dt=new Date(item.scheduled_at);
+      const label=isNaN(dt)?item.scheduled_at:dt.toLocaleString(undefined,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
+      return `<div class="sched-item">
+        <div class="sched-item-info">
+          <div class="sched-item-title">${esc(item.title)}</div>
+          <div class="sched-item-time">📅 ${esc(label)}</div>
+        </div>
+        <button class="sched-cancel-btn" onclick="cancelScheduled(${item.id})">Cancel</button>
+      </div>`;
+    }).join("");
+  }catch(_){container.innerHTML="";}
+}
+
+window.cancelScheduled=async function(id){
+  if(!_idToken)return;
+  if(!confirm("Cancel this scheduled rollcall?"))return;
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/scheduled-rollcalls/${id}?id_token=${encodeURIComponent(_idToken)}`,{
+      method:"DELETE",signal:AbortSignal.timeout(8000),
+    });
+    if(!res.ok&&res.status!==204){const d=await res.json().catch(()=>({}));throw new Error(d.detail||"Failed");}
+    toast("Scheduled rollcall cancelled.",2000);
+    await _loadScheduledList();
+  }catch(e){toast(e.message||"Could not cancel",3500);}
+};
+
+window.submitScheduleRollcall=async function(){
+  if(!_idToken){toast("Verify with Telegram first.",3500);return;}
+  const title=(document.getElementById("sched-title")?.value||"").trim();
+  if(!title){toast("Enter a title.",2500);return;}
+  const atLocal=document.getElementById("sched-at")?.value;
+  if(!atLocal){toast("Pick a date and time.",2500);return;}
+  // Convert datetime-local (local time, no zone) to UTC ISO string
+  const localMs=new Date(atLocal).getTime();
+  if(isNaN(localMs)||localMs<=Date.now()){toast("Choose a future date and time.",3000);return;}
+  const scheduledAt=new Date(localMs).toISOString();
+  const btn=document.getElementById("sched-submit-btn");
+  if(btn){btn.disabled=true;btn.textContent="Scheduling…";}
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/scheduled-rollcalls`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({id_token:_idToken,title,scheduled_at:scheduledAt}),
+      signal:AbortSignal.timeout(10000),
+    });
+    if(!res.ok){const d=await res.json().catch(()=>({}));throw new Error(d.detail||"Failed to schedule rollcall");}
+    toast("✅ Rollcall scheduled!",2500);
+    document.getElementById("sched-title").value="";
+    await _loadScheduledList();
+  }catch(e){
+    toast(e.message||"Could not schedule rollcall",4000);
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent="Schedule →";}
   }
 };
 

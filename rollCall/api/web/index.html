@@ -58,6 +58,23 @@
   </div>
 </div>
 
+<!-- Schedule rollcall modal -->
+<div id="schedule-modal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;display:flex;align-items:flex-end;justify-content:center">
+  <div style="background:var(--card);border-radius:18px 18px 0 0;padding:20px 16px 32px;width:100%;max-width:480px">
+    <div style="font-size:1rem;font-weight:700;margin-bottom:4px">📅 Schedule a Rollcall</div>
+    <div style="font-size:.8rem;color:var(--sub);margin-bottom:16px">The bot will auto-start this rollcall at the chosen time.</div>
+    <label style="font-size:.8rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">Title</label>
+    <input id="sched-title" type="text" placeholder="e.g. Friday Badminton" maxlength="200" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:.95rem;background:var(--card);color:var(--text);margin-bottom:14px"/>
+    <label style="font-size:.8rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">Date &amp; Time (your local time)</label>
+    <input id="sched-at" type="datetime-local" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:.95rem;background:var(--card);color:var(--text);margin-bottom:16px"/>
+    <div id="sched-list" style="margin-bottom:14px"></div>
+    <div style="display:flex;gap:10px">
+      <button class="btn" style="flex:1;padding:12px;background:var(--border);color:var(--text);border-radius:10px;font-weight:600" onclick="closeScheduleModal()">Cancel</button>
+      <button class="btn btn-primary" id="sched-submit-btn" style="flex:1;padding:12px;border-radius:10px;font-weight:600" onclick="submitScheduleRollcall()">Schedule →</button>
+    </div>
+  </div>
+</div>
+
 <div id="tg-offline-bar" class="tg-offline-bar hidden" role="alert">
   ⚠️ <strong>Bot is offline</strong> — web voting still works, but Telegram notifications may be delayed.
   <button class="tg-offline-close" onclick="this.parentElement.classList.add('hidden')">✕</button>
@@ -162,10 +179,24 @@
     <!-- Stats card — group mode only, lazy-loaded after identity is known -->
     <div id="stats-card" class="card hidden"></div>
 
-    <!-- Admin action — start rollcall (visible only to web admins) -->
+    <!-- Admin action — visible only to web admins -->
     <div id="admin-card" class="card hidden" style="border:1.5px dashed var(--border)">
       <div style="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:10px">Admin actions</div>
-      <button class="btn btn-primary" style="width:100%;padding:12px" onclick="openStartModal()">＋ Start Rollcall</button>
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <button class="btn btn-primary" style="flex:1;padding:12px" onclick="openStartModal()">＋ Start Rollcall</button>
+        <button class="btn" id="sched-open-btn" style="flex:1;padding:12px;background:var(--border);color:var(--text);border-radius:10px;font-weight:600" onclick="openScheduleModal()">📅 Schedule</button>
+      </div>
+      <!-- Silent mode toggle -->
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border)">
+        <div>
+          <div style="font-size:.85rem;font-weight:600">🔇 Silent mode</div>
+          <div style="font-size:.75rem;color:var(--sub)">Suppress per-vote bot messages in group</div>
+        </div>
+        <label class="admin-toggle">
+          <input type="checkbox" id="shh-toggle" onchange="toggleShhMode(this.checked)"/>
+          <span class="admin-toggle-slider"></span>
+        </label>
+      </div>
     </div>
 
     <!-- Bookmark section — always visible in group mode -->

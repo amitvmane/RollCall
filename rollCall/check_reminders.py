@@ -12,6 +12,7 @@ from db import (
     clear_rollcall_reminder,
     update_proxy_streak_on_checkin, reset_proxy_streak,
     update_chat_group_name,
+    get_pending_scheduled_rollcalls, mark_scheduled_rollcall_fired,
 )
 
 logging.basicConfig(
@@ -563,6 +564,66 @@ def _missed_within_days(schedule_day, schedule_time, last_date, now, max_days):
     return False
 
 
+async def _fire_scheduled_rollcalls():
+    """Fire any one-shot scheduled rollcalls whose scheduled_at time has passed."""
+    from rollcall_manager import manager
+    from handlers.lifecycle import get_status_keyboard, _persist_panel_msg_id, _build_panel_text
+    from bot_state import _panel_msg_ids
+
+    pending = get_pending_scheduled_rollcalls()
+    for row in pending:
+        chat_id = row["chat_id"]
+        title = row["title"]
+        row_id = row["id"]
+        try:
+            rollcalls = manager.get_rollcalls(chat_id)
+            if len(rollcalls) >= 3:
+                logging.warning(
+                    "[scheduler] Cannot fire scheduled rollcall '%s' for chat %s: 3 active rollcalls",
+                    title, chat_id,
+                )
+                # Mark as fired anyway so it doesn't loop forever
+                mark_scheduled_rollcall_fired(row_id)
+                try:
+                    await bot.send_message(
+                        chat_id,
+                        f"⚠️ Could not auto-start '{title}': maximum 3 active rollcalls already open.",
+                    )
+                except Exception:
+                    pass
+                continue
+
+            rc = manager.add_rollcall(chat_id, title)
+            rc.save()
+            rc_index = len(manager.get_rollcalls(chat_id)) - 1
+            rc_number = rc_index + 1
+
+            try:
+                markup = await get_status_keyboard(rc_number)
+                text = _build_panel_text(rc, rc_number)
+                sent = await bot.send_message(chat_id, text, reply_markup=markup)
+                _panel_msg_ids[(chat_id, rc_number)] = sent.message_id
+                _persist_panel_msg_id(rc, sent.message_id)
+            except Exception:
+                logging.exception("[scheduler] Panel send failed for '%s' chat %s", title, chat_id)
+                try:
+                    await bot.send_message(
+                        chat_id,
+                        f"📋 *{title}* rollcall is now open! Vote with /in or /out.",
+                        parse_mode="Markdown",
+                    )
+                except Exception:
+                    logging.exception("[scheduler] Fallback announce also failed for '%s'", title)
+
+            mark_scheduled_rollcall_fired(row_id)
+            logging.info("[scheduler] Fired scheduled rollcall '%s' for chat %s", title, chat_id)
+        except Exception:
+            logging.exception(
+                "[scheduler] Failed to fire scheduled rollcall id=%s '%s' chat=%s",
+                row_id, title, chat_id,
+            )
+
+
 async def check_template_schedules():
     """Persistent loop that fires scheduled templates at their configured day/time.
 
@@ -578,6 +639,12 @@ async def check_template_schedules():
 
     global _last_group_name_refresh
     while True:
+        # Fire any one-shot web-scheduled rollcalls whose time has passed.
+        try:
+            await _fire_scheduled_rollcalls()
+        except Exception:
+            logging.exception("Error in _fire_scheduled_rollcalls")
+
         # Daily group-name refresh — group titles change rarely, so a once-a-day
         # sweep is enough. Piggybacks on this persistent loop's minute tick.
         try:

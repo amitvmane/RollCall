@@ -23,7 +23,7 @@ from fastapi.responses import JSONResponse, Response
 
 import db as _db
 from api.identity import verify_identity_token
-from api.telegram_mirror import mirror_panel_to_telegram as _mirror_panel_to_telegram
+from api.telegram_mirror import mirror_panel_to_telegram as _mirror_panel_to_telegram, send_vote_notification as _send_vote_notification
 from services import web as web_svc
 from services import stats as stats_svc
 from services import presence as presence_svc
@@ -281,9 +281,11 @@ async def vote_web(
         username=body.username or None,
     )
 
-    # Reflect the web vote on the Telegram panel for this rollcall (best-effort).
+    # Reflect the web vote in the Telegram group — notification so the vote is
+    # visible in chat history, then panel update so the list stays current.
     loc = web_svc.locate_rollcall(token)
     if loc:
+        await _send_vote_notification(loc[0], body.name, body.vote)
         await _mirror_panel_to_telegram(loc[0], loc[1])
 
     return WebRollcallResponse(**data)

@@ -38,9 +38,13 @@ router = APIRouter()
     summary="List all groups the bot is in",
 )
 async def list_groups(
-    _token: AuthedToken = Depends(require_scope("admin")),
+    token: AuthedToken = Depends(require_scope("admin")),
 ) -> List[GroupSummary]:
-    return [GroupSummary(**g) for g in settings_svc.list_groups()]
+    groups = settings_svc.list_groups()
+    # Tokens scoped to a specific chat (chat_id != 0) must only see that group.
+    if token.chat_id != 0:
+        groups = [g for g in groups if g["chat_id"] == token.chat_id]
+    return [GroupSummary(**g) for g in groups]
 
 
 @router.get(

@@ -18,6 +18,8 @@ from api.schemas.portal import (
     PortalGroupsResponse,
     PortalGroupSummary,
     PortalSessionEntry,
+    PortalUpcomingItem,
+    PortalUpcomingResponse,
 )
 
 router = APIRouter()
@@ -50,7 +52,9 @@ async def portal_groups(
         cid = int(row["chat_id"])
         attended = int(row.get("sessions_attended") or 0)
         total = int(row.get("total_sessions") or 0)
-        rate = round(attended / total * 100, 1) if total > 0 else None
+        total_voted = int(row.get("total_voted") or 0)
+        attendance_rate = round(attended / total * 100, 1) if total > 0 else None
+        voting_rate = round(total_voted / total * 100, 1) if total > 0 else None
         rank = _db.get_user_rank_in_chat(cid, tg_user_id)
         has_active = len(manager.get_rollcalls(cid)) > 0
 
@@ -61,14 +65,42 @@ async def portal_groups(
             group_web_token=row.get("group_web_token"),
             sessions_attended=attended,
             total_sessions=total,
-            attendance_rate=rate,
+            total_voted=total_voted,
+            attendance_rate=attendance_rate,
+            voting_rate=voting_rate,
             current_streak=int(row.get("current_streak") or 0),
             best_streak=int(row.get("best_streak") or 0),
+            ghost_count=int(row.get("ghost_count") or 0),
             rank=rank,
             has_active_rollcall=has_active,
         ))
 
     return PortalGroupsResponse(tg_user_id=tg_user_id, groups=groups)
+
+
+@router.get(
+    "/portal/upcoming",
+    response_model=PortalUpcomingResponse,
+    summary="Upcoming scheduled rollcalls across all the user's groups",
+)
+async def portal_upcoming(
+    id_token: str = Query(..., description="Signed identity token"),
+) -> PortalUpcomingResponse:
+    tg_user_id = _require_identity(id_token)
+    rows = _db.get_user_upcoming_scheduled_rollcalls(tg_user_id)
+    return PortalUpcomingResponse(
+        items=[
+            PortalUpcomingItem(
+                id=r["id"],
+                chat_id=int(r["chat_id"]),
+                group_name=r.get("group_name"),
+                group_web_token=r.get("group_web_token"),
+                title=r["title"],
+                scheduled_at=str(r["scheduled_at"]),
+            )
+            for r in rows
+        ]
+    )
 
 
 @router.get(

@@ -3733,8 +3733,8 @@ def get_user_voted_chats(tg_user_id: int) -> List[Dict]:
     """Return all chats where tg_user_id has voting history.
 
     Each entry: chat_id, group_name, timezone, group_web_token,
-    sessions_attended (final IN in ended sessions), total_sessions (all
-    ended sessions in that chat), current_streak, best_streak.
+    sessions_attended, total_sessions, total_voted, current_streak,
+    best_streak, ghost_count.
     """
     conn = get_connection()
     cursor = None
@@ -3748,8 +3748,9 @@ def get_user_voted_chats(tg_user_id: int) -> List[Dict]:
                 c.group_name,
                 COALESCE(c.timezone, 'Asia/Kolkata') AS timezone,
                 c.group_web_token,
-                COALESCE(us.current_streak, 0) AS current_streak,
-                COALESCE(us.best_streak, 0)    AS best_streak,
+                COALESCE(us.current_streak, 0)    AS current_streak,
+                COALESCE(us.best_streak, 0)        AS best_streak,
+                COALESCE(us.total_rollcalls, 0)    AS total_voted,
                 (SELECT COUNT(*) FROM users u2
                  JOIN rollcalls r2 ON u2.rollcall_id = r2.id
                  WHERE r2.chat_id = us.chat_id AND u2.user_id = us.user_id
@@ -3757,7 +3758,10 @@ def get_user_voted_chats(tg_user_id: int) -> List[Dict]:
                 ) AS sessions_attended,
                 (SELECT COUNT(*) FROM rollcalls r3
                  WHERE r3.chat_id = us.chat_id AND r3.is_active = {active_false}
-                ) AS total_sessions
+                ) AS total_sessions,
+                COALESCE((SELECT gr.ghost_count FROM ghost_records gr
+                 WHERE gr.chat_id = us.chat_id AND gr.user_id = us.user_id
+                   AND gr.proxy_name IS NULL LIMIT 1), 0) AS ghost_count
             FROM user_stats us
             JOIN chats c ON c.chat_id = us.chat_id
             WHERE us.user_id = {ph}
@@ -3807,6 +3811,50 @@ def get_user_rank_in_chat(chat_id: int, user_id: int) -> Optional[int]:
     except Exception as e:
         logging.error("Error in get_user_rank_in_chat: %s", e)
         return None
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def get_user_upcoming_scheduled_rollcalls(tg_user_id: int, limit: int = 10) -> List[Dict]:
+    """Return upcoming (unfired) scheduled rollcalls from all groups the user has voted in."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        if db_type == 'postgresql':
+            cursor.execute(f"""
+                SELECT sr.id, sr.chat_id, sr.title, sr.scheduled_at,
+                       c.group_name, c.group_web_token
+                FROM scheduled_rollcalls sr
+                JOIN chats c ON c.chat_id = sr.chat_id
+                WHERE sr.is_fired = FALSE
+                  AND sr.chat_id IN (
+                      SELECT chat_id FROM user_stats WHERE user_id = {ph}
+                  )
+                ORDER BY sr.scheduled_at ASC
+                LIMIT {ph}
+            """, (tg_user_id, limit))
+        else:
+            cursor.execute(f"""
+                SELECT sr.id, sr.chat_id, sr.title, sr.scheduled_at,
+                       c.group_name, c.group_web_token
+                FROM scheduled_rollcalls sr
+                JOIN chats c ON c.chat_id = sr.chat_id
+                WHERE sr.is_fired = 0
+                  AND sr.chat_id IN (
+                      SELECT chat_id FROM user_stats WHERE user_id = {ph}
+                  )
+                ORDER BY sr.scheduled_at ASC
+                LIMIT {ph}
+            """, (tg_user_id, limit))
+        return [dict(row) for row in cursor.fetchall()]
+    except Exception as e:
+        logging.error("Error in get_user_upcoming_scheduled_rollcalls: %s", e)
+        return []
     finally:
         if cursor is not None:
             cursor.close()

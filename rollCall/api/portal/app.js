@@ -23,11 +23,6 @@ function toast(msg,dur=2800){
   setTimeout(()=>el.classList.remove("show"),dur);
 }
 
-function toggleTheme(){
-  const on=document.documentElement.classList.toggle("dark");
-  localStorage.setItem("rc_dark",on?"1":"0");
-}
-
 async function apiFetch(path,opts={}){
   const res=await fetch(API+path,{...opts,headers:{"Content-Type":"application/json",...(opts.headers||{})}});
   if(!res.ok){
@@ -37,8 +32,6 @@ async function apiFetch(path,opts={}){
   return res.json();
 }
 
-// ── Dark mode init ─────────────────────────────────────────────────────────────
-// (applied via inline script in <head> before paint — just wire the button)
 function _updateThemeBtn(){
   const dark=document.documentElement.classList.contains("dark");
   document.querySelectorAll(".btn-theme").forEach(b=>b.textContent=dark?"☀️":"🌙");
@@ -53,21 +46,20 @@ window.toggleTheme=function(){
 
 async function startVerify(){
   const btn=$id("verify-btn");
-  const status=$id("verify-status");
+  const statusEl=$id("verify-status");
   btn.disabled=true;btn.textContent="Starting…";
-  status.style.display="block";status.textContent="";
+  statusEl.style.display="block";statusEl.textContent="";
   try{
     const res=await apiFetch("/auth/tg-verify/start",{method:"POST",body:"{}"});
     const code=res.code;
     localStorage.setItem(LS_VERIFY_CODE,code);
-    // Open the Telegram deep link
     window.open(res.deep_link,"_blank");
-    status.textContent="Telegram opened — tap Start in the bot, then return here.";
+    statusEl.textContent="Telegram opened — tap Start in the bot, then return here.";
     btn.textContent="Waiting for verification…";
     _pollTimer=setInterval(()=>_checkVerify(code),2000);
   }catch(e){
     btn.disabled=false;btn.textContent="Verify with Telegram →";
-    status.textContent="Error: "+e.message;
+    statusEl.textContent="Error: "+e.message;
   }
 }
 
@@ -88,7 +80,6 @@ async function _checkVerify(code){
   }
 }
 
-// Resume polling if a code was in-flight when the page loaded
 (function resumeVerify(){
   const code=localStorage.getItem(LS_VERIFY_CODE);
   if(code&&!_userId){
@@ -119,8 +110,65 @@ $id("unlink-btn").addEventListener("click",()=>{
   localStorage.removeItem(LS_VERIFY_CODE);
   _userId=null;_userName=null;_idToken=null;
   $id("groups-list").innerHTML="";
+  $id("summary-card").style.display="none";
+  $id("upcoming-section").style.display="none";
   showVerifyScreen();
 });
+
+// ── Cross-group summary ───────────────────────────────────────────────────────
+
+function renderSummary(groups){
+  const card=$id("summary-card");
+  if(!groups.length){card.style.display="none";return;}
+
+  const totalGroups=groups.length;
+  const totalAttended=groups.reduce((s,g)=>s+g.sessions_attended,0);
+  const totalSessions=groups.reduce((s,g)=>s+g.total_sessions,0);
+  const overallRate=totalSessions>0?Math.round(totalAttended/totalSessions*100):null;
+  const bestStreak=groups.reduce((m,g)=>Math.max(m,g.best_streak),0);
+  const liveCount=groups.filter(g=>g.has_active_rollcall).length;
+
+  let html=`<div class="summary-grid">
+    <div class="summary-item"><div class="summary-val">${totalGroups}</div><div class="summary-lbl">Groups</div></div>
+    <div class="summary-item"><div class="summary-val">${totalAttended}</div><div class="summary-lbl">Sessions</div></div>
+    <div class="summary-item"><div class="summary-val">${overallRate!=null?overallRate+"%":"—"}</div><div class="summary-lbl">Overall rate</div></div>
+    <div class="summary-item"><div class="summary-val">${bestStreak}</div><div class="summary-lbl">Best streak</div></div>
+  </div>`;
+  if(liveCount>0){
+    html+=`<div class="live-banner">● ${liveCount} group${liveCount>1?"s":""} with a live rollcall — scroll down to vote</div>`;
+  }
+  card.innerHTML=html;
+  card.style.display="block";
+}
+
+// ── Upcoming scheduled rollcalls ──────────────────────────────────────────────
+
+async function loadUpcoming(){
+  const section=$id("upcoming-section");
+  try{
+    const data=await apiFetch("/portal/upcoming?id_token="+encodeURIComponent(_idToken));
+    const items=data.items||[];
+    if(!items.length){section.style.display="none";return;}
+    const rows=items.map(item=>{
+      const dt=new Date(item.scheduled_at.endsWith("Z")?item.scheduled_at:item.scheduled_at+"Z");
+      const dateStr=dt.toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"});
+      const timeStr=dt.toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"});
+      const groupName=esc(item.group_name||("Chat "+item.chat_id));
+      const titleStr=esc(item.title);
+      return `<div class="upcoming-row">
+  <div class="upcoming-icon">📅</div>
+  <div class="upcoming-info">
+    <div class="upcoming-title">${titleStr}</div>
+    <div class="upcoming-meta">${groupName} · ${dateStr}, ${timeStr}</div>
+  </div>
+</div>`;
+    }).join("");
+    section.innerHTML=`<div class="section-label">UPCOMING</div>`+rows;
+    section.style.display="block";
+  }catch(e){
+    section.style.display="none";
+  }
+}
 
 // ── Groups ────────────────────────────────────────────────────────────────────
 
@@ -128,11 +176,17 @@ async function loadGroups(){
   $id("groups-loading").style.display="block";
   $id("groups-empty").style.display="none";
   $id("groups-list").innerHTML="";
+  $id("summary-card").style.display="none";
+  $id("upcoming-section").style.display="none";
   try{
-    const data=await apiFetch("/portal/groups?id_token="+encodeURIComponent(_idToken));
+    const [data] = await Promise.all([
+      apiFetch("/portal/groups?id_token="+encodeURIComponent(_idToken)),
+      loadUpcoming(),
+    ]);
     _groups=data.groups||[];
     $id("groups-loading").style.display="none";
     if(!_groups.length){$id("groups-empty").style.display="block";return;}
+    renderSummary(_groups);
     renderGroups();
   }catch(e){
     $id("groups-loading").textContent="Error loading groups: "+e.message;
@@ -152,7 +206,7 @@ function groupCardHTML(g,i){
     :`<span class="group-badge badge-inactive">${g.total_sessions} sessions</span>`;
 
   const voteBtn=g.has_active_rollcall&&g.group_web_token
-    ?`<a class="vote-btn" href="/web/group/${esc(g.group_web_token)}" target="_blank">Vote Now →</a>`
+    ?`<a class="vote-btn" href="/web/group/${esc(g.group_web_token)}" target="_blank" onclick="event.stopPropagation()">Vote Now →</a>`
     :"";
 
   const rank=g.rank!=null?`#${g.rank}`:"—";
@@ -182,40 +236,44 @@ window.openDetail=async function(idx){
   if(!g)return;
   const name=g.group_name||("Chat "+g.chat_id);
   $id("detail-title").textContent=name;
-  $id("detail-body").innerHTML='<div style="color:var(--sub);padding:16px 0">Loading history…</div>';
+  $id("detail-body").innerHTML='<div style="color:var(--sub);padding:16px 0">Loading…</div>';
   $id("detail-overlay").classList.add("open");
   $id("detail-panel").classList.add("open");
   document.body.style.overflow="hidden";
 
-  // Stats summary at top
   const rate=g.attendance_rate!=null?g.attendance_rate.toFixed(1)+"%":"—";
+  const votingRate=g.voting_rate!=null?g.voting_rate.toFixed(0)+"%":"—";
   const rank=g.rank!=null?`#${g.rank}`:"—";
+
   let html=`
 <div class="group-stats" style="margin-bottom:16px">
   <div class="stat-box"><div class="stat-val">${esc(rate)}</div><div class="stat-lbl">Attendance</div></div>
   <div class="stat-box"><div class="stat-val">${esc(rank)}</div><div class="stat-lbl">Rank</div></div>
   <div class="stat-box"><div class="stat-val">${g.current_streak||0}</div><div class="stat-lbl">Streak</div></div>
   <div class="stat-box"><div class="stat-val">${g.best_streak||0}</div><div class="stat-lbl">Best</div></div>
+</div>
+<div class="detail-meta-row">
+  <span class="detail-meta-item">🗳 Voted in ${g.total_voted} of ${g.total_sessions} sessions (${esc(votingRate)})</span>
+  ${g.ghost_count>0?`<span class="detail-meta-item ghost-flag">👻 ${g.ghost_count} ghost${g.ghost_count>1?"s":""}</span>`:""}
 </div>`;
 
   if(g.has_active_rollcall&&g.group_web_token){
-    html+=`<a class="vote-btn" href="/web/group/${esc(g.group_web_token)}" target="_blank" style="margin-bottom:16px">Vote Now →</a>`;
+    html+=`<a class="vote-btn" href="/web/group/${esc(g.group_web_token)}" target="_blank" style="margin:12px 0;display:block">Vote Now →</a>`;
   }
 
-  // Shareable join link
   if(g.group_web_token){
     const joinUrl=window.location.origin+"/join/"+g.group_web_token;
     html+=`
-<div style="background:var(--hover);border-radius:8px;padding:10px 12px;margin-bottom:16px;font-size:.82rem">
-  <div style="font-weight:600;margin-bottom:4px">📎 Group invite link</div>
+<div class="join-link-box">
+  <div style="font-weight:600;margin-bottom:4px;font-size:.82rem">📎 Permanent group link</div>
   <div style="display:flex;gap:8px;align-items:center">
-    <code style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.78rem">${esc(joinUrl)}</code>
-    <button onclick="navigator.clipboard.writeText('${joinUrl.replace(/'/g,"\\'")}').then(()=>toast('Link copied!'))" style="background:var(--accent);color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer;font-size:.78rem;white-space:nowrap">Copy</button>
+    <code class="join-link-code">${esc(joinUrl)}</code>
+    <button onclick="navigator.clipboard.writeText('${joinUrl.replace(/'/g,"\\'")}').then(()=>toast('Link copied!'))" class="copy-link-btn">Copy</button>
   </div>
 </div>`;
   }
 
-  html+=`<div style="font-weight:600;font-size:.88rem;margin-bottom:8px;color:var(--sub)">RECENT SESSIONS</div>`;
+  html+=`<div class="section-label" style="margin-top:16px">RECENT SESSIONS</div>`;
   $id("detail-body").innerHTML=html+'<div id="history-body"><div style="color:var(--sub)">Loading…</div></div>';
 
   try{
@@ -225,20 +283,18 @@ window.openDetail=async function(idx){
       $id("history-body").innerHTML='<div style="color:var(--sub);font-size:.85rem">No sessions yet.</div>';
       return;
     }
-    // Sparkline (last 20, oldest first)
+    // Sparkline — oldest first, last 20
     const spark=sessions.slice(0,20).reverse().map(s=>{
       const cls={in:"dot-in",out:"dot-out",maybe:"dot-maybe",miss:"dot-miss"}[s.status]||"dot-miss";
-      const lbl=s.title||"Session";
-      return `<div class="spark-dot ${cls}" title="${esc(lbl)}"></div>`;
+      return `<div class="spark-dot ${cls}" title="${esc(s.title||"Session")}"></div>`;
     }).join("");
-    let rows=sessions.map(s=>{
+    const rows=sessions.map(s=>{
       const cls={in:"dot-in",out:"dot-out",maybe:"dot-maybe",miss:"dot-miss"}[s.status]||"dot-miss";
       const scls="status-"+(s.status||"miss");
-      const label=s.title||"Untitled";
       const dateStr=s.ended_at?s.ended_at.slice(0,10):"";
       return `<div class="session-row">
   <div class="session-dot ${cls}"></div>
-  <div class="session-title">${esc(label)}</div>
+  <div class="session-title">${esc(s.title||"Untitled")}</div>
   <div class="session-date">${esc(dateStr)}</div>
   <div class="session-status ${scls}">${(s.status||"miss").toUpperCase()}</div>
 </div>`;
@@ -255,15 +311,11 @@ window.closeDetail=function(){
   document.body.style.overflow="";
 };
 
-// Close on Escape
 document.addEventListener("keydown",e=>{if(e.key==="Escape")closeDetail();});
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
 _updateThemeBtn();
-// Require a signed identity token, not just a remembered user id. Users
-// verified before this token existed will have _userId but no _idToken and
-// must re-verify once.
 if(_userId&&_idToken){
   showApp();
 }else{

@@ -17,6 +17,7 @@ class WebRollcallResponse(BaseModel):
     finalize_epoch: Optional[float] = None
     limit: Optional[int] = None
     location: Optional[str] = None
+    fee: Optional[str] = None
     in_list: list[WebUser] = Field(default_factory=list, alias="in")
     out_list: list[WebUser] = Field(default_factory=list, alias="out")
     maybe_list: list[WebUser] = Field(default_factory=list, alias="maybe")
@@ -174,6 +175,11 @@ class VapidPublicKeyResponse(BaseModel):
 class WebStartRollcallRequest(BaseModel):
     id_token: str = Field(..., description="Signed identity token of the admin starting the rollcall")
     title: str = Field(..., min_length=1, max_length=200, description="Rollcall title")
+
+
+class WebEndRollcallRequest(BaseModel):
+    id_token: str = Field(..., description="Signed identity token of the admin ending the rollcall")
+    rollcall_num: int = Field(1, ge=1, description="1-based rollcall number to end (defaults to first)")
 
 
 class WebAdminStatusResponse(BaseModel):

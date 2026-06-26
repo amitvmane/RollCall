@@ -304,6 +304,11 @@ html.dark .tmpl-ef-divider{border-top-color:var(--border)}
 html.dark .ur-loading{opacity:.45;pointer-events:none}
 html.dark .start-form{background:#1a2744}
 html.dark .start-form input{background:#243148}
+html.dark .pill-in{background:rgba(74,222,128,.15);color:#4ade80}
+html.dark .pill-out{background:rgba(248,113,113,.12);color:#fca5a5}
+html.dark .pill-maybe{background:rgba(251,191,36,.12);color:#fbbf24}
+html.dark .pill-wait{background:#1e293b;color:#94a3b8}
+html.dark .ep-header{background:#162032}
 
 /* ── Telegram offline note (inside rollcall card) ── */
 .rc-offline-note{background:#fef3c7;border:1px solid #f59e0b;color:#92400e;border-radius:8px;padding:10px 14px;font-size:.82rem;line-height:1.5;margin-bottom:12px}

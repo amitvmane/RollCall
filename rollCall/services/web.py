@@ -56,6 +56,7 @@ def _serialize_web_rollcall(rc) -> dict:
         "finalize_epoch": finalize_epoch,
         "limit": rc.inListLimit,
         "location": rc.location,
+        "fee": rc.event_fee,
         "in": [_user_dict(u) for u in rc.inList],
         "out": [_user_dict(u) for u in rc.outList],
         "maybe": [_user_dict(u) for u in rc.maybeList],

@@ -186,6 +186,9 @@
         <button class="btn btn-primary" style="flex:1;padding:12px" onclick="openStartModal()">＋ Start Rollcall</button>
         <button class="btn" id="sched-open-btn" style="flex:1;padding:12px;background:var(--border);color:var(--text);border-radius:10px;font-weight:600" onclick="openScheduleModal()">📅 Schedule</button>
       </div>
+      <div id="end-rc-row" style="display:none;margin-bottom:10px">
+        <button class="btn btn-danger" id="end-rc-btn" style="width:100%;padding:12px" onclick="doEndRcWeb()">⏹ End Active Rollcall</button>
+      </div>
       <!-- Silent mode toggle -->
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border)">
         <div>

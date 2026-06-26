@@ -348,6 +348,7 @@ function renderRollcall(rc){
     meta.push("🕐 Closes: "+esc(rc.finalize_date)+(cdHtml?" "+cdHtml:""));
   }
   if(rc.location)meta.push("📍 "+esc(rc.location));
+  if(rc.fee)meta.push(`<strong style="color:var(--accent)">💰 Fee: ${esc(rc.fee)}/person</strong>`);
   $("rc-meta").innerHTML=meta.map(m=>`<span>${m}</span>`).join("<br/>");
   $("count-badge").textContent=rc.limit?rc.in.length+"/"+rc.limit+" IN":rc.in.length+" IN";
 
@@ -362,6 +363,8 @@ function renderRollcall(rc){
   $("identity-card").classList.remove("hidden");
   $("vote-card").classList.remove("hidden");
   $("lists-card").classList.remove("hidden");
+  const endRow=document.getElementById("end-rc-row");
+  if(endRow)endRow.style.display=_isWebAdmin?"":"none";
   detectCurrentVote();renderLists();
 }
 
@@ -479,6 +482,8 @@ async function loadGroup(){
     $("tab-card").classList.add("hidden");
     $("no-rollcalls").classList.remove("hidden");
     ["identity-card","vote-card","lists-card"].forEach(id=>$(id)?.classList.add("hidden"));
+    const endRow=document.getElementById("end-rc-row");
+    if(endRow)endRow.style.display="none";
   }else if(rcs.length===1){$("tab-card").classList.add("hidden");renderRollcall(rcs[0]);}
   else{$("tab-card").classList.remove("hidden");if(activeTabIdx>=rcs.length)activeTabIdx=0;renderTabs(rcs);renderRollcall(rcs[activeTabIdx]);}
   loadWebStats();
@@ -1048,6 +1053,33 @@ window.submitStartRollcall=async function(){
     toast(e.message||"Could not start rollcall",4000);
   }finally{
     if(btn){btn.disabled=false;btn.textContent="Start →";}
+  }
+};
+
+window.doEndRcWeb=async function(){
+  if(!_idToken){toast("Verify your Telegram identity first.",3500);return;}
+  if(!activeRcData){toast("No active rollcall to end.",2500);return;}
+  if(!confirm(`End rollcall "${activeRcData.title}"? This cannot be undone.`))return;
+  const btn=document.getElementById("end-rc-btn");
+  if(btn){btn.disabled=true;btn.textContent="Ending…";}
+  try{
+    const rollcall_num=activeTabIdx+1;
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/end-rollcall`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({id_token:_idToken,rollcall_num}),
+      signal:AbortSignal.timeout(10000),
+    });
+    if(!res.ok){
+      const d=await res.json().catch(()=>({}));
+      throw new Error(d.detail||"Failed to end rollcall");
+    }
+    toast("✅ Rollcall ended!",2500);
+    activeTabIdx=0;
+    await loadGroup();
+  }catch(e){
+    toast(e.message||"Could not end rollcall",4000);
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent="⏹ End Active Rollcall";}
   }
 };
 

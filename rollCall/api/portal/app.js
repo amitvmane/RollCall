@@ -12,6 +12,8 @@ let _userName=localStorage.getItem(LS_TG_NAME)||null;
 let _idToken=localStorage.getItem(LS_ID_TOKEN)||null;
 let _pollTimer=null;
 let _groups=[];
+let _sortMode="active";
+let _filterText="";
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
@@ -193,9 +195,36 @@ async function loadGroups(){
   }
 }
 
+window.setSort=function(mode){
+  _sortMode=mode;
+  document.querySelectorAll(".sort-tab").forEach(t=>t.classList.remove("active"));
+  const btn=$id("sort-"+mode);
+  if(btn)btn.classList.add("active");
+  renderGroups();
+};
+
+window.applyFilter=function(){
+  _filterText=($id("group-search")?.value||"").trim().toLowerCase();
+  renderGroups();
+};
+
 function renderGroups(){
+  const fb=$id("filter-bar");
+  if(fb)fb.style.display=_groups.length>=3?"":"none";
+
+  let groups=[..._groups];
+  if(_filterText)groups=groups.filter(g=>(g.group_name||"").toLowerCase().includes(_filterText));
+  if(_sortMode==="active"){
+    groups=groups.sort((a,b)=>{
+      if(a.has_active_rollcall&&!b.has_active_rollcall)return -1;
+      if(!a.has_active_rollcall&&b.has_active_rollcall)return 1;
+      return 0;
+    });
+  }else{
+    groups=groups.sort((a,b)=>(a.group_name||"").localeCompare(b.group_name||""));
+  }
   const list=$id("groups-list");
-  list.innerHTML=_groups.map((g,i)=>groupCardHTML(g,i)).join("");
+  list.innerHTML=groups.map(g=>groupCardHTML(g,_groups.indexOf(g))).join("");
 }
 
 function groupCardHTML(g,i){
@@ -212,6 +241,7 @@ function groupCardHTML(g,i){
   const rank=g.rank!=null?`#${g.rank}`:"—";
   const streak=g.current_streak||0;
   const best=g.best_streak||0;
+  const streakDisplay=streak>=3?`${streak}🔥`:String(streak);
 
   return `
 <div class="group-card" onclick="openDetail(${i})">
@@ -222,7 +252,7 @@ function groupCardHTML(g,i){
   <div class="group-stats">
     <div class="stat-box"><div class="stat-val">${esc(rate)}</div><div class="stat-lbl">Attendance</div></div>
     <div class="stat-box"><div class="stat-val">${esc(rank)}</div><div class="stat-lbl">Rank</div></div>
-    <div class="stat-box"><div class="stat-val">${streak}</div><div class="stat-lbl">Streak</div></div>
+    <div class="stat-box"><div class="stat-val">${streakDisplay}</div><div class="stat-lbl">Streak</div></div>
     <div class="stat-box"><div class="stat-val">${best}</div><div class="stat-lbl">Best</div></div>
   </div>
   ${voteBtn}
@@ -244,14 +274,18 @@ window.openDetail=async function(idx){
   const rate=g.attendance_rate!=null?g.attendance_rate.toFixed(1)+"%":"—";
   const votingRate=g.voting_rate!=null?g.voting_rate.toFixed(0)+"%":"—";
   const rank=g.rank!=null?`#${g.rank}`:"—";
+  const curStreak=g.current_streak||0;
+  const bestStreak=g.best_streak||0;
+  const streakDisplay=curStreak>=3?`${curStreak}🔥`:String(curStreak);
 
   let html=`
 <div class="group-stats" style="margin-bottom:16px">
   <div class="stat-box"><div class="stat-val">${esc(rate)}</div><div class="stat-lbl">Attendance</div></div>
   <div class="stat-box"><div class="stat-val">${esc(rank)}</div><div class="stat-lbl">Rank</div></div>
-  <div class="stat-box"><div class="stat-val">${g.current_streak||0}</div><div class="stat-lbl">Streak</div></div>
-  <div class="stat-box"><div class="stat-val">${g.best_streak||0}</div><div class="stat-lbl">Best</div></div>
+  <div class="stat-box"><div class="stat-val">${streakDisplay}</div><div class="stat-lbl">Streak</div></div>
+  <div class="stat-box"><div class="stat-val">${bestStreak}</div><div class="stat-lbl">Best</div></div>
 </div>
+${bestStreak>0?`<div class="milestone-box">🏆 Best streak ever: <strong>${bestStreak}</strong></div>`:""}
 <div class="detail-meta-row">
   <span class="detail-meta-item">🗳 Voted in ${g.total_voted} of ${g.total_sessions} sessions (${esc(votingRate)})</span>
   ${g.ghost_count>0?`<span class="detail-meta-item ghost-flag">👻 ${g.ghost_count} ghost${g.ghost_count>1?"s":""}</span>`:""}

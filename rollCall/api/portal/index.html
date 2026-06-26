@@ -60,6 +60,17 @@
     <!-- Upcoming scheduled rollcalls -->
     <div id="upcoming-section" class="upcoming-section" style="display:none"></div>
 
+    <!-- Sort/filter bar (hidden until 3+ groups) -->
+    <div id="filter-bar" style="display:none">
+      <div class="filter-row">
+        <input id="group-search" type="text" class="filter-input" placeholder="Search groups…" oninput="applyFilter()"/>
+        <div class="sort-tabs">
+          <button class="sort-tab active" id="sort-active" onclick="setSort('active')">Active first</button>
+          <button class="sort-tab" id="sort-alpha" onclick="setSort('alpha')">A–Z</button>
+        </div>
+      </div>
+    </div>
+
     <div id="groups-list"></div>
   </div>
 </div>

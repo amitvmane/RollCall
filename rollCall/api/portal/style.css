@@ -59,6 +59,27 @@
 .upcoming-title{font-size:.88rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .upcoming-meta{font-size:.75rem;color:var(--sub);margin-top:2px;}
 
+/* Sort/filter bar */
+.filter-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;}
+.filter-input{
+  flex:1;min-width:120px;padding:8px 12px;border:1.5px solid var(--border);
+  border-radius:8px;font-size:.88rem;outline:none;background:var(--card);color:var(--text);
+}
+.filter-input:focus{border-color:var(--accent);}
+.sort-tabs{display:flex;gap:4px;flex-shrink:0;}
+.sort-tab{
+  padding:7px 14px;border:1.5px solid var(--border);background:var(--card);
+  border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer;color:var(--sub);transition:all .15s;
+}
+.sort-tab.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+
+/* Personal best milestone */
+.milestone-box{
+  background:#fef3c7;color:#92400e;border-radius:8px;padding:9px 14px;
+  font-size:.82rem;margin-bottom:8px;
+}
+.dark .milestone-box{background:#78350f;color:#fcd34d;}
+
 /* Group cards */
 .group-card{
   background:var(--card);border:1px solid var(--border);border-radius:12px;

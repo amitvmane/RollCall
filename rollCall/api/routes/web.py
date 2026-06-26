@@ -33,6 +33,7 @@ from api.schemas.web import (
     PushUnsubscribeRequest,
     VapidPublicKeyResponse,
     WebAdminStatusResponse,
+    WebEndRollcallRequest,
     WebGroupResponse,
     WebGroupSettingsRequest,
     WebGroupStatsResponse,
@@ -273,6 +274,51 @@ async def web_start_rollcall(
     await _mirror_panel_to_telegram(chat_id, result["rc_index"] + 1, force_new=True)
 
     return WebRollcallResponse(**_serialize_web_rollcall(rc))
+
+
+@router.post(
+    "/web/group/{group_token}/end-rollcall",
+    status_code=status.HTTP_200_OK,
+    summary="End a rollcall via web (requires web-admin identity)",
+)
+async def web_end_rollcall(
+    body: WebEndRollcallRequest,
+    group_token: str = Path(...),
+) -> dict:
+    chat = _db.get_chat_by_group_web_token(group_token)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Invalid group token")
+
+    actor_user_id = verify_identity_token(body.id_token)
+    if not actor_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Verify with Telegram before ending a rollcall.",
+        )
+
+    chat_id = int(chat["chat_id"])
+    if not _db.is_web_admin(chat_id, actor_user_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not a web admin for this group.",
+        )
+
+    from services import rollcalls as rc_svc
+    from rollcall_manager import manager as _mgr
+
+    rc_index = body.rollcall_num - 1
+    async with _mgr.get_chat_write_lock(chat_id):
+        result = await rc_svc.end_rollcall(
+            chat_id=chat_id,
+            rc_number=rc_index,
+            ended_by_user_id=actor_user_id,
+            ended_by_name="(web)",
+        )
+
+    rc_num_ended = result["rc_number_ended_1based"]
+    await _mirror_panel_to_telegram(chat_id, rc_num_ended)
+
+    return {"ended": result["rc_number_ended_1based"]}
 
 
 # ── Scheduled rollcalls ───────────────────────────────────────────────────────

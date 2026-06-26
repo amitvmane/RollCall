@@ -449,6 +449,94 @@ class TestRouteOrdering(unittest.TestCase):
         paths = [r.path for r in app.routes]
         self.assertIn("/web/group/{group_token}", paths)
 
+    def test_end_rollcall_route_present(self):
+        from api.main import create_app
+        app = create_app()
+        paths = [r.path for r in app.routes]
+        self.assertIn("/api/v1/web/group/{group_token}/end-rollcall", paths)
+
+
+# ---------------------------------------------------------------------------
+# Fee field in WebRollcallResponse
+# ---------------------------------------------------------------------------
+
+@unittest.skipUnless(FASTAPI_AVAILABLE, "fastapi not installed")
+class TestWebRollcallFeeField(unittest.TestCase):
+
+    def test_fee_included_when_set(self):
+        rc_with_fee = {**_WEB_RC_DICT, "fee": "₹150"}
+        with patch("services.web.get_rollcall_by_token", return_value=rc_with_fee):
+            resp = _client().get("/api/v1/web/abc123rollcalltoken")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["fee"], "₹150")
+
+    def test_fee_null_when_not_set(self):
+        with patch("services.web.get_rollcall_by_token", return_value=_WEB_RC_DICT):
+            resp = _client().get("/api/v1/web/abc123rollcalltoken")
+        self.assertIsNone(resp.json().get("fee"))
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/web/group/{token}/end-rollcall
+# ---------------------------------------------------------------------------
+
+@unittest.skipUnless(FASTAPI_AVAILABLE, "fastapi not installed")
+class TestWebEndRollcall(unittest.TestCase):
+
+    def setUp(self):
+        from api.rate_limit import reset_buckets_for_tests
+        reset_buckets_for_tests()
+
+    def test_missing_id_token_returns_422(self):
+        resp = _client().post("/api/v1/web/group/grp123/end-rollcall",
+                              json={"rollcall_num": 1})
+        self.assertEqual(resp.status_code, 422)
+
+    def test_invalid_group_token_returns_404(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value=None):
+            resp = _client().post("/api/v1/web/group/badgrp/end-rollcall",
+                                  json={"id_token": "tok", "rollcall_num": 1})
+        self.assertEqual(resp.status_code, 404)
+
+    def test_non_admin_returns_403(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=False), \
+             patch("api.routes.web.verify_identity_token", return_value=77):
+            resp = _client().post("/api/v1/web/group/grp123/end-rollcall",
+                                  json={"id_token": "tok", "rollcall_num": 1})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_invalid_id_token_returns_401(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch("api.routes.web.verify_identity_token", return_value=None):
+            resp = _client().post("/api/v1/web/group/grp123/end-rollcall",
+                                  json={"id_token": "bad", "rollcall_num": 1})
+        self.assertEqual(resp.status_code, 401)
+
+    def test_end_rollcall_calls_service(self):
+        import api.routes.web as _web_mod
+        end_result = {
+            "rc_number_ended_1based": 1,
+            "ended": {},
+            "ghost_eligible": False,
+            "ghost_rc_db_id": None,
+            "ended_by": {"id": 99, "name": "(web)", "username": None},
+            "remaining": [],
+            "renumbered": [],
+        }
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch("api.routes.web.verify_identity_token", return_value=99), \
+             patch("services.rollcalls.end_rollcall", new_callable=AsyncMock, return_value=end_result), \
+             patch("api.telegram_mirror.mirror_panel_to_telegram", new_callable=AsyncMock):
+            resp = _client().post("/api/v1/web/group/grp123/end-rollcall",
+                                  json={"id_token": "tok", "rollcall_num": 1})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["ended"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

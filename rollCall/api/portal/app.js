@@ -319,18 +319,19 @@ ${bestStreak>0?`<div class="milestone-box">🏆 Best streak ever: <strong>${best
     }
     // Sparkline — oldest first, last 20
     const spark=sessions.slice(0,20).reverse().map(s=>{
-      const cls={in:"dot-in",out:"dot-out",maybe:"dot-maybe",miss:"dot-miss"}[s.status]||"dot-miss";
-      return `<div class="spark-dot ${cls}" title="${esc(s.title||"Session")}"></div>`;
+      const cls={in:"dot-in",out:"dot-out",maybe:"dot-maybe",miss:"dot-miss",cancelled:"dot-cancelled"}[s.status]||"dot-miss";
+      return `<div class="spark-dot ${cls}" title="${esc(s.status==="cancelled"?"❌ Cancelled: "+(s.title||"Session"):s.title||"Session")}"></div>`;
     }).join("");
     const rows=sessions.map(s=>{
-      const cls={in:"dot-in",out:"dot-out",maybe:"dot-maybe",miss:"dot-miss"}[s.status]||"dot-miss";
-      const scls="status-"+(s.status||"miss");
+      const st=s.status||"miss";
+      const cls={in:"dot-in",out:"dot-out",maybe:"dot-maybe",miss:"dot-miss",cancelled:"dot-cancelled"}[st]||"dot-miss";
+      const scls="status-"+st;
       const dateStr=s.ended_at?s.ended_at.slice(0,10):"";
-      return `<div class="session-row">
+      return `<div class="session-row${st==="cancelled"?" session-cancelled":""}">
   <div class="session-dot ${cls}"></div>
   <div class="session-title">${esc(s.title||"Untitled")}</div>
   <div class="session-date">${esc(dateStr)}</div>
-  <div class="session-status ${scls}">${(s.status||"miss").toUpperCase()}</div>
+  <div class="session-status ${scls}">${st.toUpperCase()}</div>
 </div>`;
     }).join("");
     $id("history-body").innerHTML=`<div class="sparkline" style="margin-bottom:12px">${spark}</div>`+rows;

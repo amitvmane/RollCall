@@ -28,6 +28,7 @@ from db import (
     reset_user_streak,
     update_proxy_streak_on_checkin,
     update_streak_on_checkin,
+    update_rollcall as _db_update_rollcall,
 )
 
 from .common import (
@@ -260,6 +261,93 @@ async def end_rollcall(
             "name": ended_by_name,
             "username": ended_by_username,
         },
+        "remaining": [serialize_rollcall(r, i) for i, r in enumerate(remaining)],
+        "renumbered": renumbered,
+    }
+
+
+async def cancel_rollcall(
+    chat_id: int,
+    rc_number: int,
+    cancelled_by_user_id: int,
+    cancelled_by_name: str,
+    cancelled_by_username: str | None = None,
+    reason: str | None = None,
+) -> dict:
+    """
+    Cancel the rollcall at the given 0-based position without recording any stats.
+
+    Unlike end_rollcall, this does NOT update streaks, increment stat counters,
+    or offer ghost marking. The rollcall is persisted in history as cancelled
+    (is_cancelled=True) so it is excluded from attendance rate, streak, and
+    session count calculations in the portal and stats views.
+
+    Args:
+      chat_id           — chat owning the rollcall
+      rc_number         — 0-based index (0 = first active rollcall)
+      cancelled_by_*    — identity of admin who cancelled it
+      reason            — optional free-text reason (e.g. "rain", "low count")
+
+    Returns:
+      {
+        "cancelled": {...serialized snapshot of the cancelled rollcall...},
+        "rc_number_ended_1based": int,
+        "remaining": [...active rollcalls still open...],
+        "renumbered": [{"old": 2, "new": 1, "title": "..."}, ...],
+      }
+
+    Raises:
+      rollCallNotStarted  — no active rollcall in this chat
+      incorrectParameter  — rc_number is out of range
+
+    Caller should hold manager.get_erc_lock(chat_id) for the same race-exclusion
+    reasons as end_rollcall.
+    """
+    rollcalls = manager.get_rollcalls(chat_id)
+    if len(rollcalls) == 0:
+        raise rollCallNotStarted("Roll call is not active")
+    if rc_number < 0 or rc_number >= len(rollcalls):
+        raise incorrectParameter(
+            "The rollcall number doesn't exist, check /rollcalls to see all rollcalls"
+        )
+    rc = manager.get_rollcall(chat_id, rc_number)
+    if rc is None:
+        raise rollCallNotStarted("Roll call is not active")
+
+    rc_db_id = getattr(rc, "db_id", None) or getattr(rc, "id", None)
+    cancelled_snapshot = serialize_rollcall(rc, rc_number)
+    ended_number_1based = rc_number + 1
+    title = rc.title
+
+    # Flag as cancelled in DB before manager removes it.
+    # manager.remove_rollcall calls db.end_rollcall which sets is_active=False,
+    # ended_at=NOW — those are additive and don't touch is_cancelled.
+    if rc_db_id:
+        _db_update_rollcall(rc_db_id, is_cancelled=True)
+
+    manager.remove_rollcall(chat_id, rc_number)
+
+    log_extra = f" (reason: {reason})" if reason else ""
+    logging.info(
+        f"[{_ts()}] [CHAT {chat_id}] Rollcall CANCELLED: '{title}' "
+        f"by {cancelled_by_name} (@{cancelled_by_username or 'none'}){log_extra}"
+    )
+    log_admin_action(
+        chat_id, cancelled_by_user_id, cancelled_by_name,
+        "cancel_rollcall", target_name=title,
+    )
+
+    remaining = manager.get_rollcalls(chat_id)
+    renumbered = []
+    for idx, rollcall in enumerate(remaining):
+        new_id = idx + 1
+        old_id = new_id if new_id < ended_number_1based else new_id + 1
+        if old_id != new_id:
+            renumbered.append({"old": old_id, "new": new_id, "title": rollcall.title})
+
+    return {
+        "cancelled": cancelled_snapshot,
+        "rc_number_ended_1based": ended_number_1based,
         "remaining": [serialize_rollcall(r, i) for i, r in enumerate(remaining)],
         "renumbered": renumbered,
     }

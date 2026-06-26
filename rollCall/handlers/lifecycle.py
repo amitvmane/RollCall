@@ -299,6 +299,72 @@ async def end_roll_call(message):
         await reply_error(message, e)
 
 
+# ── /cancel_roll_call (/xrc) ──────────────────────────────────────────────────
+
+@bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/cancel_roll_call")
+@bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/xrc")
+async def cancel_roll_call(message):
+    try:
+        if roll_call_not_started(message, manager) == False:
+            raise rollCallNotStarted("Roll call is not active")
+        if await admin_rights(message, manager) == False:
+            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
+        cid = message.chat.id
+        pmts = message.text.split(" ")[1:]
+        rc_number = 0
+        if len(pmts) > 0 and "::" in pmts[-1]:
+            try:
+                rc_number = int(pmts[-1].replace("::", "")) - 1
+                del pmts[-1]
+            except Exception:
+                raise incorrectParameter("The RollCallnumber must be a positive integer")
+        reason = " ".join(pmts).strip() or None
+
+        async with manager.get_erc_lock(cid):
+            rollcalls = manager.get_rollcalls(cid)
+            if rc_number < 0 or len(rollcalls) < rc_number + 1:
+                raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+            rc = manager.get_rollcall(cid, rc_number)
+            ended_number = rc_number + 1
+            cancelled_by = message.from_user.first_name or message.from_user.username or "someone"
+
+            result = await rollcalls_svc.cancel_rollcall(
+                cid, rc_number,
+                message.from_user.id, message.from_user.first_name,
+                message.from_user.username,
+                reason=reason,
+            )
+
+            reason_part = f" — {reason}" if reason else ""
+            await bot.send_message(
+                cid,
+                f"❌ *{rc.title}* has been cancelled by {cancelled_by}{reason_part}.\n"
+                "No attendance was recorded.",
+                parse_mode="Markdown",
+            )
+
+            # Panel ID cleanup + renumbering (same as /erc)
+            _panel_msg_ids.pop((cid, ended_number), None)
+            for entry in sorted(result["renumbered"], key=lambda x: x["old"]):
+                old_key = (cid, entry["old"])
+                if old_key in _panel_msg_ids:
+                    _panel_msg_ids[(cid, entry["new"])] = _panel_msg_ids.pop(old_key)
+
+            updated_rollcalls = manager.get_rollcalls(cid)
+            if updated_rollcalls:
+                lines = [f"⚠️ Rollcall #{ended_number} cancelled. IDs updated:"]
+                for entry in result["renumbered"]:
+                    lines.append(f"  #{entry['old']} '{entry['title']}' → #{entry['new']}")
+                if not manager.get_shh_mode(cid):
+                    await bot.send_message(cid, "\n".join(lines))
+                    for idx, rollcall in enumerate(updated_rollcalls):
+                        new_id = idx + 1
+                        text = f"Rollcall number {new_id}\n\n" + _build_panel_text(rollcall, new_id)
+                        await bot.send_message(cid, text)
+    except Exception as e:
+        await reply_error(message, e)
+
+
 # ── /set_title ────────────────────────────────────────────────────────────────
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/set_title")

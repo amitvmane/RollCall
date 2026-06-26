@@ -301,6 +301,89 @@ class TestRollcallsService(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(incorrectParameter):
                 await end_rollcall(100, 5, 9, "Admin")
 
+    async def test_cancel_rollcall_happy_path(self):
+        rc = _make_rc("Weekly")
+        rc.db_id = 99
+        rc.inList = [_make_user("Alice", user_id=1)]
+        rc.outList = []
+        rc.maybeList = []
+        rc.waitList = []
+        mgr = self._mgr([rc])
+        mgr.get_rollcalls.side_effect = [[rc], []]
+
+        with patch("services.rollcalls.manager", mgr), \
+             patch("rollcall_manager.manager", mgr), \
+             patch("services.rollcalls.log_admin_action"), \
+             patch("services.rollcalls._db_update_rollcall") as mock_db_update:
+            from services.rollcalls import cancel_rollcall
+            result = await cancel_rollcall(100, 0, 9, "Admin")
+
+        mgr.remove_rollcall.assert_called_once_with(100, 0)
+        mock_db_update.assert_called_once_with(99, is_cancelled=True)
+        self.assertEqual(result["cancelled"]["title"], "Weekly")
+        self.assertEqual(result["rc_number_ended_1based"], 1)
+
+    async def test_cancel_rollcall_no_stats_written(self):
+        """cancel_rollcall must NOT call streak or stat increment functions."""
+        rc = _make_rc("Weekly")
+        rc.db_id = 99
+        rc.inList = [_make_user("Alice", user_id=1)]
+        rc.outList = []
+        rc.maybeList = []
+        rc.waitList = []
+        mgr = self._mgr([rc])
+        mgr.get_rollcalls.side_effect = [[rc], []]
+
+        with patch("services.rollcalls.manager", mgr), \
+             patch("rollcall_manager.manager", mgr), \
+             patch("services.rollcalls.log_admin_action"), \
+             patch("services.rollcalls._db_update_rollcall"), \
+             patch("services.rollcalls.update_streak_on_checkin") as mock_streak, \
+             patch("services.rollcalls.increment_user_stat") as mock_stat:
+            from services.rollcalls import cancel_rollcall
+            await cancel_rollcall(100, 0, 9, "Admin")
+
+        mock_streak.assert_not_called()
+        mock_stat.assert_not_called()
+
+    async def test_cancel_rollcall_with_reason(self):
+        rc = _make_rc("Weekend Game")
+        rc.db_id = 42
+        rc.inList = []
+        rc.outList = []
+        rc.maybeList = []
+        rc.waitList = []
+        mgr = self._mgr([rc])
+        mgr.get_rollcalls.side_effect = [[rc], []]
+
+        with patch("services.rollcalls.manager", mgr), \
+             patch("rollcall_manager.manager", mgr), \
+             patch("services.rollcalls.log_admin_action"), \
+             patch("services.rollcalls._db_update_rollcall"):
+            from services.rollcalls import cancel_rollcall
+            result = await cancel_rollcall(100, 0, 9, "Admin", reason="heavy rain")
+
+        self.assertEqual(result["rc_number_ended_1based"], 1)
+
+    async def test_cancel_rollcall_no_rollcall_raises(self):
+        from exceptions import rollCallNotStarted
+        mgr = self._mgr([])
+
+        with patch("services.rollcalls.manager", mgr):
+            from services.rollcalls import cancel_rollcall
+            with self.assertRaises(rollCallNotStarted):
+                await cancel_rollcall(100, 0, 9, "Admin")
+
+    async def test_cancel_rollcall_out_of_range_raises(self):
+        from exceptions import incorrectParameter
+        rc = _make_rc()
+        mgr = self._mgr([rc])
+
+        with patch("services.rollcalls.manager", mgr):
+            from services.rollcalls import cancel_rollcall
+            with self.assertRaises(incorrectParameter):
+                await cancel_rollcall(100, 5, 9, "Admin")
+
     def test_list_rollcalls_empty(self):
         mgr = self._mgr([])
         with patch("services.rollcalls.manager", mgr):

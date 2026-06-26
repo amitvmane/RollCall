@@ -1129,6 +1129,26 @@ def _run_migrations(conn, cursor):
             conn.rollback()
 
 
+    # is_cancelled — marks rollcalls cancelled before they happened (weather, venue, etc.)
+    # Cancelled rollcalls are excluded from attendance rate, streak, and session counts.
+    if db_type == 'postgresql':
+        try:
+            cursor.execute(
+                "ALTER TABLE rollcalls ADD COLUMN IF NOT EXISTS is_cancelled BOOLEAN DEFAULT FALSE"
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    else:
+        try:
+            cursor.execute(
+                "ALTER TABLE rollcalls ADD COLUMN is_cancelled INTEGER DEFAULT 0"
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()  # column already exists — safe to ignore
+
+
 def get_or_create_chat(chat_id: int) -> Dict:
     """Get or create chat settings"""
     import uuid as _uuid
@@ -1428,6 +1448,7 @@ _VALID_ROLLCALL_FIELDS = {
     'chat_id', 'title', 'is_active', 'finalize_date', 'location',
     'event_fee', 'in_list_limit', 'panel_msg_id', 'web_token',
     'timezone', 'reminder_hours', 'template_name', 'created_at',
+    'is_cancelled',
 }
 
 def update_rollcall(rollcall_id: int, **kwargs) -> bool:
@@ -3709,9 +3730,13 @@ def get_user_session_history(chat_id: int, user_id: int, limit: int = 15) -> Lis
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
         active_false = 'FALSE' if db_type == 'postgresql' else '0'
+        cancel_false = 'FALSE' if db_type == 'postgresql' else '0'
         cursor.execute(f"""
             SELECT r.id, r.title, r.ended_at,
-                   COALESCE(u.status, 'miss') AS status
+                   CASE WHEN COALESCE(r.is_cancelled, {cancel_false}) != {cancel_false}
+                        THEN 'cancelled'
+                        ELSE COALESCE(u.status, 'miss')
+                   END AS status
             FROM rollcalls r
             LEFT JOIN users u ON u.rollcall_id = r.id AND u.user_id = {ph}
             WHERE r.chat_id = {ph} AND r.is_active = {active_false}
@@ -3742,6 +3767,7 @@ def get_user_voted_chats(tg_user_id: int) -> List[Dict]:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
         active_false = 'FALSE' if db_type == 'postgresql' else '0'
+        cancel_false = 'FALSE' if db_type == 'postgresql' else '0'
         cursor.execute(f"""
             SELECT
                 us.chat_id,
@@ -3755,9 +3781,11 @@ def get_user_voted_chats(tg_user_id: int) -> List[Dict]:
                  JOIN rollcalls r2 ON u2.rollcall_id = r2.id
                  WHERE r2.chat_id = us.chat_id AND u2.user_id = us.user_id
                    AND u2.status = 'in' AND r2.is_active = {active_false}
+                   AND COALESCE(r2.is_cancelled, {cancel_false}) = {cancel_false}
                 ) AS sessions_attended,
                 (SELECT COUNT(*) FROM rollcalls r3
                  WHERE r3.chat_id = us.chat_id AND r3.is_active = {active_false}
+                 AND COALESCE(r3.is_cancelled, {cancel_false}) = {cancel_false}
                 ) AS total_sessions,
                 COALESCE((SELECT gr.ghost_count FROM ghost_records gr
                  WHERE gr.chat_id = us.chat_id AND gr.user_id = us.user_id
@@ -3786,6 +3814,7 @@ def get_user_rank_in_chat(chat_id: int, user_id: int) -> Optional[int]:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
         active_false = 'FALSE' if db_type == 'postgresql' else '0'
+        cancel_false = 'FALSE' if db_type == 'postgresql' else '0'
         cursor.execute(f"""
             SELECT COUNT(*) + 1 AS rank FROM (
                 SELECT u.user_id, COUNT(*) AS attended
@@ -3793,6 +3822,7 @@ def get_user_rank_in_chat(chat_id: int, user_id: int) -> Optional[int]:
                 JOIN rollcalls r ON u.rollcall_id = r.id
                 WHERE r.chat_id = {ph} AND u.status = 'in'
                   AND r.is_active = {active_false}
+                  AND COALESCE(r.is_cancelled, {cancel_false}) = {cancel_false}
                   AND u.user_id IS NOT NULL
                 GROUP BY u.user_id
             ) sub
@@ -3801,6 +3831,7 @@ def get_user_rank_in_chat(chat_id: int, user_id: int) -> Optional[int]:
                 JOIN rollcalls r2 ON u2.rollcall_id = r2.id
                 WHERE r2.chat_id = {ph} AND u2.user_id = {ph}
                   AND u2.status = 'in' AND r2.is_active = {active_false}
+                  AND COALESCE(r2.is_cancelled, {cancel_false}) = {cancel_false}
             )
         """, (chat_id, chat_id, user_id))
         row = cursor.fetchone()

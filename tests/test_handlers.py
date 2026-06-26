@@ -38,6 +38,7 @@ class HandlerTestBase(unittest.IsolatedAsyncioTestCase):
             start_roll_call, end_roll_call, callback_handler,
             get_status_keyboard, show_panel_for_rollcall,
             notify_proxy_owner_wait_to_in, set_title, show_panel,
+            cancel_roll_call,
         )
         from handlers.proxy import set_in_for, set_out_for, set_maybe_for
         from handlers.lists import whos_in, whos_out, whos_maybe, whos_waiting, buzz_command
@@ -108,6 +109,7 @@ class HandlerTestBase(unittest.IsolatedAsyncioTestCase):
         cls.louder = staticmethod(louder)
         cls.set_title = staticmethod(set_title)
         cls.show_panel = staticmethod(show_panel)
+        cls.cancel_roll_call = staticmethod(cancel_roll_call)
         cls.wait_limit = staticmethod(wait_limit)
         cls.event_fee = staticmethod(event_fee)
         cls.individual_fee = staticmethod(individual_fee)
@@ -1248,6 +1250,66 @@ class TestShowPanel(HandlerTestBase):
              patch('handlers.lifecycle.get_status_keyboard', new=AsyncMock(return_value=MagicMock())):
             await self.show_panel(msg)
         self.assertGreater(self._sent_count(), 0)
+
+
+# ===========================================================================
+# /cancel_roll_call  /xrc
+# ===========================================================================
+
+class TestCancelRollCall(HandlerTestBase):
+
+    async def test_cancels_rollcall(self):
+        cancel_result = {
+            "cancelled": {}, "rc_number_ended_1based": 1, "remaining": [], "renumbered": [],
+        }
+        msg = self._make_message("/xrc")
+        with self._rc_started(), self._admin_ok(), self._patch_manager(), \
+             patch('handlers.lifecycle.rollcalls_svc.cancel_rollcall', new=AsyncMock(return_value=cancel_result)):
+            await self.cancel_roll_call(msg)
+        self.assertGreater(self._sent_count(), 0)
+        sent = self._sent_text()
+        self.assertIn("cancelled", sent.lower())
+
+    async def test_no_rollcall_sends_error(self):
+        msg = self._make_message("/xrc")
+        with self._rc_not_started(), self._admin_ok(), self._patch_manager():
+            await self.cancel_roll_call(msg)
+        self.assertGreater(self._sent_count(), 0)
+
+    async def test_no_admin_rights_sends_error(self):
+        msg = self._make_message("/xrc")
+        with self._rc_started(), self._admin_denied(), self._patch_manager():
+            await self.cancel_roll_call(msg)
+        sent = self._sent_text()
+        self.assertIn("permission", str(sent).lower())
+
+    async def test_reason_included_in_message(self):
+        cancel_result = {
+            "cancelled": {}, "rc_number_ended_1based": 1, "remaining": [], "renumbered": [],
+        }
+        msg = self._make_message("/xrc rain")
+        with self._rc_started(), self._admin_ok(), self._patch_manager(), \
+             patch('handlers.lifecycle.rollcalls_svc.cancel_rollcall', new=AsyncMock(return_value=cancel_result)) as mock_cancel:
+            await self.cancel_roll_call(msg)
+        # verify reason passed to service
+        mock_cancel.assert_called_once()
+        call_kwargs = mock_cancel.call_args[1]
+        self.assertEqual(call_kwargs.get("reason"), "rain")
+        # and shown in the sent message
+        texts = [c[0][1] for c in self.bot_state.bot.send_message.call_args_list]
+        self.assertTrue(any("rain" in t for t in texts))
+
+    async def test_no_ghost_prompt(self):
+        """Cancel must never offer the ghost-mark prompt."""
+        cancel_result = {
+            "cancelled": {}, "rc_number_ended_1based": 1, "remaining": [], "renumbered": [],
+        }
+        msg = self._make_message("/xrc")
+        with self._rc_started(), self._admin_ok(), self._patch_manager(), \
+             patch('handlers.lifecycle.rollcalls_svc.cancel_rollcall', new=AsyncMock(return_value=cancel_result)):
+            await self.cancel_roll_call(msg)
+        texts = [c[0][1] for c in self.bot_state.bot.send_message.call_args_list]
+        self.assertFalse(any("ghost" in t.lower() for t in texts))
 
 
 # ===========================================================================

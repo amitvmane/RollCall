@@ -144,6 +144,7 @@
 .dot-maybe{background:#f59e0b;}
 .dot-miss{background:#d1d5db;}
 .dark .dot-miss{background:#4b5563;}
+.dot-cancelled{background:#e5e7eb;border:1.5px dashed #9ca3af;box-sizing:border-box;}
 .session-title{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .session-date{color:var(--sub);font-size:.78rem;white-space:nowrap;}
 .session-status{
@@ -153,6 +154,9 @@
 .status-out{background:#fee2e2;color:#991b1b;}
 .status-maybe{background:#fef3c7;color:#92400e;}
 .status-miss{background:var(--hover);color:var(--sub);}
+.status-cancelled{background:#f3f4f6;color:#6b7280;font-style:italic;}
+.session-cancelled{opacity:.7;}
+.dark .status-cancelled{background:#374151;color:#9ca3af;}
 .dark .status-in{background:#064e3b;color:#6ee7b7;}
 .dark .status-out{background:#7f1d1d;color:#fca5a5;}
 .dark .status-maybe{background:#78350f;color:#fcd34d;}

@@ -160,6 +160,22 @@ COMMANDS = [
         "details": "Closes the rollcall, prints the final IN/OUT/MAYBE lists, attributes the ender, and triggers the ghost-mark prompt if ghost tracking is on.",
     },
     {
+        "name": "cancel_roll_call", "aliases": ["xrc"], "scope": "admin", "category": "Rollcall",
+        "args": "[reason] [::N]", "sample": "/xrc rain",
+        "summary": "Cancel a rollcall — no stats recorded",
+        "details": (
+            "Cancels the rollcall without recording any attendance stats. "
+            "Use this when the session didn't happen (bad weather, venue unavailable, too few players, etc.).\n\n"
+            "Cancelled sessions:\n"
+            "• Are stored in history as CANCELLED\n"
+            "• Are excluded from attendance rate and total session counts\n"
+            "• Do NOT break streaks — they are treated as if the session never happened\n"
+            "• Do NOT trigger ghost tracking\n\n"
+            "An optional reason can be added: /xrc rain    /xrc venue closed\n\n"
+            "Use /erc to end a session normally (stats recorded)."
+        ),
+    },
+    {
         "name": "panel", "aliases": [], "scope": "admin", "category": "Rollcall",
         "args": "[::N]", "sample": "/panel",
         "summary": "Resend vote panel with buttons",

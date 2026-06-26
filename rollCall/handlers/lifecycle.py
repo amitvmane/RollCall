@@ -248,6 +248,17 @@ async def end_roll_call(message):
             finish_text = rc.finishList().replace("__RCID__", str(ended_number))
             finish_text = f"{finish_text}\n\n🎉 Ended by {ended_by}"
 
+            # One-line summary appended to finish text
+            _in_n = len(rc.inList)
+            _out_n = len(rc.outList)
+            _maybe_n = len(rc.maybeList)
+            _medals = ["🥇", "🥈", "🥉"]
+            _top = [u.name for u in rc.inList[:3]]
+            _top_str = "  ".join(f"{_medals[i]} {_top[i]}" for i in range(len(_top)))
+            finish_text += f"\n\n📊 {_in_n} IN · {_out_n} OUT · {_maybe_n} MAYBE"
+            if _top_str:
+                finish_text += f"\n{_top_str}"
+
             result = await rollcalls_svc.end_rollcall(
                 cid, rc_number,
                 message.from_user.id, message.from_user.first_name,

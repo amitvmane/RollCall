@@ -135,6 +135,31 @@ async def handle_tg_verify(message):
         )
 
 
+@bot.message_handler(content_types=["new_chat_members"])
+async def on_new_chat_members(message):
+    """Send onboarding when the bot itself is added to a group."""
+    try:
+        me = await bot.get_me()
+        if not any(m.id == me.id for m in (message.new_chat_members or [])):
+            return
+        cid = message.chat.id
+        manager.get_chat(cid)
+        await bot.send_message(
+            cid,
+            "👋 Hi! I'm *RollCall* — attendance for your group, made simple.\n\n"
+            "Quick start:\n"
+            "• /src — Start a rollcall\n"
+            "• /in /out /maybe — Vote attendance\n"
+            "• /erc — End & finalize\n"
+            "• /weblink — Get a permanent web voting link\n"
+            "• /help — See all commands\n\n"
+            "Run /help at any time, or /help admin for admin commands.",
+            parse_mode="Markdown",
+        )
+    except Exception:
+        logging.exception("on_new_chat_members error")
+
+
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/start")
 async def welcome_and_explanation(message):
     cid = message.chat.id

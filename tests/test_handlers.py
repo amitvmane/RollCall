@@ -54,6 +54,7 @@ class HandlerTestBase(unittest.IsolatedAsyncioTestCase):
         from handlers.core import (
             welcome_and_explanation, help_commands, set_admins, unset_admins,
             broadcast, config_timezone, version_command, show_reminders,
+            on_new_chat_members,
         )
         from handlers.settings import (
             shh, louder, wait_limit, event_fee, individual_fee,
@@ -102,6 +103,7 @@ class HandlerTestBase(unittest.IsolatedAsyncioTestCase):
         cls.config_timezone = staticmethod(config_timezone)
         cls.version_command = staticmethod(version_command)
         cls.show_reminders = staticmethod(show_reminders)
+        cls.on_new_chat_members = staticmethod(on_new_chat_members)
         cls.shh = staticmethod(shh)
         cls.louder = staticmethod(louder)
         cls.set_title = staticmethod(set_title)
@@ -1246,6 +1248,108 @@ class TestShowPanel(HandlerTestBase):
              patch('handlers.lifecycle.get_status_keyboard', new=AsyncMock(return_value=MagicMock())):
             await self.show_panel(msg)
         self.assertGreater(self._sent_count(), 0)
+
+
+# ===========================================================================
+# on_new_chat_members  (bot join onboarding)
+# ===========================================================================
+
+class TestOnNewChatMembers(HandlerTestBase):
+
+    def _make_join_message(self, bot_id=999, chat_id=100, include_bot=True):
+        """Message with new_chat_members containing the bot (or not)."""
+        msg = MagicMock()
+        msg.chat.id = chat_id
+        bot_member = MagicMock()
+        bot_member.id = bot_id
+        other_member = MagicMock()
+        other_member.id = 42
+        msg.new_chat_members = [bot_member] if include_bot else [other_member]
+        return msg
+
+    async def test_sends_onboarding_when_bot_added(self):
+        msg = self._make_join_message(bot_id=999, include_bot=True)
+        me = MagicMock(); me.id = 999
+        with patch('handlers.core.manager', self.manager), \
+             patch.object(self.bot_state.bot, 'get_me', new=AsyncMock(return_value=me)):
+            await self.on_new_chat_members(msg)
+        self.assertGreater(self._sent_count(), 0)
+        sent = self._sent_text()
+        self.assertIn("RollCall", sent)
+        self.assertIn("/help", sent)
+
+    async def test_no_message_when_other_user_added(self):
+        msg = self._make_join_message(bot_id=999, include_bot=False)
+        me = MagicMock(); me.id = 999
+        with patch('handlers.core.manager', self.manager), \
+             patch.object(self.bot_state.bot, 'get_me', new=AsyncMock(return_value=me)):
+            await self.on_new_chat_members(msg)
+        self.assertEqual(self._sent_count(), 0)
+
+    async def test_no_crash_on_exception(self):
+        msg = self._make_join_message(bot_id=999, include_bot=True)
+        me = MagicMock(); me.id = 999
+        with patch('handlers.core.manager', self.manager), \
+             patch.object(self.bot_state.bot, 'get_me', new=AsyncMock(return_value=me)), \
+             patch.object(self.bot_state.bot, 'send_message', new=AsyncMock(side_effect=Exception("network"))):
+            # Should swallow the exception rather than propagate
+            await self.on_new_chat_members(msg)
+
+
+# ===========================================================================
+# /erc summary line
+# ===========================================================================
+
+class TestErcSummaryLine(HandlerTestBase):
+
+    async def test_summary_appended_to_finish_text(self):
+        u1 = MagicMock(); u1.name = "Alice"
+        u2 = MagicMock(); u2.name = "Bob"
+        self.rc.inList = [u1, u2]
+        self.rc.outList = [MagicMock()]
+        self.rc.maybeList = []
+        self.rc.finishList.return_value = "Title: Test\nID: __RCID__\nIn: Alice, Bob"
+        msg = self._make_message("/erc")
+        with self._rc_started(), self._admin_ok(), self._patch_manager():
+            await self.end_roll_call(msg)
+        texts = [c[0][1] for c in self.bot_state.bot.send_message.call_args_list]
+        finish = next((t for t in texts if "Ended by" in t), None)
+        self.assertIsNotNone(finish, "Expected finish text with 'Ended by'")
+        self.assertIn("📊", finish)
+        self.assertIn("2 IN", finish)
+        self.assertIn("1 OUT", finish)
+        self.assertIn("0 MAYBE", finish)
+
+    async def test_summary_includes_top_attendees(self):
+        u1 = MagicMock(); u1.name = "Alice"
+        u2 = MagicMock(); u2.name = "Bob"
+        u3 = MagicMock(); u3.name = "Carol"
+        self.rc.inList = [u1, u2, u3]
+        self.rc.outList = []
+        self.rc.maybeList = []
+        self.rc.finishList.return_value = "Title: Test\nID: __RCID__\nIn: Alice, Bob, Carol"
+        msg = self._make_message("/erc")
+        with self._rc_started(), self._admin_ok(), self._patch_manager():
+            await self.end_roll_call(msg)
+        texts = [c[0][1] for c in self.bot_state.bot.send_message.call_args_list]
+        finish = next((t for t in texts if "📊" in t), None)
+        self.assertIsNotNone(finish)
+        self.assertIn("🥇", finish)
+        self.assertIn("Alice", finish)
+
+    async def test_summary_no_top_when_empty_in_list(self):
+        self.rc.inList = []
+        self.rc.outList = [MagicMock()]
+        self.rc.maybeList = [MagicMock()]
+        self.rc.finishList.return_value = "Title: Test\nID: __RCID__\nIn: Nobody"
+        msg = self._make_message("/erc")
+        with self._rc_started(), self._admin_ok(), self._patch_manager():
+            await self.end_roll_call(msg)
+        texts = [c[0][1] for c in self.bot_state.bot.send_message.call_args_list]
+        finish = next((t for t in texts if "📊" in t), None)
+        self.assertIsNotNone(finish)
+        self.assertIn("0 IN", finish)
+        self.assertNotIn("🥇", finish)
 
 
 if __name__ == "__main__":

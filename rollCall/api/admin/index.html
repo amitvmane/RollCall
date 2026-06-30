@@ -43,6 +43,7 @@
       <span class="group-crumb" id="crumb"></span>
     </div>
     <div class="topbar-right">
+      <button class="rc-help-btn" title="Help" aria-label="Help" onclick="rcOpenHelp()">❓</button>
       <button class="btn-theme" id="theme-btn" title="Toggle dark mode" onclick="toggleTheme()">🌙</button>
       <button class="btn-logout" id="logout-btn">Sign out</button>
     </div>
@@ -69,6 +70,33 @@
 </div>
 
 <div class="toast" id="toast" role="alert" aria-live="assertive" aria-atomic="true"></div>
+
+<!-- Help / About modal -->
+<div class="rc-help-ov" id="rc-help-ov" onclick="rcCloseHelp()"></div>
+<div class="rc-help-card" id="rc-help-card" role="dialog" aria-modal="true" aria-labelledby="rc-help-title">
+  <div class="rc-help-head">
+    <h2 id="rc-help-title">⚙️ Admin dashboard — help</h2>
+    <button class="rc-help-close" aria-label="Close" onclick="rcCloseHelp()">✕</button>
+  </div>
+  <div class="rc-help-body">
+    <p>Manage your groups, rollcalls, templates and settings from one place. Sign in with an admin API token issued from Telegram.</p>
+    <h3>Tokens</h3>
+    <p>A <b>global</b> token (chat_id&nbsp;=&nbsp;0) sees and edits every group. A <b>group-specific</b> token can only manage the group it was issued for. Generate tokens from the bot — run <code>/help admin</code> in your group.</p>
+    <h3>Groups sidebar</h3>
+    <p>Pick a group on the left to manage it. On mobile, tap <span class="emoji">☰</span> to open the menu. Use <span class="emoji">↻</span> to refresh the list.</p>
+    <h3>Rollcalls</h3>
+    <p>Start a new rollcall, view live in/out/maybe lists, or end one — even when Telegram is unreachable. Ending records attendance and stats; cancelling discards it without affecting streaks.</p>
+    <h3>Templates &amp; schedules</h3>
+    <p>Save recurring events as templates and let them auto-open on a weekly schedule, so you don't re-create the same rollcall each week.</p>
+    <h3>Settings</h3>
+    <p>Per-group timezone, attendance limit, ghost tracking and more. Changes apply immediately.</p>
+  </div>
+</div>
+<script>
+  function rcOpenHelp(){document.getElementById('rc-help-ov').classList.add('open');document.getElementById('rc-help-card').classList.add('open');}
+  function rcCloseHelp(){document.getElementById('rc-help-ov').classList.remove('open');document.getElementById('rc-help-card').classList.remove('open');}
+  document.addEventListener('keydown',function(e){if(e.key==='Escape')rcCloseHelp();});
+</script>
 <datalist id="tz-list">
   <option value="Asia/Kolkata"/><option value="Asia/Mumbai"/><option value="Asia/Dubai"/>
   <option value="Asia/Singapore"/><option value="Asia/Kuala_Lumpur"/><option value="Asia/Bangkok"/>

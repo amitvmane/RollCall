@@ -388,3 +388,21 @@ body:has(.tg-status-bar) .topbar{top:40px}
 .att-bar{width:100%;background:var(--accent);border-radius:4px 4px 0 0;transition:height .3s;min-height:4px}
 .att-bar-lbl{font-size:.62rem;color:var(--sub);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;text-align:center}
 html.dark .att-bar{background:#3b82f6}
+
+/* ── Help / About modal (shared by admin + portal) ── */
+.rc-help-btn{background:none;border:none;cursor:pointer;font-size:1.05rem;color:var(--sub);padding:4px 8px;border-radius:var(--radius-sm);line-height:1}
+.rc-help-btn:hover{color:var(--accent);background:var(--accent-dim)}
+.rc-help-ov{position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:1000;display:none;opacity:0;transition:opacity .15s}
+.rc-help-ov.open{display:block;opacity:1}
+.rc-help-card{position:fixed;z-index:1001;left:50%;top:50%;transform:translate(-50%,-50%) scale(.97);width:min(560px,92vw);max-height:86vh;overflow-y:auto;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-md);display:none;opacity:0;transition:opacity .15s,transform .15s}
+.rc-help-card.open{display:block;opacity:1;transform:translate(-50%,-50%) scale(1)}
+.rc-help-head{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--card)}
+.rc-help-head h2{margin:0;font-size:1.1rem}
+.rc-help-close{background:none;border:none;font-size:1.2rem;cursor:pointer;color:var(--sub);line-height:1}
+.rc-help-close:hover{color:var(--text)}
+.rc-help-body{padding:14px 18px 22px}
+.rc-help-body h3{font-size:.95rem;margin:18px 0 6px;color:var(--accent)}
+.rc-help-body h3:first-child{margin-top:4px}
+.rc-help-body p{margin:0 0 8px;font-size:.9rem;color:var(--sub);line-height:1.5}
+.rc-help-body code{background:var(--accent-dim);color:var(--accent);padding:1px 5px;border-radius:4px;font-size:.85em}
+.rc-help-body .emoji{font-style:normal}

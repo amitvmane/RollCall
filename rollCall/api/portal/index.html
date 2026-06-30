@@ -41,6 +41,7 @@
     </div>
     <div class="topbar-right">
       <span id="portal-identity" style="font-size:.8rem;color:var(--sub);margin-right:8px"></span>
+      <button class="rc-help-btn" title="Help" aria-label="Help" onclick="rcOpenHelp()">❓</button>
       <button class="btn-theme" title="Toggle dark mode" onclick="toggleTheme()">🌙</button>
       <button class="btn-logout" id="unlink-btn" title="Unlink Telegram identity">Unlink</button>
     </div>
@@ -86,6 +87,32 @@
 </div>
 
 <div class="toast" id="toast" role="alert" aria-live="assertive" aria-atomic="true"></div>
+
+<!-- Help / About modal -->
+<div class="rc-help-ov" id="rc-help-ov" onclick="rcCloseHelp()"></div>
+<div class="rc-help-card" id="rc-help-card" role="dialog" aria-modal="true" aria-labelledby="rc-help-title">
+  <div class="rc-help-head">
+    <h2 id="rc-help-title">📋 My Groups — help</h2>
+    <button class="rc-help-close" aria-label="Close" onclick="rcCloseHelp()">✕</button>
+  </div>
+  <div class="rc-help-body">
+    <p>This portal shows your attendance across every RollCall group you've voted in — no separate login, just your verified Telegram identity.</p>
+    <h3>Groups list</h3>
+    <p>Each card is one group. The badge shows whether a rollcall is <span class="emoji">🟢</span> open right now. Tap a card to open its detail drawer.</p>
+    <h3>Attendance &amp; streaks</h3>
+    <p>Your attendance % is the share of finished rollcalls you marked <code>in</code>. The <span class="emoji">🔥</span> flame is your current streak of consecutive attendances; your personal best is the longest streak you've ever had. Cancelled rollcalls don't count against you.</p>
+    <h3>Upcoming</h3>
+    <p>Scheduled rollcalls that haven't started yet appear at the top so you can plan ahead.</p>
+    <h3>Identity</h3>
+    <p>Use <b>Unlink</b> to detach your Telegram identity from this browser. You can re-verify any time with the <b>Verify with Telegram</b> button.</p>
+    <p style="margin-top:14px">Need the bot commands? Run <code>/help</code> in any group.</p>
+  </div>
+</div>
+<script>
+  function rcOpenHelp(){document.getElementById('rc-help-ov').classList.add('open');document.getElementById('rc-help-card').classList.add('open');}
+  function rcCloseHelp(){document.getElementById('rc-help-ov').classList.remove('open');document.getElementById('rc-help-card').classList.remove('open');}
+  document.addEventListener('keydown',function(e){if(e.key==='Escape')rcCloseHelp();});
+</script>
 <script src="/portal/app.js"></script>
 </body>
 </html>

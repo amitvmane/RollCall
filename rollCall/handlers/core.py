@@ -135,6 +135,30 @@ async def handle_tg_verify(message):
         )
 
 
+def _onboarding_keyboard(cid):
+    """Inline buttons for the bot-join welcome. Web buttons appear only when
+    WEB_BASE_URL is configured; the intro/web-panel links can't be typed as
+    commands, so surfacing them as buttons is the only place they add value.
+    Returns None when web voting isn't configured (plain-text welcome)."""
+    import os
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+    base = os.environ.get("WEB_BASE_URL", "").rstrip("/")
+    if not base:
+        return None
+    try:
+        from services.web import get_group_web_token
+        token = get_group_web_token(cid)
+    except Exception:
+        logging.exception("onboarding keyboard: get_group_web_token failed")
+        return None
+
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton("🌐 What is RollCall?", url=base + "/"))
+    kb.add(InlineKeyboardButton("🔗 Open group web panel", url=f"{base}/web/group/{token}"))
+    return kb
+
+
 @bot.message_handler(content_types=["new_chat_members"])
 async def on_new_chat_members(message):
     """Send onboarding when the bot itself is added to a group."""
@@ -155,6 +179,7 @@ async def on_new_chat_members(message):
             "• /help — See all commands\n\n"
             "Run /help at any time, or /help admin for admin commands.",
             parse_mode="Markdown",
+            reply_markup=_onboarding_keyboard(cid),
         )
     except Exception:
         logging.exception("on_new_chat_members error")

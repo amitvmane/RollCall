@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RollCall — attendance for your group, made simple</title>
+<meta name="description" content="RollCall is a Telegram bot for running attendance rollcalls in your group — vote in/out/maybe, track streaks and stats, and vote from the web.">
+<style>
+  :root {
+    --accent: #2563eb;
+    --accent-dark: #1d4ed8;
+    --ink: #0f172a;
+    --muted: #64748b;
+    --bg: #f8fafc;
+    --card: #ffffff;
+    --border: #e2e8f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    line-height: 1.55;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 0 20px; }
+  header.hero {
+    background: linear-gradient(160deg, var(--accent) 0%, var(--accent-dark) 100%);
+    color: #fff;
+    text-align: center;
+    padding: 64px 20px 56px;
+  }
+  .logo { font-size: 52px; line-height: 1; }
+  header.hero h1 { font-size: 2.1rem; margin: 14px 0 6px; font-weight: 700; }
+  header.hero p { font-size: 1.1rem; margin: 0 auto; max-width: 30em; opacity: .95; }
+  .cta {
+    display: inline-block;
+    margin-top: 28px;
+    background: #fff;
+    color: var(--accent-dark);
+    text-decoration: none;
+    font-weight: 600;
+    padding: 13px 26px;
+    border-radius: 10px;
+    box-shadow: 0 4px 14px rgba(0,0,0,.15);
+    transition: transform .08s ease;
+  }
+  .cta:active { transform: translateY(1px); }
+  section { padding: 48px 0; }
+  h2 { font-size: 1.35rem; margin: 0 0 22px; }
+  .features { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 560px) { .features { grid-template-columns: 1fr; } }
+  .feature {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 18px 16px;
+  }
+  .feature .ico { font-size: 22px; }
+  .feature h3 { margin: 8px 0 4px; font-size: 1.02rem; }
+  .feature p { margin: 0; color: var(--muted); font-size: .92rem; }
+  .steps { counter-reset: step; padding-left: 0; list-style: none; margin: 0; }
+  .steps li {
+    position: relative;
+    padding: 12px 0 12px 46px;
+    border-bottom: 1px solid var(--border);
+  }
+  .steps li:last-child { border-bottom: 0; }
+  .steps li::before {
+    counter-increment: step;
+    content: counter(step);
+    position: absolute; left: 0; top: 10px;
+    width: 30px; height: 30px;
+    background: var(--accent); color: #fff;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 600; font-size: .9rem;
+  }
+  code {
+    background: #eef2ff; color: var(--accent-dark);
+    padding: 1px 6px; border-radius: 5px;
+    font-size: .9em;
+  }
+  footer {
+    text-align: center; color: var(--muted);
+    font-size: .85rem; padding: 32px 20px 48px;
+    border-top: 1px solid var(--border);
+  }
+  footer a { color: var(--accent-dark); }
+</style>
+</head>
+<body>
+  <header class="hero">
+    <div class="logo">📋</div>
+    <h1>RollCall</h1>
+    <p>Attendance for your Telegram group, made simple. Open a rollcall, let everyone vote <b>in</b>, <b>out</b> or <b>maybe</b>, and track who shows up.</p>
+    <a class="cta" href="{{ADD_URL}}">➕ Add to a Telegram group</a>
+  </header>
+
+  <main class="wrap">
+    <section>
+      <h2>What you get</h2>
+      <div class="features">
+        <div class="feature">
+          <div class="ico">🗳️</div>
+          <h3>One-tap voting</h3>
+          <p>Members reply <code>/in</code>, <code>/out</code> or <code>/maybe</code> — or tap the panel buttons.</p>
+        </div>
+        <div class="feature">
+          <div class="ico">📊</div>
+          <h3>Stats &amp; streaks</h3>
+          <p>Per-member attendance rates, streaks and personal bests, tracked automatically.</p>
+        </div>
+        <div class="feature">
+          <div class="ico">🌐</div>
+          <h3>Vote from the web</h3>
+          <p>A permanent web link lets people vote even when Telegram is down.</p>
+        </div>
+        <div class="feature">
+          <div class="ico">⏰</div>
+          <h3>Reminders &amp; templates</h3>
+          <p>Auto-close rollcalls, send reminders, and reuse recurring event templates.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Get started in 30 seconds</h2>
+      <ol class="steps">
+        <li>Add <b>@{{BOT_USERNAME}}</b> to your group.</li>
+        <li>An admin runs <code>/src</code> to start a rollcall.</li>
+        <li>Everyone votes with <code>/in</code>, <code>/out</code> or <code>/maybe</code>.</li>
+        <li>Run <code>/erc</code> to close it and record the stats.</li>
+      </ol>
+    </section>
+  </main>
+
+  <footer>
+    Run <code>/help</code> in your group for the full command list.<br>
+    RollCall · attendance bot for Telegram
+  </footer>
+</body>
+</html>

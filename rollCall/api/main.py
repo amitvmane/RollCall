@@ -157,6 +157,23 @@ def create_app() -> FastAPI:
             ).model_dump(),
         )
 
+    # Public landing page at the site root. Introduces the bot and offers an
+    # "Add to Telegram" deep link. The bot username is injected at request time
+    # from the live Telegram status so no extra env var is needed.
+    _index_index = Path(__file__).parent / "index" / "index.html"
+
+    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+    async def _landing_page():
+        html = _index_index.read_text()
+        try:
+            from bot_state import _telegram_status
+            uname = (_telegram_status.get("bot_username") or "").lstrip("@")
+        except Exception:
+            uname = ""
+        add_url = f"https://t.me/{uname}?startgroup=true" if uname else "https://telegram.org"
+        html = html.replace("{{BOT_USERNAME}}", uname or "RollCall").replace("{{ADD_URL}}", add_url)
+        return HTMLResponse(content=html)
+
     # Web voting pages — self-contained HTML served for both URL patterns.
     # Registered before the /web static mount so explicit routes take priority.
     _web_index = Path(__file__).parent / "web" / "index.html"

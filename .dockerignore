@@ -12,6 +12,8 @@ build/
 venv/
 env/
 ENV/
+.venv/
+.venv*/
 
 # Database and logs (don't copy to container, use volumes)
 *.db

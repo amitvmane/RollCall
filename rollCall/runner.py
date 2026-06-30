@@ -123,7 +123,7 @@ elif _sentry_status:
 
 # Import bot components
 try:
-    from config import TELEGRAM_TOKEN, DATABASE_URL, ADMINS, WEBHOOK_URL
+    from config import TELEGRAM_TOKEN, DATABASE_URL, ADMINS, WEBHOOK_URL, MEMORY_MODE
     from telegram_helper import bot
     from rollcall_manager import manager
     from check_reminders import check_template_schedules, resume_reminder_loops
@@ -156,7 +156,10 @@ def validate_environment():
     logger.info("✅ TELEGRAM_TOKEN configured")
     
     # Check database URL
-    if not DATABASE_URL:
+    if MEMORY_MODE:
+        logger.warning("⚠️  MEMORY_MODE enabled — all data is in RAM and will be lost on restart")
+        logger.warning("   Rollcalls, votes, templates, stats and tokens are NOT persisted.")
+    elif not DATABASE_URL:
         logger.warning("⚠️  DATABASE_URL not set, using default SQLite")
         logger.warning("Database will be created at: /app/data/rollcall.db")
     else:

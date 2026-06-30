@@ -20,8 +20,13 @@ def _parse_admins():
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN") or os.environ.get("API_KEY")
 ADMINS = _parse_admins()
 
+# MEMORY_MODE: all data lives in RAM and is lost on restart (original v1 behaviour).
+# Overrides DATABASE_URL — no file is written.
+_memory_mode_raw = os.environ.get("MEMORY_MODE", "").strip().lower()
+MEMORY_MODE = _memory_mode_raw in ("1", "true", "yes", "on")
+
 # Default to SQLite if DATABASE_URL is not set
-DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///rollcall.db")
+DATABASE_URL = "sqlite:///:memory:" if MEMORY_MODE else os.environ.get("DATABASE_URL", "sqlite:///rollcall.db")
 
 # Webhook mode: set WEBHOOK_URL to your public HTTPS URL to enable webhooks.
 # Leave unset (or empty) to use long-polling (default).

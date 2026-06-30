@@ -55,3 +55,4 @@ Prefer `logging.exception("context")` inside `except` blocks — it captures the
 | `REST_API_HOST` | `127.0.0.1` | bind address for REST API |
 | `MINIAPP_URL` | unset | public URL of `/miniapp/` — sets Telegram menu button on startup |
 | `WEB_BASE_URL` | unset | public base URL (e.g. `https://yourdomain.com`) — enables magic-link web voting; if unset `/weblink` shows a config warning and no link is appended to panels |
+| `MEMORY_MODE` | unset | `true`/`1` → in-memory SQLite, all data lost on restart (original v1 behaviour); overrides `DATABASE_URL` |

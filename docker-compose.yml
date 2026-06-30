@@ -5,6 +5,9 @@ services:
     build:
       context: .
       dockerfile: dockerfile
+    # Named so the db-backup sidecar can reuse the same image (it already has
+    # sqlite3 and scripts/backup_db.sh baked in — no separate image to pull).
+    image: rollcall-bot:local
     container_name: rollcall-bot
     restart: unless-stopped
 
@@ -64,6 +67,39 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # Daily SQLite backup sidecar.
+  #
+  # Reuses the bot image (sqlite3 + scripts/backup_db.sh already inside). Takes
+  # a consistent online-backup snapshot once on start, then every 24h, gzips it
+  # into ./data/backups/ on the host and prunes anything older than the
+  # retention window. No-ops on Postgres / MEMORY_MODE (no DB file to copy).
+  #
+  # Restore: gunzip a snapshot over ./data/rollcall.db while the bot is stopped.
+  # ---------------------------------------------------------------------------
+  db-backup:
+    image: rollcall-bot:local
+    container_name: rollcall-db-backup
+    restart: unless-stopped
+    depends_on:
+      - rollcall-bot
+    environment:
+      - BACKUP_DB_PATH=/app/data/rollcall.db
+      - BACKUP_DIR=/app/data/backups
+      - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-7}
+      - TZ=Asia/Kolkata
+    volumes:
+      - ./data:/app/data
+    entrypoint: ["/bin/sh", "-c"]
+    # Run once immediately, then daily. Override the cadence with BACKUP_INTERVAL_SECONDS.
+    command:
+      - 'while true; do /app/scripts/backup_db.sh || true; sleep "${BACKUP_INTERVAL_SECONDS:-86400}"; done'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
 
   # ---------------------------------------------------------------------------
   # Cloudflare Tunnel sidecar — exposes port 8081 publicly without opening any

@@ -75,8 +75,14 @@ def unsubscribe(endpoint: str) -> None:
     logging.info("[push] unsubscribe: endpoint=%.40s", endpoint)
 
 
-def _send_one(sub: dict, payload: str, priv_pem: str) -> None:
-    """Blocking send — runs in thread pool."""
+def _send_one(sub: dict, payload: str, priv_pem: str):
+    """Blocking send — runs in the thread pool.
+
+    Returns a status the caller acts on; it never touches the database. Expired
+    endpoints are reported back as ("expired", endpoint) and pruned by the
+    caller on the event-loop thread, so SQLite's single shared connection is
+    only ever used from one thread.
+    """
     from pywebpush import webpush, WebPushException
     try:
         webpush(
@@ -88,15 +94,47 @@ def _send_one(sub: dict, payload: str, priv_pem: str) -> None:
             vapid_private_key=priv_pem,
             vapid_claims={"sub": "mailto:rollcall-push@rollcall.bot"},
         )
+        return "ok"
     except WebPushException as exc:
         resp = exc.response
         if resp is not None and resp.status_code in (404, 410):
-            _db.delete_push_subscription(sub["endpoint"])
-            logging.debug("[push] Removed expired subscription %.40s", sub["endpoint"])
-        else:
-            logging.warning("[push] send failed %.40s: %s", sub["endpoint"], exc)
+            return ("expired", sub["endpoint"])
+        logging.warning("[push] send failed %.40s: %s", sub["endpoint"], exc)
+        return "failed"
     except Exception:
         logging.exception("[push] send_one unexpected error %.40s", sub["endpoint"])
+        return "failed"
+
+
+async def _dispatch(subs: list, payload: str, priv_pem: str) -> int:
+    """Fan out sends across the thread pool, then prune expired endpoints.
+
+    The deletes run here on the event-loop thread — never inside a worker —
+    so the shared SQLite connection stays single-threaded. Returns the number
+    of pushes successfully delivered.
+    """
+    loop = asyncio.get_running_loop()
+    tasks = [loop.run_in_executor(_executor, _send_one, sub, payload, priv_pem) for sub in subs]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    sent = 0
+    expired: list[str] = []
+    for r in results:
+        if isinstance(r, Exception):
+            continue
+        if isinstance(r, tuple) and r and r[0] == "expired":
+            expired.append(r[1])
+        elif r == "ok":
+            sent += 1
+
+    for endpoint in expired:
+        try:
+            _db.delete_push_subscription(endpoint)
+            logging.debug("[push] Removed expired subscription %.40s", endpoint)
+        except Exception:
+            logging.exception("[push] failed to remove expired subscription %.40s", endpoint)
+
+    return sent
 
 
 async def notify_rollcall_ended(group_token: str, title: str, url: str) -> None:
@@ -115,13 +153,7 @@ async def notify_rollcall_ended(group_token: str, title: str, url: str) -> None:
             "icon": "/web/icon-192.png",
             "badge": "/web/icon-192.png",
         })
-        loop = asyncio.get_running_loop()
-        tasks = [
-            loop.run_in_executor(_executor, _send_one, sub, payload, priv_pem)
-            for sub in subs
-        ]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        sent = sum(1 for r in results if not isinstance(r, Exception))
+        sent = await _dispatch(subs, payload, priv_pem)
         logging.info("[push] notify_ended: sent=%d/%d group=%s title=%r", sent, len(subs), group_token[:12], title)
     except Exception:
         logging.exception("[push] notify_rollcall_ended failed for group=%s", group_token[:12])
@@ -146,13 +178,7 @@ async def notify_rollcall_started(group_token: str, title: str, url: str) -> Non
             "icon": "/web/icon-192.png",
             "badge": "/web/icon-192.png",
         })
-        loop = asyncio.get_running_loop()
-        tasks = [
-            loop.run_in_executor(_executor, _send_one, sub, payload, priv_pem)
-            for sub in subs
-        ]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        sent = sum(1 for r in results if not isinstance(r, Exception))
+        sent = await _dispatch(subs, payload, priv_pem)
         logging.info("[push] notify: sent=%d/%d group=%s title=%r", sent, len(subs), group_token[:12], title)
     except Exception:
         logging.exception("[push] notify_rollcall_started failed for group=%s", group_token[:12])

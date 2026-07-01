@@ -78,6 +78,43 @@ docker-compose logs -f
 docker-compose down
 ```
 
+### Using the Makefile (recommended)
+
+The bundled `Makefile` wraps Docker Compose (with the `web` profile) into a
+one-command workflow — it also **auto-detects the Cloudflare tunnel URL and
+writes it into `.env`** for you, so you don't have to copy it by hand.
+
+**Prerequisites:** Docker with the Compose plugin (`docker compose`), a
+configured `.env` (`cp .env.example .env` and fill in `API_KEY`/`ADMIN1`), and
+`sqlite3` on the host for the token/link helper targets.
+
+```bash
+make            # or `make help` — list every target
+make up         # start tunnel + bot, detect the URL, update .env, print links
+make status     # container status + Telegram/Cloudflare/health reachability
+make logs       # tail bot logs (Ctrl+C to stop)
+make restart    # restart the bot to pick up .env changes
+make down       # stop all containers
+```
+
+| Group | Target | What it does |
+|---|---|---|
+| **Lifecycle** | `make up` | Start tunnel + bot, auto-detect tunnel URL into `.env`, show voting links |
+| | `make down` | Stop all containers |
+| | `make restart` | Restart the bot (picks up `.env` changes) |
+| | `make build` | Rebuild the bot image and restart |
+| **Observability** | `make logs` / `make logs-cf` | Tail bot / Cloudflare tunnel logs |
+| | `make status` | Container status + external-service reachability + `/health` |
+| | `make url` | Current tunnel URL, API docs link, and per-group voting links |
+| | `make chats` | List known groups with their chat IDs |
+| | `make notify` | DM all voting links to `ADMIN1` (prints them if Telegram is unreachable) |
+| **Tokens** | `make token [LABEL="..."] [DAYS=N]` | Issue a **global** admin API token (all groups) |
+| | `make group-token CHAT=<id> [SCOPES=read,vote] [LABEL="..."] [DAYS=N]` | Issue a token scoped to one group (`make chats` for the ID) |
+
+> `make up` starts the Cloudflare tunnel (the `web` profile), so it's the path
+> for web/Mini-App deployments. For a Telegram-only bot, `docker compose up -d`
+> is enough. The daily DB-backup sidecar starts automatically with either.
+
 ---
 
 ## Configuration
@@ -325,6 +362,10 @@ Lets anyone vote via a link — no Telegram account required. Works even when Te
 - Opening the link shows an IN/OUT/MAYBE voting page that auto-refreshes every 30s.
 
 **Setup — using Cloudflare Tunnel (recommended, free, hides your server IP):**
+
+> **Shortcut:** `make up` performs all three steps below automatically — it starts
+> the tunnel, detects the URL, writes `WEB_BASE_URL` into `.env`, and restarts the
+> bot. The manual steps are shown here for reference.
 
 ```bash
 # Step 1 — add to .env

@@ -15,7 +15,7 @@ HC_PORT := $(or $(call _env,HEALTH_CHECK_HOST_PORT),8080)
 
 .DEFAULT_GOAL := help
 
-.PHONY: help up down restart build logs logs-cf status url notify token group-token chats
+.PHONY: help up down restart build rebuild logs logs-cf status url notify token group-token chats
 
 help: ## Show this help
 	@printf "\n\033[1mRollCall — deployment manager\033[0m\n"
@@ -24,6 +24,7 @@ help: ## Show this help
 	@printf "  \033[36m%-16s\033[0m %s\n" "make down"    "Stop all containers"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make restart" "Restart bot (picks up .env changes)"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make build"   "Rebuild bot image and restart"
+	@printf "  \033[36m%-16s\033[0m %s\n" "make rebuild" "Clean start: down, rebuild image, up (use after git pull)"
 	@printf "\n\033[4mOBSERVABILITY\033[0m\n"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make logs"    "Tail bot logs (Ctrl+C to stop)"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make logs-cf" "Tail Cloudflare tunnel logs"
@@ -88,6 +89,13 @@ restart: ## Restart bot (picks up .env changes)
 
 build: ## Rebuild bot image and restart
 	$(COMPOSE) up -d --build $(BOT)
+
+rebuild: ## Clean start: stop everything, rebuild image from current code, start tunnel + bot
+	@echo "Stopping containers..."
+	@$(COMPOSE) down
+	@echo "Rebuilding bot image from current code..."
+	@$(COMPOSE) build $(BOT)
+	@$(MAKE) up
 
 logs: ## Tail bot logs (Ctrl+C to stop)
 	docker compose logs -f $(BOT)

@@ -10,6 +10,9 @@ DB       := ./data/rollcall.db
 # Read a value from .env, stripping surrounding quotes
 _env = $(shell grep -m1 '^$(1)=' .env 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'")
 
+# Host port the health endpoint is published on (matches HEALTH_CHECK_HOST_PORT in .env)
+HC_PORT := $(or $(call _env,HEALTH_CHECK_HOST_PORT),8080)
+
 .DEFAULT_GOAL := help
 
 .PHONY: help up down restart build logs logs-cf status url notify token group-token chats
@@ -118,7 +121,7 @@ status: ## Show container status + external service reachability
 	fi
 	@echo ""
 	@echo "=== Bot Health ==="
-	@HEALTH=$$(curl -sf --max-time 5 http://localhost:8080/health 2>/dev/null); \
+	@HEALTH=$$(curl -sf --max-time 5 http://localhost:$(HC_PORT)/health 2>/dev/null); \
 	if [ -z "$$HEALTH" ]; then \
 	  echo "  ❌  health endpoint not responding (bot down?)"; \
 	else \

@@ -46,10 +46,10 @@ services:
       - ./logs:/app/logs
 
     ports:
-      # Health-check endpoint. The HOST port is configurable to avoid clashes
-      # with other services already bound to 8080 — set HEALTH_CHECK_HOST_PORT
-      # in .env (e.g. 8090). The container always listens on 8080 internally.
-      - "${HEALTH_CHECK_HOST_PORT:-8080}:8080"
+      # Health-check endpoint. HEALTH_CHECK_HOST_PORT is the HOST port (change it
+      # to avoid clashes with other services on 8080); HEALTH_CHECK_PORT is the
+      # in-container port the app binds. Both default to 8080.
+      - "${HEALTH_CHECK_HOST_PORT:-8080}:${HEALTH_CHECK_PORT:-8080}"
       # Port 8081 (REST API) is intentionally NOT exposed to the host.
       # cloudflared reaches it over the internal Docker network instead.
 
@@ -57,9 +57,9 @@ services:
     env_file:
       - .env
 
-    # HTTP-based health check using curl
+    # HTTP-based health check using curl (port follows HEALTH_CHECK_PORT)
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:${HEALTH_CHECK_PORT:-8080}/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -124,7 +124,8 @@ services:
     restart: unless-stopped
     # Quick tunnel (random URL each restart) — remove this line and use the
     # named-tunnel command below once you have a stable domain.
-    command: tunnel --url http://rollcall-bot:8081
+    # Origin port follows REST_API_PORT so a custom port stays in sync.
+    command: tunnel --url http://rollcall-bot:${REST_API_PORT:-8081}
     # Named tunnel command (stable URL — use after completing setup above):
     # command: tunnel run --token ${CLOUDFLARE_TUNNEL_TOKEN}
     depends_on:

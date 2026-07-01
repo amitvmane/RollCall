@@ -13,21 +13,24 @@ services:
 
     environment:
       # Telegram Bot Configuration
+      # All values fall back to the defaults below when the key is absent or
+      # commented in .env — so .env is the single source of truth: uncomment a
+      # line there to override, leave it commented to keep the default.
       - API_KEY=${API_KEY}
-      - ADMIN1=${ADMIN1}
-      - ADMIN2=${ADMIN2}
+      - ADMIN1=${ADMIN1:-}
+      - ADMIN2=${ADMIN2:-}
       - TELEGRAM_TOKEN=${API_KEY}
-      - HEALTH_CHECK_PORT=8080
+      - HEALTH_CHECK_PORT=${HEALTH_CHECK_PORT:-8080}
 
       # Database Configuration (SQLite with persistent volume)
-      - DATABASE_URL=sqlite:////app/data/rollcall.db
-      - TZ=Asia/Kolkata
+      - DATABASE_URL=${DATABASE_URL:-sqlite:////app/data/rollcall.db}
+      - TZ=${TZ:-Asia/Kolkata}
 
       # REST API / Web App / Mini App
       # Set REST_API_ENABLED=true to turn on FastAPI (required for web + miniapp)
       - REST_API_ENABLED=${REST_API_ENABLED:-false}
-      - REST_API_PORT=8081
-      - REST_API_HOST=0.0.0.0
+      - REST_API_PORT=${REST_API_PORT:-8081}
+      - REST_API_HOST=${REST_API_HOST:-0.0.0.0}
 
       # Web App — set to your public HTTPS URL (e.g. via Cloudflare Tunnel below)
       # Leave unset to disable web voting links in panels and /weblink
@@ -88,7 +91,7 @@ services:
       - BACKUP_DB_PATH=/app/data/rollcall.db
       - BACKUP_DIR=/app/data/backups
       - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-7}
-      - TZ=Asia/Kolkata
+      - TZ=${TZ:-Asia/Kolkata}
     volumes:
       - ./data:/app/data
     entrypoint: ["/bin/sh", "-c"]

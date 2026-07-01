@@ -119,7 +119,10 @@ make down       # stop all containers
 
 ## Configuration
 
-Copy `.env.example` to `.env` and set the following variables:
+Copy `.env.example` to `.env` — it documents **every** supported variable,
+grouped and commented with its default. Uncomment a line to override it; leave
+it commented to keep the default. Only `API_KEY` is required. The most common
+variables:
 
 | Variable | Required | Description |
 |---|---|---|

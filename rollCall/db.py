@@ -664,7 +664,111 @@ def _migrate_schema(conn):
         cursor.close()
 
 
+# Every column that was added to a table AFTER its original CREATE. The
+# reconciler adds any that are missing on startup, so a DB created by an older
+# build self-heals rather than crashing on "no such column". Each entry is
+# (column_name, sqlite_add_ddl, postgres_add_ddl). DDL must be ADD COLUMN-safe:
+# constant/NULL defaults only (no CURRENT_TIMESTAMP), which is why created_at/
+# updated_at — present since the original schema — are intentionally omitted.
+_RECONCILE_COLUMNS = {
+    "rollcalls": [
+        ("in_list_limit",  "in_list_limit INTEGER",                    "in_list_limit INTEGER"),
+        ("reminder_hours", "reminder_hours INTEGER",                   "reminder_hours INTEGER"),
+        ("finalize_date",  "finalize_date TIMESTAMP",                  "finalize_date TIMESTAMP"),
+        ("timezone",       "timezone TEXT DEFAULT 'Asia/Kolkata'",     "timezone VARCHAR(100) DEFAULT 'Asia/Kolkata'"),
+        ("location",       "location TEXT",                            "location TEXT"),
+        ("event_fee",      "event_fee TEXT",                           "event_fee TEXT"),
+        ("is_active",      "is_active INTEGER DEFAULT 1",              "is_active BOOLEAN DEFAULT TRUE"),
+        ("ended_at",       "ended_at TIMESTAMP",                       "ended_at TIMESTAMP"),
+        ("absent_marked",  "absent_marked INTEGER DEFAULT 0",         "absent_marked BOOLEAN DEFAULT FALSE"),
+        ("panel_msg_id",   "panel_msg_id INTEGER DEFAULT NULL",        "panel_msg_id BIGINT DEFAULT NULL"),
+        ("web_token",      "web_token TEXT DEFAULT NULL",              "web_token TEXT DEFAULT NULL"),
+        ("is_cancelled",   "is_cancelled INTEGER DEFAULT 0",          "is_cancelled BOOLEAN DEFAULT FALSE"),
+    ],
+    "chats": [
+        ("shh_mode",               "shh_mode INTEGER DEFAULT 0",               "shh_mode BOOLEAN DEFAULT FALSE"),
+        ("admin_rights",           "admin_rights INTEGER DEFAULT 0",           "admin_rights BOOLEAN DEFAULT FALSE"),
+        ("timezone",               "timezone TEXT DEFAULT 'Asia/Kolkata'",     "timezone VARCHAR(100) DEFAULT 'Asia/Kolkata'"),
+        ("absent_limit",           "absent_limit INTEGER DEFAULT 1",           "absent_limit INTEGER DEFAULT 1"),
+        ("ghost_tracking_enabled", "ghost_tracking_enabled INTEGER DEFAULT 1", "ghost_tracking_enabled BOOLEAN DEFAULT TRUE"),
+        ("group_web_token",        "group_web_token TEXT DEFAULT NULL",        "group_web_token TEXT DEFAULT NULL"),
+        ("group_name",             "group_name TEXT DEFAULT NULL",             "group_name TEXT DEFAULT NULL"),
+    ],
+    "users": [
+        ("in_pos",   "in_pos INTEGER DEFAULT NULL",   "in_pos INTEGER DEFAULT NULL"),
+        ("out_pos",  "out_pos INTEGER DEFAULT NULL",  "out_pos INTEGER DEFAULT NULL"),
+        ("wait_pos", "wait_pos INTEGER DEFAULT NULL", "wait_pos INTEGER DEFAULT NULL"),
+    ],
+    "proxy_users": [
+        ("in_pos",         "in_pos INTEGER DEFAULT NULL",         "in_pos INTEGER DEFAULT NULL"),
+        ("out_pos",        "out_pos INTEGER DEFAULT NULL",        "out_pos INTEGER DEFAULT NULL"),
+        ("wait_pos",       "wait_pos INTEGER DEFAULT NULL",       "wait_pos INTEGER DEFAULT NULL"),
+        ("proxy_owner_id", "proxy_owner_id INTEGER DEFAULT NULL", "proxy_owner_id BIGINT DEFAULT NULL"),
+    ],
+    "templates": [
+        ("schedule_day",        "schedule_day TEXT DEFAULT NULL",        "schedule_day TEXT DEFAULT NULL"),
+        ("schedule_time",       "schedule_time TEXT DEFAULT NULL",       "schedule_time TEXT DEFAULT NULL"),
+        ("schedule_enabled",    "schedule_enabled TEXT DEFAULT 0",       "schedule_enabled BOOLEAN DEFAULT FALSE"),
+        ("last_scheduled_date", "last_scheduled_date TEXT DEFAULT NULL", "last_scheduled_date TEXT DEFAULT NULL"),
+        ("recurrence_type",     "recurrence_type TEXT DEFAULT 'weekly'", "recurrence_type TEXT DEFAULT 'weekly'"),
+    ],
+    "ghost_events": [
+        ("proxy_name", "proxy_name TEXT", "proxy_name TEXT"),
+    ],
+    "push_subscriptions": [
+        ("tg_user_id", "tg_user_id INTEGER DEFAULT NULL", "tg_user_id BIGINT DEFAULT NULL"),
+    ],
+    "web_verify_tokens": [
+        ("tg_username", "tg_username TEXT DEFAULT NULL", "tg_username TEXT DEFAULT NULL"),
+    ],
+}
+
+
+def _existing_columns(cursor, table):
+    """Return the set of column names currently on `table` (empty if absent)."""
+    try:
+        if db_type == 'postgresql':
+            cursor.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_name = %s",
+                (table,),
+            )
+            return {r[0] if not isinstance(r, dict) else r["column_name"] for r in cursor.fetchall()}
+        cursor.execute(f"PRAGMA table_info({table})")
+        return {r[1] for r in cursor.fetchall()}
+    except Exception:
+        return set()
+
+
+def _reconcile_columns(conn, cursor):
+    """Add any expected column that is missing from a table.
+
+    Covers databases created by older builds where a column exists in the
+    current CREATE TABLE but was never backfilled by a migration (e.g.
+    rollcalls.absent_marked). Idempotent — existing columns are skipped, so it
+    is safe to run alongside the explicit migrations below.
+    """
+    for table, columns in _RECONCILE_COLUMNS.items():
+        existing = _existing_columns(cursor, table)
+        if not existing:
+            continue  # table itself doesn't exist yet — create_tables handles that
+        for name, sqlite_ddl, pg_ddl in columns:
+            if name in existing:
+                continue
+            ddl = pg_ddl if db_type == 'postgresql' else sqlite_ddl
+            try:
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+                conn.commit()
+                logging.warning(f"Schema reconcile: added missing column {table}.{name}")
+            except Exception as e:
+                conn.rollback()
+                logging.error(f"Schema reconcile: could not add {table}.{name}: {e}")
+
+
 def _run_migrations(conn, cursor):
+
+    # Reconcile any columns missing on databases created by older builds. Runs
+    # first so the rest of startup can rely on the full schema being present.
+    _reconcile_columns(conn, cursor)
 
     # Add ghost_tracking_enabled to chats (may not exist in older deployments)
     if db_type == 'postgresql':

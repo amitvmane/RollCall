@@ -1,0 +1,16 @@
+{
+  "name": "RollCall",
+  "short_name": "RollCall",
+  "description": "Vote on rollcalls for your groups",
+  "start_url": "/web/",
+  "scope": "/web/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#2563eb",
+  "background_color": "#f0f4f8",
+  "icons": [
+    {"src": "/web/logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"},
+    {"src": "/web/icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "/web/icon-512.png", "sizes": "512x512", "type": "image/png"}
+  ]
+}

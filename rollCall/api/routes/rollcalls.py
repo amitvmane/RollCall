@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, Path, status
 from services import rollcalls as rc_svc
 
 from api.auth import AuthedToken, require_scope
+from api.telegram_mirror import mirror_panel_to_telegram
 from api.schemas.rollcalls import (
     EndRollcallRequest,
     EndRollcallResponse,
@@ -44,6 +45,7 @@ async def start_rollcall(
         started_by_name=body.started_by_name,
         started_by_username=body.started_by_username,
     )
+    await mirror_panel_to_telegram(chat_id, result["rc_index"] + 1, force_new=True)
     return RollcallResponse(**result)
 
 
@@ -90,4 +92,5 @@ async def end_rollcall(
         ended_by_name=body.ended_by_name,
         ended_by_username=body.ended_by_username,
     )
+    await mirror_panel_to_telegram(chat_id, result.get("rc_number_ended_1based", rc_number))
     return EndRollcallResponse(**result)

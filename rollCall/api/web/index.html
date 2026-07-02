@@ -30,10 +30,13 @@
       <img src="/web/logo.svg" alt="RollCall" class="brand-logo" width="28" height="28"/>
       <span class="brand-name">RollCall</span>
     </div>
+    <div class="brand-actions">
+      <button class="brand-install-btn hidden" id="install-btn-home" title="Add RollCall to your home screen" onclick="triggerInstall()">⬇ Install</button>
+    </div>
   </div>
   <div id="home-content" style="padding:16px;max-width:480px;margin:0 auto">
     <h2 style="font-size:1.1rem;font-weight:700;margin-bottom:4px">Your groups</h2>
-    <p style="font-size:.82rem;color:var(--sub);margin-bottom:16px">Tap a group to open its rollcall page.</p>
+    <p style="font-size:.82rem;color:var(--sub);margin-bottom:16px">Every group you visit is saved here automatically — tap to open.</p>
     <div id="home-groups"></div>
     <div style="margin-top:24px">
       <div style="font-size:.82rem;font-weight:600;color:var(--sub);margin-bottom:8px">Open a new group by pasting its link</div>
@@ -88,7 +91,9 @@
       <span id="presence-badge" class="presence-badge hidden"></span>
     </div>
     <div class="brand-actions">
+      <button class="brand-install-btn hidden" id="install-btn" title="Add RollCall to your home screen" onclick="triggerInstall()">⬇ Install</button>
       <button class="brand-notify-btn hidden" id="notify-btn" title="Get notified when a rollcall opens" onclick="toggleNotifications()">🔔</button>
+      <button class="brand-theme-btn" id="home-btn" title="All your groups" onclick="window.location.href='/web/'">🏠</button>
       <button class="brand-theme-btn" id="theme-btn" title="Toggle dark mode" onclick="toggleTheme()">🌙</button>
     </div>
   </div>
@@ -136,11 +141,32 @@
 
     <!-- Identity -->
     <div class="card" id="identity-card">
+      <!-- Picker: first-visit group users choose Telegram or guest entry -->
+      <div id="identity-picker-row" class="hidden">
+        <div style="font-size:.78rem;color:var(--sub);margin-bottom:12px;text-align:center">How would you like to vote?</div>
+        <button class="id-picker-option id-picker-option-tg" id="picker-tg-btn" onclick="startTgVerify()">
+          <span class="id-picker-icon">✈</span>
+          <span>
+            <div class="id-picker-label">Continue with Telegram</div>
+            <div class="id-picker-sub">Verified identity — your vote is linked to your account</div>
+          </span>
+        </button>
+        <button class="id-picker-option id-picker-option-guest" id="picker-guest-btn" onclick="showGuestInput()">
+          <span class="id-picker-icon">👤</span>
+          <span>
+            <div class="id-picker-label">Vote as guest</div>
+            <div class="id-picker-sub">Enter any name — quick, no login needed</div>
+          </span>
+        </button>
+      </div>
       <div id="name-input-row" class="hidden">
         <div style="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:8px">Enter your name to vote</div>
         <div class="name-row">
           <input id="name-input" type="text" placeholder="Your name" maxlength="64" autocomplete="given-name"/>
           <button class="btn btn-primary" id="name-save-btn" style="padding:10px 16px;font-size:.9rem">OK</button>
+        </div>
+        <div id="name-back-row" class="hidden" style="margin-top:10px;text-align:center">
+          <button class="id-change" style="font-size:.78rem;color:var(--accent)" onclick="showIdentityPicker()">← Verify with Telegram instead</button>
         </div>
       </div>
       <div id="name-tag-row" class="hidden">

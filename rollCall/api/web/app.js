@@ -118,6 +118,7 @@ window.copyPageLink=function(){
 function renderIdentity(){
   if(currentName){
     $("name-input-row").classList.add("hidden");
+    $("identity-picker-row").classList.add("hidden");
     $("name-tag-row").classList.remove("hidden");
     const badge=$("id-badge");
     if(TG_NAME){
@@ -165,8 +166,16 @@ function renderIdentity(){
       }
     }
   }else{
-    $("name-input-row").classList.remove("hidden");
     $("name-tag-row").classList.add("hidden");
+    if(IS_GROUP&&!TG_NAME){
+      // Group mode with no identity: show the picker (Telegram vs guest)
+      $("identity-picker-row").classList.remove("hidden");
+      $("name-input-row").classList.add("hidden");
+    }else{
+      // Join link or Mini App without a name yet: go straight to name input
+      $("identity-picker-row").classList.add("hidden");
+      $("name-input-row").classList.remove("hidden");
+    }
   }
 }
 
@@ -189,10 +198,15 @@ $("name-change-btn").addEventListener("click",()=>{
   currentName="";
   if(TG_NAME)localStorage.removeItem(LS_NAME_OVERRIDE);
   else localStorage.removeItem(LS_NAME);
-  $("name-input").value="";
   $("name-tag-row").classList.add("hidden");
-  $("name-input-row").classList.remove("hidden");
-  $("name-input").focus();
+  if(IS_GROUP&&!TG_NAME){
+    $("name-input-row").classList.add("hidden");
+    $("identity-picker-row").classList.remove("hidden");
+  }else{
+    $("name-input").value="";
+    $("name-input-row").classList.remove("hidden");
+    $("name-input").focus();
+  }
 });
 
 function saveName(){
@@ -203,6 +217,17 @@ function saveName(){
   renderIdentity();detectCurrentVote();
   if(IS_GROUP)loadWebStats();
 }
+
+window.showGuestInput=function(){
+  $("identity-picker-row").classList.add("hidden");
+  $("name-input-row").classList.remove("hidden");
+  $("name-back-row")?.classList.remove("hidden");
+  $("name-input").focus();
+};
+window.showIdentityPicker=function(){
+  $("name-input-row").classList.add("hidden");
+  $("identity-picker-row").classList.remove("hidden");
+};
 
 // ── Vote detection ─────────────────────────────────────────────────────────
 function detectCurrentVote(){
@@ -721,7 +746,8 @@ if (IS_GROUP) {
 let _verifyCode=null, _verifyPollTimer=null;
 
 window.startTgVerify=async function(){
-  const btn=document.getElementById("verify-tg-btn");
+  const btn=document.getElementById("verify-tg-btn")||document.getElementById("picker-tg-btn");
+  const _origBtnText=btn?.textContent||"";
   if(btn){btn.textContent="⏳ Opening Telegram…";btn.disabled=true;}
   // Disable the name input while verification is in progress so the user
   // can't accidentally type a different name after starting the flow.
@@ -744,13 +770,13 @@ window.startTgVerify=async function(){
       if(_verifyPollTimer){
         _stopVerifyPoll();
         if(nameInput){nameInput.disabled=false;nameInput.placeholder="";}
-        if(btn){btn.textContent="🔗 Verify with Telegram";btn.disabled=false;}
+        if(btn){btn.textContent=_origBtnText||"🔗 Verify with Telegram";btn.disabled=false;}
       }
     },660000);
   }catch(e){
     toast("Could not start verification — try again",3500);
     if(nameInput){nameInput.disabled=false;nameInput.placeholder="";}
-    if(btn){btn.textContent="🔗 Verify with Telegram";btn.disabled=false;}
+    if(btn){btn.textContent=_origBtnText||"🔗 Verify with Telegram";btn.disabled=false;}
   }
 };
 
@@ -758,7 +784,14 @@ async function _pollVerify(){
   if(!_verifyCode)return;
   try{
     const res=await fetch(`/api/v1/auth/tg-verify/status/${_verifyCode}`,{signal:AbortSignal.timeout(5000)});
-    if(res.status===404||res.status===410){_stopVerifyPoll();toast("Verification link expired — try again",4000);renderIdentity();return;}
+    if(res.status===404||res.status===410){
+      _stopVerifyPoll();
+      const _vb=document.getElementById("verify-tg-btn")||document.getElementById("picker-tg-btn");
+      if(_vb){_vb.textContent=_vb.id==="picker-tg-btn"?"✈ Continue with Telegram":"🔗 Verify with Telegram";_vb.disabled=false;}
+      toast("Verification link expired — try again",4000);
+      renderIdentity();
+      return;
+    }
     if(!res.ok)return;
     const data=await res.json();
     if(!data.verified)return;
@@ -807,7 +840,7 @@ async function _relinkPushSubscription(userId){
 // ── PWA: service worker + push notifications ───────────────────────────────
 let _swReg = null;
 
-if ("serviceWorker" in navigator && IS_GROUP) {
+if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/web/sw.js", { scope: "/web/" })
     .then(reg => {
       _swReg = reg;
@@ -816,12 +849,14 @@ if ("serviceWorker" in navigator && IS_GROUP) {
     .catch(e => console.warn("[sw] registration failed", e));
 }
 
-// Inject dynamic manifest once we know the group token
-if (IS_GROUP && URL_TOKEN) {
-  const link = document.createElement("link");
-  link.rel = "manifest";
-  link.href = `/api/v1/web/group/${URL_TOKEN}/manifest.json`;
-  document.head.appendChild(link);
+// Always install to the home screen (/web/) so multi-group users land on their
+// full group list. The group-specific dynamic manifest is not used for install —
+// groups are auto-saved to localStorage when visited and appear on the home screen.
+{
+  const _ml = document.createElement("link");
+  _ml.rel = "manifest";
+  _ml.href = "/web/manifest.json";
+  document.head.appendChild(_ml);
 }
 
 function _urlB64ToUint8Array(b64) {
@@ -919,10 +954,36 @@ window.toggleNotifications = async function() {
 
 // ── PWA install prompt ─────────────────────────────────────────────────────
 let _installPrompt = null;
+
+function _showInstallBtn(){
+  if(tg)return; // already inside Telegram — no native install UX needed
+  document.querySelectorAll(".brand-install-btn").forEach(b=>b.classList.remove("hidden"));
+}
+function _hideInstallBtn(){
+  document.querySelectorAll(".brand-install-btn").forEach(b=>b.classList.add("hidden"));
+}
+
 window.addEventListener("beforeinstallprompt", e => {
   e.preventDefault();
   _installPrompt = e;
+  _showInstallBtn();
 });
+
+window.addEventListener("appinstalled", () => {
+  _installPrompt = null;
+  _hideInstallBtn();
+  toast("✅ RollCall installed! Open it from your home screen.", 4000);
+});
+
+window.triggerInstall = async function(){
+  if(!_installPrompt)return;
+  _installPrompt.prompt();
+  const{outcome} = await _installPrompt.userChoice;
+  if(outcome === "accepted"){
+    _installPrompt = null;
+    _hideInstallBtn();
+  }
+};
 
 // ── Recent groups (localStorage) ───────────────────────────────────────────
 const LS_GROUPS="rc_groups";
@@ -949,7 +1010,7 @@ function renderHomeScreen(){
   const container=document.getElementById("home-groups");
   if(!container)return;
   if(!groups.length){
-    container.innerHTML='<p style="color:var(--sub);font-size:.85rem">No saved groups yet. Paste a group link below.</p>';
+    container.innerHTML='<p style="color:var(--sub);font-size:.85rem">No groups yet. Visit a group rollcall link and it\'ll appear here automatically — or paste one below.</p>';
     return;
   }
   container.innerHTML=groups.map(g=>`

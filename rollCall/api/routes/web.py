@@ -23,7 +23,7 @@ from fastapi.responses import JSONResponse, Response
 
 import db as _db
 from api.identity import verify_identity_token
-from api.telegram_mirror import mirror_panel_to_telegram as _mirror_panel_to_telegram, send_vote_notification as _send_vote_notification
+from api.telegram_mirror import mirror_panel_to_telegram as _mirror_panel_to_telegram, send_vote_notification as _send_vote_notification, send_event_notification as _send_event_notification
 from services import web as web_svc
 from services import stats as stats_svc
 from services import presence as presence_svc
@@ -224,6 +224,20 @@ async def update_group_settings(
     if body.shh_mode is not None:
         from rollcall_manager import manager as _mgr
         _mgr.set_shh_mode(chat_id, body.shh_mode)
+        actor_name = "(web admin)"
+        try:
+            from db import get_member_display_info as _gmi
+            info = _gmi(chat_id, actor_user_id)
+            if info:
+                actor_name = info.get("first_name") or actor_name
+        except Exception:
+            pass
+        _icon = "🔇" if body.shh_mode else "🔔"
+        _desc = "enabled — per-vote messages suppressed" if body.shh_mode else "disabled — per-vote messages active"
+        await _send_event_notification(
+            chat_id,
+            f"{_icon} Silent mode {_desc} (by {actor_name}, via web)",
+        )
 
 
 @router.post(
@@ -365,6 +379,17 @@ async def create_scheduled_rollcall(
         created_by_uid=actor_user_id,
         created_by_name=actor_name,
     )
+
+    # Non-blocking event log so the group knows a rollcall was scheduled via web
+    import re as _re2
+    _dt_str = body.scheduled_at
+    _dt_match = _re2.match(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})", _dt_str)
+    _dt_label = _dt_match.group(1).replace("T", " ") if _dt_match else _dt_str
+    await _send_event_notification(
+        chat_id,
+        f"📅 Rollcall scheduled: \"{body.title}\" at {_dt_label} (by {actor_name}, via web)",
+    )
+
     return {"id": row_id, "title": body.title, "scheduled_at": body.scheduled_at}
 
 
@@ -418,9 +443,20 @@ async def delete_scheduled_rollcall(
     chat_id = int(chat["chat_id"])
     if not _db.is_web_admin(chat_id, actor_user_id):
         raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
+
+    # Grab title before deletion so we can include it in the notification
+    _sched_title = next(
+        (r["title"] for r in _db.get_upcoming_scheduled_rollcalls(chat_id) if r["id"] == item_id),
+        None,
+    )
+
     deleted = _db.delete_scheduled_rollcall(item_id, chat_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Scheduled rollcall not found or already fired.")
+
+    # Non-blocking event log so the group knows the scheduled rollcall was cancelled
+    _label = f'"{_sched_title}"' if _sched_title else f"#{item_id}"
+    await _send_event_notification(chat_id, f"🗑 Scheduled rollcall {_label} cancelled (via web)")
 
 
 # ── Per-rollcall endpoints (expire with rollcall) ────────────────────────────

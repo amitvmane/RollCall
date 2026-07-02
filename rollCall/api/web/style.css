@@ -18,6 +18,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .brand-theme-btn:hover,.brand-notify-btn:hover{background:rgba(255,255,255,.28)}
 .brand-notify-btn.notify-on{background:rgba(255,255,255,.32)}
 .brand-notify-btn.notify-blocked{opacity:.5;cursor:default}
+.brand-install-btn{background:rgba(255,255,255,.15);border:1.5px solid rgba(255,255,255,.45);color:#fff;font-size:.75rem;font-weight:700;padding:5px 10px;border-radius:8px;cursor:pointer;white-space:nowrap;letter-spacing:.02em;transition:background .15s;line-height:1}
+.brand-install-btn:hover{background:rgba(255,255,255,.28)}
 /* Hide brand bar inside Telegram Mini App (has native chrome) */
 body.tg-mode .brand-bar{display:none}
 body.tg-mode #app{padding:12px 14px 32px}
@@ -260,6 +262,16 @@ html.dark .sp-tbar{background:#3b82f6}
 .sp-dot-maybe{background:#f59e0b}
 .sp-dot-miss{background:var(--border)}
 html.dark .sp-dot-miss{background:#334155}
+
+/* ── Identity picker ── */
+.id-picker-option{width:100%;padding:14px 16px;border:none;border-radius:10px;cursor:pointer;display:flex;align-items:center;gap:10px;text-align:left;margin-bottom:8px;transition:opacity .15s;-webkit-tap-highlight-color:transparent;line-height:1.3;box-sizing:border-box}
+.id-picker-option:last-child{margin-bottom:0}
+.id-picker-option:active{opacity:.8}
+.id-picker-option-tg{background:var(--accent);color:#fff}
+.id-picker-option-guest{background:var(--border);color:var(--text)}
+.id-picker-icon{font-size:1.2rem;flex-shrink:0}
+.id-picker-label{font-size:.93rem;font-weight:700}
+.id-picker-sub{font-size:.71rem;font-weight:400;opacity:.75;margin-top:2px}
 
 /* ── Admin toggle switch ── */
 .admin-toggle{position:relative;display:inline-block;width:44px;height:24px;flex-shrink:0}

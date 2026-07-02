@@ -13,6 +13,7 @@ from services import voting as vote_svc
 
 from api.auth import AuthedToken, require_scope
 from api.schemas.votes import VoteRequest, VoteResponse
+from api.telegram_mirror import mirror_panel_to_telegram, send_vote_notification
 
 
 router = APIRouter()
@@ -53,4 +54,6 @@ async def cast_vote(
             detail=f"Unknown vote choice: {body.vote!r}",
         )
 
+    await send_vote_notification(chat_id, body.first_name, body.vote)
+    await mirror_panel_to_telegram(chat_id, rc_number)
     return VoteResponse(**result)

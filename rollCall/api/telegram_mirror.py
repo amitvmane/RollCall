@@ -33,6 +33,25 @@ async def mirror_panel_to_telegram(
         )
 
 
+async def send_event_notification(
+    chat_id: int,
+    text: str,
+) -> None:
+    """Send a plain-text event log message to the group (best-effort, never blocks).
+
+    Used for admin actions that mutate state but don't have a panel to mirror
+    (e.g. scheduling or cancelling a future rollcall).
+    """
+    try:
+        from bot_state import bot
+        logging.info("[mirror] event notification chat=%s text=%r", chat_id, text)
+        await bot.send_message(chat_id, text)
+    except Exception:
+        logging.warning(
+            "[mirror] event notification failed chat=%s", chat_id, exc_info=True,
+        )
+
+
 async def send_vote_notification(
     chat_id: int,
     name: str,

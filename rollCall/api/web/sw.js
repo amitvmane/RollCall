@@ -2,7 +2,7 @@
 "use strict";
 
 const CACHE = "rc-v3";
-const PRECACHE = ["/web/", "/web/app.js", "/web/style.css", "/web/logo.svg", "/web/icon-192.png"];
+const PRECACHE = ["/web/", "/web/app.js", "/web/style.css", "/web/logo.svg", "/web/icon-192.png", "/web/manifest.json"];
 
 // ── Install: precache shell ───────────────────────────────────────────────────
 self.addEventListener("install", e => {

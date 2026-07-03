@@ -431,3 +431,455 @@ def fund_history(chat_id: int, limit: int = 15, offset: int = 0) -> dict:
     txns = db.get_fund_transactions(chat_id, limit=limit, offset=offset)
     total = db.count_fund_transactions(chat_id)
     return {"transactions": txns, "total": total, "limit": limit, "offset": offset}
+
+
+# ── Penalties ─────────────────────────────────────────────────────────────────
+
+def _penalty_for_minutes(settings: dict, minutes: int) -> int:
+    """Return ₹ penalty based on lateness duration and chat penalty tiers."""
+    if minutes < 15:
+        return settings["penalty_late_t1"]
+    if minutes < 30:
+        return settings["penalty_late_t2"]
+    return settings["penalty_late_t3"]
+
+
+def mark_late(
+    chat_id: int,
+    token: str,
+    minutes: int,
+    admin_uid: int,
+    admin_name: str,
+    rollcall_id: int | None = None,
+) -> dict:
+    """Assess a late-arrival penalty against a member.
+
+    Amount is determined by chat tier settings (<15min → t1, 15–29 → t2, ≥30 → t3).
+    Writes both a dues entry and a fund penalty transaction.
+    """
+    settings = get_dues_settings(chat_id)
+    all_names = [r["member_name"] for r in db.get_all_dues_balances(chat_id, nonzero_only=False)]
+    member = _resolve_member(chat_id, token, dues_names=all_names)
+    amount = _penalty_for_minutes(settings, minutes)
+
+    db.add_dues_entry(
+        chat_id, rollcall_id, member["user_id"], member["member_name"],
+        "penalty_late", amount,
+        f"late {minutes}min", admin_uid, admin_name,
+    )
+    db.add_fund_transaction(
+        chat_id, rollcall_id, "penalty", amount,
+        f"{member['member_name']} late {minutes}min", admin_uid, admin_name,
+    )
+    db.log_admin_action(chat_id, admin_uid, admin_name, "mark_late",
+                        target_name=member["member_name"], details=f"{minutes}min ₹{amount}")
+
+    return {
+        "member_name": member["member_name"],
+        "user_id": member["user_id"],
+        "amount": amount,
+        "minutes": minutes,
+        "announcement": f"⚠️ Penalty: {member['member_name']} late {minutes}min → ₹{amount}",
+    }
+
+
+def mark_ditch(
+    chat_id: int,
+    token: str,
+    admin_uid: int,
+    admin_name: str,
+    rollcall_id: int | None = None,
+) -> dict:
+    """Assess a no-show (ditch) penalty against a member."""
+    settings = get_dues_settings(chat_id)
+    all_names = [r["member_name"] for r in db.get_all_dues_balances(chat_id, nonzero_only=False)]
+    member = _resolve_member(chat_id, token, dues_names=all_names)
+    amount = settings["penalty_ditch"]
+
+    db.add_dues_entry(
+        chat_id, rollcall_id, member["user_id"], member["member_name"],
+        "penalty_ditch", amount,
+        "no-show", admin_uid, admin_name,
+    )
+    db.add_fund_transaction(
+        chat_id, rollcall_id, "penalty", amount,
+        f"{member['member_name']} ditch", admin_uid, admin_name,
+    )
+    db.log_admin_action(chat_id, admin_uid, admin_name, "mark_ditch",
+                        target_name=member["member_name"])
+
+    return {
+        "member_name": member["member_name"],
+        "user_id": member["user_id"],
+        "amount": amount,
+        "announcement": f"🚫 Ditch penalty: {member['member_name']} → ₹{amount}",
+    }
+
+
+def waive(
+    chat_id: int,
+    token: str,
+    amount: int,
+    reason: str,
+    admin_uid: int,
+    admin_name: str,
+    rollcall_id: int | None = None,
+) -> dict:
+    """Waive (forgive) part or all of a member's dues.
+
+    Writes compensating negative dues entry and fund adjustment.
+    Originals are never modified — append-only invariant.
+    """
+    if amount <= 0:
+        raise incorrectParameter("Waive amount must be positive.")
+    all_names = [r["member_name"] for r in db.get_all_dues_balances(chat_id, nonzero_only=False)]
+    member = _resolve_member(chat_id, token, dues_names=all_names)
+
+    db.add_dues_entry(
+        chat_id, rollcall_id, member["user_id"], member["member_name"],
+        "waiver", -amount,
+        reason or "admin waiver", admin_uid, admin_name,
+    )
+    db.add_fund_transaction(
+        chat_id, rollcall_id, "adjustment", -amount,
+        f"waiver: {member['member_name']} — {reason or 'admin'}", admin_uid, admin_name,
+    )
+    db.log_admin_action(chat_id, admin_uid, admin_name, "waive",
+                        target_name=member["member_name"], details=f"₹{amount}")
+
+    return {
+        "member_name": member["member_name"],
+        "user_id": member["user_id"],
+        "amount": amount,
+        "reason": reason,
+        "announcement": f"🕊 Waived ₹{amount} for {member['member_name']}: {reason or ''}".strip(),
+    }
+
+
+# ── Payments & collector ──────────────────────────────────────────────────────
+
+def set_collector(
+    chat_id: int,
+    token: str,
+    paid_ground: bool,
+    admin_uid: int,
+    admin_name: str,
+    rc_number: int = 0,
+) -> dict:
+    """Designate a collector for the current or most-recent game.
+
+    Pre-close (active RC): persists to rollcalls table columns.
+    Post-close: updates game_closures collector metadata.
+    """
+    all_names = [r["member_name"] for r in db.get_all_dues_balances(chat_id, nonzero_only=False)]
+    member = _resolve_member(chat_id, token, dues_names=all_names)
+    uid = member["user_id"]
+    name = member["member_name"]
+    if uid is None:
+        raise incorrectParameter("Collector must be a real (Telegram) user, not a proxy.")
+
+    paid_flag = 1 if paid_ground else 0
+
+    # Try active rollcall first
+    active = manager.get_rollcalls(chat_id)
+    if active:
+        idx = rc_number if rc_number < len(active) else 0
+        rc = manager.get_rollcalls(chat_id)[idx]
+        rc_db_id = getattr(rc, "id", None) or getattr(rc, "db_id", None)
+        if rc_db_id:
+            db.update_rollcall(rc_db_id,
+                               collector_uid=uid, collector_name=name,
+                               collector_paid_ground=paid_flag)
+        # Update in-memory object too so close_game picks it up without DB re-fetch
+        try:
+            rc.collector_uid = uid
+            rc.collector_name = name
+            rc.collector_paid_ground = paid_flag
+        except Exception:
+            pass
+        source = "active rollcall"
+    else:
+        # Post-close: update the latest closure
+        closure = db.get_latest_game_closure(chat_id)
+        if closure is None:
+            raise duesNothingToClose("No active rollcall or closed game to assign a collector to.")
+        db.update_game_closure_collector(
+            closure["rollcall_id"], uid, name, collector_paid_ground=paid_flag
+        )
+        source = "last game closure"
+
+    paid_note = " (fronted ground cost)" if paid_ground else ""
+    db.log_admin_action(chat_id, admin_uid, admin_name, "set_collector", target_name=name)
+
+    return {
+        "collector_uid": uid,
+        "collector_name": name,
+        "collector_paid_ground": paid_flag,
+        "source": source,
+        "announcement": f"📦 Collector: {name}{paid_note}",
+    }
+
+
+def mark_paid(
+    chat_id: int,
+    token: str,
+    actor_uid: int,
+    actor_name: str,
+    amount: int | None = None,
+    is_admin: bool = False,
+    rollcall_id: int | None = None,
+) -> dict:
+    """Record a payment from a member.
+
+    Permitted when actor_uid is an admin (is_admin=True) or when they are
+    the collector of the most recent game closure.
+
+    amount=None defaults to the member's full outstanding balance.
+    Overpayments are allowed and appear as negative balance (credit).
+    """
+    all_names = [r["member_name"] for r in db.get_all_dues_balances(chat_id, nonzero_only=False)]
+    member = _resolve_member(chat_id, token, dues_names=all_names)
+
+    # Permission check: admin OR current collector
+    if not is_admin:
+        closure = db.get_latest_game_closure(chat_id)
+        collector_uid = closure.get("collector_uid") if closure else None
+        if collector_uid != actor_uid:
+            raise insufficientPermissions(
+                "Only admins or the designated collector can record payments."
+            )
+
+    # Default amount = full outstanding balance
+    if amount is None:
+        if member["user_id"] is not None:
+            amount = db.get_dues_balance(chat_id, user_id=member["user_id"])
+        else:
+            amount = db.get_dues_balance(chat_id, member_name=member["member_name"])
+        if amount <= 0:
+            raise incorrectParameter(
+                f"{member['member_name']} has no outstanding balance to mark as paid."
+            )
+
+    if amount <= 0:
+        raise incorrectParameter("Payment amount must be positive.")
+
+    db.add_dues_entry(
+        chat_id, rollcall_id, member["user_id"], member["member_name"],
+        "payment", -amount,
+        f"received by {actor_name}", actor_uid, actor_name,
+    )
+    db.log_admin_action(chat_id, actor_uid, actor_name, "mark_paid",
+                        target_name=member["member_name"], details=f"₹{amount}")
+
+    return {
+        "member_name": member["member_name"],
+        "user_id": member["user_id"],
+        "amount": amount,
+        "announcement": f"✅ Payment: {member['member_name']} paid ₹{amount} (received by {actor_name})",
+    }
+
+
+def reimburse(
+    chat_id: int,
+    token: str,
+    amount: int,
+    reason: str,
+    admin_uid: int,
+    admin_name: str,
+    rollcall_id: int | None = None,
+) -> dict:
+    """Issue a reimbursement credit to a member (admin only)."""
+    if amount <= 0:
+        raise incorrectParameter("Reimbursement amount must be positive.")
+    all_names = [r["member_name"] for r in db.get_all_dues_balances(chat_id, nonzero_only=False)]
+    member = _resolve_member(chat_id, token, dues_names=all_names)
+
+    db.add_dues_entry(
+        chat_id, rollcall_id, member["user_id"], member["member_name"],
+        "reimbursement", -amount,
+        reason or "admin reimbursement", admin_uid, admin_name,
+    )
+    db.log_admin_action(chat_id, admin_uid, admin_name, "reimburse",
+                        target_name=member["member_name"], details=f"₹{amount}")
+
+    return {
+        "member_name": member["member_name"],
+        "amount": amount,
+        "announcement": f"💸 Reimbursed ₹{amount} to {member['member_name']}: {reason or ''}".strip(),
+    }
+
+
+# ── Ad-hoc joiner ─────────────────────────────────────────────────────────────
+
+def add_adhoc(
+    chat_id: int,
+    token: str,
+    admin_uid: int,
+    admin_name: str,
+) -> dict:
+    """Charge a late-joining player the most recent closure's per-head fee.
+
+    Also adds a fund 'adjustment' matching per_head so the fund accounts for
+    the extra income.
+    """
+    closure = db.get_latest_game_closure(chat_id)
+    if closure is None:
+        raise duesNothingToClose("No closed game found. Close a game first with /close_game.")
+
+    all_names = [r["member_name"] for r in db.get_all_dues_balances(chat_id, nonzero_only=False)]
+    member = _resolve_member(chat_id, token, dues_names=all_names)
+    per_head = closure["per_head"]
+    rc_id = closure["rollcall_id"]
+
+    db.add_dues_entry(
+        chat_id, rc_id, member["user_id"], member["member_name"],
+        "adhoc", per_head,
+        f"ad-hoc joiner — {closure['title']}", admin_uid, admin_name,
+    )
+    db.add_fund_transaction(
+        chat_id, rc_id, "adjustment", per_head,
+        f"ad-hoc: {member['member_name']} — {closure['title']}", admin_uid, admin_name,
+    )
+    db.log_admin_action(chat_id, admin_uid, admin_name, "add_adhoc",
+                        target_name=member["member_name"])
+
+    return {
+        "member_name": member["member_name"],
+        "per_head": per_head,
+        "announcement": f"➕ Ad-hoc: {member['member_name']} joined '{closure['title']}' → ₹{per_head}",
+    }
+
+
+# ── Cancel game dues ──────────────────────────────────────────────────────────
+
+def cancel_game_credit(
+    chat_id: int,
+    rollcall_id: int,
+    admin_uid: int,
+    admin_name: str,
+) -> dict:
+    """Reverse all share/adhoc dues entries for a game.
+
+    Writes compensating cancel_credit entries so members' balances return
+    to pre-game values. Payments already made become credits (the ledger
+    faithfully records what happened). Fund rounding/subsidy txns are also
+    reversed.
+    """
+    closure = db.get_game_closure(rollcall_id)
+    if closure is None:
+        raise incorrectParameter(
+            f"No game closure found for rollcall id={rollcall_id}. "
+            "Use /close_game first, or check the rollcall id."
+        )
+
+    entries = db.get_dues_entries_for_rollcall(rollcall_id)
+    reversible_types = {"share", "adhoc"}
+    reversed_count = 0
+
+    for e in entries:
+        if e["entry_type"] in reversible_types:
+            db.add_dues_entry(
+                chat_id, rollcall_id, e["user_id"], e["member_name"],
+                "cancel_credit", -e["amount"],
+                f"cancelled: {closure['title']}", admin_uid, admin_name,
+            )
+            reversed_count += 1
+
+    # Reverse fund transactions for this rollcall (rounding, subsidy)
+    # We write a single net-reversal entry so fund balance returns to pre-game state.
+    fund_txns = db.get_fund_transactions(chat_id, limit=1000)
+    rc_fund_txns = [t for t in fund_txns if t.get("rollcall_id") == rollcall_id
+                    and t["txn_type"] in ("rounding", "subsidy")]
+    fund_net = sum(t["amount"] for t in rc_fund_txns)
+    if fund_net != 0:
+        db.add_fund_transaction(
+            chat_id, rollcall_id, "adjustment", -fund_net,
+            f"cancellation reversal: {closure['title']}", admin_uid, admin_name,
+        )
+
+    db.log_admin_action(chat_id, admin_uid, admin_name, "cancel_game_dues",
+                        target_name=closure["title"])
+
+    return {
+        "rollcall_id": rollcall_id,
+        "title": closure["title"],
+        "reversed_count": reversed_count,
+        "fund_reversal": -fund_net,
+        "announcement": (
+            f"🔁 Cancelled dues for '{closure['title']}': "
+            f"{reversed_count} share entries reversed. "
+            f"Payments already recorded remain as credits."
+        ),
+    }
+
+
+# ── Fund management ───────────────────────────────────────────────────────────
+
+def log_expense(
+    chat_id: int,
+    amount: int,
+    description: str,
+    admin_uid: int,
+    admin_name: str,
+) -> dict:
+    """Log a fund expenditure (e.g. new balls, bibs). Amount is positive (deducted)."""
+    if amount <= 0:
+        raise incorrectParameter("Expense amount must be positive.")
+    db.add_fund_transaction(
+        chat_id, None, "expense", -amount,
+        description or "expense", admin_uid, admin_name,
+    )
+    balance = db.get_fund_balance(chat_id)
+    db.log_admin_action(chat_id, admin_uid, admin_name, "log_expense", details=f"₹{amount} {description}")
+
+    return {
+        "amount": amount,
+        "description": description,
+        "fund_balance": balance,
+        "announcement": f"🏦 Fund: −₹{amount} — {description}. Balance: ₹{balance}",
+    }
+
+
+def fund_topup(
+    chat_id: int,
+    amount: int,
+    description: str,
+    admin_uid: int,
+    admin_name: str,
+) -> dict:
+    """Manually add money to the group fund (e.g. special contribution)."""
+    if amount <= 0:
+        raise incorrectParameter("Top-up amount must be positive.")
+    db.add_fund_transaction(
+        chat_id, None, "topup", amount,
+        description or "manual top-up", admin_uid, admin_name,
+    )
+    balance = db.get_fund_balance(chat_id)
+    db.log_admin_action(chat_id, admin_uid, admin_name, "fund_topup", details=f"₹{amount}")
+
+    return {
+        "amount": amount,
+        "description": description,
+        "fund_balance": balance,
+        "announcement": f"🏦 Fund top-up: +₹{amount}. Balance: ₹{balance}",
+    }
+
+
+def remind_dues(chat_id: int) -> dict:
+    """Return members with outstanding (positive) balances for a reminder message."""
+    balances = db.get_all_dues_balances(chat_id, nonzero_only=True)
+    owed = [b for b in balances if b["balance"] > 0]
+    settings = get_dues_settings(chat_id)
+    upi = settings.get("upi_vpa")
+
+    lines = []
+    for b in owed:
+        upi_line = f"  💳 Pay ₹{b['balance']} to: `{upi}`" if upi else ""
+        lines.append(f"• {b['member_name']}: ₹{b['balance']}{upi_line}")
+
+    announcement = (
+        "📢 Outstanding dues:\n" + "\n".join(lines)
+        if lines else "✅ Everyone is settled up!"
+    )
+
+    return {"members_owed": owed, "upi_vpa": upi, "announcement": announcement}

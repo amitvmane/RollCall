@@ -576,5 +576,484 @@ class TestReadServices(unittest.TestCase):
         self.assertEqual(r["total"], 3)
 
 
+# ── Penalties ─────────────────────────────────────────────────────────────────
+
+class TestMarkLate(unittest.TestCase):
+
+    def _settings(self, t1=50, t2=75, t3=100, ditch=200):
+        return {
+            "upi_vpa": None, "dues_round_step": 10,
+            "penalty_late_t1": t1, "penalty_late_t2": t2,
+            "penalty_late_t3": t3, "penalty_ditch": ditch,
+        }
+
+    def _patch(self, **kw):
+        defaults = dict(
+            get_or_create_chat=MagicMock(return_value=self._settings()),
+            get_all_dues_balances=MagicMock(return_value=[]),
+            get_active_members=MagicMock(return_value=[
+                {"user_id": 101, "first_name": "Alice", "username": "alice"}
+            ]),
+            add_dues_entry=MagicMock(),
+            add_fund_transaction=MagicMock(),
+            log_admin_action=MagicMock(),
+        )
+        defaults.update(kw)
+        return patch.multiple("services.dues.db", **defaults)
+
+    def test_tier_t1_under_15min(self):
+        from services.dues import mark_late
+        add_dues = MagicMock()
+        with self._patch(add_dues_entry=add_dues):
+            r = mark_late(1, "alice", 14, 99, "Admin")
+        self.assertEqual(r["amount"], 50)
+        self.assertIn("14min", r["announcement"])
+
+    def test_tier_t2_at_15min(self):
+        from services.dues import mark_late
+        add_dues = MagicMock()
+        with self._patch(add_dues_entry=add_dues):
+            r = mark_late(1, "alice", 15, 99, "Admin")
+        self.assertEqual(r["amount"], 75)
+
+    def test_tier_t2_at_29min(self):
+        from services.dues import mark_late
+        add_dues = MagicMock()
+        with self._patch(add_dues_entry=add_dues):
+            r = mark_late(1, "alice", 29, 99, "Admin")
+        self.assertEqual(r["amount"], 75)
+
+    def test_tier_t3_at_30min(self):
+        from services.dues import mark_late
+        add_dues = MagicMock()
+        with self._patch(add_dues_entry=add_dues):
+            r = mark_late(1, "alice", 30, 99, "Admin")
+        self.assertEqual(r["amount"], 100)
+
+    def test_both_ledgers_written(self):
+        from services.dues import mark_late
+        add_dues = MagicMock()
+        add_fund = MagicMock()
+        with self._patch(add_dues_entry=add_dues, add_fund_transaction=add_fund):
+            mark_late(1, "alice", 20, 99, "Admin")
+        add_dues.assert_called_once()
+        add_fund.assert_called_once()
+        self.assertEqual(add_dues.call_args.args[4], "penalty_late")
+        self.assertEqual(add_fund.call_args.args[2], "penalty")
+
+
+class TestMarkDitch(unittest.TestCase):
+
+    def _patch(self, **kw):
+        settings = {
+            "upi_vpa": None, "dues_round_step": 10,
+            "penalty_late_t1": 50, "penalty_late_t2": 75,
+            "penalty_late_t3": 100, "penalty_ditch": 200,
+        }
+        defaults = dict(
+            get_or_create_chat=MagicMock(return_value=settings),
+            get_all_dues_balances=MagicMock(return_value=[]),
+            get_active_members=MagicMock(return_value=[
+                {"user_id": 101, "first_name": "Alice", "username": "alice"}
+            ]),
+            add_dues_entry=MagicMock(),
+            add_fund_transaction=MagicMock(),
+            log_admin_action=MagicMock(),
+        )
+        defaults.update(kw)
+        return patch.multiple("services.dues.db", **defaults)
+
+    def test_ditch_amount_from_settings(self):
+        from services.dues import mark_ditch
+        add_dues = MagicMock()
+        with self._patch(add_dues_entry=add_dues):
+            r = mark_ditch(1, "alice", 99, "Admin")
+        self.assertEqual(r["amount"], 200)
+        self.assertEqual(add_dues.call_args.args[4], "penalty_ditch")
+
+    def test_both_ledgers_written(self):
+        from services.dues import mark_ditch
+        add_dues = MagicMock()
+        add_fund = MagicMock()
+        with self._patch(add_dues_entry=add_dues, add_fund_transaction=add_fund):
+            mark_ditch(1, "alice", 99, "Admin")
+        add_dues.assert_called_once()
+        add_fund.assert_called_once()
+
+
+class TestWaive(unittest.TestCase):
+
+    def _patch(self, **kw):
+        defaults = dict(
+            get_all_dues_balances=MagicMock(return_value=[]),
+            get_active_members=MagicMock(return_value=[
+                {"user_id": 101, "first_name": "Alice", "username": "alice"}
+            ]),
+            add_dues_entry=MagicMock(),
+            add_fund_transaction=MagicMock(),
+            log_admin_action=MagicMock(),
+        )
+        defaults.update(kw)
+        return patch.multiple("services.dues.db", **defaults)
+
+    def test_waive_writes_negative_entries(self):
+        from services.dues import waive
+        add_dues = MagicMock()
+        add_fund = MagicMock()
+        with self._patch(add_dues_entry=add_dues, add_fund_transaction=add_fund):
+            r = waive(1, "alice", 75, "injury", 99, "Admin")
+        self.assertEqual(r["amount"], 75)
+        self.assertEqual(add_dues.call_args.args[4], "waiver")
+        self.assertEqual(add_dues.call_args.args[5], -75)   # negative = credit
+        self.assertEqual(add_fund.call_args.args[3], -75)
+
+    def test_zero_amount_raises(self):
+        from exceptions import incorrectParameter
+        from services.dues import waive
+        with self._patch():
+            with self.assertRaises(incorrectParameter):
+                waive(1, "alice", 0, "test", 99, "Admin")
+
+    def test_originals_not_touched(self):
+        """Waive only adds new entries — no UPDATE/DELETE calls."""
+        from services.dues import waive
+        update_mock = MagicMock()
+        with self._patch(), patch("services.dues.db.update_rollcall", update_mock):
+            waive(1, "alice", 50, "reason", 99, "Admin")
+        update_mock.assert_not_called()
+
+
+# ── Payments ──────────────────────────────────────────────────────────────────
+
+class TestMarkPaid(unittest.TestCase):
+
+    def _patch(self, balance=90, closure=None, **kw):
+        defaults = dict(
+            get_all_dues_balances=MagicMock(return_value=[]),
+            get_active_members=MagicMock(return_value=[
+                {"user_id": 101, "first_name": "Alice", "username": "alice"}
+            ]),
+            get_dues_balance=MagicMock(return_value=balance),
+            get_latest_game_closure=MagicMock(return_value=closure),
+            add_dues_entry=MagicMock(),
+            log_admin_action=MagicMock(),
+        )
+        defaults.update(kw)
+        return patch.multiple("services.dues.db", **defaults)
+
+    def test_admin_can_mark_paid(self):
+        from services.dues import mark_paid
+        add_dues = MagicMock()
+        with self._patch(add_dues_entry=add_dues):
+            r = mark_paid(1, "alice", actor_uid=99, actor_name="Admin",
+                          is_admin=True)
+        self.assertEqual(r["amount"], 90)
+        self.assertEqual(add_dues.call_args.args[4], "payment")
+        self.assertEqual(add_dues.call_args.args[5], -90)
+
+    def test_collector_can_mark_paid(self):
+        from services.dues import mark_paid
+        add_dues = MagicMock()
+        closure = {"collector_uid": 55, "per_head": 90}
+        with self._patch(add_dues_entry=add_dues, closure=closure):
+            r = mark_paid(1, "alice", actor_uid=55, actor_name="Ravi",
+                          is_admin=False)
+        self.assertEqual(r["amount"], 90)
+
+    def test_non_admin_non_collector_denied(self):
+        from exceptions import insufficientPermissions
+        from services.dues import mark_paid
+        closure = {"collector_uid": 55}
+        with self._patch(closure=closure):
+            with self.assertRaises(insufficientPermissions):
+                mark_paid(1, "alice", actor_uid=999, actor_name="Nobody",
+                          is_admin=False)
+
+    def test_explicit_amount_used(self):
+        from services.dues import mark_paid
+        add_dues = MagicMock()
+        with self._patch(add_dues_entry=add_dues):
+            r = mark_paid(1, "alice", actor_uid=99, actor_name="Admin",
+                          amount=50, is_admin=True)
+        self.assertEqual(r["amount"], 50)
+        self.assertEqual(add_dues.call_args.args[5], -50)
+
+    def test_overpay_allowed(self):
+        """Paying more than owed is accepted — results in negative balance (credit)."""
+        from services.dues import mark_paid
+        add_dues = MagicMock()
+        with self._patch(add_dues_entry=add_dues):
+            r = mark_paid(1, "alice", actor_uid=99, actor_name="Admin",
+                          amount=200, is_admin=True)
+        self.assertEqual(r["amount"], 200)
+
+    def test_zero_balance_no_amount_raises(self):
+        from exceptions import incorrectParameter
+        from services.dues import mark_paid
+        with self._patch(balance=0):
+            with self.assertRaises(incorrectParameter):
+                mark_paid(1, "alice", actor_uid=99, actor_name="Admin",
+                          is_admin=True)
+
+
+# ── Collector ─────────────────────────────────────────────────────────────────
+
+class TestSetCollector(unittest.TestCase):
+
+    def _patch(self, **kw):
+        defaults = dict(
+            get_all_dues_balances=MagicMock(return_value=[]),
+            get_active_members=MagicMock(return_value=[
+                {"user_id": 55, "first_name": "Ravi", "username": "ravi"}
+            ]),
+            update_rollcall=MagicMock(return_value=True),
+            update_game_closure_collector=MagicMock(return_value=True),
+            get_latest_game_closure=MagicMock(return_value=None),
+            log_admin_action=MagicMock(),
+        )
+        defaults.update(kw)
+        return patch.multiple("services.dues.db", **defaults)
+
+    def test_pre_close_updates_rollcall(self):
+        from services.dues import set_collector
+        rc = _make_rc(rc_id=77)
+        mgr = _make_manager([rc])
+        update_rc = MagicMock(return_value=True)
+        with self._patch(update_rollcall=update_rc), \
+             patch("services.dues.manager", mgr):
+            r = set_collector(1, "ravi", paid_ground=False, admin_uid=99, admin_name="Admin")
+        self.assertEqual(r["collector_uid"], 55)
+        update_rc.assert_called_once_with(
+            77, collector_uid=55, collector_name="Ravi", collector_paid_ground=0
+        )
+
+    def test_post_close_updates_closure(self):
+        from services.dues import set_collector
+        mgr = _make_manager([])  # no active
+        closure = {"rollcall_id": 88, "per_head": 90}
+        update_cl = MagicMock(return_value=True)
+        with self._patch(
+            update_game_closure_collector=update_cl,
+            get_latest_game_closure=MagicMock(return_value=closure),
+        ), patch("services.dues.manager", mgr):
+            r = set_collector(1, "ravi", paid_ground=True, admin_uid=99, admin_name="Admin")
+        update_cl.assert_called_once_with(88, 55, "Ravi", collector_paid_ground=1)
+        self.assertEqual(r["collector_paid_ground"], 1)
+
+    def test_proxy_user_raises(self):
+        """Collector must be a real Telegram user."""
+        from exceptions import incorrectParameter
+        from services.dues import set_collector
+        mgr = _make_manager([])
+        with self._patch(
+            get_active_members=MagicMock(return_value=[]),
+            get_all_dues_balances=MagicMock(return_value=[
+                {"member_name": "Guest", "balance": 0}
+            ]),
+            get_latest_game_closure=MagicMock(return_value={"rollcall_id": 88}),
+        ), patch("services.dues.manager", mgr):
+            with self.assertRaises(incorrectParameter):
+                set_collector(1, "Guest", paid_ground=False, admin_uid=99, admin_name="Admin")
+
+
+# ── Add adhoc ─────────────────────────────────────────────────────────────────
+
+class TestAddAdhoc(unittest.TestCase):
+
+    def _patch(self, closure=None, **kw):
+        defaults = dict(
+            get_latest_game_closure=MagicMock(return_value=closure),
+            get_all_dues_balances=MagicMock(return_value=[]),
+            get_active_members=MagicMock(return_value=[
+                {"user_id": 101, "first_name": "Alice", "username": "alice"}
+            ]),
+            add_dues_entry=MagicMock(),
+            add_fund_transaction=MagicMock(),
+            log_admin_action=MagicMock(),
+        )
+        defaults.update(kw)
+        return patch.multiple("services.dues.db", **defaults)
+
+    def test_no_closure_raises(self):
+        from exceptions import duesNothingToClose
+        from services.dues import add_adhoc
+        with self._patch(closure=None):
+            with self.assertRaises(duesNothingToClose):
+                add_adhoc(1, "alice", 99, "Admin")
+
+    def test_charges_per_head_from_closure(self):
+        from services.dues import add_adhoc
+        closure = {"rollcall_id": 77, "title": "Sunday Game", "per_head": 90}
+        add_dues = MagicMock()
+        add_fund = MagicMock()
+        with self._patch(closure=closure, add_dues_entry=add_dues, add_fund_transaction=add_fund):
+            r = add_adhoc(1, "alice", 99, "Admin")
+        self.assertEqual(r["per_head"], 90)
+        self.assertEqual(add_dues.call_args.args[4], "adhoc")
+        self.assertEqual(add_dues.call_args.args[5], 90)
+        add_fund.assert_called_once()
+        self.assertEqual(add_fund.call_args.args[2], "adjustment")
+        self.assertEqual(add_fund.call_args.args[3], 90)
+
+
+# ── Cancel game credit ────────────────────────────────────────────────────────
+
+class TestCancelGameCredit(unittest.TestCase):
+
+    def _patch(self, closure, entries, fund_txns=None, **kw):
+        defaults = dict(
+            get_game_closure=MagicMock(return_value=closure),
+            get_dues_entries_for_rollcall=MagicMock(return_value=entries),
+            get_fund_transactions=MagicMock(return_value=fund_txns or []),
+            add_dues_entry=MagicMock(),
+            add_fund_transaction=MagicMock(),
+            log_admin_action=MagicMock(),
+        )
+        defaults.update(kw)
+        return patch.multiple("services.dues.db", **defaults)
+
+    def test_no_closure_raises(self):
+        from exceptions import incorrectParameter
+        from services.dues import cancel_game_credit
+        with self._patch(closure=None, entries=[]):
+            with self.assertRaises(incorrectParameter):
+                cancel_game_credit(1, 99, 99, "Admin")
+
+    def test_reverses_share_and_adhoc_entries(self):
+        from services.dues import cancel_game_credit
+        closure = {"rollcall_id": 77, "title": "Sunday"}
+        entries = [
+            {"user_id": 101, "member_name": "Alice", "entry_type": "share", "amount": 90},
+            {"user_id": 202, "member_name": "Ravi", "entry_type": "adhoc", "amount": 90},
+            {"user_id": 101, "member_name": "Alice", "entry_type": "payment", "amount": -90},
+        ]
+        add_dues = MagicMock()
+        with self._patch(closure=closure, entries=entries, add_dues_entry=add_dues):
+            r = cancel_game_credit(1, 77, 99, "Admin")
+        # Only share + adhoc reversed; payment stays
+        self.assertEqual(r["reversed_count"], 2)
+        self.assertEqual(add_dues.call_count, 2)
+        for c in add_dues.call_args_list:
+            self.assertEqual(c.args[4], "cancel_credit")
+            self.assertLess(c.args[5], 0)   # negative = credit
+
+    def test_fund_reversal_written(self):
+        from services.dues import cancel_game_credit
+        closure = {"rollcall_id": 77, "title": "Sunday"}
+        entries = [
+            {"user_id": 101, "member_name": "Alice", "entry_type": "share", "amount": 90},
+        ]
+        fund_txns = [
+            {"rollcall_id": 77, "txn_type": "rounding", "amount": 30},
+            {"rollcall_id": 77, "txn_type": "subsidy", "amount": -60},
+            {"rollcall_id": 88, "txn_type": "rounding", "amount": 20},  # different rc
+        ]
+        add_fund = MagicMock()
+        with self._patch(
+            closure=closure, entries=entries, fund_txns=fund_txns,
+            add_fund_transaction=add_fund,
+        ):
+            r = cancel_game_credit(1, 77, 99, "Admin")
+        # Net of rc 77 fund txns = 30 + (-60) = -30 → reversal = +30
+        add_fund.assert_called_once()
+        self.assertEqual(add_fund.call_args.args[3], 30)
+        self.assertEqual(r["fund_reversal"], 30)
+
+    def test_payments_remain_as_credits(self):
+        """Existing payment entries are intentionally NOT reversed."""
+        from services.dues import cancel_game_credit
+        closure = {"rollcall_id": 77, "title": "Sunday"}
+        entries = [
+            {"user_id": 101, "member_name": "Alice", "entry_type": "payment", "amount": -90},
+        ]
+        add_dues = MagicMock()
+        with self._patch(closure=closure, entries=entries, add_dues_entry=add_dues):
+            r = cancel_game_credit(1, 77, 99, "Admin")
+        self.assertEqual(r["reversed_count"], 0)
+        add_dues.assert_not_called()
+
+
+# ── Fund management ───────────────────────────────────────────────────────────
+
+class TestFundManagement(unittest.TestCase):
+
+    def _patch(self, balance=100, **kw):
+        defaults = dict(
+            add_fund_transaction=MagicMock(),
+            get_fund_balance=MagicMock(return_value=balance),
+            log_admin_action=MagicMock(),
+        )
+        defaults.update(kw)
+        return patch.multiple("services.dues.db", **defaults)
+
+    def test_log_expense_negative_txn(self):
+        from services.dues import log_expense
+        add_fund = MagicMock()
+        with self._patch(add_fund_transaction=add_fund):
+            r = log_expense(1, 50, "new balls", 99, "Admin")
+        self.assertEqual(r["amount"], 50)
+        self.assertEqual(add_fund.call_args.args[3], -50)
+        self.assertEqual(add_fund.call_args.args[2], "expense")
+
+    def test_log_expense_zero_raises(self):
+        from exceptions import incorrectParameter
+        from services.dues import log_expense
+        with self._patch():
+            with self.assertRaises(incorrectParameter):
+                log_expense(1, 0, "free", 99, "Admin")
+
+    def test_fund_topup_positive_txn(self):
+        from services.dues import fund_topup
+        add_fund = MagicMock()
+        with self._patch(add_fund_transaction=add_fund):
+            r = fund_topup(1, 200, "donation", 99, "Admin")
+        self.assertEqual(r["amount"], 200)
+        self.assertEqual(add_fund.call_args.args[3], 200)
+        self.assertEqual(add_fund.call_args.args[2], "topup")
+
+    def test_fund_topup_zero_raises(self):
+        from exceptions import incorrectParameter
+        from services.dues import fund_topup
+        with self._patch():
+            with self.assertRaises(incorrectParameter):
+                fund_topup(1, 0, "nothing", 99, "Admin")
+
+
+# ── Remind dues ───────────────────────────────────────────────────────────────
+
+class TestRemindDues(unittest.TestCase):
+
+    def _settings(self):
+        return {
+            "upi_vpa": "collect@upi", "dues_round_step": 10,
+            "penalty_late_t1": 50, "penalty_late_t2": 75,
+            "penalty_late_t3": 100, "penalty_ditch": 200,
+        }
+
+    def test_lists_owed_members(self):
+        from services.dues import remind_dues
+        balances = [
+            {"member_name": "Alice", "balance": 90},
+            {"member_name": "Ravi", "balance": 0},
+        ]
+        with patch.multiple("services.dues.db",
+                            get_all_dues_balances=MagicMock(return_value=balances),
+                            get_or_create_chat=MagicMock(return_value=self._settings())):
+            r = remind_dues(1)
+        self.assertEqual(len(r["members_owed"]), 1)
+        self.assertEqual(r["members_owed"][0]["member_name"], "Alice")
+        self.assertIn("Alice", r["announcement"])
+        self.assertIn("collect@upi", r["announcement"])
+
+    def test_all_settled(self):
+        from services.dues import remind_dues
+        with patch.multiple("services.dues.db",
+                            get_all_dues_balances=MagicMock(return_value=[]),
+                            get_or_create_chat=MagicMock(return_value=self._settings())):
+            r = remind_dues(1)
+        self.assertEqual(r["members_owed"], [])
+        self.assertIn("settled", r["announcement"])
+
+
 if __name__ == "__main__":
     unittest.main()

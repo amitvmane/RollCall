@@ -1,0 +1,241 @@
+"""
+Dues & Treasury DB layer tests — real SQLite via the integration conftest.
+
+Covers: append-only writers, balance aggregation across mixed member keys
+(user_id vs name-keyed proxies), the game_closures UNIQUE double-close guard,
+closeable-rollcall lookup, and the schema reconciler backfilling the new
+dues columns onto an old-schema database.
+"""
+
+import os
+import sqlite3
+import tempfile
+import time
+
+import pytest
+
+import db
+
+
+# The integration DB file persists across pytest runs (fixed path in
+# conftest), so chat ids must be unique per run for count/sum assertions.
+CHAT = -(int(time.time() * 1000) % 10**12) - 10**14
+
+
+def _mk_rollcall(chat_id=CHAT, title="Sunday Game", is_active=0, is_cancelled=0,
+                 ended_at="2026-07-01T10:00:00Z"):
+    """Insert a rollcall row directly and return its id."""
+    conn = db.get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO rollcalls (chat_id, title, is_active, is_cancelled, ended_at)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (chat_id, title, is_active, is_cancelled, ended_at),
+    )
+    conn.commit()
+    rc_id = cur.lastrowid
+    cur.close()
+    return rc_id
+
+
+def _close(rc_id, chat_id=CHAT, **kw):
+    args = dict(
+        chat_id=chat_id, rollcall_id=rc_id, title="Sunday Game",
+        ground_cost=600, in_count=7, subsidy=0, per_head=90,
+        rounding_step=10, remainder=30, closed_by_uid=1, closed_by_name="Admin",
+    )
+    args.update(kw)
+    return db.create_game_closure(**args)
+
+
+# ── game_closures ────────────────────────────────────────────────────────────
+
+def test_create_and_get_game_closure():
+    rc_id = _mk_rollcall()
+    closure_id = _close(rc_id)
+    assert closure_id > 0
+
+    row = db.get_game_closure(rc_id)
+    assert row is not None
+    assert row["ground_cost"] == 600
+    assert row["per_head"] == 90
+    assert row["remainder"] == 30
+    assert row["collector_uid"] is None
+
+
+def test_double_close_raises():
+    rc_id = _mk_rollcall()
+    _close(rc_id)
+    with pytest.raises(Exception):
+        _close(rc_id)  # UNIQUE(rollcall_id) violated
+
+
+def test_update_game_closure_collector():
+    rc_id = _mk_rollcall()
+    _close(rc_id)
+    assert db.update_game_closure_collector(rc_id, 42, "Ravi", collector_paid_ground=1)
+    row = db.get_game_closure(rc_id)
+    assert row["collector_uid"] == 42
+    assert row["collector_name"] == "Ravi"
+    assert row["collector_paid_ground"] == 1
+
+
+def test_get_latest_game_closure():
+    chat = CHAT - 1
+    rc1 = _mk_rollcall(chat_id=chat, title="Game 1")
+    rc2 = _mk_rollcall(chat_id=chat, title="Game 2")
+    _close(rc1, chat_id=chat)
+    _close(rc2, chat_id=chat, per_head=120)
+    latest = db.get_latest_game_closure(chat)
+    assert latest["rollcall_id"] == rc2
+    assert latest["per_head"] == 120
+
+
+# ── dues_entries ─────────────────────────────────────────────────────────────
+
+def test_dues_balance_real_user():
+    chat = CHAT - 2
+    db.add_dues_entry(chat, None, 111, "Amit", "share", 90, None, 1, "Admin")
+    db.add_dues_entry(chat, None, 111, "Amit", "penalty_late", 75, "late 20min", 1, "Admin")
+    db.add_dues_entry(chat, None, 111, "Amit", "payment", -90, "received by Ravi", 1, "Admin")
+    assert db.get_dues_balance(chat, user_id=111) == 75
+
+
+def test_dues_balance_name_keyed_proxy():
+    chat = CHAT - 3
+    db.add_dues_entry(chat, None, None, "Guest Sanju", "share", 90, "unowned proxy", 1, "Admin")
+    # Case-insensitive name key
+    assert db.get_dues_balance(chat, member_name="guest sanju") == 90
+    db.add_dues_entry(chat, None, None, "guest sanju", "payment", -90, None, 1, "Admin")
+    assert db.get_dues_balance(chat, member_name="Guest Sanju") == 0
+
+
+def test_all_dues_balances_mixed_keys():
+    chat = CHAT - 4
+    db.add_dues_entry(chat, None, 111, "Amit", "share", 90, None, 1, "Admin")
+    db.add_dues_entry(chat, None, 222, "Ravi", "share", 90, None, 1, "Admin")
+    db.add_dues_entry(chat, None, 222, "Ravi", "payment", -90, None, 1, "Admin")
+    db.add_dues_entry(chat, None, None, "Guest", "share", 90, None, 1, "Admin")
+
+    rows = db.get_all_dues_balances(chat)
+    by_name = {r["member_name"]: r["balance"] for r in rows}
+    assert by_name == {"Amit": 90, "Ravi": 0, "Guest": 90}
+
+    nonzero = db.get_all_dues_balances(chat, nonzero_only=True)
+    assert {r["member_name"] for r in nonzero} == {"Amit", "Guest"}
+
+
+def test_dues_entries_pagination_and_rollcall_filter():
+    chat = CHAT - 5
+    rc_id = _mk_rollcall(chat_id=chat)
+    for i in range(4):
+        db.add_dues_entry(chat, rc_id, 111, "Amit", "share", 10 + i, None, 1, "Admin")
+
+    assert db.count_dues_entries(chat) == 4
+    page = db.get_dues_entries(chat, user_id=111, limit=2, offset=0)
+    assert len(page) == 2
+    assert page[0]["amount"] == 13  # newest first
+
+    for_rc = db.get_dues_entries_for_rollcall(rc_id)
+    assert len(for_rc) == 4
+    assert for_rc[0]["amount"] == 10  # oldest first
+
+
+# ── fund_transactions ────────────────────────────────────────────────────────
+
+def test_fund_balance_and_history():
+    chat = CHAT - 6
+    db.add_fund_transaction(chat, None, "rounding", 30, None, 1, "Admin")
+    db.add_fund_transaction(chat, None, "penalty", 75, "Amit late", 1, "Admin")
+    db.add_fund_transaction(chat, None, "expense", -50, "new balls", 1, "Admin")
+    assert db.get_fund_balance(chat) == 55
+    assert db.count_fund_transactions(chat) == 3
+    hist = db.get_fund_transactions(chat, limit=2)
+    assert len(hist) == 2
+    assert hist[0]["txn_type"] == "expense"  # newest first
+
+
+# ── closeable rollcall lookup ────────────────────────────────────────────────
+
+def test_latest_closeable_skips_active_cancelled_and_closed():
+    chat = CHAT - 7
+    _mk_rollcall(chat_id=chat, title="active", is_active=1)
+    _mk_rollcall(chat_id=chat, title="cancelled", is_cancelled=1)
+    closed = _mk_rollcall(chat_id=chat, title="already closed",
+                          ended_at="2026-07-02T10:00:00Z")
+    _close(closed, chat_id=chat)
+    target = _mk_rollcall(chat_id=chat, title="closeable",
+                          ended_at="2026-07-01T10:00:00Z")
+
+    row = db.get_latest_closeable_rollcall(chat)
+    assert row is not None
+    assert row["id"] == target
+    assert row["title"] == "closeable"
+
+
+def test_latest_closeable_none_when_all_closed():
+    chat = CHAT - 8
+    rc_id = _mk_rollcall(chat_id=chat)
+    _close(rc_id, chat_id=chat)
+    assert db.get_latest_closeable_rollcall(chat) is None
+
+
+# ── proxy owner in get_rollcall_in_users ─────────────────────────────────────
+
+def test_get_rollcall_in_users_includes_proxy_owner():
+    chat = CHAT - 9
+    rc_id = _mk_rollcall(chat_id=chat)
+    conn = db.get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO users (rollcall_id, user_id, first_name, username, status, in_pos)"
+        " VALUES (?, ?, ?, ?, 'in', 1)",
+        (rc_id, 111, "Amit", "amit_tg"),
+    )
+    cur.execute(
+        "INSERT INTO proxy_users (rollcall_id, name, status, proxy_owner_id, in_pos)"
+        " VALUES (?, 'Ravi friend', 'in', 222, 2)",
+        (rc_id,),
+    )
+    cur.execute(
+        "INSERT INTO proxy_users (rollcall_id, name, status, in_pos)"
+        " VALUES (?, 'Walk-in Guest', 'in', 3)",
+        (rc_id,),
+    )
+    conn.commit()
+    cur.close()
+
+    members = db.get_rollcall_in_users(rc_id)
+    assert len(members) == 3
+    real = [m for m in members if m["user_id"] is not None][0]
+    assert real["first_name"] == "Amit"
+    owned = [m for m in members if m.get("proxy_name") == "Ravi friend"][0]
+    assert owned["proxy_owner_id"] == 222
+    unowned = [m for m in members if m.get("proxy_name") == "Walk-in Guest"][0]
+    assert unowned["proxy_owner_id"] is None
+
+
+# ── schema reconciler backfills dues columns ─────────────────────────────────
+
+def test_reconciler_adds_dues_columns_to_old_schema():
+    path = tempfile.mktemp(suffix=".db")
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE chats (chat_id INTEGER PRIMARY KEY,
+            timezone TEXT DEFAULT 'Asia/Kolkata');
+        CREATE TABLE rollcalls (id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id INTEGER NOT NULL, title TEXT);
+        """
+    )
+    conn.commit()
+    try:
+        db._reconcile_columns(conn, conn.cursor())
+        chat_cols = {r[1] for r in conn.execute("PRAGMA table_info(chats)")}
+        assert {"upi_vpa", "dues_round_step", "penalty_late_t1", "penalty_late_t2",
+                "penalty_late_t3", "penalty_ditch"} <= chat_cols
+        rc_cols = {r[1] for r in conn.execute("PRAGMA table_info(rollcalls)")}
+        assert {"collector_uid", "collector_name", "collector_paid_ground"} <= rc_cols
+    finally:
+        conn.close()
+        os.unlink(path)

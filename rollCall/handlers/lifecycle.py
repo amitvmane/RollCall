@@ -40,6 +40,46 @@ def _build_panel_text(rc, rc_number: int) -> str:
     return rc.allList().replace("__RCID__", str(rc_number))
 
 
+async def _post_end_cleanup(cid: int, ended_number: int, result: dict, rc_title: str = "") -> None:
+    """Panel-ID cleanup, ghost prompt, and renumber announcements after a rollcall ends.
+
+    Called by /erc and /close_game (whenever close_game ends an active rollcall).
+    `ended_number` is 1-based. `result` is the dict from rollcalls_svc.end_rollcall.
+    """
+    _panel_msg_ids.pop((cid, ended_number), None)
+    for entry in sorted(result["renumbered"], key=lambda x: x["old"]):
+        old_key = (cid, entry["old"])
+        if old_key in _panel_msg_ids:
+            _panel_msg_ids[(cid, entry["new"])] = _panel_msg_ids.pop(old_key)
+
+    if result.get("ghost_eligible"):
+        ghost_markup = InlineKeyboardMarkup(row_width=2)
+        ghost_markup.add(
+            InlineKeyboardButton(
+                "👻 Yes, select ghosts",
+                callback_data=f"ghost_yes_{result['ghost_rc_db_id']}"
+            ),
+            InlineKeyboardButton(
+                "✅ No, all showed up",
+                callback_data=f"ghost_no_{result['ghost_rc_db_id']}"
+            ),
+        )
+        title_hint = f" '{rc_title}'" if rc_title else ""
+        await bot.send_message(cid, f"👻 Did anyone ghost{title_hint}?", reply_markup=ghost_markup)
+
+    updated_rollcalls = manager.get_rollcalls(cid)
+    if updated_rollcalls:
+        lines = [f"⚠️ Rollcall #{ended_number} ended. IDs updated:"]
+        for entry in result["renumbered"]:
+            lines.append(f"  #{entry['old']} '{entry['title']}' → #{entry['new']}")
+        if not manager.get_shh_mode(cid):
+            await bot.send_message(cid, "\n".join(lines))
+            for idx, rollcall in enumerate(updated_rollcalls):
+                new_id = idx + 1
+                text = f"Rollcall number {new_id}\n\n" + _build_panel_text(rollcall, new_id)
+                await bot.send_message(cid, text)
+
+
 def _group_web_url(cid: int) -> str:
     """Return the permanent group web URL for the keyboard button, or empty string."""
     base = os.environ.get("WEB_BASE_URL", "").rstrip("/")
@@ -266,35 +306,7 @@ async def end_roll_call(message):
             )
 
             await bot.send_message(cid, finish_text)
-
-            # Update panel IDs: remove ended slot, shift renumbered ones down
-            _panel_msg_ids.pop((cid, ended_number), None)
-            for entry in sorted(result["renumbered"], key=lambda x: x["old"]):
-                old_key = (cid, entry["old"])
-                if old_key in _panel_msg_ids:
-                    _panel_msg_ids[(cid, entry["new"])] = _panel_msg_ids.pop(old_key)
-
-            if result["ghost_eligible"]:
-                ghost_markup = InlineKeyboardMarkup(row_width=2)
-                ghost_markup.add(
-                    InlineKeyboardButton("👻 Yes, select ghosts", callback_data=f"ghost_yes_{result['ghost_rc_db_id']}"),
-                    InlineKeyboardButton("✅ No, all showed up", callback_data=f"ghost_no_{result['ghost_rc_db_id']}")
-                )
-                # Name the rollcall so multiple prompts (when several rollcalls
-                # end close together) are distinguishable rather than identical.
-                await bot.send_message(cid, f"👻 Did anyone ghost '{rc.title}'?", reply_markup=ghost_markup)
-
-            updated_rollcalls = manager.get_rollcalls(cid)
-            if updated_rollcalls:
-                lines = [f"⚠️ Rollcall #{ended_number} ended. IDs updated:"]
-                for entry in result["renumbered"]:
-                    lines.append(f"  #{entry['old']} '{entry['title']}' → #{entry['new']}")
-                if not manager.get_shh_mode(cid):
-                    await bot.send_message(cid, "\n".join(lines))
-                    for idx, rollcall in enumerate(updated_rollcalls):
-                        new_id = idx + 1
-                        text = f"Rollcall number {new_id}\n\n" + _build_panel_text(rollcall, new_id)
-                        await bot.send_message(cid, text)
+            await _post_end_cleanup(cid, ended_number, result, rc_title=rc.title)
     except Exception as e:
         await reply_error(message, e)
 

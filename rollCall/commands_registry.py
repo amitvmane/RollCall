@@ -379,6 +379,185 @@ COMMANDS = [
         ),
     },
 
+    # ──────────────────────── DUES & FUND (user) ────────────────────
+    {
+        "name": "my_dues", "aliases": ["md"], "scope": "user", "category": "Dues & Fund",
+        "args": "", "sample": "/my_dues",
+        "summary": "Your outstanding dues and payment history",
+        "details": (
+            "Shows your current balance and the 5 most recent ledger entries.\n\n"
+            "If a UPI address is configured, a pay link is shown when you owe money."
+        ),
+    },
+    {
+        "name": "fund", "aliases": [], "scope": "user", "category": "Dues & Fund",
+        "args": "", "sample": "/fund",
+        "summary": "Show the group fund balance",
+        "details": (
+            "Displays the total group fund balance — the running total of all "
+            "rounding remainders, penalties, subsidies, expenses and top-ups.\n\n"
+            "Balance = booked amount; it may not equal actual cash on hand."
+        ),
+    },
+    {
+        "name": "fund_history", "aliases": ["fh"], "scope": "user", "category": "Dues & Fund",
+        "args": "[page]", "sample": "/fh 2",
+        "summary": "Paginated fund transaction history",
+        "details": "Lists fund in/out entries newest first. Pass a page number for older entries.",
+    },
+    {
+        "name": "mark_paid", "aliases": ["paid"], "scope": "user", "category": "Dues & Fund",
+        "args": "name [amount]", "sample": "/paid Alice",
+        "summary": "Record a payment received from a member",
+        "details": (
+            "Records a payment, clearing dues.\n\n"
+            "• Admin: can record payment for anyone.\n"
+            "• Designated collector (set via /set_collector): can record payment too.\n"
+            "• Amount defaults to the member's full outstanding balance.\n"
+            "  Overpayments are accepted and appear as negative balance (credit).\n\n"
+            "Example: /paid Alice 90"
+        ),
+    },
+    # ──────────────────────── DUES & FUND (admin) ───────────────────
+    {
+        "name": "close_game", "aliases": ["cg"], "scope": "admin", "category": "Dues & Fund",
+        "args": "[subsidy] [::N]", "sample": "/cg",
+        "summary": "Financially close a game — split costs and record shares",
+        "details": (
+            "Closes the current (or most-recent ended) game:\n"
+            "  1. Reads player count from the IN list.\n"
+            "  2. Reads ground cost from /ef (first digit group).\n"
+            "  3. Splits cost equally; rounds each share UP to the nearest step "
+            "(set via /set_round_step, default ₹10).\n"
+            "  4. Rounding surplus goes to the group fund.\n"
+            "  5. Optional [subsidy] deducts from fund balance before splitting.\n\n"
+            "If an active rollcall is open, it's ended first (stats recorded).\n\n"
+            "Examples: /cg  |  /cg 60  |  /cg ::2"
+        ),
+    },
+    {
+        "name": "mark_late", "aliases": [], "scope": "admin", "category": "Dues & Fund",
+        "args": "name minutes", "sample": "/mark_late Alice 20",
+        "summary": "Assess a late-arrival penalty",
+        "details": (
+            "Adds a lateness penalty based on minutes:\n"
+            "  <15 min → tier 1 (default ₹50)\n"
+            "  15–29 min → tier 2 (default ₹75)\n"
+            "  ≥30 min → tier 3 (default ₹100)\n\n"
+            "Tiers are configurable via /set_penalties."
+        ),
+    },
+    {
+        "name": "mark_ditch", "aliases": [], "scope": "admin", "category": "Dues & Fund",
+        "args": "name", "sample": "/mark_ditch Bob",
+        "summary": "Assess a no-show (ditch) penalty",
+        "details": "Adds the ditch penalty (default ₹200, configurable via /set_penalties).",
+    },
+    {
+        "name": "waive", "aliases": [], "scope": "admin", "category": "Dues & Fund",
+        "args": "name amount [reason]", "sample": "/waive Alice 75 injured",
+        "summary": "Waive part or all of a member's dues",
+        "details": (
+            "Writes a compensating credit entry. Original entries are never deleted "
+            "(append-only ledger).\n\n"
+            "Example: /waive Alice 75 injury"
+        ),
+    },
+    {
+        "name": "set_collector", "aliases": [], "scope": "admin", "category": "Dues & Fund",
+        "args": "name [paid] [::N]", "sample": "/set_collector Ravi paid",
+        "summary": "Designate a member as the game's cash collector",
+        "details": (
+            "Sets the collector for this game. Adding 'paid' means the collector "
+            "fronted the ground cost and should be reimbursed when the game is closed.\n\n"
+            "The designated collector can also run /mark_paid without being a chat admin.\n\n"
+            "Examples: /set_collector Ravi  |  /set_collector Ravi paid  |  /set_collector Ravi paid ::2"
+        ),
+    },
+    {
+        "name": "reimburse", "aliases": [], "scope": "admin", "category": "Dues & Fund",
+        "args": "name amount [reason]", "sample": "/reimburse Ravi 600 fronted ground",
+        "summary": "Issue a reimbursement credit to a member",
+        "details": "Writes a negative dues entry (credit) for the given amount.",
+    },
+    {
+        "name": "add_adhoc", "aliases": [], "scope": "admin", "category": "Dues & Fund",
+        "args": "name", "sample": "/add_adhoc NewPlayer",
+        "summary": "Charge a late-joining player the last game's per-head fee",
+        "details": (
+            "Adds the most recent closure's per-head as an 'adhoc' charge for a player "
+            "who joined after /close_game was run. Also credits the group fund."
+        ),
+    },
+    {
+        "name": "cancel_game_dues", "aliases": [], "scope": "admin", "category": "Dues & Fund",
+        "args": "[rollcall_id]", "sample": "/cancel_game_dues",
+        "summary": "Reverse all share entries for a closed game",
+        "details": (
+            "Writes compensating cancel_credit entries to undo share/adhoc charges. "
+            "Payments already recorded remain as credits (they genuinely happened). "
+            "Use /close_game again to re-close after fixing the event fee or player count.\n\n"
+            "Defaults to the most recently closed game. Pass a rollcall id to target a specific one."
+        ),
+    },
+    {
+        "name": "dues", "aliases": [], "scope": "admin", "category": "Dues & Fund",
+        "args": "", "sample": "/dues",
+        "summary": "Full group dues ledger (admin view)",
+        "details": "Shows every member's current balance. Use /my_dues for your own balance.",
+    },
+    {
+        "name": "log_expense", "aliases": ["le"], "scope": "admin", "category": "Dues & Fund",
+        "args": "amount description", "sample": "/le 150 new balls",
+        "summary": "Log a fund expenditure",
+        "details": "Deducts from the group fund. Example: /le 150 new balls and bibs",
+    },
+    {
+        "name": "fund_topup", "aliases": [], "scope": "admin", "category": "Dues & Fund",
+        "args": "amount [description]", "sample": "/fund_topup 500 donations",
+        "summary": "Manually add money to the group fund",
+        "details": "Credits the group fund. Use for special contributions or corrections.",
+    },
+    {
+        "name": "remind_dues", "aliases": [], "scope": "admin", "category": "Dues & Fund",
+        "args": "", "sample": "/remind_dues",
+        "summary": "Post a dues reminder for all members with outstanding balances",
+        "details": "Lists everyone who owes money with a UPI pay link if configured.",
+    },
+    {
+        "name": "set_upi", "aliases": [], "scope": "admin", "category": "Dues & Fund",
+        "args": "vpa@bank", "sample": "/set_upi amit@upi",
+        "summary": "Set the group UPI VPA for payment instructions",
+        "details": (
+            "Configures the UPI address shown in /close_game summaries, "
+            "/my_dues, and /remind_dues.\n\n"
+            "Format: name@bankname  e.g. amit@upi, 9876543210@paytm, squad@hdfc"
+        ),
+    },
+    {
+        "name": "set_penalties", "aliases": [], "scope": "admin", "category": "Dues & Fund",
+        "args": "t1 t2 t3 ditch", "sample": "/set_penalties 50 75 100 200",
+        "summary": "Configure late and ditch penalty amounts",
+        "details": (
+            "Sets four penalty tiers (all in ₹):\n"
+            "  t1 — arrived <15 min late\n"
+            "  t2 — arrived 15–29 min late\n"
+            "  t3 — arrived ≥30 min late\n"
+            "  ditch — no-show\n\n"
+            "Must satisfy: t1 ≤ t2 ≤ t3 ≤ ditch"
+        ),
+    },
+    {
+        "name": "set_round_step", "aliases": [], "scope": "admin", "category": "Dues & Fund",
+        "args": "step", "sample": "/set_round_step 5",
+        "summary": "Set the per-head fee rounding step",
+        "details": (
+            "Per-head fees are rounded UP to the nearest multiple of this step "
+            "(default ₹10). The overage goes to the group fund.\n\n"
+            "Example: /set_round_step 5 rounds to the nearest ₹5."
+        ),
+    },
+
     # ────────────────────────── SUPER ADMIN ─────────────────────────
     {
         "name": "broadcast", "aliases": [], "scope": "super_admin", "category": "Super Admin",
@@ -421,10 +600,10 @@ def all_names_and_aliases():
 
 # Order each category appears in the rendered /help. Categories not listed
 # here fall to the bottom in COMMANDS order.
-USER_CATEGORY_ORDER = ["Vote", "View Lists", "Stats & History", "Settings"]
+USER_CATEGORY_ORDER = ["Vote", "View Lists", "Stats & History", "Dues & Fund", "Settings"]
 ADMIN_CATEGORY_ORDER = [
     "Rollcall", "Settings", "Proxy", "Templates",
-    "User Management", "Ghost Tracking", "Audit", "API Access", "Super Admin",
+    "User Management", "Ghost Tracking", "Dues & Fund", "Audit", "API Access", "Super Admin",
 ]
 
 

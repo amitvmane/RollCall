@@ -5368,6 +5368,36 @@ def update_game_closure_collector(
             release_connection(conn)
 
 
+def delete_game_closure(rollcall_id: int) -> bool:
+    """Remove a game closure row so the rollcall becomes eligible for re-close.
+
+    game_closures is NOT append-only (metadata, not money rows), so deletion
+    is permitted.  The compensating dues_entries and fund_transactions written
+    by cancel_game_credit remain for a complete audit trail.
+    """
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"DELETE FROM game_closures WHERE rollcall_id = {ph}",
+            (rollcall_id,),
+        )
+        deleted = cursor.rowcount > 0
+        conn.commit()
+        return deleted
+    except Exception:
+        logging.exception("delete_game_closure failed")
+        conn.rollback()
+        return False
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
 def add_dues_entry(
     chat_id: int,
     rollcall_id: int,

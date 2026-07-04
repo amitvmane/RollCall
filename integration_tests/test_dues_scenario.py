@@ -407,22 +407,23 @@ class TestDuesScenario:
 
     def test_09_cancel_and_reclose_week3(self):
         """
-        Admin closes week 3 with wrong ground cost — cancels the dues and
-        inserts a corrected rollcall, then closes that.
+        Admin closed week 3 with wrong ground cost — cancels and re-closes.
 
-        After cancel: all share/adhoc entries for week 3 are reversed.
-        Fund reversal: week3 had rounding +40, subsidy −40, adhoc adjustment +40
-          → fund_net = +40 → cancel writes −40 → fund_reversal = −40.
+        After cancel:
+          • All share/adhoc dues entries reversed (cancel_credit rows written).
+          • game_closures row deleted → rollcall is eligible for re-close again.
+          • Fund reversal: rounding(+40) + subsidy(−40) + adhoc adj(+40) = +40
+            → cancel writes −40 → fund_reversal = −40.
 
-        Re-close with corrected cost ₹600 (was ₹640):
-          net = 600, 16 players, step=10
-          raw = ceil(600/16) = 38 → per_head = 40  (same per_head coincidentally)
-          remainder = 40×16 − 600 = 40
+        Re-close via /ef + /close_game on the SAME rollcall (not a fresh insert):
+          Corrected cost ₹600 (was ₹640), no subsidy, same 16 players.
+          net=600, step=10 → raw=38 → per_head=40, remainder=40.
+          (Same per_head coincidentally; different ground cost & remainder.)
         """
         amit_before_cancel = _bal("Amit")
         fund_before_cancel = _fund()
 
-        # Cancel week 3 (latest closure)
+        # Before cancel: closure row must exist
         closure_w3 = db.get_nth_game_closure(CHAT, 0)
         assert closure_w3 is not None
         w3_rc_id = closure_w3["rollcall_id"]
@@ -433,32 +434,28 @@ class TestDuesScenario:
         )
         assert cancel_result["reversed_count"] > 0
 
+        # After cancel: closure row deleted → get_game_closure returns None
+        assert db.get_game_closure(w3_rc_id) is None
+
         # Amit's week3 share reversed — balance drops by 40
         assert _bal("Amit") == amit_before_cancel - 40
 
-        # Fund net for week3 txns: rounding(+40) + subsidy(−40) + adhoc adj(+40) = +40
-        # cancel_result["fund_reversal"] = −fund_net = −40
-        # Fund after cancel = fund_before_cancel + fund_reversal
+        # Fund net for week3: rounding(+40) + subsidy(−40) + Lakshmi adhoc adj(+40) = +40
+        # cancel_game_credit writes −40 reversal → fund_reversal = −40
         assert cancel_result["fund_reversal"] == -40
         assert _fund() == fund_before_cancel + cancel_result["fund_reversal"]
 
-        # game_closure row still exists after cancel (append-only), so
-        # get_latest_closeable_rollcall won't find week3 again.
-        # Insert a fresh "corrected" rollcall and close that instead.
-        _insert_ended_rollcall(
-            "Week 3 — Redo (corrected cost)",
-            event_fee=600,
-            in_names=["Amit", "Ravi", "Suresh", "Priya", "Vikram",
-                      "Anjali", "Dev", "Kavya", "Rohit", "Sneha",
-                      "Arjun", "Meera", "Kiran", "Pooja", "Deepa",
-                      "Nikhil"],
-        )
+        # The rollcall is now closeable again — simulate /ef (corrected cost)
+        # then /close_game on the SAME rollcall row (no fresh insert needed).
+        db.update_rollcall(w3_rc_id, event_fee="600")
         reclose_result = _close(subsidy=0)
+
+        assert reclose_result["rollcall_id"] == w3_rc_id   # same game
         assert reclose_result["per_head"] == 40
         assert reclose_result["in_count"] == 16
         assert reclose_result["remainder"] == 40
 
-        # Amit owes ₹40 again from the redo → balance back to pre-cancel level
+        # Amit owes ₹40 again from the re-close → balance back to pre-cancel level
         assert _bal("Amit") == amit_before_cancel
 
     # ── Waive and reimburse ───────────────────────────────────────────────────

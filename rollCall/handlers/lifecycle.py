@@ -25,6 +25,7 @@ from exceptions import (
 from functions import admin_rights, roll_call_not_started
 from models import User
 from rollcall_manager import manager
+import db
 from db import update_rollcall
 from services import rollcalls as rollcalls_svc
 from services import voting as voting_svc
@@ -251,6 +252,17 @@ async def start_roll_call(message):
         sent = await bot.send_message(message.chat.id, text, reply_markup=markup)
         _panel_msg_ids[(cid, rc_number_1based)] = sent.message_id
         _persist_panel_msg_id(rc, sent.message_id)
+
+        # Dues reminder: prompt the admin to set the ground cost now so it
+        # isn't forgotten before /erc.  Only shown in non-shh mode.
+        chat_row = db.get_or_create_chat(cid)
+        if chat_row.get("dues_enabled") and not manager.get_shh_mode(cid):
+            await bot.send_message(
+                cid,
+                "💰 *Dues active* — set the ground cost now so it's ready for /close\_game:\n"
+                "`/ef <amount>`  e.g. `/ef 600`",
+                parse_mode="Markdown",
+            )
 
     except Exception as e:
         await reply_error(cid, e)

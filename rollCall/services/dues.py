@@ -838,6 +838,12 @@ def cancel_game_credit(
             f"cancellation reversal: {closure['title']}", admin_uid, admin_name,
         )
 
+    # Remove the closure row so the rollcall is eligible for re-close.
+    # game_closures is metadata (not a money table) so deletion is allowed.
+    # The compensating dues_entries + fund_transactions above stay as the
+    # complete audit trail.
+    db.delete_game_closure(rollcall_id)
+
     db.log_admin_action(chat_id, admin_uid, admin_name, "cancel_game_dues",
                         target_name=closure["title"])
 
@@ -849,7 +855,8 @@ def cancel_game_credit(
         "announcement": (
             f"🔁 Cancelled dues for '{closure['title']}': "
             f"{reversed_count} share entries reversed. "
-            f"Payments already recorded remain as credits."
+            f"Payments already recorded remain as credits.\n"
+            f"Run /ef <amount> then /close_game to re-close with corrected figures."
         ),
     }
 

@@ -217,6 +217,62 @@ def test_get_rollcall_in_users_includes_proxy_owner():
 
 # ── schema reconciler backfills dues columns ─────────────────────────────────
 
+# ── penalty_tiers ────────────────────────────────────────────────────────────
+
+def test_upsert_and_get_penalty_tiers():
+    chat = CHAT - 10
+    db.upsert_penalty_tier(chat, "ditch", 200, "no-show")
+    db.upsert_penalty_tier(chat, "late_short", 50, "under 15 min")
+    tiers = db.get_penalty_tiers(chat)
+    by_name = {t["name"]: t for t in tiers}
+    assert "ditch" in by_name
+    assert by_name["ditch"]["amount"] == 200
+    assert "late_short" in by_name
+    assert by_name["late_short"]["amount"] == 50
+
+
+def test_upsert_updates_existing_tier():
+    chat = CHAT - 11
+    db.upsert_penalty_tier(chat, "ditch", 200, "no-show")
+    db.upsert_penalty_tier(chat, "ditch", 250, "updated no-show")
+    tier = db.get_penalty_tier(chat, "ditch")
+    assert tier is not None
+    assert tier["amount"] == 250
+
+
+def test_get_penalty_tier_case_insensitive():
+    chat = CHAT - 12
+    db.upsert_penalty_tier(chat, "Late_Short", 50, None)
+    assert db.get_penalty_tier(chat, "late_short") is not None
+    assert db.get_penalty_tier(chat, "LATE_SHORT") is not None
+
+
+def test_delete_penalty_tier():
+    chat = CHAT - 13
+    db.upsert_penalty_tier(chat, "ditch", 200, None)
+    assert db.delete_penalty_tier(chat, "ditch") is True
+    assert db.get_penalty_tier(chat, "ditch") is None
+    assert db.delete_penalty_tier(chat, "ditch") is False  # already gone
+
+
+def test_get_nth_game_closure():
+    chat = CHAT - 14
+    rc1 = _mk_rollcall(chat_id=chat, title="Game 1")
+    rc2 = _mk_rollcall(chat_id=chat, title="Game 2")
+    rc3 = _mk_rollcall(chat_id=chat, title="Game 3")
+    _close(rc1, chat_id=chat, per_head=90)
+    _close(rc2, chat_id=chat, per_head=100)
+    _close(rc3, chat_id=chat, per_head=110)
+    # n=0 → latest (Game 3)
+    assert db.get_nth_game_closure(chat, 0)["per_head"] == 110
+    # n=1 → second most recent (Game 2)
+    assert db.get_nth_game_closure(chat, 1)["per_head"] == 100
+    # n=2 → oldest (Game 1)
+    assert db.get_nth_game_closure(chat, 2)["per_head"] == 90
+    # n=3 → none
+    assert db.get_nth_game_closure(chat, 3) is None
+
+
 def test_reconciler_adds_dues_columns_to_old_schema():
     path = tempfile.mktemp(suffix=".db")
     conn = sqlite3.connect(path)

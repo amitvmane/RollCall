@@ -203,10 +203,6 @@ class TestDuesSettings(unittest.TestCase):
             get_or_create_chat=MagicMock(return_value={
                 "upi_vpa": "test@upi",
                 "dues_round_step": 10,
-                "penalty_late_t1": 50,
-                "penalty_late_t2": 75,
-                "penalty_late_t3": 100,
-                "penalty_ditch": 200,
             }),
         )
 
@@ -231,19 +227,6 @@ class TestDuesSettings(unittest.TestCase):
             with self.assertRaises(incorrectParameter):
                 set_upi(1, "justnodomain", 99, "Admin")
 
-    def test_set_penalty_tiers_valid(self):
-        from services.dues import set_penalty_tiers
-        with self._patch_db():
-            r = set_penalty_tiers(1, 50, 75, 100, 200, 99, "Admin")
-        self.assertEqual(r["penalty_late_t1"], 50)
-
-    def test_set_penalty_tiers_invalid_order(self):
-        from exceptions import incorrectParameter
-        from services.dues import set_penalty_tiers
-        with self._patch_db():
-            with self.assertRaises(incorrectParameter):
-                set_penalty_tiers(1, 100, 75, 50, 200, 99, "Admin")  # t1 > t2
-
     def test_set_round_step_valid(self):
         from services.dues import set_round_step
         with self._patch_db():
@@ -262,7 +245,7 @@ class TestDuesSettings(unittest.TestCase):
         with self._patch_db():
             s = get_dues_settings(1)
         self.assertEqual(s["dues_round_step"], 10)
-        self.assertEqual(s["penalty_ditch"], 200)
+        self.assertNotIn("penalty_ditch", s)  # penalty tiers live in penalty_tiers table now
 
 
 # ── close_game ───────────────────────────────────────────────────────────────
@@ -271,10 +254,6 @@ _CLOSE_GAME_DB_DEFAULTS = dict(
     get_or_create_chat=MagicMock(return_value={
         "upi_vpa": None,
         "dues_round_step": 10,
-        "penalty_late_t1": 50,
-        "penalty_late_t2": 75,
-        "penalty_late_t3": 100,
-        "penalty_ditch": 200,
     }),
     get_game_closure=MagicMock(return_value=None),   # not yet closed
     get_fund_balance=MagicMock(return_value=0),
@@ -438,8 +417,8 @@ class TestCloseGameDoubleClose(unittest.IsolatedAsyncioTestCase):
 
 class TestCloseGameProxyAttribution(unittest.IsolatedAsyncioTestCase):
 
-    async def test_owned_proxy_charges_owner(self):
-        """Owned proxy → share entry keyed on owner's user_id."""
+    async def test_owned_proxy_is_name_keyed_with_owner_memo(self):
+        """Owned proxy → name-keyed entry (user_id=None), owner referenced in memo."""
         from services.dues import close_game
 
         alice = _make_user("Alice", user_id=101)
@@ -461,10 +440,14 @@ class TestCloseGameProxyAttribution(unittest.IsolatedAsyncioTestCase):
 
         calls = add_dues_entry.call_args_list
         self.assertEqual(len(calls), 2)
-        proxy_call = next(c for c in calls if "proxy: Bob Friend" in (c.args[6] or ""))
-        self.assertEqual(proxy_call.args[2], 202)   # owner user_id
+        # Proxy entry: user_id=None (name-keyed), owner reference in memo
+        proxy_call = next(c for c in calls if c.args[3] == "Bob Friend")
+        self.assertIsNone(proxy_call.args[2])                    # user_id=None
+        memo = proxy_call.args[6] or ""
+        self.assertIn("owner:", memo)                            # owner reference present
+        # Real user entry: user_id=101, no memo
         real_call = next(c for c in calls if c.args[2] == 101)
-        self.assertIsNone(real_call.args[6])          # no memo
+        self.assertIsNone(real_call.args[6])
 
     async def test_unowned_proxy_is_name_keyed(self):
         """Unowned proxy → user_id=None, name-keyed entry."""
@@ -578,18 +561,88 @@ class TestReadServices(unittest.TestCase):
 
 # ── Penalties ─────────────────────────────────────────────────────────────────
 
-class TestMarkLate(unittest.TestCase):
-
-    def _settings(self, t1=50, t2=75, t3=100, ditch=200):
-        return {
-            "upi_vpa": None, "dues_round_step": 10,
-            "penalty_late_t1": t1, "penalty_late_t2": t2,
-            "penalty_late_t3": t3, "penalty_ditch": ditch,
-        }
+class TestPenaltyTiers(unittest.TestCase):
 
     def _patch(self, **kw):
         defaults = dict(
-            get_or_create_chat=MagicMock(return_value=self._settings()),
+            get_penalty_tiers=MagicMock(return_value=[]),
+            get_penalty_tier=MagicMock(return_value=None),
+            upsert_penalty_tier=MagicMock(return_value=True),
+            delete_penalty_tier=MagicMock(return_value=True),
+            log_admin_action=MagicMock(),
+        )
+        defaults.update(kw)
+        return patch.multiple("services.dues.db", **defaults)
+
+    def test_add_tier_valid(self):
+        from services.dues import add_penalty_tier
+        with self._patch() as _:
+            r = add_penalty_tier(1, "ditch", 200, "no-show", 99, "Admin")
+        self.assertEqual(r["name"], "ditch")
+        self.assertEqual(r["amount"], 200)
+        self.assertIn("ditch", r["announcement"])
+        self.assertIn("₹200", r["announcement"])
+
+    def test_add_tier_zero_amount_raises(self):
+        from exceptions import incorrectParameter
+        from services.dues import add_penalty_tier
+        with self._patch():
+            with self.assertRaises(incorrectParameter):
+                add_penalty_tier(1, "bad", 0, "", 99, "Admin")
+
+    def test_add_tier_empty_name_raises(self):
+        from exceptions import parameterMissing
+        from services.dues import add_penalty_tier
+        with self._patch():
+            with self.assertRaises(parameterMissing):
+                add_penalty_tier(1, "  ", 50, "", 99, "Admin")
+
+    def test_remove_tier_existing(self):
+        from services.dues import remove_penalty_tier
+        with self._patch(delete_penalty_tier=MagicMock(return_value=True)):
+            r = remove_penalty_tier(1, "ditch", 99, "Admin")
+        self.assertIn("ditch", r["announcement"])
+
+    def test_remove_tier_not_found_raises(self):
+        from exceptions import incorrectParameter
+        from services.dues import remove_penalty_tier
+        with self._patch(delete_penalty_tier=MagicMock(return_value=False)):
+            with self.assertRaises(incorrectParameter):
+                remove_penalty_tier(1, "nonexistent", 99, "Admin")
+
+    def test_list_tiers_formats_output(self):
+        from services.dues import list_penalty_tiers
+        tiers = [
+            {"name": "ditch", "amount": 200, "description": "no-show"},
+            {"name": "late_short", "amount": 50, "description": "under 15 min"},
+        ]
+        with self._patch(get_penalty_tiers=MagicMock(return_value=tiers)):
+            r = list_penalty_tiers(1)
+        self.assertIn("ditch", r["announcement"])
+        self.assertIn("₹200", r["announcement"])
+
+    def test_seed_defaults_only_if_empty(self):
+        from services.dues import seed_default_penalty_tiers
+        upsert = MagicMock()
+        with self._patch(get_penalty_tiers=MagicMock(return_value=[]), upsert_penalty_tier=upsert):
+            seed_default_penalty_tiers(1)
+        self.assertEqual(upsert.call_count, 3)  # three defaults
+
+    def test_seed_skips_if_tiers_exist(self):
+        from services.dues import seed_default_penalty_tiers
+        upsert = MagicMock()
+        existing = [{"name": "ditch", "amount": 200, "description": None}]
+        with self._patch(get_penalty_tiers=MagicMock(return_value=existing), upsert_penalty_tier=upsert):
+            seed_default_penalty_tiers(1)
+        upsert.assert_not_called()
+
+
+class TestMarkPenalty(unittest.TestCase):
+
+    def _patch(self, tier=None, **kw):
+        tier = tier or {"name": "ditch", "amount": 200, "description": "no-show"}
+        defaults = dict(
+            get_penalty_tier=MagicMock(return_value=tier),
             get_all_dues_balances=MagicMock(return_value=[]),
             get_active_members=MagicMock(return_value=[
                 {"user_id": 101, "first_name": "Alice", "username": "alice"}
@@ -601,84 +654,31 @@ class TestMarkLate(unittest.TestCase):
         defaults.update(kw)
         return patch.multiple("services.dues.db", **defaults)
 
-    def test_tier_t1_under_15min(self):
-        from services.dues import mark_late
+    def test_charges_correct_amount(self):
+        from services.dues import mark_penalty
         add_dues = MagicMock()
         with self._patch(add_dues_entry=add_dues):
-            r = mark_late(1, "alice", 14, 99, "Admin")
-        self.assertEqual(r["amount"], 50)
-        self.assertIn("14min", r["announcement"])
-
-    def test_tier_t2_at_15min(self):
-        from services.dues import mark_late
-        add_dues = MagicMock()
-        with self._patch(add_dues_entry=add_dues):
-            r = mark_late(1, "alice", 15, 99, "Admin")
-        self.assertEqual(r["amount"], 75)
-
-    def test_tier_t2_at_29min(self):
-        from services.dues import mark_late
-        add_dues = MagicMock()
-        with self._patch(add_dues_entry=add_dues):
-            r = mark_late(1, "alice", 29, 99, "Admin")
-        self.assertEqual(r["amount"], 75)
-
-    def test_tier_t3_at_30min(self):
-        from services.dues import mark_late
-        add_dues = MagicMock()
-        with self._patch(add_dues_entry=add_dues):
-            r = mark_late(1, "alice", 30, 99, "Admin")
-        self.assertEqual(r["amount"], 100)
+            r = mark_penalty(1, "ditch", "alice", 99, "Admin")
+        self.assertEqual(r["amount"], 200)
+        self.assertEqual(r["tier_name"], "ditch")
 
     def test_both_ledgers_written(self):
-        from services.dues import mark_late
+        from services.dues import mark_penalty
         add_dues = MagicMock()
         add_fund = MagicMock()
         with self._patch(add_dues_entry=add_dues, add_fund_transaction=add_fund):
-            mark_late(1, "alice", 20, 99, "Admin")
+            mark_penalty(1, "ditch", "alice", 99, "Admin")
         add_dues.assert_called_once()
         add_fund.assert_called_once()
-        self.assertEqual(add_dues.call_args.args[4], "penalty_late")
+        self.assertEqual(add_dues.call_args.args[4], "penalty")
         self.assertEqual(add_fund.call_args.args[2], "penalty")
 
-
-class TestMarkDitch(unittest.TestCase):
-
-    def _patch(self, **kw):
-        settings = {
-            "upi_vpa": None, "dues_round_step": 10,
-            "penalty_late_t1": 50, "penalty_late_t2": 75,
-            "penalty_late_t3": 100, "penalty_ditch": 200,
-        }
-        defaults = dict(
-            get_or_create_chat=MagicMock(return_value=settings),
-            get_all_dues_balances=MagicMock(return_value=[]),
-            get_active_members=MagicMock(return_value=[
-                {"user_id": 101, "first_name": "Alice", "username": "alice"}
-            ]),
-            add_dues_entry=MagicMock(),
-            add_fund_transaction=MagicMock(),
-            log_admin_action=MagicMock(),
-        )
-        defaults.update(kw)
-        return patch.multiple("services.dues.db", **defaults)
-
-    def test_ditch_amount_from_settings(self):
-        from services.dues import mark_ditch
-        add_dues = MagicMock()
-        with self._patch(add_dues_entry=add_dues):
-            r = mark_ditch(1, "alice", 99, "Admin")
-        self.assertEqual(r["amount"], 200)
-        self.assertEqual(add_dues.call_args.args[4], "penalty_ditch")
-
-    def test_both_ledgers_written(self):
-        from services.dues import mark_ditch
-        add_dues = MagicMock()
-        add_fund = MagicMock()
-        with self._patch(add_dues_entry=add_dues, add_fund_transaction=add_fund):
-            mark_ditch(1, "alice", 99, "Admin")
-        add_dues.assert_called_once()
-        add_fund.assert_called_once()
+    def test_unknown_tier_raises(self):
+        from exceptions import incorrectParameter
+        from services.dues import mark_penalty
+        with self._patch(get_penalty_tier=MagicMock(return_value=None)):
+            with self.assertRaises(incorrectParameter):
+                mark_penalty(1, "nonexistent", "alice", 99, "Admin")
 
 
 class TestWaive(unittest.TestCase):

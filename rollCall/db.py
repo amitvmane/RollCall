@@ -1331,6 +1331,21 @@ def _run_migrations(conn, cursor):
             conn.commit()
         except Exception:
             conn.rollback()
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS penalty_tiers (
+                    id              SERIAL PRIMARY KEY,
+                    chat_id         BIGINT NOT NULL,
+                    name            TEXT NOT NULL,
+                    amount          INTEGER NOT NULL,
+                    description     TEXT DEFAULT NULL,
+                    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(chat_id, name)
+                )
+            """)
+            conn.commit()
+        except Exception:
+            conn.rollback()
     else:
         try:
             cursor.execute("""
@@ -1391,6 +1406,21 @@ def _run_migrations(conn, cursor):
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_fund_transactions_chat ON fund_transactions(chat_id)")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS penalty_tiers (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id         INTEGER NOT NULL,
+                    name            TEXT NOT NULL,
+                    amount          INTEGER NOT NULL,
+                    description     TEXT DEFAULT NULL,
+                    created_at      TEXT NOT NULL,
+                    UNIQUE(chat_id, name)
+                )
+            """)
             conn.commit()
         except Exception:
             conn.rollback()
@@ -5248,6 +5278,33 @@ def get_game_closure(rollcall_id: int) -> Optional[Dict]:
             release_connection(conn)
 
 
+def get_nth_game_closure(chat_id: int, n: int = 0) -> Optional[Dict]:
+    """Return the Nth most recent closure for a chat (0 = latest, 1 = second most recent).
+
+    Used by /cancel_game_dues ::N to target a specific past game by position.
+    """
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"SELECT * FROM game_closures WHERE chat_id = {ph}"
+            f" ORDER BY id DESC LIMIT 1 OFFSET {ph}",
+            (chat_id, n),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except Exception:
+        logging.exception("get_nth_game_closure failed")
+        return None
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
 def get_latest_game_closure(chat_id: int) -> Optional[Dict]:
     """Return the most recent closure for a chat (for /add_adhoc and defaults)."""
     conn = get_connection()
@@ -5612,6 +5669,113 @@ def get_latest_closeable_rollcall(chat_id: int) -> Optional[Dict]:
     except Exception:
         logging.exception("get_latest_closeable_rollcall failed")
         return None
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+# ── penalty_tiers ─────────────────────────────────────────────────────────────
+
+def upsert_penalty_tier(chat_id: int, name: str, amount: int, description: Optional[str] = None) -> bool:
+    """Insert or replace a penalty tier for a chat. name is unique per chat."""
+    import datetime
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        now = datetime.datetime.utcnow().isoformat()
+        if db_type == "postgresql":
+            cursor.execute(
+                f"INSERT INTO penalty_tiers (chat_id, name, amount, description, created_at)"
+                f" VALUES ({ph},{ph},{ph},{ph},{ph})"
+                f" ON CONFLICT (chat_id, name) DO UPDATE SET amount=EXCLUDED.amount, description=EXCLUDED.description",
+                (chat_id, name.strip().lower(), amount, description, now),
+            )
+        else:
+            cursor.execute(
+                f"INSERT OR REPLACE INTO penalty_tiers (chat_id, name, amount, description, created_at)"
+                f" VALUES ({ph},{ph},{ph},{ph},{ph})",
+                (chat_id, name.strip().lower(), amount, description, now),
+            )
+        conn.commit()
+        return True
+    except Exception:
+        logging.exception("upsert_penalty_tier failed")
+        conn.rollback()
+        return False
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def get_penalty_tiers(chat_id: int) -> List[Dict]:
+    """Return all penalty tiers for a chat, ordered by amount ascending."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"SELECT * FROM penalty_tiers WHERE chat_id = {ph} ORDER BY amount ASC",
+            (chat_id,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    except Exception:
+        logging.exception("get_penalty_tiers failed")
+        return []
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def get_penalty_tier(chat_id: int, name: str) -> Optional[Dict]:
+    """Return a single penalty tier by name (case-insensitive)."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"SELECT * FROM penalty_tiers WHERE chat_id = {ph} AND name = {ph}",
+            (chat_id, name.strip().lower()),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except Exception:
+        logging.exception("get_penalty_tier failed")
+        return None
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def delete_penalty_tier(chat_id: int, name: str) -> bool:
+    """Delete a penalty tier by name. Returns True if a row was deleted."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"DELETE FROM penalty_tiers WHERE chat_id = {ph} AND name = {ph}",
+            (chat_id, name.strip().lower()),
+        )
+        deleted = cursor.rowcount > 0
+        conn.commit()
+        return deleted
+    except Exception:
+        logging.exception("delete_penalty_tier failed")
+        conn.rollback()
+        return False
     finally:
         if cursor is not None:
             cursor.close()

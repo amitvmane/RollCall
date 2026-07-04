@@ -436,22 +436,16 @@ COMMANDS = [
         ),
     },
     {
-        "name": "mark_late", "aliases": [], "scope": "admin", "category": "Dues & Fund",
-        "args": "name minutes", "sample": "/mark_late Alice 20",
-        "summary": "Assess a late-arrival penalty",
+        "name": "mark_penalty", "aliases": [], "scope": "admin", "category": "Dues & Fund",
+        "args": "tier_name player_name", "sample": "/mark_penalty ditch Bob",
+        "summary": "Charge a named penalty tier to a player",
         "details": (
-            "Adds a lateness penalty based on minutes:\n"
-            "  <15 min → tier 1 (default ₹50)\n"
-            "  15–29 min → tier 2 (default ₹75)\n"
-            "  ≥30 min → tier 3 (default ₹100)\n\n"
-            "Tiers are configurable via /set_penalties."
+            "Charges the amount defined in the named tier to the player's dues and "
+            "credits the group fund.\n\n"
+            "Use /penalties to see all defined tiers.\n"
+            "Use /add_penalty to create or update a tier.\n\n"
+            "Examples: /mark_penalty ditch Bob  |  /mark_penalty late_short Alice"
         ),
-    },
-    {
-        "name": "mark_ditch", "aliases": [], "scope": "admin", "category": "Dues & Fund",
-        "args": "name", "sample": "/mark_ditch Bob",
-        "summary": "Assess a no-show (ditch) penalty",
-        "details": "Adds the ditch penalty (default ₹200, configurable via /set_penalties).",
     },
     {
         "name": "waive", "aliases": [], "scope": "admin", "category": "Dues & Fund",
@@ -491,13 +485,14 @@ COMMANDS = [
     },
     {
         "name": "cancel_game_dues", "aliases": [], "scope": "admin", "category": "Dues & Fund",
-        "args": "[rollcall_id]", "sample": "/cancel_game_dues",
+        "args": "[::N]", "sample": "/cancel_game_dues",
         "summary": "Reverse all share entries for a closed game",
         "details": (
             "Writes compensating cancel_credit entries to undo share/adhoc charges. "
             "Payments already recorded remain as credits (they genuinely happened). "
             "Use /close_game again to re-close after fixing the event fee or player count.\n\n"
-            "Defaults to the most recently closed game. Pass a rollcall id to target a specific one."
+            "Defaults to the most recently closed game.\n"
+            "Use ::N to target an older game: /cancel_game_dues ::2 cancels the second most recent."
         ),
     },
     {
@@ -535,17 +530,29 @@ COMMANDS = [
         ),
     },
     {
-        "name": "set_penalties", "aliases": [], "scope": "admin", "category": "Dues & Fund",
-        "args": "t1 t2 t3 ditch", "sample": "/set_penalties 50 75 100 200",
-        "summary": "Configure late and ditch penalty amounts",
+        "name": "penalties", "aliases": [], "scope": "admin", "category": "Dues & Fund",
+        "args": "", "sample": "/penalties",
+        "summary": "List all defined penalty tiers",
+        "details": "Shows all named penalty tiers and their amounts. Use /add_penalty to create or update one.",
+    },
+    {
+        "name": "add_penalty", "aliases": [], "scope": "admin", "category": "Dues & Fund",
+        "args": "name amount [description]", "sample": "/add_penalty late_short 50 under 15 min",
+        "summary": "Add or update a penalty tier",
         "details": (
-            "Sets four penalty tiers (all in ₹):\n"
-            "  t1 — arrived <15 min late\n"
-            "  t2 — arrived 15–29 min late\n"
-            "  t3 — arrived ≥30 min late\n"
-            "  ditch — no-show\n\n"
-            "Must satisfy: t1 ≤ t2 ≤ t3 ≤ ditch"
+            "Creates (or updates) a named penalty tier with a fixed ₹ amount.\n"
+            "Names are case-insensitive and stored lowercase.\n\n"
+            "Examples:\n"
+            "  /add_penalty late_short 50 under 15 min late\n"
+            "  /add_penalty ditch 200 no-show\n"
+            "  /add_penalty early_leave 75"
         ),
+    },
+    {
+        "name": "remove_penalty", "aliases": [], "scope": "admin", "category": "Dues & Fund",
+        "args": "name", "sample": "/remove_penalty early_leave",
+        "summary": "Remove a penalty tier",
+        "details": "Deletes the named tier. Existing ledger entries using this tier are unaffected.",
     },
     {
         "name": "set_round_step", "aliases": [], "scope": "admin", "category": "Dues & Fund",

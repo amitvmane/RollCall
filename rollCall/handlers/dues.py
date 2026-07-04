@@ -3,14 +3,13 @@ Dues & Treasury handlers.
 
 Commands (all admin-only unless noted):
   /close_game /cg [subsidy] [::N]
-  /mark_late name minutes
-  /mark_ditch name
+  /mark_penalty tier_name player_name
   /waive name amount [reason]
   /set_collector name [paid] [::N]
   /mark_paid /paid name [amount]      — admin OR designated collector
   /reimburse name amount [reason]
   /add_adhoc name
-  /cancel_game_dues [rollcall_id]
+  /cancel_game_dues [::N]
   /my_dues /md                        — user-scoped, own balance only
   /dues                               — admin: full group ledger
   /fund                               — all: fund balance
@@ -18,9 +17,12 @@ Commands (all admin-only unless noted):
   /log_expense /le amount description
   /fund_topup amount [description]
   /remind_dues
+  /penalties                          — list defined penalty tiers
+  /add_penalty name amount [description]
+  /remove_penalty name
   /set_upi vpa@bank
-  /set_penalties t1 t2 t3 ditch
   /set_round_step step
+  /enable_dues / /disable_dues
 
 Ledger mutation announcements always post, even in shh mode (durability).
 """
@@ -115,56 +117,32 @@ async def close_game(message):
         await reply_error(message, e)
 
 
-# ── /mark_late ───────────────────────────────────────────────────────────────
+# ── /mark_penalty ────────────────────────────────────────────────────────────
 
-@bot.message_handler(func=lambda m: _cmd(m.text) == "/mark_late")
-async def mark_late(message):
+@bot.message_handler(func=lambda m: _cmd(m.text) == "/mark_penalty")
+async def mark_penalty(message):
     try:
         if await admin_rights(message, manager) is False:
-            raise insufficientPermissions("Admin only: /mark_late")
+            raise insufficientPermissions("Admin only: /mark_penalty")
         cid = message.chat.id
         _require_dues_enabled(cid)
         args = _parse_args(message.text)
         if len(args) < 2:
-            raise parameterMissing("Usage: /mark_late <name> <minutes>")
-        try:
-            minutes = int(args[-1])
-        except ValueError:
-            raise incorrectParameter("Minutes must be a whole number. Example: /mark_late Alice 20")
-        name = " ".join(args[:-1])
+            raise parameterMissing(
+                "Usage: /mark_penalty <tier_name> <player_name>\n"
+                "Example: /mark_penalty late_short Alice\n"
+                "Use /penalties to see defined tiers."
+            )
+        tier_name = args[0]
+        player_name = " ".join(args[1:])
 
         async with manager.get_chat_write_lock(cid):
-            result = dues_svc.mark_late(
-                cid, name, minutes,
+            result = dues_svc.mark_penalty(
+                cid, tier_name, player_name,
                 message.from_user.id,
                 message.from_user.first_name or "Admin",
             )
-        await bot.send_message(cid, result["announcement"])
-    except Exception as e:
-        await reply_error(message, e)
-
-
-# ── /mark_ditch ───────────────────────────────────────────────────────────────
-
-@bot.message_handler(func=lambda m: _cmd(m.text) == "/mark_ditch")
-async def mark_ditch(message):
-    try:
-        if await admin_rights(message, manager) is False:
-            raise insufficientPermissions("Admin only: /mark_ditch")
-        cid = message.chat.id
-        _require_dues_enabled(cid)
-        args = _parse_args(message.text)
-        if not args:
-            raise parameterMissing("Usage: /mark_ditch <name>")
-        name = " ".join(args)
-
-        async with manager.get_chat_write_lock(cid):
-            result = dues_svc.mark_ditch(
-                cid, name,
-                message.from_user.id,
-                message.from_user.first_name or "Admin",
-            )
-        await bot.send_message(cid, result["announcement"])
+        await bot.send_message(cid, result["announcement"], parse_mode="Markdown")
     except Exception as e:
         await reply_error(message, e)
 
@@ -333,19 +311,17 @@ async def cancel_game_dues(message):
         cid = message.chat.id
         _require_dues_enabled(cid)
         args = _parse_args(message.text)
-        rollcall_id = None
-        if args:
-            try:
-                rollcall_id = int(args[0])
-            except ValueError:
-                raise incorrectParameter("Rollcall id must be a number. Example: /cancel_game_dues 42")
+        # ::N suffix — 0-based index into closures ordered newest-first.
+        # No suffix (or ::1) → latest; ::2 → second most recent.
+        n_idx, _ = _parse_rc_suffix(args)
 
-        if rollcall_id is None:
-            from db import get_latest_game_closure
-            closure = get_latest_game_closure(cid)
-            if closure is None:
-                raise duesNothingToClose("No closed game found to cancel.")
-            rollcall_id = closure["rollcall_id"]
+        closure = _db.get_nth_game_closure(cid, n_idx)
+        if closure is None:
+            raise duesNothingToClose(
+                "No closed game found to cancel."
+                + (" Use /cancel_game_dues ::2 for an older game." if n_idx == 0 else "")
+            )
+        rollcall_id = closure["rollcall_id"]
 
         async with manager.get_chat_write_lock(cid):
             result = dues_svc.cancel_game_credit(
@@ -569,30 +545,66 @@ async def set_upi(message):
         await reply_error(message, e)
 
 
-# ── /set_penalties ────────────────────────────────────────────────────────────
+# ── /penalties ───────────────────────────────────────────────────────────────
 
-@bot.message_handler(func=lambda m: _cmd(m.text) == "/set_penalties")
-async def set_penalties(message):
+@bot.message_handler(func=lambda m: _cmd(m.text) == "/penalties")
+async def penalties(message):
+    try:
+        _require_dues_enabled(message.chat.id)
+        result = dues_svc.list_penalty_tiers(message.chat.id)
+        await bot.send_message(message.chat.id, result["announcement"], parse_mode="Markdown")
+    except Exception as e:
+        await reply_error(message, e)
+
+
+# ── /add_penalty ──────────────────────────────────────────────────────────────
+
+@bot.message_handler(func=lambda m: _cmd(m.text) == "/add_penalty")
+async def add_penalty(message):
     try:
         if await admin_rights(message, manager) is False:
-            raise insufficientPermissions("Admin only: /set_penalties")
+            raise insufficientPermissions("Admin only: /add_penalty")
         cid = message.chat.id
         args = _parse_args(message.text)
-        if len(args) < 4:
+        if len(args) < 2:
             raise parameterMissing(
-                "Usage: /set_penalties <t1> <t2> <t3> <ditch>\n"
-                "Example: /set_penalties 50 75 100 200"
+                "Usage: /add_penalty <name> <amount> [description]\n"
+                "Example: /add_penalty late_short 50 under 15 min late"
             )
         try:
-            t1, t2, t3, ditch = int(args[0]), int(args[1]), int(args[2]), int(args[3])
+            amount = int(args[1])
         except ValueError:
-            raise incorrectParameter("All four penalty values must be whole numbers (₹).")
-        result = dues_svc.set_penalty_tiers(
-            cid, t1, t2, t3, ditch,
+            raise incorrectParameter("Amount must be a whole number (₹). Example: /add_penalty ditch 200")
+        name = args[0]
+        description = " ".join(args[2:]) if len(args) > 2 else ""
+        result = dues_svc.add_penalty_tier(
+            cid, name, amount, description,
             message.from_user.id,
             message.from_user.first_name or "Admin",
         )
-        await bot.send_message(cid, result["announcement"])
+        await bot.send_message(cid, result["announcement"], parse_mode="Markdown")
+    except Exception as e:
+        await reply_error(message, e)
+
+
+# ── /remove_penalty ───────────────────────────────────────────────────────────
+
+@bot.message_handler(func=lambda m: _cmd(m.text) == "/remove_penalty")
+async def remove_penalty(message):
+    try:
+        if await admin_rights(message, manager) is False:
+            raise insufficientPermissions("Admin only: /remove_penalty")
+        cid = message.chat.id
+        args = _parse_args(message.text)
+        if not args:
+            raise parameterMissing("Usage: /remove_penalty <tier_name>")
+        name = args[0]
+        result = dues_svc.remove_penalty_tier(
+            cid, name,
+            message.from_user.id,
+            message.from_user.first_name or "Admin",
+        )
+        await bot.send_message(cid, result["announcement"], parse_mode="Markdown")
     except Exception as e:
         await reply_error(message, e)
 
@@ -631,14 +643,18 @@ async def enable_dues(message):
             raise insufficientPermissions("Admin only: /enable_dues")
         cid = message.chat.id
         _db.update_chat_settings(cid, dues_enabled=1)
+        dues_svc.seed_default_penalty_tiers(cid)
         await bot.send_message(
             cid,
             "✅ *Dues & Treasury enabled* for this group.\n\n"
-            "Setup commands (run in any order before first /close_game):\n"
+            "Default penalty tiers seeded (edit with /add_penalty / /remove_penalty):\n"
+            "• *late\\_short* ₹50 — under 15 min late\n"
+            "• *late\\_long* ₹100 — 15+ min late\n"
+            "• *ditch* ₹200 — no-show / absent\n\n"
+            "Other setup commands:\n"
             "• /set_upi `vpa@bank` — UPI address for payment links\n"
-            "• /set_penalties `t1 t2 t3 ditch` — late/ditch amounts (default: 50 75 100 200)\n"
-            "• /set_round_step `step` — per-head rounding (default: 10)\n\n"
-            "Once configured, use /close_game after a game to split the ground fee.",
+            "• /set_round_step `step` — per-head rounding (default: ₹10)\n\n"
+            "Use /close_game after a game to split the ground fee.",
             parse_mode="Markdown",
         )
     except Exception as e:

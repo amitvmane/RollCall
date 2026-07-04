@@ -71,35 +71,21 @@ class TestDuesHandlers(unittest.IsolatedAsyncioTestCase):
         text = self._sent_text()
         self.assertIn("Admin", text)
 
-    async def test_mark_late_admin_denied(self):
-        from handlers.dues import mark_late
+    async def test_mark_penalty_admin_denied(self):
+        from handlers.dues import mark_penalty
         with _admin_denied(), patch("handlers.dues.manager", self.mgr):
-            await mark_late(_msg("/mark_late Alice 20"))
-        text = self._sent_text()
-        self.assertIn("Admin", text)
-
-    async def test_mark_ditch_admin_denied(self):
-        from handlers.dues import mark_ditch
-        with _admin_denied(), patch("handlers.dues.manager", self.mgr):
-            await mark_ditch(_msg("/mark_ditch Alice"))
+            await mark_penalty(_msg("/mark_penalty ditch Alice"))
         text = self._sent_text()
         self.assertIn("Admin", text)
 
     # ── missing params ────────────────────────────────────────────────────────
 
-    async def test_mark_late_missing_args(self):
-        from handlers.dues import mark_late
+    async def test_mark_penalty_missing_args(self):
+        from handlers.dues import mark_penalty
         with _admin_ok(), patch("handlers.dues.manager", self.mgr):
-            await mark_late(_msg("/mark_late"))
+            await mark_penalty(_msg("/mark_penalty"))
         text = self._sent_text()
         self.assertIn("Usage", text)
-
-    async def test_mark_late_bad_minutes(self):
-        from handlers.dues import mark_late
-        with _admin_ok(), patch("handlers.dues.manager", self.mgr):
-            await mark_late(_msg("/mark_late Alice notanumber"))
-        text = self._sent_text()
-        self.assertIn("whole number", text.lower())
 
     async def test_waive_missing_amount(self):
         from handlers.dues import waive
@@ -108,10 +94,10 @@ class TestDuesHandlers(unittest.IsolatedAsyncioTestCase):
         text = self._sent_text()
         self.assertIn("Usage", text)
 
-    async def test_set_penalties_too_few_args(self):
-        from handlers.dues import set_penalties
+    async def test_add_penalty_missing_amount(self):
+        from handlers.dues import add_penalty
         with _admin_ok(), patch("handlers.dues.manager", self.mgr):
-            await set_penalties(_msg("/set_penalties 50 75"))
+            await add_penalty(_msg("/add_penalty"))
         text = self._sent_text()
         self.assertIn("Usage", text)
 
@@ -169,14 +155,14 @@ class TestDuesHandlers(unittest.IsolatedAsyncioTestCase):
         rc_number = call_args.kwargs.get("rc_number", call_args.args[4] if len(call_args.args) > 4 else 0)
         self.assertEqual(rc_number, 1)   # ::2 → 0-based index 1
 
-    async def test_mark_late_posts_announcement(self):
-        from handlers.dues import mark_late
+    async def test_mark_penalty_posts_announcement(self):
+        from handlers.dues import mark_penalty
         with _admin_ok(), \
              patch("handlers.dues.manager", self.mgr), \
-             patch("handlers.dues.dues_svc.mark_late", return_value={
-                 "announcement": "⚠️ Penalty: Alice late 20min → ₹75"
+             patch("handlers.dues.dues_svc.mark_penalty", return_value={
+                 "announcement": "⚠️ Penalty (ditch): Alice → ₹200  _no-show_"
              }):
-            await mark_late(_msg("/mark_late Alice 20"))
+            await mark_penalty(_msg("/mark_penalty ditch Alice"))
         self.assertIn("Penalty", self._sent_text())
 
     async def test_waive_posts_announcement(self):
@@ -274,7 +260,7 @@ class TestDuesHandlers(unittest.IsolatedAsyncioTestCase):
         from handlers.dues import cancel_game_dues
         with _admin_ok(), \
              patch("handlers.dues.manager", self.mgr), \
-             patch("db.get_latest_game_closure", return_value={"rollcall_id": 77}), \
+             patch("handlers.dues._db.get_nth_game_closure", return_value={"rollcall_id": 77}), \
              patch("handlers.dues.dues_svc.cancel_game_credit", return_value={
                  "announcement": "🔁 Cancelled dues for 'Sunday': 3 share entries reversed."
              }):

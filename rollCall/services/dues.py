@@ -112,30 +112,6 @@ def set_upi(chat_id: int, vpa: str, admin_uid: int, admin_name: str) -> dict:
     return {"upi_vpa": vpa, "announcement": f"💳 UPI VPA set: `{vpa}`"}
 
 
-def set_penalty_tiers(
-    chat_id: int,
-    t1: int, t2: int, t3: int, ditch: int,
-    admin_uid: int, admin_name: str,
-) -> dict:
-    """Set late/ditch penalty amounts (₹)."""
-    if not (0 < t1 <= t2 <= t3 <= ditch):
-        raise incorrectParameter(
-            "Penalty tiers must satisfy: 0 < t1 ≤ t2 ≤ t3 ≤ ditch"
-        )
-    db.update_chat_settings(
-        chat_id,
-        penalty_late_t1=t1, penalty_late_t2=t2, penalty_late_t3=t3,
-        penalty_ditch=ditch,
-    )
-    db.log_admin_action(
-        chat_id, admin_uid, admin_name, "set_penalties",
-        details=f"t1={t1} t2={t2} t3={t3} ditch={ditch}",
-    )
-    return {
-        "penalty_late_t1": t1, "penalty_late_t2": t2,
-        "penalty_late_t3": t3, "penalty_ditch": ditch,
-        "announcement": f"⚙️ Penalty tiers updated: <15min ₹{t1} | 15–29min ₹{t2} | ≥30min ₹{t3} | ditch ₹{ditch}",
-    }
 
 
 def set_round_step(chat_id: int, step: int, admin_uid: int, admin_name: str) -> dict:
@@ -153,10 +129,6 @@ def get_dues_settings(chat_id: int) -> dict:
     return {
         "upi_vpa": row.get("upi_vpa"),
         "dues_round_step": row.get("dues_round_step") or 10,
-        "penalty_late_t1": row.get("penalty_late_t1") or 50,
-        "penalty_late_t2": row.get("penalty_late_t2") or 75,
-        "penalty_late_t3": row.get("penalty_late_t3") or 100,
-        "penalty_ditch": row.get("penalty_ditch") or 200,
     }
 
 
@@ -176,37 +148,58 @@ def _parse_ground_cost(event_fee) -> int:
 
 def _in_list_from_active_rc(rc) -> list[dict]:
     """Build a flat list of IN members from the in-memory RollCall object."""
+    # uid → display name map for owner reference in proxy memos
+    uid_to_name = {}
+    for u in rc.inList:
+        uid = u.user_id if isinstance(u.user_id, int) else None
+        if uid is not None:
+            uid_to_name[uid] = u.name or u.first_name or str(uid)
+
     members = []
     for u in rc.inList:
         uid = u.user_id if isinstance(u.user_id, int) else None
         name = u.name or u.first_name or str(uid)
         if uid is None:
-            # proxy user — look up owner from rc.proxy_owners
             owner_id = None
             if hasattr(rc, "proxy_owners") and rc.proxy_owners:
                 owner_id = rc.proxy_owners.get(u.name)
-            members.append({"user_id": None, "member_name": name, "proxy_owner_id": owner_id})
+            owner_name = uid_to_name.get(owner_id) if owner_id else None
+            members.append({
+                "user_id": None, "member_name": name,
+                "proxy_owner_id": owner_id, "proxy_owner_name": owner_name,
+            })
         else:
-            members.append({"user_id": uid, "member_name": name, "proxy_owner_id": None})
+            members.append({
+                "user_id": uid, "member_name": name,
+                "proxy_owner_id": None, "proxy_owner_name": None,
+            })
     return members
 
 
 def _in_list_from_db(rollcall_id: int) -> list[dict]:
     """Build a flat list of IN members from a persisted (ended) rollcall."""
     rows = db.get_rollcall_in_users(rollcall_id)
+    uid_to_name = {
+        r["user_id"]: (r.get("first_name") or str(r["user_id"]))
+        for r in rows if r.get("user_id") is not None
+    }
     members = []
     for r in rows:
         if r.get("proxy_name") is not None:
+            owner_id = r.get("proxy_owner_id")
+            owner_name = uid_to_name.get(owner_id) if owner_id else None
             members.append({
                 "user_id": None,
                 "member_name": r["proxy_name"],
-                "proxy_owner_id": r.get("proxy_owner_id"),
+                "proxy_owner_id": owner_id,
+                "proxy_owner_name": owner_name,
             })
         else:
             members.append({
                 "user_id": r["user_id"],
                 "member_name": r.get("first_name") or str(r["user_id"]),
                 "proxy_owner_id": None,
+                "proxy_owner_name": None,
             })
     return members
 
@@ -331,24 +324,25 @@ async def close_game(
         uid = m["user_id"]
         name = m["member_name"]
         owner_id = m.get("proxy_owner_id")
+        owner_name = m.get("proxy_owner_name")
 
         if uid is not None:
-            # Real user
+            # Real user — keyed by user_id
             db.add_dues_entry(
                 chat_id, rc_db_id, uid, name,
                 "share", per_head, None, admin_uid, admin_name,
             )
-        elif owner_id is not None:
-            # Owned proxy — charge owner, memo records proxy name
-            db.add_dues_entry(
-                chat_id, rc_db_id, owner_id, name,
-                "share", per_head, f"proxy: {name}", admin_uid, admin_name,
-            )
         else:
-            # Unowned proxy — name-keyed entry
+            # All proxies — name-keyed (user_id=None).
+            # Owned proxy: memo references the responsible owner so the group
+            # knows who to follow up with; they settle privately.
+            if owner_id is not None:
+                memo = f"owner: {owner_name}" if owner_name else f"owner: uid:{owner_id}"
+            else:
+                memo = None
             db.add_dues_entry(
                 chat_id, rc_db_id, None, name,
-                "share", per_head, None, admin_uid, admin_name,
+                "share", per_head, memo, admin_uid, admin_name,
             )
 
     # ── Collector reimbursement (if they fronted ground cost) ────────────────
@@ -433,86 +427,119 @@ def fund_history(chat_id: int, limit: int = 15, offset: int = 0) -> dict:
     return {"transactions": txns, "total": total, "limit": limit, "offset": offset}
 
 
-# ── Penalties ─────────────────────────────────────────────────────────────────
+# ── Penalty tiers (user-defined, n tiers) ────────────────────────────────────
 
-def _penalty_for_minutes(settings: dict, minutes: int) -> int:
-    """Return ₹ penalty based on lateness duration and chat penalty tiers."""
-    if minutes < 15:
-        return settings["penalty_late_t1"]
-    if minutes < 30:
-        return settings["penalty_late_t2"]
-    return settings["penalty_late_t3"]
+def seed_default_penalty_tiers(chat_id: int) -> None:
+    """Seed default penalty tiers if none exist yet (called on /enable_dues)."""
+    if db.get_penalty_tiers(chat_id):
+        return  # already configured — don't overwrite on re-enable
+    for name, amount, desc in [
+        ("late_short", 50,  "under 15 min late"),
+        ("late_long",  100, "15+ min late"),
+        ("ditch",      200, "no-show / absent"),
+    ]:
+        db.upsert_penalty_tier(chat_id, name, amount, desc)
 
 
-def mark_late(
+def add_penalty_tier(
     chat_id: int,
-    token: str,
-    minutes: int,
+    name: str,
+    amount: int,
+    description: str,
     admin_uid: int,
     admin_name: str,
-    rollcall_id: int | None = None,
 ) -> dict:
-    """Assess a late-arrival penalty against a member.
-
-    Amount is determined by chat tier settings (<15min → t1, 15–29 → t2, ≥30 → t3).
-    Writes both a dues entry and a fund penalty transaction.
-    """
-    settings = get_dues_settings(chat_id)
-    all_names = [r["member_name"] for r in db.get_all_dues_balances(chat_id, nonzero_only=False)]
-    member = _resolve_member(chat_id, token, dues_names=all_names)
-    amount = _penalty_for_minutes(settings, minutes)
-
-    db.add_dues_entry(
-        chat_id, rollcall_id, member["user_id"], member["member_name"],
-        "penalty_late", amount,
-        f"late {minutes}min", admin_uid, admin_name,
-    )
-    db.add_fund_transaction(
-        chat_id, rollcall_id, "penalty", amount,
-        f"{member['member_name']} late {minutes}min", admin_uid, admin_name,
-    )
-    db.log_admin_action(chat_id, admin_uid, admin_name, "mark_late",
-                        target_name=member["member_name"], details=f"{minutes}min ₹{amount}")
-
+    """Add or update a named penalty tier."""
+    name = name.strip().lower()
+    if not name:
+        raise parameterMissing("Tier name cannot be empty.")
+    if len(name) > 40:
+        raise incorrectParameter("Tier name must be 40 characters or fewer.")
+    if amount <= 0:
+        raise incorrectParameter("Penalty amount must be a positive integer (₹).")
+    db.upsert_penalty_tier(chat_id, name, amount, description or None)
+    db.log_admin_action(chat_id, admin_uid, admin_name, "add_penalty_tier",
+                        details=f"{name}=₹{amount}")
     return {
-        "member_name": member["member_name"],
-        "user_id": member["user_id"],
-        "amount": amount,
-        "minutes": minutes,
-        "announcement": f"⚠️ Penalty: {member['member_name']} late {minutes}min → ₹{amount}",
+        "name": name, "amount": amount,
+        "announcement": f"⚙️ Penalty tier *{name}*: ₹{amount}" +
+                        (f" — {description}" if description else ""),
     }
 
 
-def mark_ditch(
+def remove_penalty_tier(
     chat_id: int,
+    name: str,
+    admin_uid: int,
+    admin_name: str,
+) -> dict:
+    """Remove a penalty tier by name."""
+    name = name.strip().lower()
+    deleted = db.delete_penalty_tier(chat_id, name)
+    if not deleted:
+        raise incorrectParameter(
+            f"Tier '{name}' not found. Use /penalties to see defined tiers."
+        )
+    db.log_admin_action(chat_id, admin_uid, admin_name, "remove_penalty_tier", details=name)
+    return {"name": name, "announcement": f"🗑 Penalty tier *{name}* removed."}
+
+
+def list_penalty_tiers(chat_id: int) -> dict:
+    """Return all penalty tiers as a formatted announcement."""
+    tiers = db.get_penalty_tiers(chat_id)
+    if not tiers:
+        lines = ["No penalty tiers defined. Use /add_penalty to create one."]
+    else:
+        lines = ["📋 *Penalty tiers:*"]
+        for t in tiers:
+            desc = f" — {t['description']}" if t.get("description") else ""
+            lines.append(f"  • *{t['name']}*: ₹{t['amount']}{desc}")
+        lines.append("\nUse: /mark_penalty <tier> <name>")
+    return {"tiers": tiers, "announcement": "\n".join(lines)}
+
+
+def mark_penalty(
+    chat_id: int,
+    tier_name: str,
     token: str,
     admin_uid: int,
     admin_name: str,
     rollcall_id: int | None = None,
 ) -> dict:
-    """Assess a no-show (ditch) penalty against a member."""
-    settings = get_dues_settings(chat_id)
+    """Assess a named penalty tier against a member.
+
+    Writes a dues entry (entry_type='penalty', memo=tier_name) and a fund
+    penalty transaction.
+    """
+    tier = db.get_penalty_tier(chat_id, tier_name)
+    if tier is None:
+        raise incorrectParameter(
+            f"Penalty tier '{tier_name}' not found. Use /penalties to see defined tiers."
+        )
     all_names = [r["member_name"] for r in db.get_all_dues_balances(chat_id, nonzero_only=False)]
     member = _resolve_member(chat_id, token, dues_names=all_names)
-    amount = settings["penalty_ditch"]
+    amount = tier["amount"]
+    display_name = tier["name"]
 
     db.add_dues_entry(
         chat_id, rollcall_id, member["user_id"], member["member_name"],
-        "penalty_ditch", amount,
-        "no-show", admin_uid, admin_name,
+        "penalty", amount,
+        display_name, admin_uid, admin_name,
     )
     db.add_fund_transaction(
         chat_id, rollcall_id, "penalty", amount,
-        f"{member['member_name']} ditch", admin_uid, admin_name,
+        f"{member['member_name']} — {display_name}", admin_uid, admin_name,
     )
-    db.log_admin_action(chat_id, admin_uid, admin_name, "mark_ditch",
-                        target_name=member["member_name"])
+    db.log_admin_action(chat_id, admin_uid, admin_name, "mark_penalty",
+                        target_name=member["member_name"], details=f"{display_name} ₹{amount}")
 
+    desc = tier.get("description") or display_name
     return {
         "member_name": member["member_name"],
         "user_id": member["user_id"],
+        "tier_name": display_name,
         "amount": amount,
-        "announcement": f"🚫 Ditch penalty: {member['member_name']} → ₹{amount}",
+        "announcement": f"⚠️ Penalty ({display_name}): {member['member_name']} → ₹{amount}  _{desc}_",
     }
 
 

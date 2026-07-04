@@ -299,6 +299,7 @@ async def close_game(
             subsidy=body.subsidy,
             admin_uid=actor_uid,
             admin_name=actor_name,
+            rc_number=body.rc_number,
         )
 
     return {
@@ -328,13 +329,17 @@ async def cancel_game_dues(
     actor_uid = _require_admin(chat_id, body.id_token)
     actor_name = _actor_name(chat_id, actor_uid)
 
-    closure = _db.get_nth_game_closure(chat_id, body.n_index)
-    if closure is None:
-        raise HTTPException(status_code=404, detail="No game closure found at that position.")
-
-    return dues_svc.cancel_game_credit(
-        chat_id, closure["rollcall_id"], actor_uid, actor_name
-    )
+    async with _mgr.get_chat_write_lock(chat_id):
+        # Fetch inside the lock so a concurrent close_game cannot shift ordering
+        # between the lookup and the reversal, and to prevent double-reversal
+        # from two concurrent API calls on the same game.
+        closure = _db.get_nth_game_closure(chat_id, body.n_index)
+        if closure is None:
+            raise HTTPException(status_code=404, detail="No game closure found at that position.")
+        result = dues_svc.cancel_game_credit(
+            chat_id, closure["rollcall_id"], actor_uid, actor_name
+        )
+    return result
 
 
 # ── Penalty, payment, and adjustment ops ─────────────────────────────────────
@@ -450,9 +455,10 @@ async def set_collector(
     actor_uid = _require_admin(chat_id, body.id_token)
     actor_name = _actor_name(chat_id, actor_uid)
 
-    return dues_svc.set_collector(
-        chat_id, body.member_name, body.paid_ground, actor_uid, actor_name
-    )
+    async with _mgr.get_chat_write_lock(chat_id):
+        return dues_svc.set_collector(
+            chat_id, body.member_name, body.paid_ground, actor_uid, actor_name
+        )
 
 
 # ── Fund management ───────────────────────────────────────────────────────────

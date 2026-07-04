@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 class DuesCloseGameRequest(BaseModel):
     id_token: str = Field(..., description="Signed identity token of the admin")
     subsidy: int = Field(0, ge=0, description="Amount to subsidise from the group fund (₹)")
+    rc_number: int = Field(0, ge=0, description="Which active rollcall to close: 0 = first, 1 = second, … (for groups with multiple simultaneous rollcalls)")
 
 
 class DuesMarkPenaltyRequest(BaseModel):

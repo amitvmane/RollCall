@@ -1310,6 +1310,7 @@ def _run_migrations(conn, cursor):
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_dues_entries_chat ON dues_entries(chat_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_dues_entries_rollcall ON dues_entries(rollcall_id)")
             conn.commit()
         except Exception:
             conn.rollback()
@@ -1328,6 +1329,7 @@ def _run_migrations(conn, cursor):
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_fund_transactions_chat ON fund_transactions(chat_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_fund_transactions_rollcall ON fund_transactions(rollcall_id)")
             conn.commit()
         except Exception:
             conn.rollback()
@@ -1388,6 +1390,7 @@ def _run_migrations(conn, cursor):
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_dues_entries_chat ON dues_entries(chat_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_dues_entries_rollcall ON dues_entries(rollcall_id)")
             conn.commit()
         except Exception:
             conn.rollback()
@@ -1406,6 +1409,7 @@ def _run_migrations(conn, cursor):
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_fund_transactions_chat ON fund_transactions(chat_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_fund_transactions_rollcall ON fund_transactions(rollcall_id)")
             conn.commit()
         except Exception:
             conn.rollback()
@@ -5627,6 +5631,28 @@ def get_fund_transactions(chat_id: int, limit: int = 15, offset: int = 0) -> Lis
             release_connection(conn)
 
 
+def get_fund_transactions_for_rollcall(rollcall_id: int) -> List[Dict]:
+    """All fund transactions attached to one rollcall (for cancellation reversal)."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"SELECT * FROM fund_transactions WHERE rollcall_id = {ph} ORDER BY id ASC",
+            (rollcall_id,),
+        )
+        return [dict(r) for r in cursor.fetchall()]
+    except Exception:
+        logging.exception("get_fund_transactions_for_rollcall failed")
+        return []
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
 def count_fund_transactions(chat_id: int) -> int:
     conn = get_connection()
     cursor = None
@@ -5661,7 +5687,7 @@ def get_latest_closeable_rollcall(chat_id: int) -> Optional[Dict]:
                   AND r.is_active = {active_false}
                   AND COALESCE(r.is_cancelled, {active_false}) = {active_false}
                   AND gc.id IS NULL
-                ORDER BY r.ended_at DESC LIMIT 1""",
+                ORDER BY r.ended_at IS NULL ASC, r.ended_at DESC, r.id DESC LIMIT 1""",
             (chat_id,),
         )
         row = cursor.fetchone()

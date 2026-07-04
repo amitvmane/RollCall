@@ -239,10 +239,18 @@ async def close_game(
     collector_paid_ground: int = 0
     end_result: dict | None = None
 
+    _active_rc_idx: int | None = None  # set when an active RC needs ending post-validation
+
     if active_rollcalls:
-        # Use an active rollcall (close_game ends it)
-        idx = rc_number if rc_number < len(active_rollcalls) else 0
-        rc = manager.get_rollcall(chat_id, idx)
+        # Raise early if the requested rollcall slot doesn't exist (fix: was silently
+        # falling back to idx=0 and closing the wrong game).
+        if rc_number >= len(active_rollcalls):
+            raise incorrectParameter(
+                f"Rollcall ::{rc_number + 1} does not exist. "
+                f"There {'is' if len(active_rollcalls) == 1 else 'are'} "
+                f"{len(active_rollcalls)} active rollcall(s)."
+            )
+        rc = manager.get_rollcall(chat_id, rc_number)
         if rc is None:
             raise duesNothingToClose("No active rollcall found.")
         rc_db_id = getattr(rc, "id", None) or getattr(rc, "db_id", None)
@@ -252,12 +260,7 @@ async def close_game(
         collector_name = getattr(rc, "collector_name", None)
         collector_paid_ground = getattr(rc, "collector_paid_ground", 0) or 0
         in_members = _in_list_from_active_rc(rc)
-
-        # End the rollcall so streak/stats are recorded
-        from services import rollcalls as _rc_svc
-        end_result = await _rc_svc.end_rollcall(
-            chat_id, idx, admin_uid, admin_name
-        )
+        _active_rc_idx = rc_number  # remember for after validation passes
     else:
         # No active rollcall — close latest ended one from DB
         row = db.get_latest_closeable_rollcall(chat_id)
@@ -273,21 +276,22 @@ async def close_game(
         collector_paid_ground = row.get("collector_paid_ground") or 0
         in_members = _in_list_from_db(rc_db_id)
 
-    # ── Double-close guard ───────────────────────────────────────────────────
+    # ── ALL validation before any side effects ───────────────────────────────
+    # end_rollcall is deferred until after this block so a validation failure
+    # does not permanently end the rollcall with no financial record.
+
     if rc_db_id and db.get_game_closure(rc_db_id) is not None:
         raise duesGameAlreadyClosed(
             f"'{title}' has already been financially closed. "
             "Use /cancel_game_dues to reverse it first."
         )
 
-    # ── Validate ground_cost ─────────────────────────────────────────────────
     if ground_cost <= 0:
         raise parameterMissing(
             "Ground cost is not set or couldn't be read from the event fee. "
             "Run /ef <amount> on the rollcall before /close_game."
         )
 
-    # ── Validate subsidy ────────────────────────────────────────────────────
     fund_balance = db.get_fund_balance(chat_id)
     if subsidy < 0 or subsidy > min(ground_cost, fund_balance):
         raise incorrectParameter(
@@ -300,6 +304,14 @@ async def close_game(
         raise parameterMissing("No players were IN for this game — cannot split costs.")
 
     per_head, remainder = compute_shares(ground_cost, subsidy, in_count, step)
+
+    # ── End active rollcall NOW — all validation passed ──────────────────────
+    end_result: dict | None = None
+    if _active_rc_idx is not None:
+        from services import rollcalls as _rc_svc
+        end_result = await _rc_svc.end_rollcall(
+            chat_id, _active_rc_idx, admin_uid, admin_name
+        )
 
     # ── Write closure row ────────────────────────────────────────────────────
     closure_id = db.create_game_closure(
@@ -812,11 +824,13 @@ def cancel_game_credit(
             )
             reversed_count += 1
 
-    # Reverse fund transactions for this rollcall (rounding, subsidy)
-    # We write a single net-reversal entry so fund balance returns to pre-game state.
-    fund_txns = db.get_fund_transactions(chat_id, limit=1000)
-    rc_fund_txns = [t for t in fund_txns if t.get("rollcall_id") == rollcall_id
-                    and t["txn_type"] in ("rounding", "subsidy")]
+    # Reverse fund transactions for this rollcall.
+    # Uses a targeted rollcall-scoped query (not a chat-wide scan with a limit)
+    # so cancellation is correct even on groups with thousands of transactions.
+    # "adjustment" covers add_adhoc income; "penalty" entries stand independently.
+    all_rc_fund_txns = db.get_fund_transactions_for_rollcall(rollcall_id)
+    rc_fund_txns = [t for t in all_rc_fund_txns
+                    if t["txn_type"] in ("rounding", "subsidy", "adjustment")]
     fund_net = sum(t["amount"] for t in rc_fund_txns)
     if fund_net != 0:
         db.add_fund_transaction(

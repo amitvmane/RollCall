@@ -330,7 +330,8 @@ class TestCloseGameActivePath(unittest.IsolatedAsyncioTestCase):
         fund_call = add_fund_transaction.call_args
         self.assertEqual(fund_call.args[3], 30)   # amount = remainder
 
-    async def test_no_event_fee_raises(self):
+    async def test_no_event_fee_raises_without_ending_rollcall(self):
+        """Validation failure must not side-effect: rollcall must NOT be ended."""
         from exceptions import parameterMissing
         from services.dues import close_game
 
@@ -344,8 +345,10 @@ class TestCloseGameActivePath(unittest.IsolatedAsyncioTestCase):
              patch("services.rollcalls.end_rollcall", mock_end):
             with self.assertRaises(parameterMissing):
                 await close_game(1, subsidy=0, admin_uid=1, admin_name="Admin")
+        mock_end.assert_not_called()   # rollcall must survive a failed close
 
-    async def test_subsidy_exceeds_fund_raises(self):
+    async def test_subsidy_exceeds_fund_raises_without_ending_rollcall(self):
+        """Validation failure must not side-effect: rollcall must NOT be ended."""
         from exceptions import incorrectParameter
         from services.dues import close_game
 
@@ -359,6 +362,24 @@ class TestCloseGameActivePath(unittest.IsolatedAsyncioTestCase):
              patch("services.rollcalls.end_rollcall", mock_end):
             with self.assertRaises(incorrectParameter):
                 await close_game(1, subsidy=100, admin_uid=1, admin_name="Admin")
+        mock_end.assert_not_called()
+
+    async def test_rc_number_out_of_range_raises(self):
+        """::N pointing beyond active rollcall count must raise, not silently close ::1."""
+        from exceptions import incorrectParameter
+        from services.dues import close_game
+
+        alice = _make_user("Alice", user_id=101)
+        rc = _make_rc(in_list=[alice], event_fee="600", rc_id=77)
+        mgr = _make_manager([rc])
+        mock_end = AsyncMock(return_value=_end_result())
+
+        with _patch_close(), \
+             patch("services.dues.manager", mgr), \
+             patch("services.rollcalls.end_rollcall", mock_end):
+            with self.assertRaises(incorrectParameter):
+                await close_game(1, subsidy=0, admin_uid=1, admin_name="Admin", rc_number=2)
+        mock_end.assert_not_called()
 
 
 class TestCloseGameEndedPath(unittest.IsolatedAsyncioTestCase):
@@ -904,7 +925,8 @@ class TestCancelGameCredit(unittest.TestCase):
         defaults = dict(
             get_game_closure=MagicMock(return_value=closure),
             get_dues_entries_for_rollcall=MagicMock(return_value=entries),
-            get_fund_transactions=MagicMock(return_value=fund_txns or []),
+            # Targeted per-rollcall query (replaced the chat-wide limit=1000 scan)
+            get_fund_transactions_for_rollcall=MagicMock(return_value=fund_txns or []),
             add_dues_entry=MagicMock(),
             add_fund_transaction=MagicMock(),
             log_admin_action=MagicMock(),
@@ -943,10 +965,10 @@ class TestCancelGameCredit(unittest.TestCase):
         entries = [
             {"user_id": 101, "member_name": "Alice", "entry_type": "share", "amount": 90},
         ]
+        # get_fund_transactions_for_rollcall returns only rows for rollcall_id=77
         fund_txns = [
             {"rollcall_id": 77, "txn_type": "rounding", "amount": 30},
             {"rollcall_id": 77, "txn_type": "subsidy", "amount": -60},
-            {"rollcall_id": 88, "txn_type": "rounding", "amount": 20},  # different rc
         ]
         add_fund = MagicMock()
         with self._patch(
@@ -958,6 +980,37 @@ class TestCancelGameCredit(unittest.TestCase):
         add_fund.assert_called_once()
         self.assertEqual(add_fund.call_args.args[3], 30)
         self.assertEqual(r["fund_reversal"], 30)
+
+    def test_adhoc_adjustment_reversed(self):
+        """add_adhoc writes txn_type='adjustment' — must be reversed on cancel."""
+        from services.dues import cancel_game_credit
+        closure = {"rollcall_id": 77, "title": "Sunday"}
+        entries = [
+            {"user_id": None, "member_name": "Guest", "entry_type": "adhoc", "amount": 90},
+        ]
+        fund_txns = [
+            {"rollcall_id": 77, "txn_type": "adjustment", "amount": 90},
+        ]
+        add_fund = MagicMock()
+        with self._patch(closure=closure, entries=entries, fund_txns=fund_txns,
+                         add_fund_transaction=add_fund):
+            r = cancel_game_credit(1, 77, 99, "Admin")
+        add_fund.assert_called_once()
+        self.assertEqual(add_fund.call_args.args[3], -90)  # reversed
+
+    def test_penalty_fund_txn_not_reversed(self):
+        """Penalty fund entries are independent of game cancellation and must stand."""
+        from services.dues import cancel_game_credit
+        closure = {"rollcall_id": 77, "title": "Sunday"}
+        entries = []
+        fund_txns = [
+            {"rollcall_id": 77, "txn_type": "penalty", "amount": 200},
+        ]
+        add_fund = MagicMock()
+        with self._patch(closure=closure, entries=entries, fund_txns=fund_txns,
+                         add_fund_transaction=add_fund):
+            cancel_game_credit(1, 77, 99, "Admin")
+        add_fund.assert_not_called()
 
     def test_payments_remain_as_credits(self):
         """Existing payment entries are intentionally NOT reversed."""

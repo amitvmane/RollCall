@@ -315,17 +315,17 @@ async def cancel_game_dues(message):
         # No suffix (or ::1) → latest; ::2 → second most recent.
         n_idx, _ = _parse_rc_suffix(args)
 
-        closure = _db.get_nth_game_closure(cid, n_idx)
-        if closure is None:
-            raise duesNothingToClose(
-                "No closed game found to cancel."
-                + (" Use /cancel_game_dues ::2 for an older game." if n_idx == 0 else "")
-            )
-        rollcall_id = closure["rollcall_id"]
-
         async with manager.get_chat_write_lock(cid):
+            # Fetch the target closure inside the lock so a concurrent /close_game
+            # cannot shift ordering between fetch and reversal.
+            closure = _db.get_nth_game_closure(cid, n_idx)
+            if closure is None:
+                raise duesNothingToClose(
+                    "No closed game found to cancel."
+                    + (" Use /cancel_game_dues ::2 for an older game." if n_idx == 0 else "")
+                )
             result = dues_svc.cancel_game_credit(
-                cid, rollcall_id,
+                cid, closure["rollcall_id"],
                 message.from_user.id,
                 message.from_user.first_name or "Admin",
             )
@@ -550,7 +550,9 @@ async def set_upi(message):
 @bot.message_handler(func=lambda m: _cmd(m.text) == "/penalties")
 async def penalties(message):
     try:
-        _require_dues_enabled(message.chat.id)
+        # No dues-enabled guard: /penalties is a setup-info command so admins can
+        # review tiers before or after enabling dues, consistent with /add_penalty
+        # and /remove_penalty which also bypass the guard.
         result = dues_svc.list_penalty_tiers(message.chat.id)
         await bot.send_message(message.chat.id, result["announcement"], parse_mode="Markdown")
     except Exception as e:

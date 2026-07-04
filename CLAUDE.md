@@ -36,6 +36,15 @@ CI runs the same script as the `Smoke (real-import boot check)` job. Unit tests 
 
 Prefer `logging.exception("context")` inside `except` blocks — it captures the traceback automatically. Do not use `traceback.format_exc()` interpolation. The bot supports `STRUCTURED_LOGS=true` to emit one-line JSON to stdout for log aggregators, and `SENTRY_DSN=...` (with `sentry-sdk` installed as an optional dep) for error reporting.
 
+## Dues & Treasury ledger rule
+
+`dues_entries` and `fund_transactions` are **append-only**. Never `UPDATE` or `DELETE` rows in these tables. Corrections are compensating entries (a new row with the opposite-signed amount). This invariant is the durability backbone of the financial system — if data is lost from the DB, the group-chat announcement history (which always posts, even in shh mode) is the reconstruction source.
+
+Consequences:
+- New dues/fund services must use `db.add_dues_entry` / `db.add_fund_transaction` only — never raw UPDATE.
+- Reversals write `cancel_credit` / `adjustment` entry types, not deletes.
+- `game_closures` is NOT append-only (it stores metadata, not money rows) — its `collector_uid` fields may be updated via `update_game_closure_collector`.
+
 ## Environment variables
 
 | Var | Default | Purpose |

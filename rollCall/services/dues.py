@@ -445,12 +445,13 @@ def seed_default_penalty_tiers(chat_id: int) -> None:
     """Seed default penalty tiers if none exist yet (called on /enable_dues)."""
     if db.get_penalty_tiers(chat_id):
         return  # already configured — don't overwrite on re-enable
-    for name, amount, desc in [
-        ("late_short", 50,  "under 15 min late"),
-        ("late_long",  100, "15+ min late"),
-        ("ditch",      200, "no-show / absent"),
+    #  name          amount  description           mins_threshold  is_ditch
+    for name, amount, desc, mins, ditch in [
+        ("late_short", 50,  "under 15 min late",  1,    False),
+        ("late_long",  100, "15+ min late",        15,   False),
+        ("ditch",      200, "no-show / absent",    None, True),
     ]:
-        db.upsert_penalty_tier(chat_id, name, amount, desc)
+        db.upsert_penalty_tier(chat_id, name, amount, desc, mins, ditch)
 
 
 def add_penalty_tier(
@@ -460,8 +461,15 @@ def add_penalty_tier(
     description: str,
     admin_uid: int,
     admin_name: str,
+    late_minutes_threshold: int | None = None,
+    is_ditch: bool = False,
 ) -> dict:
-    """Add or update a named penalty tier."""
+    """Add or update a named penalty tier.
+
+    late_minutes_threshold — minimum minutes late to auto-select this tier
+    via /mark_late.  None means the tier is manual-only.
+    is_ditch — marks this as the no-show tier used by /mark_ditch.
+    """
     name = name.strip().lower()
     if not name:
         raise parameterMissing("Tier name cannot be empty.")
@@ -469,14 +477,21 @@ def add_penalty_tier(
         raise incorrectParameter("Tier name must be 40 characters or fewer.")
     if amount <= 0:
         raise incorrectParameter("Penalty amount must be a positive integer (₹).")
-    db.upsert_penalty_tier(chat_id, name, amount, description or None)
+    if late_minutes_threshold is not None and late_minutes_threshold < 1:
+        raise incorrectParameter("mins threshold must be at least 1.")
+    db.upsert_penalty_tier(chat_id, name, amount, description or None,
+                           late_minutes_threshold, is_ditch)
     db.log_admin_action(chat_id, admin_uid, admin_name, "add_penalty_tier",
                         details=f"{name}=₹{amount}")
-    return {
-        "name": name, "amount": amount,
-        "announcement": f"⚙️ Penalty tier *{name}*: ₹{amount}" +
-                        (f" — {description}" if description else ""),
-    }
+
+    parts = [f"⚙️ Penalty tier *{name}*: ₹{amount}"]
+    if description:
+        parts.append(f"— {description}")
+    if late_minutes_threshold is not None:
+        parts.append(f"(auto: ≥{late_minutes_threshold} min late)")
+    if is_ditch:
+        parts.append("(ditch tier)")
+    return {"name": name, "amount": amount, "announcement": " ".join(parts)}
 
 
 def remove_penalty_tier(
@@ -553,6 +568,51 @@ def mark_penalty(
         "amount": amount,
         "announcement": f"⚠️ Penalty ({display_name}): {member['member_name']} → ₹{amount}  _{desc}_",
     }
+
+
+def mark_late(
+    chat_id: int,
+    token: str,
+    minutes: int,
+    admin_uid: int,
+    admin_name: str,
+    rollcall_id: int | None = None,
+) -> dict:
+    """Assess a late penalty by how many minutes late the player was.
+
+    Picks the tier with the highest late_minutes_threshold that is ≤ minutes.
+    The group configures tiers and thresholds via /add_penalty mins:<N>.
+    """
+    if minutes < 1:
+        raise incorrectParameter("Minutes must be at least 1.")
+    tier = db.get_tier_for_minutes(chat_id, minutes)
+    if tier is None:
+        raise incorrectParameter(
+            f"No late tier covers {minutes} min late. "
+            "Add one with: /add_penalty <name> <amount> mins:<threshold>"
+        )
+    return mark_penalty(chat_id, tier["name"], token, admin_uid, admin_name, rollcall_id)
+
+
+def mark_ditch(
+    chat_id: int,
+    token: str,
+    admin_uid: int,
+    admin_name: str,
+    rollcall_id: int | None = None,
+) -> dict:
+    """Assess the ditch (no-show) penalty for a player.
+
+    Uses whichever tier is flagged is_ditch=1 for this group.
+    Configure with: /add_penalty <name> <amount> ditch <description>
+    """
+    tier = db.get_ditch_tier(chat_id)
+    if tier is None:
+        raise incorrectParameter(
+            "No ditch tier configured. "
+            "Add one with: /add_penalty <name> <amount> ditch <description>"
+        )
+    return mark_penalty(chat_id, tier["name"], token, admin_uid, admin_name, rollcall_id)
 
 
 def waive(

@@ -570,20 +570,113 @@ async def add_penalty(message):
         args = _parse_args(message.text)
         if len(args) < 2:
             raise parameterMissing(
-                "Usage: /add_penalty <name> <amount> [description]\n"
-                "Example: /add_penalty late_short 50 under 15 min late"
+                "Usage: /add_penalty <name> <amount> [mins:<N>] [ditch] [description]\n"
+                "  mins:<N>  — auto-select this tier when ≥N minutes late (/mark_late)\n"
+                "  ditch     — mark as the no-show tier (/mark_ditch)\n"
+                "Examples:\n"
+                "  /add_penalty slightly_late 50 mins:1 under 15 min late\n"
+                "  /add_penalty very_late 100 mins:20 significantly late\n"
+                "  /add_penalty no_show 200 ditch missed the game"
             )
         try:
             amount = int(args[1])
         except ValueError:
             raise incorrectParameter("Amount must be a whole number (₹). Example: /add_penalty ditch 200")
+
         name = args[0]
-        description = " ".join(args[2:]) if len(args) > 2 else ""
+        mins_threshold = None
+        is_ditch_flag = False
+        desc_parts = []
+        for part in args[2:]:
+            low = part.lower()
+            if low.startswith("mins:"):
+                try:
+                    mins_threshold = int(low[5:])
+                except ValueError:
+                    raise incorrectParameter("mins: must be followed by a whole number. Example: mins:15")
+            elif low == "ditch":
+                is_ditch_flag = True
+            else:
+                desc_parts.append(part)
+
+        # Preserve existing threshold/ditch flag when admin only updates the amount
+        existing = _db.get_penalty_tier(cid, name)
+        if mins_threshold is None and existing:
+            mins_threshold = existing.get("late_minutes_threshold")
+        if not is_ditch_flag and existing:
+            is_ditch_flag = bool(existing.get("is_ditch", 0))
+
         result = dues_svc.add_penalty_tier(
-            cid, name, amount, description,
+            cid, name, amount, " ".join(desc_parts),
             message.from_user.id,
             message.from_user.first_name or "Admin",
+            late_minutes_threshold=mins_threshold,
+            is_ditch=is_ditch_flag,
         )
+        await bot.send_message(cid, result["announcement"], parse_mode="Markdown")
+    except Exception as e:
+        await reply_error(message, e)
+
+
+# ── /mark_late ────────────────────────────────────────────────────────────────
+
+@bot.message_handler(func=lambda m: _cmd(m.text) == "/mark_late")
+@bot.message_handler(func=lambda m: _cmd(m.text) == "/ml")
+async def mark_late(message):
+    try:
+        if await admin_rights(message, manager) is False:
+            raise insufficientPermissions("Admin only: /mark_late")
+        cid = message.chat.id
+        _require_dues_enabled(cid)
+        args = _parse_args(message.text)
+        if len(args) < 2:
+            raise parameterMissing(
+                "Usage: /mark_late <player_name> <minutes>\n"
+                "Example: /mark_late Alice 20\n"
+                "The correct tier is chosen automatically from configured thresholds."
+            )
+        try:
+            minutes = int(args[-1])
+        except ValueError:
+            raise incorrectParameter(
+                "Last argument must be the number of minutes late.\n"
+                "Example: /mark_late Alice 20"
+            )
+        player_name = " ".join(args[:-1])
+        async with manager.get_chat_write_lock(cid):
+            result = dues_svc.mark_late(
+                cid, player_name, minutes,
+                message.from_user.id,
+                message.from_user.first_name or "Admin",
+            )
+        await bot.send_message(cid, result["announcement"], parse_mode="Markdown")
+    except Exception as e:
+        await reply_error(message, e)
+
+
+# ── /mark_ditch ───────────────────────────────────────────────────────────────
+
+@bot.message_handler(func=lambda m: _cmd(m.text) == "/mark_ditch")
+@bot.message_handler(func=lambda m: _cmd(m.text) == "/mdt")
+async def mark_ditch(message):
+    try:
+        if await admin_rights(message, manager) is False:
+            raise insufficientPermissions("Admin only: /mark_ditch")
+        cid = message.chat.id
+        _require_dues_enabled(cid)
+        args = _parse_args(message.text)
+        if not args:
+            raise parameterMissing(
+                "Usage: /mark_ditch <player_name>\n"
+                "Example: /mark_ditch Bob"
+            )
+        player_name = " ".join(args)
+        async with manager.get_chat_write_lock(cid):
+            result = dues_svc.mark_ditch(
+                cid, player_name,
+                message.from_user.id,
+                message.from_user.first_name or "Admin",
+            )
         await bot.send_message(cid, result["announcement"], parse_mode="Markdown")
     except Exception as e:
         await reply_error(message, e)

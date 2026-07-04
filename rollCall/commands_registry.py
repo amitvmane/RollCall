@@ -436,15 +436,35 @@ COMMANDS = [
         ),
     },
     {
-        "name": "mark_penalty", "aliases": [], "scope": "admin", "category": "Dues & Fund",
-        "args": "tier_name player_name", "sample": "/mark_penalty ditch Bob",
-        "summary": "Charge a named penalty tier to a player",
+        "name": "mark_late", "aliases": ["ml"], "scope": "admin", "category": "Dues & Fund",
+        "args": "player_name minutes", "sample": "/mark_late Alice 20",
+        "summary": "Assess a late penalty — tier auto-chosen from minutes",
         "details": (
-            "Charges the amount defined in the named tier to the player's dues and "
-            "credits the group fund.\n\n"
+            "Picks the configured tier whose threshold is ≤ the given minutes "
+            "and charges it to the player.\n\n"
+            "Configure thresholds with /add_penalty mins:<N>.\n\n"
+            "Examples: /mark_late Alice 20  |  /ml Bob 8"
+        ),
+    },
+    {
+        "name": "mark_ditch", "aliases": ["mdt"], "scope": "admin", "category": "Dues & Fund",
+        "args": "player_name", "sample": "/mark_ditch Bob",
+        "summary": "Assess the no-show (ditch) penalty",
+        "details": (
+            "Uses whichever tier is configured as the ditch tier for this group.\n\n"
+            "Set one with: /add_penalty <name> <amount> ditch <description>\n\n"
+            "Examples: /mark_ditch Bob  |  /mdt Carol"
+        ),
+    },
+    {
+        "name": "mark_penalty", "aliases": [], "scope": "admin", "category": "Dues & Fund",
+        "args": "tier_name player_name", "sample": "/mark_penalty late_short Alice",
+        "summary": "Manual fallback — charge any named tier to a player",
+        "details": (
+            "Manual fallback when /mark_late or /mark_ditch don't fit.\n\n"
             "Use /penalties to see all defined tiers.\n"
             "Use /add_penalty to create or update a tier.\n\n"
-            "Examples: /mark_penalty ditch Bob  |  /mark_penalty late_short Alice"
+            "Examples: /mark_penalty late_short Alice  |  /mark_penalty no_show Bob"
         ),
     },
     {
@@ -537,15 +557,20 @@ COMMANDS = [
     },
     {
         "name": "add_penalty", "aliases": [], "scope": "admin", "category": "Dues & Fund",
-        "args": "name amount [description]", "sample": "/add_penalty late_short 50 under 15 min",
-        "summary": "Add or update a penalty tier",
+        "args": "name amount [mins:N] [ditch] [description]",
+        "sample": "/add_penalty very_late 100 mins:20 significantly late",
+        "summary": "Add or update a penalty tier with optional auto-trigger thresholds",
         "details": (
-            "Creates (or updates) a named penalty tier with a fixed ₹ amount.\n"
-            "Names are case-insensitive and stored lowercase.\n\n"
+            "Creates or updates a named penalty tier.\n\n"
+            "  mins:<N>  — auto-select via /mark_late when player is ≥N min late\n"
+            "  ditch     — mark as the no-show tier used by /mark_ditch\n\n"
+            "When updating an existing tier, omitting mins: or ditch preserves "
+            "the current values.\n\n"
             "Examples:\n"
-            "  /add_penalty late_short 50 under 15 min late\n"
-            "  /add_penalty ditch 200 no-show\n"
-            "  /add_penalty early_leave 75"
+            "  /add_penalty slightly_late 50 mins:1 under 15 min late\n"
+            "  /add_penalty very_late 100 mins:20 significantly late\n"
+            "  /add_penalty no_show 200 ditch missed the game\n"
+            "  /add_penalty custom_fine 75 one-off manual tier"
         ),
     },
     {

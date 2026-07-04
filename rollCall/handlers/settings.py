@@ -187,7 +187,7 @@ async def event_fee(message):
             # This lets admins set the fee after /erc and then run /close_game.
             closeable = db.get_latest_closeable_rollcall(cid)
             if closeable is None:
-                raise rollCallNotStarted("No active rollcall and no unclosed game found. Start a new rollcall with /rc.")
+                raise rollCallNotStarted("Roll call is not active and no unclosed game found. Start a new rollcall with /rc.")
             db.update_rollcall(closeable["id"], event_fee=event_price)
             db.log_admin_action(cid, message.from_user.id, message.from_user.first_name,
                                 "event_fee", details=event_price)

@@ -751,6 +751,10 @@ _RECONCILE_COLUMNS = {
     "web_verify_tokens": [
         ("tg_username", "tg_username TEXT DEFAULT NULL", "tg_username TEXT DEFAULT NULL"),
     ],
+    "penalty_tiers": [
+        ("late_minutes_threshold", "late_minutes_threshold INTEGER DEFAULT NULL", "late_minutes_threshold INTEGER DEFAULT NULL"),
+        ("is_ditch",               "is_ditch INTEGER DEFAULT 0",                  "is_ditch INTEGER DEFAULT 0"),
+    ],
 }
 
 
@@ -1336,12 +1340,14 @@ def _run_migrations(conn, cursor):
         try:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS penalty_tiers (
-                    id              SERIAL PRIMARY KEY,
-                    chat_id         BIGINT NOT NULL,
-                    name            TEXT NOT NULL,
-                    amount          INTEGER NOT NULL,
-                    description     TEXT DEFAULT NULL,
-                    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    id                      SERIAL PRIMARY KEY,
+                    chat_id                 BIGINT NOT NULL,
+                    name                    TEXT NOT NULL,
+                    amount                  INTEGER NOT NULL,
+                    description             TEXT DEFAULT NULL,
+                    late_minutes_threshold  INTEGER DEFAULT NULL,
+                    is_ditch                INTEGER DEFAULT 0,
+                    created_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(chat_id, name)
                 )
             """)
@@ -1416,12 +1422,14 @@ def _run_migrations(conn, cursor):
         try:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS penalty_tiers (
-                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                    chat_id         INTEGER NOT NULL,
-                    name            TEXT NOT NULL,
-                    amount          INTEGER NOT NULL,
-                    description     TEXT DEFAULT NULL,
-                    created_at      TEXT NOT NULL,
+                    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id                 INTEGER NOT NULL,
+                    name                    TEXT NOT NULL,
+                    amount                  INTEGER NOT NULL,
+                    description             TEXT DEFAULT NULL,
+                    late_minutes_threshold  INTEGER DEFAULT NULL,
+                    is_ditch                INTEGER DEFAULT 0,
+                    created_at              TEXT NOT NULL,
                     UNIQUE(chat_id, name)
                 )
             """)
@@ -5734,8 +5742,19 @@ def get_latest_closeable_rollcall(chat_id: int) -> Optional[Dict]:
 
 # ── penalty_tiers ─────────────────────────────────────────────────────────────
 
-def upsert_penalty_tier(chat_id: int, name: str, amount: int, description: Optional[str] = None) -> bool:
-    """Insert or replace a penalty tier for a chat. name is unique per chat."""
+def upsert_penalty_tier(
+    chat_id: int,
+    name: str,
+    amount: int,
+    description: Optional[str] = None,
+    late_minutes_threshold: Optional[int] = None,
+    is_ditch: bool = False,
+) -> bool:
+    """Insert or replace a penalty tier for a chat. name is unique per chat.
+
+    If is_ditch=True, clears the is_ditch flag from all other tiers for this
+    chat first (only one ditch tier per group).
+    """
     import datetime
     conn = get_connection()
     cursor = None
@@ -5743,18 +5762,35 @@ def upsert_penalty_tier(chat_id: int, name: str, amount: int, description: Optio
         cursor = conn.cursor()
         ph = "%s" if db_type == "postgresql" else "?"
         now = datetime.datetime.utcnow().isoformat()
+        clean_name = name.strip().lower()
+        ditch_int = 1 if is_ditch else 0
+
+        if is_ditch:
+            cursor.execute(
+                f"UPDATE penalty_tiers SET is_ditch = 0 WHERE chat_id = {ph} AND name != {ph}",
+                (chat_id, clean_name),
+            )
+
         if db_type == "postgresql":
             cursor.execute(
-                f"INSERT INTO penalty_tiers (chat_id, name, amount, description, created_at)"
-                f" VALUES ({ph},{ph},{ph},{ph},{ph})"
-                f" ON CONFLICT (chat_id, name) DO UPDATE SET amount=EXCLUDED.amount, description=EXCLUDED.description",
-                (chat_id, name.strip().lower(), amount, description, now),
+                f"INSERT INTO penalty_tiers"
+                f" (chat_id, name, amount, description, late_minutes_threshold, is_ditch, created_at)"
+                f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph})"
+                f" ON CONFLICT (chat_id, name) DO UPDATE SET"
+                f"  amount=EXCLUDED.amount,"
+                f"  description=EXCLUDED.description,"
+                f"  late_minutes_threshold=EXCLUDED.late_minutes_threshold,"
+                f"  is_ditch=EXCLUDED.is_ditch",
+                (chat_id, clean_name, amount, description,
+                 late_minutes_threshold, ditch_int, now),
             )
         else:
             cursor.execute(
-                f"INSERT OR REPLACE INTO penalty_tiers (chat_id, name, amount, description, created_at)"
-                f" VALUES ({ph},{ph},{ph},{ph},{ph})",
-                (chat_id, name.strip().lower(), amount, description, now),
+                f"INSERT OR REPLACE INTO penalty_tiers"
+                f" (chat_id, name, amount, description, late_minutes_threshold, is_ditch, created_at)"
+                f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+                (chat_id, clean_name, amount, description,
+                 late_minutes_threshold, ditch_int, now),
             )
         conn.commit()
         return True
@@ -5812,6 +5848,29 @@ def get_penalty_tier(chat_id: int, name: str) -> Optional[Dict]:
             cursor.close()
         if db_type == "postgresql":
             release_connection(conn)
+
+
+def get_tier_for_minutes(chat_id: int, minutes: int) -> Optional[Dict]:
+    """Find the best matching late tier for a given number of minutes late.
+
+    Returns the tier with the highest late_minutes_threshold that is still
+    <= minutes.  Returns None when no configured tier covers this duration.
+    """
+    tiers = get_penalty_tiers(chat_id)
+    candidates = [
+        t for t in tiers
+        if t.get("late_minutes_threshold") is not None
+        and t["late_minutes_threshold"] <= minutes
+    ]
+    return max(candidates, key=lambda t: t["late_minutes_threshold"]) if candidates else None
+
+
+def get_ditch_tier(chat_id: int) -> Optional[Dict]:
+    """Return the tier flagged as is_ditch=1 for this chat, or None."""
+    for t in get_penalty_tiers(chat_id):
+        if t.get("is_ditch"):
+            return t
+    return None
 
 
 def delete_penalty_tier(chat_id: int, name: str) -> bool:

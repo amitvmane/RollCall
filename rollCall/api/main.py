@@ -24,6 +24,8 @@ from fastapi.staticfiles import StaticFiles
 from exceptions import (
     alreadyInList,
     amountOfRollCallsReached,
+    duesGameAlreadyClosed,
+    duesNothingToClose,
     incorrectParameter,
     insufficientPermissions,
     parameterMissing,
@@ -32,7 +34,7 @@ from exceptions import (
     timeError,
 )
 from api.rate_limit import rate_limit_middleware
-from api.routes import admin, auth, groups, health, portal, proxy_votes, rollcalls, stats, templates, tg_verify, votes, web as web_routes
+from api.routes import admin, auth, dues as dues_routes, groups, health, portal, proxy_votes, rollcalls, stats, templates, tg_verify, votes, web as web_routes
 from api.schemas.common import ErrorResponse
 
 
@@ -94,6 +96,8 @@ def create_app() -> FastAPI:
         parameterMissing: 422,
         insufficientPermissions: 403,
         timeError: 422,
+        duesNothingToClose: 404,
+        duesGameAlreadyClosed: 409,
     }
 
     @app.exception_handler(rollCallNotStarted)
@@ -104,6 +108,8 @@ def create_app() -> FastAPI:
     @app.exception_handler(parameterMissing)
     @app.exception_handler(insufficientPermissions)
     @app.exception_handler(timeError)
+    @app.exception_handler(duesNothingToClose)
+    @app.exception_handler(duesGameAlreadyClosed)
     async def _curated_exception_handler(request: Request, exc: Exception):
         status = _exception_map.get(type(exc), 400)
         return JSONResponse(
@@ -140,6 +146,7 @@ def create_app() -> FastAPI:
     app.include_router(admin.router, prefix=API_PREFIX, tags=["admin"])
     app.include_router(groups.router, prefix=API_PREFIX, tags=["admin", "groups"])
     app.include_router(web_routes.router, prefix=API_PREFIX, tags=["web-voting"])
+    app.include_router(dues_routes.router, prefix=API_PREFIX, tags=["dues"])
     app.include_router(portal.router, prefix=API_PREFIX, tags=["portal"])
 
     # Map proxy-specific exceptions to HTTP status codes

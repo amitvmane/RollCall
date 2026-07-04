@@ -54,6 +54,10 @@ class TestDuesHandlers(unittest.IsolatedAsyncioTestCase):
         self.bot_state = bot_state
         bot_state.bot.send_message = AsyncMock()
         self.mgr = _make_lock_manager()
+        # Assume dues enabled for all tests (guard is a one-liner; tested separately)
+        patcher = patch("handlers.dues._require_dues_enabled")
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _sent_text(self, idx=0):
         return self.bot_state.bot.send_message.call_args_list[idx][0][1]

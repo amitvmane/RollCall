@@ -26,6 +26,7 @@ Ledger mutation announcements always post, even in shh mode (durability).
 """
 import logging
 
+import db as _db
 from bot_state import bot, reply_error
 from exceptions import (
     duesGameAlreadyClosed, duesNothingToClose,
@@ -35,6 +36,16 @@ from functions import admin_rights
 from rollcall_manager import manager
 from services import dues as dues_svc
 from handlers.lifecycle import _post_end_cleanup
+
+
+def _require_dues_enabled(cid: int) -> None:
+    """Raise if Dues & Treasury is not enabled for this chat."""
+    chat = _db.get_or_create_chat(cid)
+    if not chat.get("dues_enabled"):
+        raise insufficientPermissions(
+            "Dues & Treasury is not enabled for this group.\n"
+            "An admin can enable it with /enable_dues."
+        )
 
 
 def _cmd(text: str) -> str:
@@ -69,6 +80,7 @@ async def close_game(message):
         if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Admin only: /close_game")
         cid = message.chat.id
+        _require_dues_enabled(cid)
         args = _parse_args(message.text)
         rc_idx, args = _parse_rc_suffix(args)
 
@@ -111,6 +123,7 @@ async def mark_late(message):
         if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Admin only: /mark_late")
         cid = message.chat.id
+        _require_dues_enabled(cid)
         args = _parse_args(message.text)
         if len(args) < 2:
             raise parameterMissing("Usage: /mark_late <name> <minutes>")
@@ -139,6 +152,7 @@ async def mark_ditch(message):
         if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Admin only: /mark_ditch")
         cid = message.chat.id
+        _require_dues_enabled(cid)
         args = _parse_args(message.text)
         if not args:
             raise parameterMissing("Usage: /mark_ditch <name>")
@@ -163,6 +177,7 @@ async def waive(message):
         if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Admin only: /waive")
         cid = message.chat.id
+        _require_dues_enabled(cid)
         args = _parse_args(message.text)
         if len(args) < 2:
             raise parameterMissing("Usage: /waive <name> <amount> [reason]")
@@ -192,6 +207,7 @@ async def set_collector(message):
         if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Admin only: /set_collector")
         cid = message.chat.id
+        _require_dues_enabled(cid)
         args = _parse_args(message.text)
         rc_idx, args = _parse_rc_suffix(args)
         if not args:
@@ -223,6 +239,7 @@ async def set_collector(message):
 async def mark_paid(message):
     try:
         cid = message.chat.id
+        _require_dues_enabled(cid)
         args = _parse_args(message.text)
         if not args:
             raise parameterMissing("Usage: /mark_paid <name> [amount]")
@@ -259,6 +276,7 @@ async def reimburse(message):
         if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Admin only: /reimburse")
         cid = message.chat.id
+        _require_dues_enabled(cid)
         args = _parse_args(message.text)
         if len(args) < 2:
             raise parameterMissing("Usage: /reimburse <name> <amount> [reason]")
@@ -288,6 +306,7 @@ async def add_adhoc(message):
         if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Admin only: /add_adhoc")
         cid = message.chat.id
+        _require_dues_enabled(cid)
         args = _parse_args(message.text)
         if not args:
             raise parameterMissing("Usage: /add_adhoc <name>")
@@ -312,6 +331,7 @@ async def cancel_game_dues(message):
         if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Admin only: /cancel_game_dues")
         cid = message.chat.id
+        _require_dues_enabled(cid)
         args = _parse_args(message.text)
         rollcall_id = None
         if args:
@@ -345,6 +365,7 @@ async def cancel_game_dues(message):
 async def my_dues(message):
     try:
         cid = message.chat.id
+        _require_dues_enabled(cid)
         uid = message.from_user.id
         result = dues_svc.my_dues(cid, uid)
         balance = result["balance"]
@@ -379,6 +400,7 @@ async def dues(message):
         if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Admin only: /dues — use /my_dues for your own balance.")
         cid = message.chat.id
+        _require_dues_enabled(cid)
         result = dues_svc.all_dues(cid, nonzero_only=False)
         balances = result["balances"]
         if not balances:
@@ -403,6 +425,7 @@ async def dues(message):
 async def fund(message):
     try:
         cid = message.chat.id
+        _require_dues_enabled(cid)
         result = dues_svc.fund_summary(cid)
         bal = result["fund_balance"]
         await bot.send_message(
@@ -422,6 +445,7 @@ async def fund(message):
 async def fund_history(message):
     try:
         cid = message.chat.id
+        _require_dues_enabled(cid)
         args = _parse_args(message.text)
         page = 1
         if args:
@@ -460,6 +484,7 @@ async def log_expense(message):
         if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Admin only: /log_expense")
         cid = message.chat.id
+        _require_dues_enabled(cid)
         args = _parse_args(message.text)
         if len(args) < 2:
             raise parameterMissing("Usage: /log_expense <amount> <description>")
@@ -487,6 +512,7 @@ async def fund_topup(message):
         if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Admin only: /fund_topup")
         cid = message.chat.id
+        _require_dues_enabled(cid)
         args = _parse_args(message.text)
         if not args:
             raise parameterMissing("Usage: /fund_topup <amount> [description]")
@@ -514,6 +540,7 @@ async def remind_dues(message):
         if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Admin only: /remind_dues")
         cid = message.chat.id
+        _require_dues_enabled(cid)
         result = dues_svc.remind_dues(cid)
         await bot.send_message(cid, result["announcement"])
     except Exception as e:
@@ -591,5 +618,45 @@ async def set_round_step(message):
             message.from_user.first_name or "Admin",
         )
         await bot.send_message(cid, result["announcement"])
+    except Exception as e:
+        await reply_error(message, e)
+
+
+# ── /enable_dues / /disable_dues ─────────────────────────────────────────────
+
+@bot.message_handler(func=lambda m: _cmd(m.text) == "/enable_dues")
+async def enable_dues(message):
+    try:
+        if await admin_rights(message, manager) is False:
+            raise insufficientPermissions("Admin only: /enable_dues")
+        cid = message.chat.id
+        _db.update_chat_settings(cid, dues_enabled=1)
+        await bot.send_message(
+            cid,
+            "✅ *Dues & Treasury enabled* for this group.\n\n"
+            "Setup commands (run in any order before first /close_game):\n"
+            "• /set_upi `vpa@bank` — UPI address for payment links\n"
+            "• /set_penalties `t1 t2 t3 ditch` — late/ditch amounts (default: 50 75 100 200)\n"
+            "• /set_round_step `step` — per-head rounding (default: 10)\n\n"
+            "Once configured, use /close_game after a game to split the ground fee.",
+            parse_mode="Markdown",
+        )
+    except Exception as e:
+        await reply_error(message, e)
+
+
+@bot.message_handler(func=lambda m: _cmd(m.text) == "/disable_dues")
+async def disable_dues(message):
+    try:
+        if await admin_rights(message, manager) is False:
+            raise insufficientPermissions("Admin only: /disable_dues")
+        cid = message.chat.id
+        _db.update_chat_settings(cid, dues_enabled=0)
+        await bot.send_message(
+            cid,
+            "⛔ *Dues & Treasury disabled* for this group.\n"
+            "Existing ledger data is preserved. Re-enable with /enable_dues.",
+            parse_mode="Markdown",
+        )
     except Exception as e:
         await reply_error(message, e)

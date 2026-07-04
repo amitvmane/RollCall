@@ -557,6 +557,27 @@ COMMANDS = [
             "Example: /set_round_step 5 rounds to the nearest ₹5."
         ),
     },
+    {
+        "name": "enable_dues", "aliases": [], "scope": "admin", "category": "Dues & Fund",
+        "args": "", "sample": "/enable_dues",
+        "summary": "Enable Dues & Treasury for this group",
+        "details": (
+            "Turns on the Dues & Treasury feature for this group. All dues commands "
+            "(/close_game, /my_dues, /fund, etc.) are blocked until this is run.\n\n"
+            "Configure settings first: /set_upi, /set_penalties, /set_round_step.\n"
+            "Existing ledger data is preserved if re-enabled after /disable_dues."
+        ),
+    },
+    {
+        "name": "disable_dues", "aliases": [], "scope": "admin", "category": "Dues & Fund",
+        "args": "", "sample": "/disable_dues",
+        "summary": "Disable Dues & Treasury for this group",
+        "details": (
+            "Turns off all Dues & Treasury commands for this group. "
+            "Existing ledger data is preserved — nothing is deleted. "
+            "Re-enable at any time with /enable_dues."
+        ),
+    },
 
     # ────────────────────────── SUPER ADMIN ─────────────────────────
     {

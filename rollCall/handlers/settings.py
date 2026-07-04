@@ -17,6 +17,7 @@ from exceptions import (
     rollCallNotStarted, insufficientPermissions, parameterMissing, incorrectParameter,
     timeError,
 )
+import db
 from functions import admin_rights, roll_call_not_started
 from rollcall_manager import manager
 from services import settings as settings_svc
@@ -150,10 +151,10 @@ async def event_fee(message):
     rc_number = 0
 
     try:
-        if roll_call_not_started(message, manager) == False:
-            raise rollCallNotStarted("Roll call is not active")
         if await admin_rights(message, manager) == False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
+
+        has_active = roll_call_not_started(message, manager)  # True = rollcall running
 
         if len(pmts) > 0 and "::" in pmts[-1]:
             try:
@@ -162,9 +163,10 @@ async def event_fee(message):
             except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
-            rollcalls = manager.get_rollcalls(cid)
-            if rc_number < 0 or len(rollcalls) < rc_number + 1:
-                raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+            if has_active:
+                rollcalls = manager.get_rollcalls(cid)
+                if rc_number < 0 or len(rollcalls) < rc_number + 1:
+                    raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         event_price = " ".join(pmts)
         event_price_number = re.findall('[0-9]+', event_price)
@@ -172,14 +174,29 @@ async def event_fee(message):
         if len(event_price_number) == 0 or int(event_price_number[0]) <= 0:
             raise incorrectParameter("The correct format is '/event_fee Integer' Where 'Integer' it's up to 0 number")
 
-        settings_svc.set_event_fee(cid, event_price, message.from_user.id, message.from_user.first_name, rc_number)
-        rc = manager.get_rollcall(cid, rc_number)
-
-        if not manager.get_shh_mode(cid):
-            await bot.send_message(cid, f"Event Fee set to {event_price}\n\nAdditional unknown/penalty fees are not included and needs to be handled separately.")
-
-        from handlers.lifecycle import _update_panel
-        await _update_panel(cid, rc_number + 1, rc)
+        if has_active:
+            # Active rollcall: update in-memory object + DB and refresh the panel
+            settings_svc.set_event_fee(cid, event_price, message.from_user.id, message.from_user.first_name, rc_number)
+            rc = manager.get_rollcall(cid, rc_number)
+            if not manager.get_shh_mode(cid):
+                await bot.send_message(cid, f"Event Fee set to {event_price}\n\nAdditional unknown/penalty fees are not included and needs to be handled separately.")
+            from handlers.lifecycle import _update_panel
+            await _update_panel(cid, rc_number + 1, rc)
+        else:
+            # No active rollcall: apply retroactively to the latest ended-but-unclosed game.
+            # This lets admins set the fee after /erc and then run /close_game.
+            closeable = db.get_latest_closeable_rollcall(cid)
+            if closeable is None:
+                raise rollCallNotStarted("No active rollcall and no unclosed game found. Start a new rollcall with /rc.")
+            db.update_rollcall(closeable["id"], event_fee=event_price)
+            db.log_admin_action(cid, message.from_user.id, message.from_user.first_name,
+                                "event_fee", details=event_price)
+            title = closeable.get("title") or f"game #{closeable['id']}"
+            await bot.send_message(
+                cid,
+                f"Event Fee set to {event_price} for *{title}*\n\nRun /close\_game to financially close this game.",
+                parse_mode="Markdown",
+            )
 
     except Exception as e:
         await reply_error(cid, e)

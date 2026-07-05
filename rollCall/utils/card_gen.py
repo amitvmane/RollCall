@@ -51,24 +51,82 @@ _FONT_BOLD_PATHS = [
 ]
 
 _font_cache: dict = {}
+_cmap_cache: dict = {}
+
+
+def _mpl_dejavu(bold: bool) -> Optional[str]:
+    """DejaVu bundled inside matplotlib (already a dependency) — guaranteed
+    fallback even if no system fonts are installed."""
+    try:
+        import matplotlib
+        name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
+        path = os.path.join(matplotlib.get_data_path(), "fonts", "ttf", name)
+        return path if os.path.exists(path) else None
+    except Exception:
+        return None
+
+
+def _font_path(bold: bool = False) -> Optional[str]:
+    paths = _FONT_BOLD_PATHS + _FONT_PATHS if bold else _FONT_PATHS
+    for path in paths:
+        if os.path.exists(path):
+            return path
+    return _mpl_dejavu(bold)
 
 
 def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
     key = (size, bold)
     if key in _font_cache:
         return _font_cache[key]
-    paths = _FONT_BOLD_PATHS + _FONT_PATHS if bold else _FONT_PATHS
-    for path in paths:
-        if os.path.exists(path):
-            try:
-                f = ImageFont.truetype(path, size)
-                _font_cache[key] = f
-                return f
-            except Exception:
-                continue
+    path = _font_path(bold)
+    if path:
+        try:
+            f = ImageFont.truetype(path, size)
+            _font_cache[key] = f
+            return f
+        except Exception:
+            pass
     f = ImageFont.load_default(size=size)
     _font_cache[key] = f
     return f
+
+
+def _glyph_coverage(bold: bool = False) -> Optional[set]:
+    """Codepoints the active font can actually render, or None if unknown."""
+    path = _font_path(bold)
+    if path is None:
+        return None
+    if path in _cmap_cache:
+        return _cmap_cache[path]
+    try:
+        from fontTools.ttLib import TTFont
+        tt = TTFont(path, fontNumber=0, lazy=True)
+        cov = set(tt.getBestCmap().keys())
+        tt.close()
+    except Exception:
+        logging.exception("glyph coverage load failed for %s", path)
+        cov = None
+    _cmap_cache[path] = cov
+    return cov
+
+
+def _sanitize(text: str, fallback: str = "?", bold: bool = False) -> str:
+    """Drop characters the font cannot render (emoji, unsupported scripts).
+
+    PIL draws missing glyphs as tofu boxes — worse than omission on a share
+    card. Whitespace is always kept; if nothing renderable remains, return
+    `fallback`. No-op when coverage is unknown (PIL default bitmap font).
+    """
+    cov = _glyph_coverage(bold)
+    if cov is None or not text:
+        return text or fallback
+    kept = "".join(c for c in text if c.isspace() or ord(c) in cov)
+    kept = " ".join(kept.split())   # collapse gaps left by dropped chars
+    return kept if kept else fallback
+
+
+def _ellipsize(text: str, max_len: int) -> str:
+    return text if len(text) <= max_len else text[: max_len - 1].rstrip() + "…"
 
 
 def _text_w(draw: ImageDraw.Draw, text: str, font) -> int:
@@ -138,9 +196,10 @@ def matchday_card(
 
     # ── Header ────────────────────────────────────────────────────────────────
     draw.rectangle([0, 0, W, HDR_H], fill=_C_HEADER_BG)
-    draw.text((PAD, 14), title[:40], font=f_title, fill=_C_HEADER_FG)
-    sub = f"{date_str}  •  {venue}" if venue else date_str
-    draw.text((PAD, 48), sub[:60], font=f_sub, fill=_C_HEADER_SUB)
+    draw.text((PAD, 14), _ellipsize(_sanitize(title, "Game Day", bold=True), 40),
+              font=f_title, fill=_C_HEADER_FG)
+    sub = f"{date_str}  •  {_sanitize(venue, '')}" if venue else date_str
+    draw.text((PAD, 48), _ellipsize(sub, 60), font=f_sub, fill=_C_HEADER_SUB)
 
     # IN count badge (top-right)
     badge = f"{n} IN"
@@ -166,7 +225,8 @@ def matchday_card(
             draw.rectangle([x, ry, x + col_w - 4, ry + ROW_H - 2], fill=_C_STRIP_ODD)
         num_str = f"{i + 1:2d}."
         draw.text((x + 6, ry + 7), num_str, font=f_name, fill=_C_MUTED)
-        draw.text((x + 34, ry + 7), name[:22], font=f_name, fill=_C_TEXT)
+        clean = _sanitize(name, f"Player {i + 1}")
+        draw.text((x + 34, ry + 7), _ellipsize(clean, 22), font=f_name, fill=_C_TEXT)
 
     # ── Footer ────────────────────────────────────────────────────────────────
     fy = H - FTR_H
@@ -223,7 +283,8 @@ def close_receipt_card(
     # ── Header ────────────────────────────────────────────────────────────────
     draw.rectangle([0, 0, W, HDR_H], fill=_C_HEADER_BG)
     draw.text((PAD, 12), "Game Closed", font=f_sub, fill=_C_HEADER_SUB)
-    draw.text((PAD, 32), title[:38], font=f_title, fill=_C_HEADER_FG)
+    draw.text((PAD, 32), _ellipsize(_sanitize(title, "Game", bold=True), 38),
+              font=f_title, fill=_C_HEADER_FG)
 
     # ── Summary block ─────────────────────────────────────────────────────────
     y  = HDR_H + PAD
@@ -255,7 +316,8 @@ def close_receipt_card(
         for i, b in enumerate(owed):
             if i % 2 == 0:
                 draw.rectangle([PAD, y, W - PAD, y + ROW_H - 2], fill=_C_STRIP_ODD)
-            draw.text((PAD + 6, y + 6), b["member_name"][:28], font=f_name, fill=_C_TEXT)
+            clean = _ellipsize(_sanitize(b["member_name"], "Member"), 28)
+            draw.text((PAD + 6, y + 6), clean, font=f_name, fill=_C_TEXT)
             bal_str = f"Rs.{b['balance']}"
             bw = _text_w(draw, bal_str, f_bal)
             draw.text((W - PAD - bw, y + 6), bal_str, font=f_bal, fill=_C_OWED)
@@ -265,7 +327,8 @@ def close_receipt_card(
         draw.text((PAD, y + 4), "SETTLED", font=f_sec, fill=_C_SETTLED)
         y += ROW_H - 4
         for b in settled:
-            draw.text((PAD + 6, y + 6), b["member_name"][:28], font=f_name, fill=_C_MUTED)
+            clean = _ellipsize(_sanitize(b["member_name"], "Member"), 28)
+            draw.text((PAD + 6, y + 6), clean, font=f_name, fill=_C_MUTED)
             draw.text((W - PAD - 20, y + 6), "✓", font=f_name, fill=_C_SETTLED)
             y += ROW_H
 

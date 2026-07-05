@@ -32,8 +32,16 @@ import db
 from db import (
     get_rollcall_in_users, mark_rollcall_absent_done,
 )
-from bot_state import bot, reply_error, safe_edit_text, safe_edit_markup
+from bot_state import (
+    bot, reply_error, safe_edit_text, safe_edit_markup,
+    send_md_fallback, _esc_md,
+)
+from rollcall_manager import manager
 from services import dues as dues_svc
+
+# Cap on concurrently tracked panels; oldest evicted first. A panel that was
+# never dismissed just expires — tapping it says "run /erc again".
+_MAX_SESSIONS = 64
 
 
 # ── Session state ─────────────────────────────────────────────────────────────
@@ -64,7 +72,7 @@ def _tier_view(session: "_PenaltySession", tiers: list) -> Tuple[str, InlineKeyb
     )
     ghost_hint = "\n_Ditch tier also records ghost/no-show._" if session.ghost_eligible else ""
     text = (
-        f"⚠️ *Penalty marking* — _{session.title}_\n"
+        f"⚠️ *Penalty marking* — _{_esc_md(session.title)}_\n"
         f"Tap a tier to select players:{applied_notes}{ghost_hint}"
     )
     kb = InlineKeyboardMarkup(row_width=1)
@@ -96,8 +104,8 @@ def _player_view(
         is_ditch and session.ghost_eligible
     ) else ""
     text = (
-        f"⚠️ *{tier_name}* (₹{tier['amount']}) — tap to select players\n"
-        f"_{tier.get('description') or 'Tap Apply when done.'}_"
+        f"⚠️ *{_esc_md(tier_name)}* (₹{tier['amount']}) — tap to select players\n"
+        f"_{_esc_md(tier.get('description') or 'Tap Apply when done.')}_"
         f"{ghost_note}"
     )
     kb = InlineKeyboardMarkup(row_width=3)
@@ -155,6 +163,8 @@ async def send_penalty_panel(
     text, kb = _tier_view(session, tiers)
     sent = await bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=kb)
     _sessions[(chat_id, sent.message_id)] = session
+    while len(_sessions) > _MAX_SESSIONS:
+        _sessions.pop(next(iter(_sessions)))
 
 
 # ── Callback handler ──────────────────────────────────────────────────────────
@@ -165,6 +175,17 @@ async def penalty_panel_callback(call):
         cid  = call.message.chat.id
         mid  = call.message.message_id
         data = call.data
+
+        # Penalties are financial writes — gate on admin status (same pattern
+        # as the end-rollcall button in lifecycle.py). Respects the chat's
+        # admin-mode setting like every dues command does.
+        if manager.get_admin_rights(cid):
+            member = await bot.get_chat_member(cid, call.from_user.id)
+            if member.status not in ("administrator", "creator"):
+                await bot.answer_callback_query(
+                    call.id, "⛔ Only admins can mark penalties", show_alert=True
+                )
+                return
 
         session = _sessions.get((cid, mid))
         if session is None:
@@ -230,29 +251,32 @@ async def penalty_panel_callback(call):
 
             applied_names = []
             errors        = []
-            for idx in sorted(indices):
-                m = session.members[idx]
-                try:
-                    dues_svc.mark_penalty(
-                        cid, tier_name, m["member_name"],
-                        actor.id, actor_name,
-                    )
-                    applied_names.append(m["member_name"])
-                except Exception as exc:
-                    errors.append(f"{m['member_name']}: {exc}")
+            # Serialize with /erc, template auto-close, and manual /mark_*
+            # commands — same invariant as every chat mutation (CLAUDE.md).
+            async with manager.get_chat_write_lock(cid):
+                for idx in sorted(indices):
+                    m = session.members[idx]
+                    try:
+                        dues_svc.mark_penalty(
+                            cid, tier_name, m["member_name"],
+                            actor.id, actor_name,
+                        )
+                        applied_names.append(m["member_name"])
+                    except Exception as exc:
+                        errors.append(f"{m['member_name']}: {exc}")
 
-            # Ghost tracking side-effects for ditch tier
-            if is_ditch and session.ghost_eligible:
-                ghost_identities = {
-                    session.members[i]["_identity"]
-                    for i in indices
-                    if session.members[i]["_identity"] is not None
-                }
-                if ghost_identities:
-                    in_users = get_rollcall_in_users(rc)
-                    from handlers.ghost import apply_ghost_marking, _decrement_attended
-                    apply_ghost_marking(cid, rc, ghost_identities, in_users)
-                    session.ghost_marked.update(ghost_identities)
+                # Ghost tracking side-effects for ditch tier
+                if is_ditch and session.ghost_eligible:
+                    ghost_identities = {
+                        session.members[i]["_identity"]
+                        for i in indices
+                        if session.members[i]["_identity"] is not None
+                    }
+                    if ghost_identities:
+                        in_users = get_rollcall_in_users(rc)
+                        from handlers.ghost import apply_ghost_marking
+                        apply_ghost_marking(cid, rc, ghost_identities, in_users)
+                        session.ghost_marked.update(ghost_identities)
 
             count = len(applied_names)
             session.applied[tier_name] = session.applied.get(tier_name, 0) + count
@@ -260,12 +284,11 @@ async def penalty_panel_callback(call):
             session.active_tier = None
 
             if applied_names:
-                names_str = ", ".join(applied_names)
+                names_str = ", ".join(_esc_md(n) for n in applied_names)
                 ghost_note = " (recorded as ghosts)" if is_ditch and session.ghost_eligible else ""
-                await bot.send_message(
+                await send_md_fallback(
                     cid,
-                    f"⚠️ Penalty *{tier_name}* (₹{tier['amount']}) applied to: {names_str}{ghost_note}",
-                    parse_mode="Markdown",
+                    f"⚠️ Penalty *{_esc_md(tier_name)}* (₹{tier['amount']}) applied to: {names_str}{ghost_note}",
                 )
             if errors:
                 await bot.send_message(cid, "⚠️ Some penalties could not be applied:\n" + "\n".join(errors))
@@ -287,10 +310,11 @@ async def penalty_panel_callback(call):
         elif data == f"pen_d:{rc}":
             if session.ghost_eligible and not session.ghost_finalised:
                 session.ghost_finalised = True
-                in_users = get_rollcall_in_users(rc)
-                from handlers.ghost import _decrement_attended
-                _decrement_attended(cid, in_users, session.ghost_marked)
-                mark_rollcall_absent_done(rc)
+                async with manager.get_chat_write_lock(cid):
+                    in_users = get_rollcall_in_users(rc)
+                    from handlers.ghost import _decrement_attended
+                    _decrement_attended(cid, in_users, session.ghost_marked)
+                    mark_rollcall_absent_done(rc)
 
             total   = sum(session.applied.values())
             summary = f"✅ Penalty marking done — {total} penalties recorded." if total else "✅ No penalties marked."

@@ -214,6 +214,24 @@ async def safe_edit_markup(cid: int, msg_id: int, reply_markup=None) -> bool:
         return False
 
 
+async def send_md_fallback(cid: int, text: str, **kwargs):
+    """Send with Markdown, retrying as plain text if Telegram rejects parsing.
+
+    User-controlled strings (names, titles) interpolated into Markdown can
+    contain unmatched */_/` entities, which makes Telegram reject the whole
+    message with a 400. For ledger announcements that message IS the
+    durability layer — losing it is data loss. Degrading to plain text keeps
+    the record in the chat history.
+    """
+    try:
+        return await bot.send_message(cid, text, parse_mode="Markdown", **kwargs)
+    except Exception as e:
+        if "can't parse entities" not in str(e).lower():
+            raise
+        logging.warning("Markdown parse failed for chat %s; resending plain", cid)
+        return await bot.send_message(cid, text, **kwargs)
+
+
 # ── Task helpers ──────────────────────────────────────────────────────────────
 
 # Last unhandled-error signal for /health diagnostics

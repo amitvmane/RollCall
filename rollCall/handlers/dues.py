@@ -31,7 +31,7 @@ import logging
 from datetime import datetime
 
 import db as _db
-from bot_state import bot, reply_error, _log_task_exc
+from bot_state import bot, reply_error, _log_task_exc, send_md_fallback, _esc_md
 from exceptions import (
     duesGameAlreadyClosed, duesNothingToClose,
     incorrectParameter, insufficientPermissions, parameterMissing,
@@ -104,7 +104,7 @@ async def close_game(message):
             )
 
         # Always post announcement — financial record
-        await bot.send_message(cid, result["announcement"], parse_mode="Markdown")
+        await send_md_fallback(cid, result["announcement"])
 
         # QR code + VPA (non-blocking best-effort)
         upi = dues_svc.get_dues_settings(cid).get("upi_vpa")
@@ -152,7 +152,7 @@ async def mark_penalty(message):
                 message.from_user.id,
                 message.from_user.first_name or "Admin",
             )
-        await bot.send_message(cid, result["announcement"], parse_mode="Markdown")
+        await send_md_fallback(cid, result["announcement"])
     except Exception as e:
         await reply_error(message, e)
 
@@ -182,7 +182,7 @@ async def waive(message):
                 message.from_user.id,
                 message.from_user.first_name or "Admin",
             )
-        await bot.send_message(cid, result["announcement"])
+        await send_md_fallback(cid, result["announcement"])
     except Exception as e:
         await reply_error(message, e)
 
@@ -215,7 +215,7 @@ async def set_collector(message):
                 message.from_user.first_name or "Admin",
                 rc_number=rc_idx,
             )
-        await bot.send_message(cid, result["announcement"])
+        await send_md_fallback(cid, result["announcement"])
     except Exception as e:
         await reply_error(message, e)
 
@@ -251,7 +251,7 @@ async def mark_paid(message):
                 amount=amount,
                 is_admin=is_admin,
             )
-        await bot.send_message(cid, result["announcement"])
+        await send_md_fallback(cid, result["announcement"])
     except Exception as e:
         await reply_error(message, e)
 
@@ -281,7 +281,7 @@ async def reimburse(message):
                 message.from_user.id,
                 message.from_user.first_name or "Admin",
             )
-        await bot.send_message(cid, result["announcement"])
+        await send_md_fallback(cid, result["announcement"])
     except Exception as e:
         await reply_error(message, e)
 
@@ -306,7 +306,7 @@ async def add_adhoc(message):
                 message.from_user.id,
                 message.from_user.first_name or "Admin",
             )
-        await bot.send_message(cid, result["announcement"])
+        await send_md_fallback(cid, result["announcement"])
     except Exception as e:
         await reply_error(message, e)
 
@@ -339,7 +339,7 @@ async def cancel_game_dues(message):
                 message.from_user.id,
                 message.from_user.first_name or "Admin",
             )
-        await bot.send_message(cid, result["announcement"])
+        await send_md_fallback(cid, result["announcement"])
     except Exception as e:
         await reply_error(message, e)
 
@@ -485,7 +485,7 @@ async def log_expense(message):
             message.from_user.id,
             message.from_user.first_name or "Admin",
         )
-        await bot.send_message(cid, result["announcement"])
+        await send_md_fallback(cid, result["announcement"])
     except Exception as e:
         await reply_error(message, e)
 
@@ -513,7 +513,7 @@ async def fund_topup(message):
             message.from_user.id,
             message.from_user.first_name or "Admin",
         )
-        await bot.send_message(cid, result["announcement"])
+        await send_md_fallback(cid, result["announcement"])
     except Exception as e:
         await reply_error(message, e)
 
@@ -529,7 +529,7 @@ async def remind_dues(message):
         _require_dues_enabled(cid)
         result = dues_svc.remind_dues(cid)
         # Group summary (always)
-        await bot.send_message(cid, result["announcement"], parse_mode="Markdown")
+        await send_md_fallback(cid, result["announcement"])
         # Individual DMs (best-effort, non-blocking)
         asyncio.create_task(_send_dues_dms(cid, result)).add_done_callback(_log_task_exc)
     except Exception as e:
@@ -553,7 +553,7 @@ async def set_upi(message):
             message.from_user.id,
             message.from_user.first_name or "Admin",
         )
-        await bot.send_message(cid, result["announcement"])
+        await send_md_fallback(cid, result["announcement"])
     except Exception as e:
         await reply_error(message, e)
 
@@ -626,7 +626,7 @@ async def add_penalty(message):
             late_minutes_threshold=mins_threshold,
             is_ditch=is_ditch_flag,
         )
-        await bot.send_message(cid, result["announcement"], parse_mode="Markdown")
+        await send_md_fallback(cid, result["announcement"])
     except Exception as e:
         await reply_error(message, e)
 
@@ -662,7 +662,7 @@ async def mark_late(message):
                 message.from_user.id,
                 message.from_user.first_name or "Admin",
             )
-        await bot.send_message(cid, result["announcement"], parse_mode="Markdown")
+        await send_md_fallback(cid, result["announcement"])
     except Exception as e:
         await reply_error(message, e)
 
@@ -690,7 +690,7 @@ async def mark_ditch(message):
                 message.from_user.id,
                 message.from_user.first_name or "Admin",
             )
-        await bot.send_message(cid, result["announcement"], parse_mode="Markdown")
+        await send_md_fallback(cid, result["announcement"])
     except Exception as e:
         await reply_error(message, e)
 
@@ -712,7 +712,7 @@ async def remove_penalty(message):
             message.from_user.id,
             message.from_user.first_name or "Admin",
         )
-        await bot.send_message(cid, result["announcement"], parse_mode="Markdown")
+        await send_md_fallback(cid, result["announcement"])
     except Exception as e:
         await reply_error(message, e)
 
@@ -737,7 +737,7 @@ async def set_round_step(message):
             message.from_user.id,
             message.from_user.first_name or "Admin",
         )
-        await bot.send_message(cid, result["announcement"])
+        await send_md_fallback(cid, result["announcement"])
     except Exception as e:
         await reply_error(message, e)
 
@@ -873,7 +873,7 @@ async def _send_dues_dms(cid: int, result: dict) -> None:
         if is_proxy:
             body = (
                 f"📢 *Dues reminder*\n"
-                f"Your proxy *{name}* owes *₹{balance}* to the group."
+                f"Your proxy *{_esc_md(name)}* owes *₹{balance}* to the group."
             )
         else:
             body = f"📢 *Dues reminder*\nYou owe *₹{balance}* to the group."
@@ -882,7 +882,7 @@ async def _send_dues_dms(cid: int, result: dict) -> None:
             body += f"\n💳 Pay ₹{balance} to: `{upi}`"
 
         try:
-            await bot.send_message(uid, body, parse_mode="Markdown")
+            await send_md_fallback(uid, body)
             sent += 1
         except Exception:
             failed.append(name)

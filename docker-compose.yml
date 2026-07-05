@@ -9,6 +9,13 @@ services:
     container_name: rollcall-bot
     restart: unless-stopped
 
+    # Privilege hardening: the bot is a plain Python process — it needs no
+    # Linux capabilities and must never gain new privileges (setuid etc.).
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
     environment:
       # Telegram Bot Configuration
       # All values fall back to the defaults below when the key is absent or

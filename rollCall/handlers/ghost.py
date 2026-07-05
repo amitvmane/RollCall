@@ -224,6 +224,18 @@ async def ghost_callback_handler(call):
         cid = call.message.chat.id
         data = call.data
 
+        # Ghost marking mutates attendance stats and streaks — admin-gate the
+        # ghost_* actions (same pattern as the end-rollcall button). Other
+        # prefixes this handler serves (reconf_, proxy_add_, …) are
+        # user-facing self-service flows and stay open.
+        if data.startswith("ghost_") and manager.get_admin_rights(cid):
+            member = await bot.get_chat_member(cid, call.from_user.id)
+            if member.status not in ("administrator", "creator"):
+                await bot.answer_callback_query(
+                    call.id, "⛔ Only admins can mark ghosts", show_alert=True
+                )
+                return
+
         # ── ghost_no ─────────────────────────────────────────────────────────
         if data.startswith("ghost_no_"):
             rc_db_id = int(data.split("_", 2)[2])

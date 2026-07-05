@@ -104,6 +104,27 @@ def _actor_name(chat_id: int, user_id: int) -> str:
     return "(web)"
 
 
+async def _announce(chat_id: int, text: Optional[str]) -> None:
+    """Post a ledger announcement to the Telegram group.
+
+    Ledger mutations must land in the group chat history regardless of which
+    surface triggered them — the announcement is the reconstruction source if
+    the DB is ever lost (CLAUDE.md durability rule). Best-effort: a send
+    failure is logged loudly but doesn't fail the API call, since the DB
+    write has already committed.
+    """
+    if not text:
+        return
+    try:
+        from bot_state import send_md_fallback
+        await send_md_fallback(chat_id, text)
+    except Exception:
+        log.exception(
+            "ledger announcement failed for chat %s — group history is missing this mutation",
+            chat_id,
+        )
+
+
 # ── Read endpoints ────────────────────────────────────────────────────────────
 
 @router.get(
@@ -302,6 +323,7 @@ async def close_game(
             rc_number=body.rc_number,
         )
 
+    await _announce(chat_id, result.get("announcement"))
     return {
         "rollcall_id": result["rollcall_id"],
         "title": result["title"],
@@ -339,6 +361,7 @@ async def cancel_game_dues(
         result = dues_svc.cancel_game_credit(
             chat_id, closure["rollcall_id"], actor_uid, actor_name
         )
+    await _announce(chat_id, result.get("announcement"))
     return result
 
 
@@ -358,9 +381,11 @@ async def mark_penalty(
     actor_uid = _require_admin(chat_id, body.id_token)
     actor_name = _actor_name(chat_id, actor_uid)
 
-    return dues_svc.mark_penalty(
+    result = dues_svc.mark_penalty(
         chat_id, body.tier_name, body.member_name, actor_uid, actor_name
     )
+    await _announce(chat_id, result.get("announcement"))
+    return result
 
 
 @router.post(
@@ -378,10 +403,12 @@ async def mark_paid(
     actor_name = _actor_name(chat_id, actor_uid)
     is_admin = bool(_db.is_web_admin(chat_id, actor_uid))
 
-    return dues_svc.mark_paid(
+    result = dues_svc.mark_paid(
         chat_id, body.member_name, actor_uid, actor_name,
         amount=body.amount, is_admin=is_admin,
     )
+    await _announce(chat_id, result.get("announcement"))
+    return result
 
 
 @router.post(
@@ -398,10 +425,12 @@ async def waive(
     actor_uid = _require_admin(chat_id, body.id_token)
     actor_name = _actor_name(chat_id, actor_uid)
 
-    return dues_svc.waive(
+    result = dues_svc.waive(
         chat_id, body.member_name, body.amount, body.reason,
         actor_uid, actor_name,
     )
+    await _announce(chat_id, result.get("announcement"))
+    return result
 
 
 @router.post(
@@ -418,10 +447,12 @@ async def reimburse(
     actor_uid = _require_admin(chat_id, body.id_token)
     actor_name = _actor_name(chat_id, actor_uid)
 
-    return dues_svc.reimburse(
+    result = dues_svc.reimburse(
         chat_id, body.member_name, body.amount, body.reason,
         actor_uid, actor_name,
     )
+    await _announce(chat_id, result.get("announcement"))
+    return result
 
 
 @router.post(
@@ -438,7 +469,9 @@ async def add_adhoc(
     actor_uid = _require_admin(chat_id, body.id_token)
     actor_name = _actor_name(chat_id, actor_uid)
 
-    return dues_svc.add_adhoc(chat_id, body.member_name, actor_uid, actor_name)
+    result = dues_svc.add_adhoc(chat_id, body.member_name, actor_uid, actor_name)
+    await _announce(chat_id, result.get("announcement"))
+    return result
 
 
 @router.post(
@@ -477,7 +510,9 @@ async def log_expense(
     actor_uid = _require_admin(chat_id, body.id_token)
     actor_name = _actor_name(chat_id, actor_uid)
 
-    return dues_svc.log_expense(chat_id, body.amount, body.description, actor_uid, actor_name)
+    result = dues_svc.log_expense(chat_id, body.amount, body.description, actor_uid, actor_name)
+    await _announce(chat_id, result.get("announcement"))
+    return result
 
 
 @router.post(
@@ -494,7 +529,9 @@ async def fund_topup(
     actor_uid = _require_admin(chat_id, body.id_token)
     actor_name = _actor_name(chat_id, actor_uid)
 
-    return dues_svc.fund_topup(chat_id, body.amount, body.description, actor_uid, actor_name)
+    result = dues_svc.fund_topup(chat_id, body.amount, body.description, actor_uid, actor_name)
+    await _announce(chat_id, result.get("announcement"))
+    return result
 
 
 # ── Penalty tier management ───────────────────────────────────────────────────

@@ -35,6 +35,40 @@ def _ts() -> str:
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 
+def apply_ghost_marking(cid: int, rc_db_id: int, selected: set, in_users: list) -> list:
+    """Write ghost tracking records for `selected` members and return summary lines.
+
+    `selected` is a set of user_id (int) for real users or proxy_name (str) for proxies.
+    `in_users` is the output of get_rollcall_in_users(rc_db_id).
+    Does NOT call mark_rollcall_absent_done or _decrement_attended — caller handles those.
+    """
+    user_map  = {u['user_id']:   u for u in in_users if u['user_id'] is not None}
+    proxy_map = {u['proxy_name']: u for u in in_users if u.get('proxy_name') is not None}
+    lines = []
+    for item in selected:
+        if isinstance(item, int):
+            u = user_map.get(item)
+            if not u:
+                logging.warning(f"[{_ts()}] Ghost: real user {item} not found in user_map")
+                continue
+            name = u.get('first_name') or u.get('username') or str(item)
+            increment_ghost_count(cid, item, name)
+            add_ghost_event(rc_db_id, cid, item, name)
+            reset_user_streak(cid, item)
+            new_count = get_ghost_count(cid, item)
+            lines.append(f"👻 {name} — ghosted {new_count} session(s) total")
+        else:
+            proxy_name = str(item)
+            if proxy_name not in proxy_map:
+                logging.warning(f"[{_ts()}] Ghost: proxy {proxy_name} not found in proxy_map")
+                continue
+            increment_ghost_count(cid, -1, proxy_name, proxy_name=proxy_name)
+            add_ghost_event(rc_db_id, cid, None, user_name=proxy_name, proxy_name=proxy_name)
+            new_count = get_ghost_count_by_proxy_name(cid, proxy_name)
+            lines.append(f"👻 {proxy_name} (via /sif) — ghosted {new_count} session(s) total")
+    return lines
+
+
 def _decrement_attended(cid: int, in_users: list, selected: set) -> int:
     """Forgive 1 absence for each IN user NOT in the selected-ghosts set.
 
@@ -280,37 +314,9 @@ async def ghost_callback_handler(call):
                 return
 
             in_users = get_rollcall_in_users(rc_db_id)
-            user_map = {u['user_id']: u for u in in_users if u['user_id'] is not None}
-            proxy_map = {u['proxy_name']: u for u in in_users if u.get('proxy_name') is not None}
-            lines = []
-
             logging.info(f"[{_ts()}] Ghost callback: in_users={[u.get('first_name') or u.get('proxy_name') for u in in_users]}, selected={selected}")
 
-            for item in selected:
-                if isinstance(item, int):
-                    u = user_map.get(item)
-                    if not u:
-                        logging.warning(f"[{_ts()}] Ghost: real user {item} not found in user_map")
-                        continue
-                    name = u.get('first_name') or u.get('username') or str(item)
-                    logging.info(f"[{_ts()}] Ghosting real user: {name}")
-                    increment_ghost_count(cid, item, name)
-                    add_ghost_event(rc_db_id, cid, item, name)
-                    reset_user_streak(cid, item)
-                    new_count = get_ghost_count(cid, item)
-                    lines.append(f"👻 {name} — ghosted {new_count} session(s) total")
-                else:
-                    proxy_name = str(item)
-                    if proxy_name not in proxy_map:
-                        logging.warning(f"[{_ts()}] Ghost: proxy {proxy_name} not found in proxy_map: {list(proxy_map.keys())}")
-                        continue
-                    logging.info(f"[{_ts()}] Ghosting proxy user: {proxy_name}")
-                    increment_ghost_count(cid, -1, proxy_name, proxy_name=proxy_name)
-                    add_ghost_event(rc_db_id, cid, None, user_name=proxy_name, proxy_name=proxy_name)
-                    new_count = get_ghost_count_by_proxy_name(cid, proxy_name)
-                    lines.append(f"👻 {proxy_name} (via /sif) — ghosted {new_count} session(s) total")
-
-            # Forgive 1 absence for every IN user who actually attended (not selected).
+            lines = apply_ghost_marking(cid, rc_db_id, selected, in_users)
             _decrement_attended(cid, in_users, selected)
 
             summary = "\n".join(lines)

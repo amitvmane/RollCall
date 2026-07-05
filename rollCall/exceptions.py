@@ -27,3 +27,9 @@ class incorrectParameter(Exception):
 
 class amountOfRollCallsReached(Exception):
     pass
+
+class duesGameAlreadyClosed(Exception):
+    pass
+
+class duesNothingToClose(Exception):
+    pass

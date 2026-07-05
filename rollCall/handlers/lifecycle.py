@@ -25,6 +25,7 @@ from exceptions import (
 from functions import admin_rights, roll_call_not_started
 from models import User
 from rollcall_manager import manager
+import db
 from db import update_rollcall
 from services import rollcalls as rollcalls_svc
 from services import voting as voting_svc
@@ -38,6 +39,57 @@ def _build_panel_text(rc, rc_number: int) -> str:
     """Build the panel text. The web link is exposed via the inline keyboard
     button (_group_web_url), so we don't duplicate it in the message body."""
     return rc.allList().replace("__RCID__", str(rc_number))
+
+
+async def _post_end_cleanup(cid: int, ended_number: int, result: dict, rc_title: str = "") -> None:
+    """Panel-ID cleanup, ghost prompt, and renumber announcements after a rollcall ends.
+
+    Called by /erc and /close_game (whenever close_game ends an active rollcall).
+    `ended_number` is 1-based. `result` is the dict from rollcalls_svc.end_rollcall.
+    """
+    _panel_msg_ids.pop((cid, ended_number), None)
+    for entry in sorted(result["renumbered"], key=lambda x: x["old"]):
+        old_key = (cid, entry["old"])
+        if old_key in _panel_msg_ids:
+            _panel_msg_ids[(cid, entry["new"])] = _panel_msg_ids.pop(old_key)
+
+    rc_db_id = result.get("rc_db_id")
+    ghost_eligible = bool(result.get("ghost_eligible"))
+
+    chat_row = db.get_or_create_chat(cid)
+    dues_enabled = bool(chat_row.get("dues_enabled"))
+
+    if dues_enabled and rc_db_id:
+        # Penalty panel absorbs ghost tracking — ditch tier = no-show marker.
+        # Ghost prompt is suppressed; the panel handles both in one step.
+        from handlers.penalty_panel import send_penalty_panel
+        await send_penalty_panel(cid, rc_db_id, rc_title, ghost_eligible=ghost_eligible)
+    elif ghost_eligible:
+        ghost_markup = InlineKeyboardMarkup(row_width=2)
+        ghost_markup.add(
+            InlineKeyboardButton(
+                "👻 Yes, select ghosts",
+                callback_data=f"ghost_yes_{result['ghost_rc_db_id']}"
+            ),
+            InlineKeyboardButton(
+                "✅ No, all showed up",
+                callback_data=f"ghost_no_{result['ghost_rc_db_id']}"
+            ),
+        )
+        title_hint = f" '{rc_title}'" if rc_title else ""
+        await bot.send_message(cid, f"👻 Did anyone ghost{title_hint}?", reply_markup=ghost_markup)
+
+    updated_rollcalls = manager.get_rollcalls(cid)
+    if updated_rollcalls:
+        lines = [f"⚠️ Rollcall #{ended_number} ended. IDs updated:"]
+        for entry in result["renumbered"]:
+            lines.append(f"  #{entry['old']} '{entry['title']}' → #{entry['new']}")
+        if not manager.get_shh_mode(cid):
+            await bot.send_message(cid, "\n".join(lines))
+            for idx, rollcall in enumerate(updated_rollcalls):
+                new_id = idx + 1
+                text = f"Rollcall number {new_id}\n\n" + _build_panel_text(rollcall, new_id)
+                await bot.send_message(cid, text)
 
 
 def _group_web_url(cid: int) -> str:
@@ -212,6 +264,17 @@ async def start_roll_call(message):
         _panel_msg_ids[(cid, rc_number_1based)] = sent.message_id
         _persist_panel_msg_id(rc, sent.message_id)
 
+        # Dues reminder: prompt the admin to set the ground cost now so it
+        # isn't forgotten before /erc.  Only shown in non-shh mode.
+        chat_row = db.get_or_create_chat(cid)
+        if chat_row.get("dues_enabled") and not manager.get_shh_mode(cid):
+            await bot.send_message(
+                cid,
+                "💰 *Dues active* — set the ground cost now so it's ready for /close_game:\n"
+                "`/ef <amount>`  e.g. `/ef 600`",
+                parse_mode="Markdown",
+            )
+
     except Exception as e:
         await reply_error(cid, e)
 
@@ -266,35 +329,7 @@ async def end_roll_call(message):
             )
 
             await bot.send_message(cid, finish_text)
-
-            # Update panel IDs: remove ended slot, shift renumbered ones down
-            _panel_msg_ids.pop((cid, ended_number), None)
-            for entry in sorted(result["renumbered"], key=lambda x: x["old"]):
-                old_key = (cid, entry["old"])
-                if old_key in _panel_msg_ids:
-                    _panel_msg_ids[(cid, entry["new"])] = _panel_msg_ids.pop(old_key)
-
-            if result["ghost_eligible"]:
-                ghost_markup = InlineKeyboardMarkup(row_width=2)
-                ghost_markup.add(
-                    InlineKeyboardButton("👻 Yes, select ghosts", callback_data=f"ghost_yes_{result['ghost_rc_db_id']}"),
-                    InlineKeyboardButton("✅ No, all showed up", callback_data=f"ghost_no_{result['ghost_rc_db_id']}")
-                )
-                # Name the rollcall so multiple prompts (when several rollcalls
-                # end close together) are distinguishable rather than identical.
-                await bot.send_message(cid, f"👻 Did anyone ghost '{rc.title}'?", reply_markup=ghost_markup)
-
-            updated_rollcalls = manager.get_rollcalls(cid)
-            if updated_rollcalls:
-                lines = [f"⚠️ Rollcall #{ended_number} ended. IDs updated:"]
-                for entry in result["renumbered"]:
-                    lines.append(f"  #{entry['old']} '{entry['title']}' → #{entry['new']}")
-                if not manager.get_shh_mode(cid):
-                    await bot.send_message(cid, "\n".join(lines))
-                    for idx, rollcall in enumerate(updated_rollcalls):
-                        new_id = idx + 1
-                        text = f"Rollcall number {new_id}\n\n" + _build_panel_text(rollcall, new_id)
-                        await bot.send_message(cid, text)
+            await _post_end_cleanup(cid, ended_number, result, rc_title=rc.title)
     except Exception as e:
         await reply_error(message, e)
 

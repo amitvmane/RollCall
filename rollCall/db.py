@@ -174,7 +174,14 @@ def create_tables():
                     absent_limit INTEGER DEFAULT 1,
                     ghost_tracking_enabled BOOLEAN DEFAULT TRUE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    group_name TEXT DEFAULT NULL
+                    group_name TEXT DEFAULT NULL,
+                    upi_vpa TEXT DEFAULT NULL,
+                    dues_round_step INTEGER DEFAULT 10,
+                    penalty_late_t1 INTEGER DEFAULT 50,
+                    penalty_late_t2 INTEGER DEFAULT 75,
+                    penalty_late_t3 INTEGER DEFAULT 100,
+                    penalty_ditch INTEGER DEFAULT 200,
+                    dues_enabled BOOLEAN DEFAULT FALSE
                 )
             """)
 
@@ -195,6 +202,9 @@ def create_tables():
                     ended_at TIMESTAMP,
                     absent_marked BOOLEAN DEFAULT FALSE,
                     panel_msg_id BIGINT DEFAULT NULL,
+                    collector_uid BIGINT DEFAULT NULL,
+                    collector_name TEXT DEFAULT NULL,
+                    collector_paid_ground INTEGER DEFAULT 0,
                     FOREIGN KEY (chat_id) REFERENCES chats(chat_id) ON DELETE CASCADE
                 )
             """)
@@ -334,7 +344,14 @@ def create_tables():
                     absent_limit INTEGER DEFAULT 1,
                     ghost_tracking_enabled INTEGER DEFAULT 1,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    group_name TEXT DEFAULT NULL
+                    group_name TEXT DEFAULT NULL,
+                    upi_vpa TEXT DEFAULT NULL,
+                    dues_round_step INTEGER DEFAULT 10,
+                    penalty_late_t1 INTEGER DEFAULT 50,
+                    penalty_late_t2 INTEGER DEFAULT 75,
+                    penalty_late_t3 INTEGER DEFAULT 100,
+                    penalty_ditch INTEGER DEFAULT 200,
+                    dues_enabled INTEGER DEFAULT 0
                 )
             """)
 
@@ -355,6 +372,9 @@ def create_tables():
                     ended_at TIMESTAMP,
                     absent_marked INTEGER DEFAULT 0,
                     panel_msg_id INTEGER DEFAULT NULL,
+                    collector_uid INTEGER DEFAULT NULL,
+                    collector_name TEXT DEFAULT NULL,
+                    collector_paid_ground INTEGER DEFAULT 0,
                     FOREIGN KEY (chat_id) REFERENCES chats(chat_id) ON DELETE CASCADE
                 )
             """)
@@ -684,6 +704,9 @@ _RECONCILE_COLUMNS = {
         ("panel_msg_id",   "panel_msg_id INTEGER DEFAULT NULL",        "panel_msg_id BIGINT DEFAULT NULL"),
         ("web_token",      "web_token TEXT DEFAULT NULL",              "web_token TEXT DEFAULT NULL"),
         ("is_cancelled",   "is_cancelled INTEGER DEFAULT 0",          "is_cancelled BOOLEAN DEFAULT FALSE"),
+        ("collector_uid",  "collector_uid INTEGER DEFAULT NULL",       "collector_uid BIGINT DEFAULT NULL"),
+        ("collector_name", "collector_name TEXT DEFAULT NULL",         "collector_name TEXT DEFAULT NULL"),
+        ("collector_paid_ground", "collector_paid_ground INTEGER DEFAULT 0", "collector_paid_ground INTEGER DEFAULT 0"),
     ],
     "chats": [
         ("shh_mode",               "shh_mode INTEGER DEFAULT 0",               "shh_mode BOOLEAN DEFAULT FALSE"),
@@ -693,6 +716,13 @@ _RECONCILE_COLUMNS = {
         ("ghost_tracking_enabled", "ghost_tracking_enabled INTEGER DEFAULT 1", "ghost_tracking_enabled BOOLEAN DEFAULT TRUE"),
         ("group_web_token",        "group_web_token TEXT DEFAULT NULL",        "group_web_token TEXT DEFAULT NULL"),
         ("group_name",             "group_name TEXT DEFAULT NULL",             "group_name TEXT DEFAULT NULL"),
+        ("upi_vpa",                "upi_vpa TEXT DEFAULT NULL",                "upi_vpa TEXT DEFAULT NULL"),
+        ("dues_round_step",        "dues_round_step INTEGER DEFAULT 10",       "dues_round_step INTEGER DEFAULT 10"),
+        ("penalty_late_t1",        "penalty_late_t1 INTEGER DEFAULT 50",       "penalty_late_t1 INTEGER DEFAULT 50"),
+        ("penalty_late_t2",        "penalty_late_t2 INTEGER DEFAULT 75",       "penalty_late_t2 INTEGER DEFAULT 75"),
+        ("penalty_late_t3",        "penalty_late_t3 INTEGER DEFAULT 100",      "penalty_late_t3 INTEGER DEFAULT 100"),
+        ("penalty_ditch",          "penalty_ditch INTEGER DEFAULT 200",        "penalty_ditch INTEGER DEFAULT 200"),
+        ("dues_enabled",           "dues_enabled BOOLEAN DEFAULT FALSE",       "dues_enabled INTEGER DEFAULT 0"),
     ],
     "users": [
         ("in_pos",   "in_pos INTEGER DEFAULT NULL",   "in_pos INTEGER DEFAULT NULL"),
@@ -720,6 +750,10 @@ _RECONCILE_COLUMNS = {
     ],
     "web_verify_tokens": [
         ("tg_username", "tg_username TEXT DEFAULT NULL", "tg_username TEXT DEFAULT NULL"),
+    ],
+    "penalty_tiers": [
+        ("late_minutes_threshold", "late_minutes_threshold INTEGER DEFAULT NULL", "late_minutes_threshold INTEGER DEFAULT NULL"),
+        ("is_ditch",               "is_ditch INTEGER DEFAULT 0",                  "is_ditch INTEGER DEFAULT 0"),
     ],
 }
 
@@ -1233,6 +1267,176 @@ def _run_migrations(conn, cursor):
             conn.rollback()
 
 
+    # ── Dues & Treasury tables ────────────────────────────────────────────────
+    # game_closures: one row per financially closed game. UNIQUE(rollcall_id)
+    # is the double-close guard. dues_entries / fund_transactions are
+    # APPEND-ONLY ledgers — corrections are compensating entries, never
+    # UPDATE/DELETE, so the full money history is always reconstructable.
+    if db_type == 'postgresql':
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS game_closures (
+                    id              SERIAL PRIMARY KEY,
+                    chat_id         BIGINT NOT NULL,
+                    rollcall_id     INTEGER NOT NULL UNIQUE,
+                    title           TEXT,
+                    ground_cost     INTEGER NOT NULL,
+                    in_count        INTEGER NOT NULL,
+                    subsidy         INTEGER NOT NULL DEFAULT 0,
+                    per_head        INTEGER NOT NULL,
+                    rounding_step   INTEGER NOT NULL,
+                    remainder       INTEGER NOT NULL DEFAULT 0,
+                    collector_uid   BIGINT DEFAULT NULL,
+                    collector_name  TEXT DEFAULT NULL,
+                    collector_paid_ground INTEGER DEFAULT 0,
+                    closed_by_uid   BIGINT NOT NULL,
+                    closed_by_name  TEXT NOT NULL,
+                    created_at      TEXT NOT NULL
+                )
+            """)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS dues_entries (
+                    id              SERIAL PRIMARY KEY,
+                    chat_id         BIGINT NOT NULL,
+                    rollcall_id     INTEGER DEFAULT NULL,
+                    user_id         BIGINT DEFAULT NULL,
+                    member_name     TEXT NOT NULL,
+                    entry_type      TEXT NOT NULL,
+                    amount          INTEGER NOT NULL,
+                    memo            TEXT DEFAULT NULL,
+                    created_by_uid  BIGINT NOT NULL,
+                    created_by_name TEXT NOT NULL,
+                    created_at      TEXT NOT NULL
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_dues_entries_chat ON dues_entries(chat_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_dues_entries_rollcall ON dues_entries(rollcall_id)")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS fund_transactions (
+                    id              SERIAL PRIMARY KEY,
+                    chat_id         BIGINT NOT NULL,
+                    rollcall_id     INTEGER DEFAULT NULL,
+                    txn_type        TEXT NOT NULL,
+                    amount          INTEGER NOT NULL,
+                    description     TEXT DEFAULT NULL,
+                    created_by_uid  BIGINT NOT NULL,
+                    created_by_name TEXT NOT NULL,
+                    created_at      TEXT NOT NULL
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_fund_transactions_chat ON fund_transactions(chat_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_fund_transactions_rollcall ON fund_transactions(rollcall_id)")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS penalty_tiers (
+                    id                      SERIAL PRIMARY KEY,
+                    chat_id                 BIGINT NOT NULL,
+                    name                    TEXT NOT NULL,
+                    amount                  INTEGER NOT NULL,
+                    description             TEXT DEFAULT NULL,
+                    late_minutes_threshold  INTEGER DEFAULT NULL,
+                    is_ditch                INTEGER DEFAULT 0,
+                    created_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(chat_id, name)
+                )
+            """)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    else:
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS game_closures (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id         INTEGER NOT NULL,
+                    rollcall_id     INTEGER NOT NULL UNIQUE,
+                    title           TEXT,
+                    ground_cost     INTEGER NOT NULL,
+                    in_count        INTEGER NOT NULL,
+                    subsidy         INTEGER NOT NULL DEFAULT 0,
+                    per_head        INTEGER NOT NULL,
+                    rounding_step   INTEGER NOT NULL,
+                    remainder       INTEGER NOT NULL DEFAULT 0,
+                    collector_uid   INTEGER DEFAULT NULL,
+                    collector_name  TEXT DEFAULT NULL,
+                    collector_paid_ground INTEGER DEFAULT 0,
+                    closed_by_uid   INTEGER NOT NULL,
+                    closed_by_name  TEXT NOT NULL,
+                    created_at      TEXT NOT NULL
+                )
+            """)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS dues_entries (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id         INTEGER NOT NULL,
+                    rollcall_id     INTEGER DEFAULT NULL,
+                    user_id         INTEGER DEFAULT NULL,
+                    member_name     TEXT NOT NULL,
+                    entry_type      TEXT NOT NULL,
+                    amount          INTEGER NOT NULL,
+                    memo            TEXT DEFAULT NULL,
+                    created_by_uid  INTEGER NOT NULL,
+                    created_by_name TEXT NOT NULL,
+                    created_at      TEXT NOT NULL
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_dues_entries_chat ON dues_entries(chat_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_dues_entries_rollcall ON dues_entries(rollcall_id)")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS fund_transactions (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id         INTEGER NOT NULL,
+                    rollcall_id     INTEGER DEFAULT NULL,
+                    txn_type        TEXT NOT NULL,
+                    amount          INTEGER NOT NULL,
+                    description     TEXT DEFAULT NULL,
+                    created_by_uid  INTEGER NOT NULL,
+                    created_by_name TEXT NOT NULL,
+                    created_at      TEXT NOT NULL
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_fund_transactions_chat ON fund_transactions(chat_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_fund_transactions_rollcall ON fund_transactions(rollcall_id)")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS penalty_tiers (
+                    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id                 INTEGER NOT NULL,
+                    name                    TEXT NOT NULL,
+                    amount                  INTEGER NOT NULL,
+                    description             TEXT DEFAULT NULL,
+                    late_minutes_threshold  INTEGER DEFAULT NULL,
+                    is_ditch                INTEGER DEFAULT 0,
+                    created_at              TEXT NOT NULL,
+                    UNIQUE(chat_id, name)
+                )
+            """)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
     # is_cancelled — marks rollcalls cancelled before they happened (weather, venue, etc.)
     # Cancelled rollcalls are excluded from attendance rate, streak, and session counts.
     if db_type == 'postgresql':
@@ -1369,6 +1573,9 @@ def get_chat_by_group_web_token(token: str) -> Optional[Dict]:
 _VALID_CHAT_FIELDS = {
     'shh_mode', 'admin_rights', 'timezone', 'absent_limit',
     'ghost_tracking_enabled', 'group_name', 'group_web_token',
+    'upi_vpa', 'dues_round_step',
+    'penalty_late_t1', 'penalty_late_t2', 'penalty_late_t3', 'penalty_ditch',
+    'dues_enabled',
 }
 
 def update_chat_settings(chat_id: int, **kwargs) -> bool:
@@ -1553,6 +1760,7 @@ _VALID_ROLLCALL_FIELDS = {
     'event_fee', 'in_list_limit', 'panel_msg_id', 'web_token',
     'timezone', 'reminder_hours', 'template_name', 'created_at',
     'is_cancelled',
+    'collector_uid', 'collector_name', 'collector_paid_ground',
 }
 
 def update_rollcall(rollcall_id: int, **kwargs) -> bool:
@@ -3024,14 +3232,15 @@ def get_rollcall_in_users(rollcall_id: int) -> List[Dict]:
 
         # Proxy users added via /sif (no Telegram user_id)
         cursor.execute(
-            f"""SELECT name
+            f"""SELECT name, proxy_owner_id
                 FROM proxy_users
                 WHERE rollcall_id = {ph} AND status = 'in'
                 ORDER BY in_pos ASC""",
             (rollcall_id,)
         )
         proxy_rows = [
-            {'user_id': None, 'first_name': row['name'], 'username': None, 'proxy_name': row['name']}
+            {'user_id': None, 'first_name': row['name'], 'username': None,
+             'proxy_name': row['name'], 'proxy_owner_id': row['proxy_owner_id']}
             for row in cursor.fetchall()
         ]
 
@@ -4991,6 +5200,730 @@ def delete_scheduled_rollcall(row_id: int, chat_id: int) -> bool:
         return deleted
     except Exception:
         logging.exception("delete_scheduled_rollcall failed")
+        conn.rollback()
+        return False
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+# ── Dues & Treasury ──────────────────────────────────────────────────────────
+# dues_entries and fund_transactions are APPEND-ONLY: the only writers are the
+# INSERT helpers below. Corrections must be compensating entries so the money
+# history stays fully reconstructable (see CLAUDE.md).
+
+def _dues_now() -> str:
+    return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def create_game_closure(
+    chat_id: int,
+    rollcall_id: int,
+    title: str,
+    ground_cost: int,
+    in_count: int,
+    subsidy: int,
+    per_head: int,
+    rounding_step: int,
+    remainder: int,
+    closed_by_uid: int,
+    closed_by_name: str,
+    collector_uid: int = None,
+    collector_name: str = None,
+    collector_paid_ground: int = 0,
+) -> int:
+    """Create the financial-close record for a game. Raises on duplicate
+    rollcall_id (UNIQUE constraint) — that is the double-close guard."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"INSERT INTO game_closures (chat_id, rollcall_id, title, ground_cost, in_count,"
+            f" subsidy, per_head, rounding_step, remainder, collector_uid, collector_name,"
+            f" collector_paid_ground, closed_by_uid, closed_by_name, created_at)"
+            f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+            (chat_id, rollcall_id, title, ground_cost, in_count, subsidy, per_head,
+             rounding_step, remainder, collector_uid, collector_name,
+             collector_paid_ground, closed_by_uid, closed_by_name, _dues_now()),
+        )
+        conn.commit()
+        if db_type == "postgresql":
+            cursor.execute("SELECT lastval()")
+        else:
+            cursor.execute("SELECT last_insert_rowid()")
+        return cursor.fetchone()[0]
+    except Exception:
+        logging.exception("create_game_closure failed")
+        conn.rollback()
+        raise
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def get_game_closure(rollcall_id: int) -> Optional[Dict]:
+    """Return the closure row for a rollcall, or None if not financially closed."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"SELECT * FROM game_closures WHERE rollcall_id = {ph}",
+            (rollcall_id,),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except Exception:
+        logging.exception("get_game_closure failed")
+        return None
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def get_nth_game_closure(chat_id: int, n: int = 0) -> Optional[Dict]:
+    """Return the Nth most recent closure for a chat (0 = latest, 1 = second most recent).
+
+    Used by /cancel_game_dues ::N to target a specific past game by position.
+    """
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"SELECT * FROM game_closures WHERE chat_id = {ph}"
+            f" ORDER BY id DESC LIMIT 1 OFFSET {ph}",
+            (chat_id, n),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except Exception:
+        logging.exception("get_nth_game_closure failed")
+        return None
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def get_latest_game_closure(chat_id: int) -> Optional[Dict]:
+    """Return the most recent closure for a chat (for /add_adhoc and defaults)."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"SELECT * FROM game_closures WHERE chat_id = {ph} ORDER BY id DESC LIMIT 1",
+            (chat_id,),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except Exception:
+        logging.exception("get_latest_game_closure failed")
+        return None
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def update_game_closure_collector(
+    rollcall_id: int, collector_uid: int, collector_name: str, collector_paid_ground: int = None,
+) -> bool:
+    """Set/replace the collector on an existing closure (post-close /set_collector).
+    Not a money row — game_closures records metadata; ledgers stay append-only."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        if collector_paid_ground is None:
+            cursor.execute(
+                f"UPDATE game_closures SET collector_uid = {ph}, collector_name = {ph}"
+                f" WHERE rollcall_id = {ph}",
+                (collector_uid, collector_name, rollcall_id),
+            )
+        else:
+            cursor.execute(
+                f"UPDATE game_closures SET collector_uid = {ph}, collector_name = {ph},"
+                f" collector_paid_ground = {ph} WHERE rollcall_id = {ph}",
+                (collector_uid, collector_name, collector_paid_ground, rollcall_id),
+            )
+        updated = cursor.rowcount > 0
+        conn.commit()
+        return updated
+    except Exception:
+        logging.exception("update_game_closure_collector failed")
+        conn.rollback()
+        return False
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def delete_game_closure(rollcall_id: int) -> bool:
+    """Remove a game closure row so the rollcall becomes eligible for re-close.
+
+    game_closures is NOT append-only (metadata, not money rows), so deletion
+    is permitted.  The compensating dues_entries and fund_transactions written
+    by cancel_game_credit remain for a complete audit trail.
+    """
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"DELETE FROM game_closures WHERE rollcall_id = {ph}",
+            (rollcall_id,),
+        )
+        deleted = cursor.rowcount > 0
+        conn.commit()
+        return deleted
+    except Exception:
+        logging.exception("delete_game_closure failed")
+        conn.rollback()
+        return False
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def add_dues_entry(
+    chat_id: int,
+    rollcall_id: int,
+    user_id: int,
+    member_name: str,
+    entry_type: str,
+    amount: int,
+    memo: str,
+    created_by_uid: int,
+    created_by_name: str,
+) -> int:
+    """Append one dues ledger entry. Positive amount = member owes; negative = credit."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"INSERT INTO dues_entries (chat_id, rollcall_id, user_id, member_name,"
+            f" entry_type, amount, memo, created_by_uid, created_by_name, created_at)"
+            f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+            (chat_id, rollcall_id, user_id, member_name, entry_type, amount, memo,
+             created_by_uid, created_by_name, _dues_now()),
+        )
+        conn.commit()
+        if db_type == "postgresql":
+            cursor.execute("SELECT lastval()")
+        else:
+            cursor.execute("SELECT last_insert_rowid()")
+        return cursor.fetchone()[0]
+    except Exception:
+        logging.exception("add_dues_entry failed")
+        conn.rollback()
+        raise
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+# Member key: entries for real users aggregate on user_id; entries for unowned
+# proxies (user_id NULL) aggregate on LOWER(member_name).
+_DUES_MEMBER_KEY = "COALESCE(CAST(user_id AS TEXT), LOWER(member_name))"
+
+
+def get_dues_balance(chat_id: int, user_id: int = None, member_name: str = None) -> int:
+    """Balance for one member: SUM(amount). Positive = owes."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        if user_id is not None:
+            cursor.execute(
+                f"SELECT COALESCE(SUM(amount), 0) FROM dues_entries"
+                f" WHERE chat_id = {ph} AND user_id = {ph}",
+                (chat_id, user_id),
+            )
+        else:
+            cursor.execute(
+                f"SELECT COALESCE(SUM(amount), 0) FROM dues_entries"
+                f" WHERE chat_id = {ph} AND user_id IS NULL AND LOWER(member_name) = {ph}",
+                (chat_id, (member_name or "").lower()),
+            )
+        row = cursor.fetchone()
+        return int(row[0] or 0)
+    except Exception:
+        logging.exception("get_dues_balance failed")
+        return 0
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def get_all_dues_balances(chat_id: int, nonzero_only: bool = False) -> List[Dict]:
+    """Per-member balances for a chat. Each row: user_id, member_name (latest), balance."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        having = "HAVING SUM(amount) != 0" if nonzero_only else ""
+        cursor.execute(
+            f"SELECT MAX(user_id) AS user_id, MAX(member_name) AS member_name,"
+            f" SUM(amount) AS balance"
+            f" FROM dues_entries WHERE chat_id = {ph}"
+            f" GROUP BY {_DUES_MEMBER_KEY} {having}"
+            f" ORDER BY balance DESC",
+            (chat_id,),
+        )
+        return [dict(r) for r in cursor.fetchall()]
+    except Exception:
+        logging.exception("get_all_dues_balances failed")
+        return []
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def get_dues_entries(
+    chat_id: int, user_id: int = None, member_name: str = None,
+    limit: int = 15, offset: int = 0,
+) -> List[Dict]:
+    """Paginated ledger lines, newest first. Filter by member when key given."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        where = f"chat_id = {ph}"
+        params = [chat_id]
+        if user_id is not None:
+            where += f" AND user_id = {ph}"
+            params.append(user_id)
+        elif member_name is not None:
+            where += f" AND user_id IS NULL AND LOWER(member_name) = {ph}"
+            params.append(member_name.lower())
+        params += [limit, offset]
+        cursor.execute(
+            f"SELECT * FROM dues_entries WHERE {where}"
+            f" ORDER BY id DESC LIMIT {ph} OFFSET {ph}",
+            params,
+        )
+        return [dict(r) for r in cursor.fetchall()]
+    except Exception:
+        logging.exception("get_dues_entries failed")
+        return []
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def get_dues_entries_for_rollcall(rollcall_id: int) -> List[Dict]:
+    """All ledger lines attached to one game (for cancel-credit reversal)."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"SELECT * FROM dues_entries WHERE rollcall_id = {ph} ORDER BY id ASC",
+            (rollcall_id,),
+        )
+        return [dict(r) for r in cursor.fetchall()]
+    except Exception:
+        logging.exception("get_dues_entries_for_rollcall failed")
+        return []
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def get_proxy_owner_uid(chat_id: int, member_name: str) -> Optional[int]:
+    """Return the Telegram user_id of the proxy owner for member_name, if recorded.
+
+    Looks at the most recent dues_entry for member_name whose memo matches the
+    format "owner:{uid}:{name}" written by close_game for owned proxies.
+    Returns None for unowned proxies or if the memo format is older.
+    """
+    import re as _re
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"SELECT memo FROM dues_entries WHERE chat_id = {ph}"
+            f" AND LOWER(member_name) = LOWER({ph})"
+            f" AND memo LIKE 'owner:%'"
+            f" ORDER BY id DESC LIMIT 1",
+            (chat_id, member_name),
+        )
+        row = cursor.fetchone()
+        if not row or not row[0]:
+            return None
+        m = _re.match(r"owner:(\d+):", row[0])
+        return int(m.group(1)) if m else None
+    except Exception:
+        logging.exception("get_proxy_owner_uid failed")
+        return None
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def count_dues_entries(chat_id: int) -> int:
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(f"SELECT COUNT(*) FROM dues_entries WHERE chat_id = {ph}", (chat_id,))
+        row = cursor.fetchone()
+        return row[0] if row else 0
+    except Exception:
+        logging.exception("count_dues_entries failed")
+        return 0
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def add_fund_transaction(
+    chat_id: int,
+    rollcall_id: int,
+    txn_type: str,
+    amount: int,
+    description: str,
+    created_by_uid: int,
+    created_by_name: str,
+) -> int:
+    """Append one fund ledger entry. Positive = into fund; negative = out."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"INSERT INTO fund_transactions (chat_id, rollcall_id, txn_type, amount,"
+            f" description, created_by_uid, created_by_name, created_at)"
+            f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+            (chat_id, rollcall_id, txn_type, amount, description,
+             created_by_uid, created_by_name, _dues_now()),
+        )
+        conn.commit()
+        if db_type == "postgresql":
+            cursor.execute("SELECT lastval()")
+        else:
+            cursor.execute("SELECT last_insert_rowid()")
+        return cursor.fetchone()[0]
+    except Exception:
+        logging.exception("add_fund_transaction failed")
+        conn.rollback()
+        raise
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def get_fund_balance(chat_id: int) -> int:
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"SELECT COALESCE(SUM(amount), 0) FROM fund_transactions WHERE chat_id = {ph}",
+            (chat_id,),
+        )
+        row = cursor.fetchone()
+        return int(row[0] or 0)
+    except Exception:
+        logging.exception("get_fund_balance failed")
+        return 0
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def get_fund_transactions(chat_id: int, limit: int = 15, offset: int = 0) -> List[Dict]:
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"SELECT * FROM fund_transactions WHERE chat_id = {ph}"
+            f" ORDER BY id DESC LIMIT {ph} OFFSET {ph}",
+            (chat_id, limit, offset),
+        )
+        return [dict(r) for r in cursor.fetchall()]
+    except Exception:
+        logging.exception("get_fund_transactions failed")
+        return []
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def get_fund_transactions_for_rollcall(rollcall_id: int) -> List[Dict]:
+    """All fund transactions attached to one rollcall (for cancellation reversal)."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"SELECT * FROM fund_transactions WHERE rollcall_id = {ph} ORDER BY id ASC",
+            (rollcall_id,),
+        )
+        return [dict(r) for r in cursor.fetchall()]
+    except Exception:
+        logging.exception("get_fund_transactions_for_rollcall failed")
+        return []
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def count_fund_transactions(chat_id: int) -> int:
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(f"SELECT COUNT(*) FROM fund_transactions WHERE chat_id = {ph}", (chat_id,))
+        row = cursor.fetchone()
+        return row[0] if row else 0
+    except Exception:
+        logging.exception("count_fund_transactions failed")
+        return 0
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def get_latest_closeable_rollcall(chat_id: int) -> Optional[Dict]:
+    """Most recent ended, not-cancelled rollcall with no financial closure yet."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        active_false = "FALSE" if db_type == "postgresql" else "0"
+        cursor.execute(
+            f"""SELECT r.* FROM rollcalls r
+                LEFT JOIN game_closures gc ON gc.rollcall_id = r.id
+                WHERE r.chat_id = {ph}
+                  AND r.is_active = {active_false}
+                  AND COALESCE(r.is_cancelled, {active_false}) = {active_false}
+                  AND gc.id IS NULL
+                ORDER BY r.ended_at IS NULL ASC, r.ended_at DESC, r.id DESC LIMIT 1""",
+            (chat_id,),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except Exception:
+        logging.exception("get_latest_closeable_rollcall failed")
+        return None
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+# ── penalty_tiers ─────────────────────────────────────────────────────────────
+
+def upsert_penalty_tier(
+    chat_id: int,
+    name: str,
+    amount: int,
+    description: Optional[str] = None,
+    late_minutes_threshold: Optional[int] = None,
+    is_ditch: bool = False,
+) -> bool:
+    """Insert or replace a penalty tier for a chat. name is unique per chat.
+
+    If is_ditch=True, clears the is_ditch flag from all other tiers for this
+    chat first (only one ditch tier per group).
+    """
+    import datetime
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        now = datetime.datetime.utcnow().isoformat()
+        clean_name = name.strip().lower()
+        ditch_int = 1 if is_ditch else 0
+
+        if is_ditch:
+            cursor.execute(
+                f"UPDATE penalty_tiers SET is_ditch = 0 WHERE chat_id = {ph} AND name != {ph}",
+                (chat_id, clean_name),
+            )
+
+        if db_type == "postgresql":
+            cursor.execute(
+                f"INSERT INTO penalty_tiers"
+                f" (chat_id, name, amount, description, late_minutes_threshold, is_ditch, created_at)"
+                f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph})"
+                f" ON CONFLICT (chat_id, name) DO UPDATE SET"
+                f"  amount=EXCLUDED.amount,"
+                f"  description=EXCLUDED.description,"
+                f"  late_minutes_threshold=EXCLUDED.late_minutes_threshold,"
+                f"  is_ditch=EXCLUDED.is_ditch",
+                (chat_id, clean_name, amount, description,
+                 late_minutes_threshold, ditch_int, now),
+            )
+        else:
+            cursor.execute(
+                f"INSERT OR REPLACE INTO penalty_tiers"
+                f" (chat_id, name, amount, description, late_minutes_threshold, is_ditch, created_at)"
+                f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+                (chat_id, clean_name, amount, description,
+                 late_minutes_threshold, ditch_int, now),
+            )
+        conn.commit()
+        return True
+    except Exception:
+        logging.exception("upsert_penalty_tier failed")
+        conn.rollback()
+        return False
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def get_penalty_tiers(chat_id: int) -> List[Dict]:
+    """Return all penalty tiers for a chat, ordered by amount ascending."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"SELECT * FROM penalty_tiers WHERE chat_id = {ph} ORDER BY amount ASC",
+            (chat_id,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    except Exception:
+        logging.exception("get_penalty_tiers failed")
+        return []
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def get_penalty_tier(chat_id: int, name: str) -> Optional[Dict]:
+    """Return a single penalty tier by name (case-insensitive)."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"SELECT * FROM penalty_tiers WHERE chat_id = {ph} AND name = {ph}",
+            (chat_id, name.strip().lower()),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except Exception:
+        logging.exception("get_penalty_tier failed")
+        return None
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def get_tier_for_minutes(chat_id: int, minutes: int) -> Optional[Dict]:
+    """Find the best matching late tier for a given number of minutes late.
+
+    Returns the tier with the highest late_minutes_threshold that is still
+    <= minutes.  Returns None when no configured tier covers this duration.
+    """
+    tiers = get_penalty_tiers(chat_id)
+    candidates = [
+        t for t in tiers
+        if t.get("late_minutes_threshold") is not None
+        and t["late_minutes_threshold"] <= minutes
+    ]
+    return max(candidates, key=lambda t: t["late_minutes_threshold"]) if candidates else None
+
+
+def get_ditch_tier(chat_id: int) -> Optional[Dict]:
+    """Return the tier flagged as is_ditch=1 for this chat, or None."""
+    for t in get_penalty_tiers(chat_id):
+        if t.get("is_ditch"):
+            return t
+    return None
+
+
+def delete_penalty_tier(chat_id: int, name: str) -> bool:
+    """Delete a penalty tier by name. Returns True if a row was deleted."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"DELETE FROM penalty_tiers WHERE chat_id = {ph} AND name = {ph}",
+            (chat_id, name.strip().lower()),
+        )
+        deleted = cursor.rowcount > 0
+        conn.commit()
+        return deleted
+    except Exception:
+        logging.exception("delete_penalty_tier failed")
         conn.rollback()
         return False
     finally:

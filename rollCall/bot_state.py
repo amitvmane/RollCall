@@ -15,6 +15,7 @@ from config import TELEGRAM_TOKEN
 from exceptions import (
     rollCallNotStarted, insufficientPermissions, parameterMissing, incorrectParameter,
     duplicateProxy, alreadyInList, repeatlyName, timeError, amountOfRollCallsReached, rollCallAlreadyStarted,
+    duesGameAlreadyClosed, duesNothingToClose,
 )
 from models import RollCall, User
 
@@ -23,6 +24,7 @@ from models import RollCall, User
 _USER_FACING_EXCEPTIONS = (
     rollCallNotStarted, insufficientPermissions, parameterMissing, incorrectParameter,
     duplicateProxy, alreadyInList, repeatlyName, timeError, amountOfRollCallsReached, rollCallAlreadyStarted,
+    duesGameAlreadyClosed, duesNothingToClose,
 )
 
 logging.basicConfig(

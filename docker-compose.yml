@@ -118,6 +118,57 @@ services:
   #   2. Run: docker run cloudflare/cloudflared tunnel create rollcall
   #   3. Set CLOUDFLARE_TUNNEL_TOKEN=<token from step 2> in .env
   # ---------------------------------------------------------------------------
+  # ---------------------------------------------------------------------------
+  # Off-site backup sidecar — ships local SQLite snapshots to any rclone remote
+  # (Google Drive, S3, Backblaze B2, etc.).
+  #
+  # Uses `rclone copy` (not sync) so the remote retains history forever even
+  # when the local 7-day retention window prunes old snapshots. Critical for
+  # financial ledger data — never delete remote copies.
+  #
+  # One-time setup on the host:
+  #   1. Install rclone: https://rclone.org/install/
+  #   2. Configure a remote: rclone config
+  #   3. Set RCLONE_REMOTE=<name>:<bucket/path> in .env
+  #      e.g. RCLONE_REMOTE=gdrive:rollcall-backups
+  #   4. (Optional) Set RCLONE_CONFIG_PATH if your rclone.conf is not at
+  #      the default path (~/.config/rclone).
+  #   5. Start: docker-compose --profile backup-remote up -d
+  #
+  # The sidecar runs a copy every BACKUP_SYNC_INTERVAL_SECONDS (default 1 hour).
+  # ---------------------------------------------------------------------------
+  backup-sync:
+    image: rclone/rclone:latest
+    container_name: rollcall-backup-sync
+    restart: unless-stopped
+    profiles:
+      - backup-remote  # only starts with: docker-compose --profile backup-remote up -d
+    depends_on:
+      - db-backup
+    environment:
+      - RCLONE_REMOTE=${RCLONE_REMOTE:-myremote:rollcall-backups}
+      - BACKUP_SYNC_INTERVAL_SECONDS=${BACKUP_SYNC_INTERVAL_SECONDS:-3600}
+    volumes:
+      # Local backups written by db-backup sidecar (read-only here)
+      - ./data/backups:/backups:ro
+      # Host rclone config (must already be configured via `rclone config`)
+      - ${RCLONE_CONFIG_PATH:-~/.config/rclone}:/config/rclone:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) rclone copy /backups $${RCLONE_REMOTE}"
+          rclone copy /backups "$${RCLONE_REMOTE}" \
+            --config /config/rclone/rclone.conf \
+            --log-level INFO || true
+          sleep "$${BACKUP_SYNC_INTERVAL_SECONDS:-3600}"
+        done
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: rollcall-cloudflared

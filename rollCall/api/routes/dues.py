@@ -150,6 +150,7 @@ async def get_my_dues(
         balance=result["balance"],
         entries=[DuesEntry(**e) for e in result["entries"]],
         upi_vpa=settings.get("upi_vpa"),
+        dues_self_paid_mode=settings.get("dues_self_paid_mode") or "auto",
     )
 
 

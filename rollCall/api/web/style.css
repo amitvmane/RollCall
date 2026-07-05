@@ -140,6 +140,7 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 @keyframes spin{to{transform:rotate(360deg)}}
 .btn{padding:10px 24px;border:none;border-radius:8px;font-size:.95rem;font-weight:600;cursor:pointer}
 .btn-primary{background:var(--accent);color:#fff}
+.btn-secondary{background:var(--border);color:var(--text)}
 .no-rc{text-align:center;padding:28px 16px;color:var(--sub);font-size:.92rem}
 .no-rc .icon{font-size:2rem;margin-bottom:8px}
 .refresh-bar-wrap{display:flex;align-items:center;gap:8px;margin-top:4px}

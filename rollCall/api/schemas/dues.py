@@ -107,6 +107,7 @@ class DuesMyResponse(BaseModel):
     balance: int
     entries: List[DuesEntry]
     upi_vpa: Optional[str] = None
+    dues_self_paid_mode: str = "auto"
 
 
 class DuesMemberBalance(BaseModel):

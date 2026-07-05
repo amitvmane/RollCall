@@ -53,7 +53,18 @@ async def _post_end_cleanup(cid: int, ended_number: int, result: dict, rc_title:
         if old_key in _panel_msg_ids:
             _panel_msg_ids[(cid, entry["new"])] = _panel_msg_ids.pop(old_key)
 
-    if result.get("ghost_eligible"):
+    rc_db_id = result.get("rc_db_id")
+    ghost_eligible = bool(result.get("ghost_eligible"))
+
+    chat_row = db.get_or_create_chat(cid)
+    dues_enabled = bool(chat_row.get("dues_enabled"))
+
+    if dues_enabled and rc_db_id:
+        # Penalty panel absorbs ghost tracking — ditch tier = no-show marker.
+        # Ghost prompt is suppressed; the panel handles both in one step.
+        from handlers.penalty_panel import send_penalty_panel
+        await send_penalty_panel(cid, rc_db_id, rc_title, ghost_eligible=ghost_eligible)
+    elif ghost_eligible:
         ghost_markup = InlineKeyboardMarkup(row_width=2)
         ghost_markup.add(
             InlineKeyboardButton(
@@ -79,13 +90,6 @@ async def _post_end_cleanup(cid: int, ended_number: int, result: dict, rc_title:
                 new_id = idx + 1
                 text = f"Rollcall number {new_id}\n\n" + _build_panel_text(rollcall, new_id)
                 await bot.send_message(cid, text)
-
-    rc_db_id = result.get("rc_db_id")
-    if rc_db_id:
-        chat_row = db.get_or_create_chat(cid)
-        if chat_row.get("dues_enabled"):
-            from handlers.penalty_panel import send_penalty_panel
-            await send_penalty_panel(cid, rc_db_id, rc_title)
 
 
 def _group_web_url(cid: int) -> str:

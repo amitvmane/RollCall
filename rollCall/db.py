@@ -1457,6 +1457,37 @@ def _run_migrations(conn, cursor):
         except Exception:
             conn.rollback()  # column already exists — safe to ignore
 
+    # web_direct_login_tokens — admin-issued single-use login URLs for Telegram-down scenarios
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS web_direct_login_tokens (
+                token           TEXT PRIMARY KEY,
+                chat_id         INTEGER NOT NULL,
+                tg_user_id      INTEGER NOT NULL,
+                tg_name         TEXT NOT NULL,
+                created_by_uid  INTEGER NOT NULL,
+                created_by_name TEXT NOT NULL,
+                expires_at      TEXT NOT NULL,
+                used_at         TEXT DEFAULT NULL,
+                created_at      TEXT DEFAULT (datetime('now'))
+            )
+        """ if db_type != 'postgresql' else """
+            CREATE TABLE IF NOT EXISTS web_direct_login_tokens (
+                token           TEXT PRIMARY KEY,
+                chat_id         BIGINT NOT NULL,
+                tg_user_id      BIGINT NOT NULL,
+                tg_name         TEXT NOT NULL,
+                created_by_uid  BIGINT NOT NULL,
+                created_by_name TEXT NOT NULL,
+                expires_at      TIMESTAMPTZ NOT NULL,
+                used_at         TIMESTAMPTZ DEFAULT NULL,
+                created_at      TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+
 
 def get_or_create_chat(chat_id: int) -> Dict:
     """Get or create chat settings"""
@@ -5931,6 +5962,79 @@ def delete_penalty_tier(chat_id: int, name: str) -> bool:
         if cursor is not None:
             cursor.close()
         if db_type == "postgresql":
+            release_connection(conn)
+
+
+# ── web_direct_login_tokens helpers ──────────────────────────────────────────
+
+def create_web_direct_login_token(
+    token: str,
+    chat_id: int,
+    tg_user_id: int,
+    tg_name: str,
+    created_by_uid: int,
+    created_by_name: str,
+    expires_at: "datetime",
+) -> None:
+    """Store a single-use admin-issued web login token."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(
+            f"INSERT INTO web_direct_login_tokens "
+            f"(token, chat_id, tg_user_id, tg_name, created_by_uid, created_by_name, expires_at) "
+            f"VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+            (token, chat_id, tg_user_id, tg_name, created_by_uid, created_by_name, expires_at.isoformat()),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logging.exception("create_web_direct_login_token failed")
+        raise
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def consume_web_direct_login_token(token: str) -> Optional[Dict]:
+    """Atomically mark the token as used and return its payload, or None if invalid/expired/used."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        now = __import__('datetime').datetime.utcnow().isoformat()
+        cursor.execute(
+            f"UPDATE web_direct_login_tokens SET used_at={ph} "
+            f"WHERE token={ph} AND used_at IS NULL AND expires_at > {ph}",
+            (now, token, now),
+        )
+        if cursor.rowcount == 0:
+            conn.commit()
+            return None
+        conn.commit()
+        cursor.execute(
+            f"SELECT chat_id, tg_user_id, tg_name FROM web_direct_login_tokens WHERE token={ph}",
+            (token,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        if isinstance(row, dict):
+            return dict(row)
+        return {'chat_id': row[0], 'tg_user_id': row[1], 'tg_name': row[2]}
+    except Exception:
+        conn.rollback()
+        logging.exception("consume_web_direct_login_token failed")
+        return None
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
             release_connection(conn)
 
 

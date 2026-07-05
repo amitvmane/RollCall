@@ -144,6 +144,23 @@ COMMANDS = [
 
     # ──────────────────────────── ADMIN ─────────────────────────────
     {
+        "name": "weblogin", "aliases": [], "scope": "admin", "category": "Settings",
+        "args": "<name or @username>",
+        "sample": "/weblogin Amit",
+        "summary": "Generate a one-time web login link for a member",
+        "details": (
+            "Creates a single-use login URL for a group member who cannot go through "
+            "the normal Telegram verification flow — for example when Telegram is down "
+            "or the member doesn't have the app installed.\n\n"
+            "The link expires in 7 days and can only be used once. Share it via "
+            "WhatsApp, SMS, or email. When the member opens it, they are automatically "
+            "authenticated on the group web page.\n\n"
+            "The member must have previously chatted in the group so the bot knows "
+            "their account (run /weblink first to register yourself).\n\n"
+            "Example: /weblogin @Amit_Shah or /weblogin Ravi"
+        ),
+    },
+    {
         "name": "start_roll_call", "aliases": ["src"], "scope": "admin", "category": "Rollcall",
         "args": "[title]", "sample": "/src Friday Football",
         "summary": "Start a new rollcall",

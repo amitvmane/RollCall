@@ -24,6 +24,7 @@ from typing import Optional
 from urllib.parse import parse_qsl, unquote
 
 from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
 from db import _hash_token, generate_api_token, insert_api_token
@@ -200,3 +201,76 @@ async def miniapp_auth(body: MiniAppAuthRequest) -> MiniAppAuthResponse:
         chat_id=chat_id,
         id_token=id_token,
     )
+
+
+_WEBLOGIN_ERROR_HTML = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Link expired — RollCall</title>
+<style>body{{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f4f6fb}}
+.card{{background:#fff;border-radius:16px;padding:36px;max-width:340px;text-align:center;box-shadow:0 2px 16px #0001}}
+h1{{font-size:1.3rem;margin:0 0 12px}}p{{color:#555;font-size:.9rem;margin:0}}</style>
+</head><body><div class="card"><h1>🔗 {title}</h1><p>{message}</p></div></body></html>"""
+
+
+@router.get(
+    "/auth/weblogin/{token}",
+    summary="Redeem an admin-issued web login token",
+)
+async def weblogin_redeem(token: str):
+    """
+    Validate and consume a single-use admin-issued login token, then redirect to
+    the group web page with a signed identity token so the user is authenticated
+    without needing Telegram active.
+    """
+    import db as _db
+    from api.identity import issue_identity_token, IdentityError
+
+    payload = _db.consume_web_direct_login_token(token)
+    if not payload:
+        return HTMLResponse(
+            content=_WEBLOGIN_ERROR_HTML.format(
+                title="Link expired or already used",
+                message="This login link has expired or was already used. Ask an admin to generate a new one with /weblogin.",
+            ),
+            status_code=410,
+        )
+
+    tg_user_id = payload["tg_user_id"]
+    chat_id = payload["chat_id"]
+
+    try:
+        id_token = issue_identity_token(tg_user_id)
+    except IdentityError:
+        logging.error("[weblogin_redeem] cannot issue id_token — TELEGRAM_TOKEN not set")
+        return HTMLResponse(
+            content=_WEBLOGIN_ERROR_HTML.format(
+                title="Server error",
+                message="Could not issue identity token. Contact the group admin.",
+            ),
+            status_code=503,
+        )
+
+    # Resolve the group's permanent URL
+    chat = _db.get_or_create_chat(chat_id)
+    group_token = chat.get("group_web_token", "")
+    base = os.environ.get("WEB_BASE_URL", "").rstrip("/")
+    if base and group_token:
+        redirect_url = f"{base}/web/group/{group_token}?login_token={id_token}"
+    elif group_token:
+        # Relative redirect — works when client opened the link on the same origin
+        redirect_url = f"/web/group/{group_token}?login_token={id_token}"
+    else:
+        return HTMLResponse(
+            content=_WEBLOGIN_ERROR_HTML.format(
+                title="Group not found",
+                message="Could not locate the group page. Contact the group admin.",
+            ),
+            status_code=404,
+        )
+
+    logging.info(
+        "[weblogin_redeem] redeemed token for user=%s chat=%s → %s",
+        tg_user_id, chat_id, redirect_url.split("?")[0],
+    )
+    return RedirectResponse(url=redirect_url, status_code=302)

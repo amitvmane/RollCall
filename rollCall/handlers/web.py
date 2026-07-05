@@ -1,16 +1,23 @@
 """
-Web voting handler — /weblink command.
+Web voting handler — /weblink and /weblogin commands.
 
-Shares the permanent group URL (bookmark once, always works) and per-rollcall
-deep links for active rollcalls. Requires WEB_BASE_URL env var.
+/weblink — shares the permanent group URL for bookmarking.
+/weblogin name — admin issues a single-use login URL for a member who can't
+  use the Telegram verify flow (e.g. Telegram is down).
+
+Requires WEB_BASE_URL env var.
 """
 import logging
 import os
+import uuid
+from datetime import datetime, timedelta, timezone
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 import db as _db
 from bot_state import bot, reply_error, _esc_md
+from exceptions import incorrectParameter, insufficientPermissions, parameterMissing
+from functions import admin_rights
 from rollcall_manager import manager
 from services.web import get_group_web_token
 
@@ -68,3 +75,102 @@ async def weblink_cmd(message):
         await bot.send_message(cid, "\n".join(lines), parse_mode="Markdown", reply_markup=markup)
     except Exception as e:
         await reply_error(cid, e)
+
+
+# ── /weblogin ────────────────────────────────────────────────────────────────
+
+_WEBLOGIN_TTL_DAYS = 7
+
+
+def _resolve_member_for_weblogin(chat_id: int, name_arg: str) -> tuple:
+    """Return (tg_user_id, display_name) by matching name_arg against chat_members.
+
+    Strips leading @ for username matches. Raises incorrectParameter with a
+    helpful message if no unique match is found.
+    """
+    needle = name_arg.lstrip("@").lower()
+    members = _db.get_active_members(chat_id)
+    matched = []
+    for m in members:
+        first = (m.get("first_name") or "").lower()
+        uname = (m.get("username") or "").lower()
+        if needle == first or needle == uname:
+            matched.append(m)
+    if not matched:
+        all_names = ", ".join(
+            m.get("first_name") or m.get("username") or str(m["user_id"])
+            for m in members[:10]
+        )
+        hint = f"\n\nKnown members: {all_names}" if all_names else ""
+        raise incorrectParameter(
+            f"No member '{name_arg}' found in this group's chat history.{hint}"
+        )
+    if len(matched) > 1:
+        names = ", ".join(
+            m.get("first_name") or m.get("username") or str(m["user_id"])
+            for m in matched
+        )
+        raise incorrectParameter(f"Ambiguous name — multiple matches: {names}")
+    m = matched[0]
+    display = m.get("first_name") or (f"@{m['username']}" if m.get("username") else str(m["user_id"]))
+    return m["user_id"], display
+
+
+@bot.message_handler(func=lambda m: m.text.split()[0].split("@")[0].lower() == "/weblogin")
+async def weblogin_cmd(message):
+    """Admin-only: issue a single-use login URL for a member who can't use Telegram verify."""
+    cid = message.chat.id
+    try:
+        if await admin_rights(message, manager) is False:
+            raise insufficientPermissions("Admin only: /weblogin")
+
+        base = _web_base_url()
+        if not base:
+            await bot.send_message(
+                cid,
+                "Web voting is not configured. Set WEB_BASE_URL on the server first."
+            )
+            return
+
+        args = message.text.split()[1:]
+        if not args:
+            raise parameterMissing("Usage: /weblogin <name or @username>")
+
+        name_arg = " ".join(args)
+        tg_user_id, display_name = _resolve_member_for_weblogin(cid, name_arg)
+
+        token = uuid.uuid4().hex
+        expires_at = datetime.now(timezone.utc) + timedelta(days=_WEBLOGIN_TTL_DAYS)
+
+        admin = message.from_user
+        admin_uid = admin.id if admin else 0
+        admin_name = (admin.first_name if admin else None) or "admin"
+
+        _db.create_web_direct_login_token(
+            token=token,
+            chat_id=cid,
+            tg_user_id=tg_user_id,
+            tg_name=display_name,
+            created_by_uid=admin_uid,
+            created_by_name=admin_name,
+            expires_at=expires_at,
+        )
+
+        login_url = f"{base}/api/v1/auth/weblogin/{token}"
+        expiry_str = expires_at.strftime("%d %b %Y")
+
+        await bot.send_message(
+            cid,
+            f"🔐 *Web login link for {_esc_md(display_name)}*\n\n"
+            f"`{login_url}`\n\n"
+            f"Single-use · expires {expiry_str}\n"
+            f"_Share via WhatsApp or email. The link logs them in automatically._",
+            parse_mode="Markdown",
+        )
+
+        logging.info(
+            "[weblogin_cmd] admin=%s issued weblogin for user=%s chat=%s expires=%s",
+            admin_uid, tg_user_id, cid, expiry_str,
+        )
+    except Exception as e:
+        await reply_error(message, e)

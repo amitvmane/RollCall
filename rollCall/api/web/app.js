@@ -32,6 +32,25 @@ if(_verifiedUserId&&!_idToken){
   localStorage.removeItem(LS_TG_USER_ID);
 }
 
+// Admin-issued weblogin redirect: ?login_token=<id_token> lands here after the
+// server validates the single-use token and issues an identity token. Store it,
+// strip the param from the URL so it isn't bookmarked or shared accidentally,
+// then continue with normal page load.
+(function(){
+  try{
+    const p=new URLSearchParams(window.location.search);
+    const lt=p.get("login_token");
+    if(lt){
+      localStorage.setItem(LS_ID_TOKEN,lt);
+      _idToken=lt;
+      p.delete("login_token");
+      const qs=p.toString();
+      const clean=window.location.pathname+(qs?"?"+qs:"");
+      history.replaceState(null,"",clean);
+    }
+  }catch(_){}
+})();
+
 // Only show "invalid URL" when a token IS present but the mode is wrong (corrupted link).
 // No token = home screen, handled at the bottom of the file.
 if(URL_TOKEN&&(URL_MODE!=="join"&&URL_MODE!=="group")){

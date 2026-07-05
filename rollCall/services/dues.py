@@ -349,7 +349,8 @@ async def close_game(
             # Owned proxy: memo references the responsible owner so the group
             # knows who to follow up with; they settle privately.
             if owner_id is not None:
-                memo = f"owner: {owner_name}" if owner_name else f"owner: uid:{owner_id}"
+                # Format "owner:{uid}:{name}" lets get_proxy_owner_uid parse uid reliably.
+                memo = f"owner:{owner_id}:{owner_name or ''}"
             else:
                 memo = None
             db.add_dues_entry(
@@ -974,20 +975,64 @@ def fund_topup(
 
 
 def remind_dues(chat_id: int) -> dict:
-    """Return members with outstanding (positive) balances for a reminder message."""
+    """Return members with outstanding (positive) balances.
+
+    Each entry in `dm_targets` is ready for individual DM delivery:
+      {user_id, member_name, balance, is_proxy, proxy_owner_uid, proxy_owner_name}
+
+    `no_dm` lists proxy members whose owner uid cannot be resolved.
+    """
     balances = db.get_all_dues_balances(chat_id, nonzero_only=True)
-    owed = [b for b in balances if b["balance"] > 0]
+    owed     = [b for b in balances if b["balance"] > 0]
     settings = get_dues_settings(chat_id)
-    upi = settings.get("upi_vpa")
+    upi      = settings.get("upi_vpa")
+
+    dm_targets = []
+    no_dm      = []
+
+    for b in owed:
+        uid  = b.get("user_id")
+        name = b["member_name"]
+        if uid is not None:
+            dm_targets.append({
+                "user_id":          uid,
+                "member_name":      name,
+                "balance":          b["balance"],
+                "is_proxy":         False,
+                "proxy_owner_uid":  None,
+                "proxy_owner_name": None,
+            })
+        else:
+            # Unowned proxy or proxy whose owner uid is in memo
+            owner_uid = db.get_proxy_owner_uid(chat_id, name)
+            if owner_uid is not None:
+                dm_targets.append({
+                    "user_id":          owner_uid,
+                    "member_name":      name,
+                    "balance":          b["balance"],
+                    "is_proxy":         True,
+                    "proxy_owner_uid":  owner_uid,
+                    "proxy_owner_name": None,
+                })
+            else:
+                no_dm.append(name)
 
     lines = []
     for b in owed:
         upi_line = f"  💳 Pay ₹{b['balance']} to: `{upi}`" if upi else ""
         lines.append(f"• {b['member_name']}: ₹{b['balance']}{upi_line}")
+    if no_dm:
+        lines.append(f"\n_Cannot DM (no linked Telegram account): {', '.join(no_dm)}_")
 
     announcement = (
         "📢 Outstanding dues:\n" + "\n".join(lines)
         if lines else "✅ Everyone is settled up!"
     )
 
-    return {"members_owed": owed, "upi_vpa": upi, "announcement": announcement}
+    return {
+        "members_owed": owed,
+        "upi_vpa":      upi,
+        "dm_targets":   dm_targets,
+        "no_dm":        no_dm,
+        "announcement": announcement,
+    }

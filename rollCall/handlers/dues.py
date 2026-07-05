@@ -26,10 +26,12 @@ Commands (all admin-only unless noted):
 
 Ledger mutation announcements always post, even in shh mode (durability).
 """
+import asyncio
 import logging
+from datetime import datetime
 
 import db as _db
-from bot_state import bot, reply_error
+from bot_state import bot, reply_error, _log_task_exc
 from exceptions import (
     duesGameAlreadyClosed, duesNothingToClose,
     incorrectParameter, insufficientPermissions, parameterMissing,
@@ -102,7 +104,15 @@ async def close_game(message):
             )
 
         # Always post announcement — financial record
-        await bot.send_message(cid, result["announcement"])
+        await bot.send_message(cid, result["announcement"], parse_mode="Markdown")
+
+        # QR code + VPA (non-blocking best-effort)
+        upi = dues_svc.get_dues_settings(cid).get("upi_vpa")
+        if upi:
+            asyncio.create_task(_send_close_qr(cid, upi, result["per_head"])).add_done_callback(_log_task_exc)
+
+        # Receipt card (non-blocking best-effort)
+        asyncio.create_task(_send_close_receipt(cid, result)).add_done_callback(_log_task_exc)
 
         # If an active rollcall was ended, run the standard post-end cleanup
         end_res = result.get("end_result")
@@ -518,7 +528,10 @@ async def remind_dues(message):
         cid = message.chat.id
         _require_dues_enabled(cid)
         result = dues_svc.remind_dues(cid)
-        await bot.send_message(cid, result["announcement"])
+        # Group summary (always)
+        await bot.send_message(cid, result["announcement"], parse_mode="Markdown")
+        # Individual DMs (best-effort, non-blocking)
+        asyncio.create_task(_send_dues_dms(cid, result)).add_done_callback(_log_task_exc)
     except Exception as e:
         await reply_error(message, e)
 
@@ -771,3 +784,114 @@ async def disable_dues(message):
         )
     except Exception as e:
         await reply_error(message, e)
+
+
+# ── /card — match-day card ────────────────────────────────────────────────────
+
+@bot.message_handler(func=lambda m: _cmd(m.text) == "/card")
+@bot.message_handler(func=lambda m: _cmd(m.text) == "/mc")
+async def matchday_card(message):
+    """Send a shareable match-day card image showing the current IN list."""
+    try:
+        from functions import roll_call_not_started
+        cid = message.chat.id
+        if not roll_call_not_started(message, manager):
+            from exceptions import rollCallNotStarted
+            raise rollCallNotStarted("No active rollcall. Start one with /rc first.")
+
+        args     = _parse_args(message.text)
+        rc_idx, _ = _parse_rc_suffix(args)
+        rc       = manager.get_rollcall(cid, rc_idx)
+        if rc is None:
+            from exceptions import rollCallNotStarted
+            raise rollCallNotStarted("Rollcall not found.")
+
+        in_names = [u.name for u in rc.inList]
+        if not in_names:
+            await bot.send_message(cid, "Nobody is IN yet — card will be more useful once people vote.")
+            return
+
+        from utils.card_gen import matchday_card as _gen_card
+        date_str = datetime.now().strftime("%A, %-d %b %Y")
+        buf      = _gen_card(rc.title or "Game Day", date_str, in_names)
+        caption  = f"📋 *{rc.title or 'Game Day'}* — {len(in_names)} players IN"
+        await bot.send_photo(cid, buf, caption=caption, parse_mode="Markdown")
+    except Exception as e:
+        await reply_error(message, e)
+
+
+# ── Background helpers ────────────────────────────────────────────────────────
+
+async def _send_close_qr(cid: int, upi: str, per_head: int) -> None:
+    """Send QR code + VPA text for the per-head amount after close_game."""
+    try:
+        from utils.card_gen import qr_png
+        buf     = qr_png(upi, per_head)
+        caption = f"💳 Pay *₹{per_head}* to: `{upi}`\n_Scan QR or copy the VPA above._"
+        await bot.send_photo(cid, buf, caption=caption, parse_mode="Markdown")
+    except Exception:
+        logging.exception("_send_close_qr failed")
+
+
+async def _send_close_receipt(cid: int, result: dict) -> None:
+    """Send a receipt card image summarising the just-closed game."""
+    try:
+        from utils.card_gen import close_receipt_card
+        balances = _db.get_all_dues_balances(cid, nonzero_only=False)
+        buf = close_receipt_card(
+            title        = result.get("title", "Game"),
+            ground_cost  = result.get("ground_cost", 0),
+            subsidy      = result.get("subsidy", 0),
+            per_head     = result.get("per_head", 0),
+            in_count     = result.get("in_count", 0),
+            fund_balance = result.get("fund_balance_after", 0),
+            balances     = balances,
+        )
+        await bot.send_photo(cid, buf, caption="📊 Balance sheet after close")
+    except Exception:
+        logging.exception("_send_close_receipt failed")
+
+
+async def _send_dues_dms(cid: int, result: dict) -> None:
+    """DM each debtor individually after /remind_dues.
+
+    Real users get a direct DM. Owned proxies get a DM to their owner with
+    clear context of which proxy the amount is for. Unowned proxies are
+    already noted in the group announcement.
+    """
+    upi     = result.get("upi_vpa")
+    targets = result.get("dm_targets", [])
+    sent    = 0
+    failed  = []
+
+    for t in targets:
+        uid      = t["user_id"]
+        name     = t["member_name"]
+        balance  = t["balance"]
+        is_proxy = t["is_proxy"]
+
+        if is_proxy:
+            body = (
+                f"📢 *Dues reminder*\n"
+                f"Your proxy *{name}* owes *₹{balance}* to the group."
+            )
+        else:
+            body = f"📢 *Dues reminder*\nYou owe *₹{balance}* to the group."
+
+        if upi:
+            body += f"\n💳 Pay ₹{balance} to: `{upi}`"
+
+        try:
+            await bot.send_message(uid, body, parse_mode="Markdown")
+            sent += 1
+        except Exception:
+            failed.append(name)
+
+    if failed or sent:
+        summary = f"✅ Reminders sent to {sent} member(s)."
+        if failed:
+            summary += f"\n⚠️ Could not DM: {', '.join(failed)} (they may not have started the bot)."
+        try:
+            await bot.send_message(cid, summary)
+        except Exception:
+            logging.exception("_send_dues_dms summary failed")

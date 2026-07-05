@@ -5567,6 +5567,41 @@ def get_dues_entries_for_rollcall(rollcall_id: int) -> List[Dict]:
             release_connection(conn)
 
 
+def get_proxy_owner_uid(chat_id: int, member_name: str) -> Optional[int]:
+    """Return the Telegram user_id of the proxy owner for member_name, if recorded.
+
+    Looks at the most recent dues_entry for member_name whose memo matches the
+    format "owner:{uid}:{name}" written by close_game for owned proxies.
+    Returns None for unowned proxies or if the memo format is older.
+    """
+    import re as _re
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"SELECT memo FROM dues_entries WHERE chat_id = {ph}"
+            f" AND LOWER(member_name) = LOWER({ph})"
+            f" AND memo LIKE 'owner:%'"
+            f" ORDER BY id DESC LIMIT 1",
+            (chat_id, member_name),
+        )
+        row = cursor.fetchone()
+        if not row or not row[0]:
+            return None
+        m = _re.match(r"owner:(\d+):", row[0])
+        return int(m.group(1)) if m else None
+    except Exception:
+        logging.exception("get_proxy_owner_uid failed")
+        return None
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
 def count_dues_entries(chat_id: int) -> int:
     conn = get_connection()
     cursor = None

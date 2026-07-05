@@ -182,6 +182,16 @@ COMMANDS = [
         "details": "Re-sends the inline vote panel (useful if it scrolled out of view).",
     },
     {
+        "name": "card", "aliases": ["mc"], "scope": "admin", "category": "Rollcall",
+        "args": "[::N]", "sample": "/card",
+        "summary": "Share match-day player card",
+        "details": (
+            "Generates a shareable image card showing the current IN list — "
+            "great for posting to WhatsApp or other group chats.\n\n"
+            "Use `::N` to pick from multiple active rollcalls."
+        ),
+    },
+    {
         "name": "set_title", "aliases": ["st"], "scope": "admin", "category": "Settings",
         "args": "title", "sample": '/st "Sunday League W3"',
         "summary": "Set rollcall title",

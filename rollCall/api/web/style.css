@@ -290,3 +290,94 @@ html.dark .sp-dot-miss{background:#334155}
 .sched-cancel-btn{background:var(--danger-dim);color:var(--danger);border:1px solid var(--danger);border-radius:6px;padding:3px 10px;font-size:.78rem;cursor:pointer;white-space:nowrap;flex-shrink:0}
 .sched-cancel-btn:hover{background:var(--danger);color:#fff}
 .sched-empty{color:var(--sub);font-size:.82rem;text-align:center;padding:10px 0}
+
+/* ── Dues cards ── */
+:root{--dues-owed:#dc2626;--dues-settled:#16a34a;--dues-credit:#0891b2;--danger:#dc2626;--danger-dim:#fef2f2}
+.dues-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.dues-hdr-title{font-size:.88rem;font-weight:700;color:var(--sub)}
+.dues-hdr-toggle{background:none;border:none;color:var(--sub);font-size:.85rem;cursor:pointer;padding:2px 6px}
+
+/* Balance display */
+.dues-balance-row{text-align:center;padding:14px 0 10px}
+.dues-balance-amount{font-size:2rem;font-weight:800;line-height:1.1}
+.dues-balance-amount.owed{color:var(--dues-owed)}
+.dues-balance-amount.settled{color:var(--dues-settled)}
+.dues-balance-amount.credit{color:var(--dues-credit)}
+.dues-balance-label{font-size:.78rem;color:var(--sub);margin-top:4px}
+
+/* Pay row */
+.dues-pay-row{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
+.dues-upi-btn{display:block;width:100%;padding:12px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-size:.95rem;font-weight:700;cursor:pointer;text-align:center;text-decoration:none}
+.dues-upi-btn:hover{opacity:.9}
+.dues-vpa-row{display:flex;align-items:center;gap:8px;background:var(--bg);border-radius:8px;padding:8px 12px}
+.dues-vpa-text{font-family:monospace;font-size:.88rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dues-vpa-copy{background:none;border:1.5px solid var(--border);border-radius:6px;padding:4px 10px;font-size:.78rem;cursor:pointer;color:var(--sub);white-space:nowrap}
+.dues-vpa-copy:hover{border-color:var(--accent);color:var(--accent)}
+.dues-qr-wrap{text-align:center;margin:8px 0}
+.dues-qr-wrap img{max-width:180px;border-radius:8px;border:1px solid var(--border)}
+.dues-self-paid-btn{width:100%;padding:12px;background:var(--dues-settled);color:#fff;border:none;border-radius:10px;font-size:.95rem;font-weight:700;cursor:pointer}
+.dues-self-paid-btn:disabled{opacity:.5;cursor:default}
+
+/* Ledger */
+.dues-section-toggle{background:none;border:none;font-size:.82rem;font-weight:600;color:var(--sub);cursor:pointer;padding:8px 0;width:100%;text-align:left;border-top:1px solid var(--border)}
+.dues-ledger-table{width:100%;border-collapse:collapse;font-size:.8rem;margin-top:6px}
+.dues-ledger-table td{padding:6px 4px;border-bottom:1px solid var(--border)}
+.dues-ledger-table td:last-child{text-align:right;white-space:nowrap}
+.dues-ledger-table .owed{color:var(--dues-owed)}
+.dues-ledger-table .credit{color:var(--dues-settled)}
+.dues-ledger-empty{color:var(--sub);font-size:.82rem;text-align:center;padding:10px 0}
+
+/* Fund row */
+.dues-fund-row{margin-top:10px;font-size:.82rem;color:var(--sub);border-top:1px solid var(--border);padding-top:10px;text-align:center}
+.dues-fund-balance{font-weight:700;color:var(--text)}
+
+/* Admin sections */
+.dues-admin-section{border-bottom:1px solid var(--border);margin-bottom:0}
+.dues-admin-section-hdr{font-size:.83rem;font-weight:700;color:var(--sub);padding:10px 0;cursor:pointer;display:flex;justify-content:space-between;align-items:center;user-select:none}
+.dues-admin-section-hdr:hover{color:var(--text)}
+
+/* Balances table */
+.dues-tbl{width:100%;border-collapse:collapse;font-size:.82rem;margin-top:6px}
+.dues-tbl th{text-align:left;color:var(--sub);font-weight:600;padding:4px 6px;font-size:.75rem}
+.dues-tbl td{padding:7px 6px;border-bottom:1px solid var(--border)}
+.dues-tbl tr:last-child td{border-bottom:none}
+.dues-tbl .owed{color:var(--dues-owed);font-weight:700}
+.dues-tbl .settled{color:var(--dues-settled);font-weight:700}
+.dues-tbl .mark-paid-btn{background:none;border:1.5px solid var(--dues-settled);color:var(--dues-settled);border-radius:6px;padding:3px 10px;font-size:.75rem;cursor:pointer;white-space:nowrap}
+.dues-tbl .mark-paid-btn:hover{background:var(--dues-settled);color:#fff}
+
+/* Close-game form */
+.dues-close-preview{background:var(--bg);border-radius:8px;padding:12px;margin:8px 0;font-size:.82rem}
+.dues-close-preview-row{display:flex;justify-content:space-between;padding:3px 0}
+.dues-close-preview-row.total{font-weight:700;border-top:1px solid var(--border);padding-top:8px;margin-top:4px;font-size:.9rem}
+.dues-subsidy-row{display:flex;gap:8px;margin:10px 0;align-items:center}
+.dues-subsidy-row label{font-size:.82rem;font-weight:600;color:var(--sub);white-space:nowrap}
+.dues-subsidy-row input{flex:1;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:.88rem;background:var(--card);color:var(--text)}
+
+/* Fund admin */
+.dues-fund-stat{text-align:center;padding:8px 0 12px}
+.dues-fund-stat-val{font-size:1.5rem;font-weight:800}
+.dues-fund-stat-lbl{font-size:.75rem;color:var(--sub)}
+.dues-fund-form{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.dues-fund-form input{padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:.88rem;background:var(--card);color:var(--text)}
+
+/* Settings form */
+.dues-settings-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)}
+.dues-settings-row:last-child{border-bottom:none}
+.dues-settings-label{font-size:.83rem;font-weight:600}
+.dues-settings-sub{font-size:.73rem;color:var(--sub);margin-top:2px}
+.dues-settings-input{padding:6px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:.85rem;background:var(--card);color:var(--text);width:140px}
+
+/* Confirm modal */
+#dues-confirm-modal{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:300;display:flex;align-items:flex-end;justify-content:center}
+.dues-modal-sheet{background:var(--card);border-radius:18px 18px 0 0;padding:20px 16px 32px;width:100%;max-width:480px}
+.dues-modal-title{font-size:1rem;font-weight:700;margin-bottom:6px}
+.dues-modal-sub{font-size:.82rem;color:var(--sub);margin-bottom:16px}
+.dues-modal-input{width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:.95rem;background:var(--card);color:var(--text);margin-bottom:14px}
+.dues-modal-btns{display:flex;gap:10px}
+.dues-modal-btns .btn{flex:1;padding:12px;border-radius:10px;font-weight:600}
+
+/* Dark mode */
+.dark{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--sub:#94a3b8;--accent:#3b82f6}
+.dark .dues-close-preview{background:#0a1628}
+.dark .dues-fund-form input,.dark .dues-settings-input,.dark .dues-modal-input{background:#0a1628;border-color:#334155}

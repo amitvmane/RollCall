@@ -74,10 +74,16 @@ class DuesUpsertTierRequest(BaseModel):
     description: str = Field("", description="Human-readable description of when this tier applies")
 
 
+class DuesSelfPaidRequest(BaseModel):
+    id_token: str
+    amount: Optional[int] = Field(None, gt=0, description="Amount paid (₹); omit to use full outstanding balance")
+
+
 class DuesSettingsPatchRequest(BaseModel):
     id_token: str
     upi_vpa: Optional[str] = Field(None, description="UPI VPA for payment instructions, e.g. name@bank")
     dues_round_step: Optional[int] = Field(None, gt=0, description="Rounding step for per-head calculation (₹)")
+    dues_self_paid_mode: Optional[str] = Field(None, description="'auto' or 'off'")
 
 
 class DuesEnableRequest(BaseModel):
@@ -150,7 +156,19 @@ class DuesTiersResponse(BaseModel):
     tiers: List[PenaltyTier]
 
 
+class DuesClosePreviewResponse(BaseModel):
+    title: str = ""
+    ground_cost: int = 0
+    in_count: int = 0
+    per_head: int = 0
+    remainder: int = 0
+    fund_balance: int = 0
+    has_active: bool = False
+    available: bool = True
+
+
 class DuesSettingsResponse(BaseModel):
     upi_vpa: Optional[str] = None
     dues_round_step: int
     dues_enabled: bool
+    dues_self_paid_mode: str = "auto"

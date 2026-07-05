@@ -129,6 +129,60 @@ def get_dues_settings(chat_id: int) -> dict:
     return {
         "upi_vpa": row.get("upi_vpa"),
         "dues_round_step": row.get("dues_round_step") or 10,
+        "dues_self_paid_mode": row.get("dues_self_paid_mode") or "auto",
+    }
+
+
+def close_preview(chat_id: int) -> dict:
+    """Return per-head math for the next closeable game without writing anything.
+
+    Checks the active rollcall first; falls back to the latest ended-but-not-closed
+    rollcall. Returns {'available': False} when nothing is closeable.
+    """
+    settings = get_dues_settings(chat_id)
+    step = settings["dues_round_step"]
+
+    active_rcs = manager.get_rollcalls(chat_id)
+    if active_rcs:
+        rc = active_rcs[0]
+        ground_cost = _parse_ground_cost(rc.event_fee)
+        in_count = len(rc.inList)
+        if ground_cost > 0 and in_count > 0:
+            fund = fund_summary(chat_id)
+            per_head, remainder = compute_shares(ground_cost, 0, in_count, step)
+            return {
+                "title": rc.title,
+                "ground_cost": ground_cost,
+                "in_count": in_count,
+                "per_head": per_head,
+                "remainder": remainder,
+                "fund_balance": fund["fund_balance"],
+                "has_active": True,
+                "available": True,
+            }
+
+    row = db.get_latest_closeable_rollcall(chat_id)
+    if not row:
+        return {"available": False, "title": "", "ground_cost": 0, "in_count": 0,
+                "per_head": 0, "remainder": 0, "fund_balance": 0, "has_active": False}
+    ground_cost = _parse_ground_cost(row.get("event_fee"))
+    in_members = db.get_rollcall_in_users(row["id"])
+    in_count = len(in_members)
+    if ground_cost <= 0 or in_count <= 0:
+        return {"available": False, "title": row.get("title", ""), "ground_cost": ground_cost,
+                "in_count": in_count, "per_head": 0, "remainder": 0,
+                "fund_balance": 0, "has_active": False}
+    fund = fund_summary(chat_id)
+    per_head, remainder = compute_shares(ground_cost, 0, in_count, step)
+    return {
+        "title": row.get("title", ""),
+        "ground_cost": ground_cost,
+        "in_count": in_count,
+        "per_head": per_head,
+        "remainder": remainder,
+        "fund_balance": fund["fund_balance"],
+        "has_active": False,
+        "available": True,
     }
 
 
@@ -776,6 +830,38 @@ def mark_paid(
         "user_id": member["user_id"],
         "amount": amount,
         "announcement": f"✅ Payment: {member['member_name']} paid ₹{amount} (received by {actor_name})",
+    }
+
+
+def self_paid(
+    chat_id: int,
+    user_id: int,
+    member_name: str,
+    amount: int | None = None,
+) -> dict:
+    """Member self-reports a payment. No admin/collector check; capped at outstanding."""
+    outstanding = db.get_dues_balance(chat_id, user_id=user_id)
+    if outstanding <= 0:
+        raise incorrectParameter("You have no outstanding dues.")
+
+    if amount is None:
+        amount = outstanding
+    if amount > outstanding:
+        amount = outstanding  # cap — no credit via self-report
+
+    if amount <= 0:
+        raise incorrectParameter("Payment amount must be positive.")
+
+    db.add_dues_entry(
+        chat_id, None, user_id, member_name,
+        "payment", -amount,
+        "self-reported (web)", user_id, member_name,
+    )
+    return {
+        "member_name": member_name,
+        "user_id": user_id,
+        "amount": amount,
+        "announcement": f"✅ {member_name} marked ₹{amount} as paid (self-reported)",
     }
 
 

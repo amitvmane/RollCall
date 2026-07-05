@@ -45,6 +45,7 @@ class WebGroupResponse(BaseModel):
     rollcalls: list[WebRollcallResponse]
     upcoming: list[UpcomingRollcall] = Field(default_factory=list)
     shh_mode: bool = False
+    dues_enabled: bool = False
 
 
 class WebGroupSettingsRequest(BaseModel):

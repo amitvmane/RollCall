@@ -29,6 +29,7 @@ from api.schemas.dues import (
     DuesAddAdhocRequest,
     DuesCancelGameRequest,
     DuesCloseGameRequest,
+    DuesClosePreviewResponse,
     DuesEnableRequest,
     DuesFundExpenseRequest,
     DuesFundHistoryResponse,
@@ -39,6 +40,7 @@ from api.schemas.dues import (
     DuesMemberBalance,
     DuesMyResponse,
     DuesReimburseRequest,
+    DuesSelfPaidRequest,
     DuesSetCollectorRequest,
     DuesSettingsPatchRequest,
     DuesSettingsResponse,
@@ -256,6 +258,7 @@ async def get_settings(
         upi_vpa=settings.get("upi_vpa"),
         dues_round_step=settings.get("dues_round_step") or 10,
         dues_enabled=bool(chat.get("dues_enabled")),
+        dues_self_paid_mode=settings.get("dues_self_paid_mode") or "auto",
     )
 
 
@@ -593,3 +596,120 @@ async def update_settings(
         dues_svc.set_upi(chat_id, body.upi_vpa, actor_uid, actor_name)
     if body.dues_round_step is not None:
         dues_svc.set_round_step(chat_id, body.dues_round_step, actor_uid, actor_name)
+    if body.dues_self_paid_mode is not None:
+        mode = body.dues_self_paid_mode
+        if mode not in ("auto", "off"):
+            raise HTTPException(status_code=422, detail="dues_self_paid_mode must be 'auto' or 'off'")
+        _db.update_chat_settings(chat_id, dues_self_paid_mode=mode)
+        _db.log_admin_action(chat_id, actor_uid, actor_name, "set_dues_self_paid_mode", details=mode)
+
+
+# ── Member self-paid ──────────────────────────────────────────────────────────
+
+@router.post(
+    "/web/group/{group_token}/dues/self-paid",
+    summary="Member self-reports a payment — auto-trust mode only. Capped at outstanding balance.",
+)
+async def self_paid(
+    body: DuesSelfPaidRequest,
+    group_token: str = Path(...),
+) -> dict:
+    chat = _resolve_chat(group_token)
+    _require_dues(chat)
+    chat_id = int(chat["chat_id"])
+    actor_uid = _require_identity(body.id_token)
+
+    settings = dues_svc.get_dues_settings(chat_id)
+    if (settings.get("dues_self_paid_mode") or "auto") == "off":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Self-reported payments are disabled for this group. Ask an admin to record your payment.",
+        )
+
+    # Resolve the member's own balance by user_id
+    my = dues_svc.my_dues(chat_id, actor_uid)
+    outstanding = my["balance"]
+    if outstanding <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="You have no outstanding dues.",
+        )
+
+    actor_name = _actor_name(chat_id, actor_uid)
+    result = dues_svc.self_paid(
+        chat_id, actor_uid, actor_name, amount=body.amount,
+    )
+    await _announce(chat_id, result.get("announcement"))
+    return result
+
+
+# ── Close-game preview ────────────────────────────────────────────────────────
+
+@router.get(
+    "/web/group/{group_token}/dues/close-preview",
+    response_model=DuesClosePreviewResponse,
+    summary="Preview per-head math for the next closeable game without writing (admin only)",
+)
+async def close_preview(
+    group_token: str = Path(...),
+    id_token: str = Query(...),
+    subsidy: int = Query(0, ge=0),
+) -> DuesClosePreviewResponse:
+    chat = _resolve_chat(group_token)
+    _require_dues(chat)
+    chat_id = int(chat["chat_id"])
+    _require_admin(chat_id, id_token)
+
+    result = dues_svc.close_preview(chat_id)
+    if not result.get("available"):
+        return DuesClosePreviewResponse(available=False)
+
+    # Re-compute with the requested subsidy so the UI can show live preview
+    if subsidy > 0 and result["in_count"] > 0 and result["ground_cost"] > 0:
+        settings = dues_svc.get_dues_settings(chat_id)
+        capped_subsidy = min(subsidy, result["fund_balance"], result["ground_cost"])
+        per_head, remainder = dues_svc.compute_shares(
+            result["ground_cost"], capped_subsidy, result["in_count"],
+            settings["dues_round_step"],
+        )
+        result["per_head"] = per_head
+        result["remainder"] = remainder
+
+    return DuesClosePreviewResponse(**result)
+
+
+# ── QR code ───────────────────────────────────────────────────────────────────
+
+@router.get(
+    "/web/group/{group_token}/dues/qr",
+    summary="UPI QR code PNG for the group VPA (any verified member)",
+    response_class=None,
+)
+async def dues_qr(
+    group_token: str = Path(...),
+    id_token: str = Query(...),
+    amount: int = Query(0, ge=0),
+) -> "Response":
+    from fastapi.responses import Response as _Resp
+    chat = _resolve_chat(group_token)
+    _require_dues(chat)
+    _require_identity(id_token)
+    chat_id = int(chat["chat_id"])
+
+    settings = dues_svc.get_dues_settings(chat_id)
+    vpa = settings.get("upi_vpa")
+    if not vpa:
+        raise HTTPException(status_code=404, detail="UPI VPA not configured. Ask an admin to run /set_upi.")
+
+    try:
+        from utils.card_gen import qr_png
+        png_bytes = qr_png(vpa, amount if amount > 0 else None)
+    except Exception:
+        log.exception("QR generation failed for chat %s", chat_id)
+        raise HTTPException(status_code=500, detail="QR generation failed")
+
+    return _Resp(
+        content=png_bytes,
+        media_type="image/png",
+        headers={"Cache-Control": "no-store"},
+    )

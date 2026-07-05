@@ -1052,6 +1052,8 @@ async function _checkWebAdmin(){
     if(card)card.classList.toggle("hidden",!_isWebAdmin);
     if(_isWebAdmin)_syncShhToggle();
   }catch(_){}
+  // Load dues after admin status is resolved — both member and admin sections
+  loadDuesSection().catch(()=>{});
 }
 
 function _syncShhToggle(){
@@ -1240,6 +1242,438 @@ window.shareGroupLink=function(){
   const url=window.location.origin+`/web/group/${URL_TOKEN}`;
   if(navigator.share){navigator.share({title:"RollCall",url}).catch(()=>{});}
 };
+
+// ── Dues ───────────────────────────────────────────────────────────────────
+const DUES_API=`/api/v1/web/group/${URL_TOKEN}/dues`;
+let _duesSettings=null;    // cached settings (upi_vpa, mode)
+let _duesMemberData=null;  // my_dues response
+let _duesSummaryData=null; // summary response (admin)
+let _duesPreviewData=null; // close-preview response (admin)
+
+async function _duesGet(path,params={}){
+  const q=new URLSearchParams({...params,id_token:_idToken||""});
+  const r=await fetch(`${DUES_API}${path}?${q}`,{signal:AbortSignal.timeout(10000)});
+  if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||"Request failed");}
+  return r.json();
+}
+
+async function _duesPost(path,body={}){
+  const r=await fetch(`${DUES_API}${path}`,{
+    method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({...body,id_token:_idToken||""}),
+    signal:AbortSignal.timeout(12000),
+  });
+  if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||"Request failed");}
+  return r.json();
+}
+
+async function _duesPatch(path,body={}){
+  const r=await fetch(`${DUES_API}${path}`,{
+    method:"PATCH",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({...body,id_token:_idToken||""}),
+    signal:AbortSignal.timeout(10000),
+  });
+  if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||"Request failed");}
+}
+
+async function loadDuesSection(){
+  if(!IS_GROUP)return;
+  const duesEnabled=groupData&&groupData.dues_enabled;
+  if(!duesEnabled){
+    document.getElementById("dues-member-card")?.classList.add("hidden");
+    document.getElementById("dues-admin-card")?.classList.add("hidden");
+    return;
+  }
+  if(_idToken){
+    try{
+      [_duesMemberData,_duesSettings]=await Promise.all([
+        _duesGet("/my"),
+        _duesGet("/settings"),
+      ]);
+      renderMemberDues();
+      document.getElementById("dues-member-card")?.classList.remove("hidden");
+    }catch(e){console.warn("dues/my failed:",e.message);}
+  }
+  if(_isWebAdmin){
+    try{
+      [_duesSummaryData,_duesPreviewData]=await Promise.all([
+        _duesGet("/summary"),
+        _duesGet("/close-preview").catch(()=>null),
+      ]);
+      renderAdminDues();
+      document.getElementById("dues-admin-card")?.classList.remove("hidden");
+    }catch(e){console.warn("dues/summary failed:",e.message);}
+  }
+}
+
+function renderMemberDues(){
+  if(!_duesMemberData)return;
+  const{balance,entries,upi_vpa}=_duesMemberData;
+  const vpa=upi_vpa||(_duesSettings&&_duesSettings.upi_vpa)||null;
+  const mode=_duesSettings&&_duesSettings.dues_self_paid_mode||"auto";
+
+  // Balance row
+  const balEl=document.getElementById("dues-balance-row");
+  if(balEl){
+    let cls="settled",label="All settled ✓";
+    if(balance>0){cls="owed";label=`you owe`;}
+    else if(balance<0){cls="credit";label="you have credit";}
+    balEl.innerHTML=`<div class="dues-balance-amount ${cls}">₹${Math.abs(balance)}</div><div class="dues-balance-label">${esc(label)}</div>`;
+  }
+
+  // Pay row (only when balance > 0 and VPA is set)
+  const payEl=document.getElementById("dues-pay-row");
+  if(payEl){
+    if(balance>0&&vpa){
+      const upiLink=`upi://pay?pa=${encodeURIComponent(vpa)}&am=${balance}&cu=INR&tn=RollCall`;
+      let html=`<a href="${upiLink}" class="dues-upi-btn">💳 Pay ₹${balance} via UPI</a>`;
+      html+=`<div class="dues-vpa-row">
+        <span class="dues-vpa-text">${esc(vpa)}</span>
+        <button class="dues-vpa-copy" onclick="copyVpa('${esc(vpa)}')">📋 Copy</button>
+      </div>`;
+      // QR — fetch from server
+      const qrSrc=`${DUES_API}/qr?id_token=${encodeURIComponent(_idToken||"")}&amount=${balance}`;
+      html+=`<div class="dues-qr-wrap"><img src="${qrSrc}" alt="UPI QR" loading="lazy"/></div>`;
+      if(mode==="auto"){
+        html+=`<button class="dues-self-paid-btn" id="self-paid-btn" onclick="doSelfPaid(${balance})">✅ I've paid ₹${balance}</button>`;
+      }
+      payEl.innerHTML=html;
+      payEl.classList.remove("hidden");
+    }else{
+      payEl.classList.add("hidden");
+    }
+  }
+
+  // Ledger
+  const ledEl=document.getElementById("dues-ledger-body");
+  if(ledEl){
+    if(!entries||!entries.length){
+      ledEl.innerHTML=`<p class="dues-ledger-empty">No entries yet.</p>`;
+    }else{
+      const rows=entries.slice(0,20).map(e=>{
+        const isCr=e.amount<0;
+        const amtCls=isCr?"credit":"owed";
+        const sign=isCr?"−":"";
+        const typeLabel=_entryTypeLabel(e.entry_type);
+        const date=(e.created_at||"").slice(0,10);
+        return `<tr><td>${esc(typeLabel)}<br/><span style="font-size:.72rem;color:var(--sub)">${esc(date)}</span></td><td class="${amtCls}">${sign}₹${Math.abs(e.amount)}</td></tr>`;
+      }).join("");
+      ledEl.innerHTML=`<table class="dues-ledger-table">${rows}</table>`;
+    }
+  }
+
+  // Fund
+  const fundEl=document.getElementById("dues-fund-row");
+  if(fundEl&&_duesSummaryData){
+    fundEl.innerHTML=`🏦 Group fund: <span class="dues-fund-balance">₹${_duesSummaryData.fund_balance||0}</span>`;
+  }
+}
+
+function _entryTypeLabel(t){
+  const map={share:"Game share",adhoc:"Late joiner",penalty_late:"Late penalty",
+    penalty_ditch:"No-show penalty",payment:"Payment",waiver:"Waiver",
+    reimbursement:"Reimbursement",cancel_credit:"Reversal",adjustment:"Adjustment"};
+  return map[t]||t;
+}
+
+window.copyVpa=function(vpa){
+  if(navigator.clipboard){navigator.clipboard.writeText(vpa).then(()=>toast("VPA copied!",2000)).catch(()=>toast(vpa,4000));}
+  else toast(vpa,4000);
+};
+
+window.doSelfPaid=async function(amount){
+  if(!_idToken){toast("Verify with Telegram first.",3000);return;}
+  if(!confirm(`Mark ₹${amount} as paid?`))return;
+  const btn=document.getElementById("self-paid-btn");
+  if(btn){btn.disabled=true;btn.textContent="Recording…";}
+  try{
+    await _duesPost("/self-paid",{amount});
+    toast("✅ Recorded! Balance refreshing…",2800);
+    _duesMemberData=await _duesGet("/my");
+    renderMemberDues();
+    if(_isWebAdmin){_duesSummaryData=await _duesGet("/summary");renderAdminDues();}
+  }catch(e){
+    toast(e.message||"Could not record payment.",4000);
+    if(btn){btn.disabled=false;btn.textContent=`✅ I've paid ₹${amount}`;}
+  }
+};
+
+window.toggleDuesMember=function(){
+  const body=document.getElementById("dues-member-body");
+  const btn=document.getElementById("dues-member-toggle");
+  if(!body||!btn)return;
+  const hidden=body.classList.toggle("hidden");
+  btn.textContent=hidden?"▼":"▲";
+};
+
+window.toggleDuesLedger=function(){
+  const body=document.getElementById("dues-ledger-body");
+  const ch=document.getElementById("dues-ledger-chevron");
+  if(!body)return;
+  const hidden=body.classList.toggle("hidden");
+  if(ch)ch.textContent=hidden?"▼":"▲";
+};
+
+// ── Admin dues ────────────────────────────────────────────────────────────
+function renderAdminDues(){
+  renderBalancesTable();
+  renderCloseGame();
+  renderFundAdmin();
+  renderSettingsAdmin();
+}
+
+function renderBalancesTable(){
+  const el=document.getElementById("dues-balances-body");
+  if(!el)return;
+  const balances=(_duesSummaryData&&_duesSummaryData.balances)||[];
+  if(!balances.length){el.innerHTML=`<p class="dues-ledger-empty">No dues entries yet.</p>`;return;}
+  const sorted=[...balances].sort((a,b)=>b.balance-a.balance);
+  const rows=sorted.map(b=>{
+    const cls=b.balance>0?"owed":"settled";
+    const label=b.balance>0?`₹${b.balance}`:b.balance<0?`₹${Math.abs(b.balance)} credit`:"Settled";
+    const btn=b.balance>0?`<button class="mark-paid-btn" onclick="openMarkPaid('${esc(b.member_name)}',${b.balance})">Mark paid</button>`:"";
+    return `<tr><td>${esc(b.member_name)}</td><td class="${cls}">${esc(label)}</td><td>${btn}</td></tr>`;
+  }).join("");
+  el.innerHTML=`<table class="dues-tbl"><thead><tr><th>Member</th><th>Balance</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function renderCloseGame(){
+  const el=document.getElementById("dues-close-body");
+  if(!el)return;
+  const p=_duesPreviewData;
+  if(!p||!p.available){
+    el.innerHTML=`<p class="dues-ledger-empty">No closeable game found. End a rollcall with a fee set first.</p>`;
+    return;
+  }
+  el.innerHTML=`
+    <div class="dues-close-preview" id="dues-close-preview-box">
+      <div class="dues-close-preview-row"><span>${esc(p.title)}</span></div>
+      <div class="dues-close-preview-row"><span>Ground cost</span><span>₹${p.ground_cost}</span></div>
+      <div class="dues-close-preview-row"><span>Players IN</span><span>${p.in_count}</span></div>
+      <div class="dues-close-preview-row"><span>Fund subsidy</span><span id="preview-subsidy-display">₹0</span></div>
+      <div class="dues-close-preview-row total"><span>Per head</span><span id="preview-per-head">₹${p.per_head}</span></div>
+      <div class="dues-close-preview-row"><span style="color:var(--sub);font-size:.77rem">→ Fund +₹${p.remainder} rounding</span></div>
+    </div>
+    <div class="dues-subsidy-row">
+      <label for="close-subsidy">Subsidy (₹)</label>
+      <input id="close-subsidy" type="number" min="0" max="${p.fund_balance}" value="0" oninput="updateClosePreview()"/>
+    </div>
+    <button class="btn btn-primary" style="width:100%;padding:12px" onclick="doCloseGame()">Close Game →</button>
+    <div style="font-size:.75rem;color:var(--sub);margin-top:6px;text-align:center">Fund balance: ₹${p.fund_balance}${p.has_active?" · Ends active rollcall":""}</div>
+  `;
+}
+
+window.updateClosePreview=async function(){
+  const inp=document.getElementById("close-subsidy");
+  const subsidy=parseInt(inp?.value||0)||0;
+  try{
+    const data=await _duesGet("/close-preview",{subsidy});
+    document.getElementById("preview-per-head").textContent=`₹${data.per_head}`;
+    document.getElementById("preview-subsidy-display").textContent=`₹${subsidy}`;
+  }catch(_){}
+};
+
+window.doCloseGame=async function(){
+  if(!_idToken){toast("Verify with Telegram first.",3000);return;}
+  const subsidy=parseInt(document.getElementById("close-subsidy")?.value||0)||0;
+  const ph=document.getElementById("preview-per-head")?.textContent||"";
+  if(!confirm(`Close game?\n${ph}/person · subsidy ₹${subsidy}`))return;
+  try{
+    const r=await fetch(`${DUES_API}/close-game`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({id_token:_idToken,subsidy}),
+      signal:AbortSignal.timeout(20000),
+    });
+    if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||"Close failed");}
+    toast("✅ Game closed! Refreshing…",2800);
+    await refreshDues();
+  }catch(e){toast(e.message||"Could not close game.",5000);}
+};
+
+window.openMarkPaid=function(name,amount){
+  _showDuesModal(
+    `Mark paid — ${name}`,
+    `Amount (₹):`,
+    String(amount),
+    async(val)=>{
+      const amt=parseInt(val)||amount;
+      await fetch(`${DUES_API}/mark-paid`,{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({id_token:_idToken,member_name:name,amount:amt}),
+        signal:AbortSignal.timeout(12000),
+      }).then(r=>{if(!r.ok)return r.json().then(d=>{throw new Error(d.detail||"Failed");});})
+      .catch(e=>{throw e;});
+      toast(`✅ ₹${amt} recorded for ${name}`,2800);
+      await refreshDues();
+    }
+  );
+};
+
+function renderFundAdmin(){
+  const el=document.getElementById("dues-fund-admin-body");
+  if(!el)return;
+  const bal=(_duesSummaryData&&_duesSummaryData.fund_balance)||0;
+  el.innerHTML=`
+    <div class="dues-fund-stat"><div class="dues-fund-stat-val">₹${bal}</div><div class="dues-fund-stat-lbl">Fund balance</div></div>
+    <div style="font-size:.82rem;font-weight:600;color:var(--sub);margin-bottom:6px">Log expense</div>
+    <div class="dues-fund-form">
+      <input id="fund-exp-amount" type="number" min="1" placeholder="Amount (₹)"/>
+      <input id="fund-exp-desc" type="text" placeholder="Description (e.g. Shuttlecocks)"/>
+      <button class="btn btn-danger" style="width:100%;padding:10px;border-radius:10px" onclick="doLogExpense()">Log Expense →</button>
+    </div>
+    <div style="font-size:.82rem;font-weight:600;color:var(--sub);margin:12px 0 6px">Add top-up</div>
+    <div class="dues-fund-form">
+      <input id="fund-top-amount" type="number" min="1" placeholder="Amount (₹)"/>
+      <input id="fund-top-desc" type="text" placeholder="Note (optional)"/>
+      <button class="btn btn-primary" style="width:100%;padding:10px;border-radius:10px" onclick="doFundTopup()">Add to Fund →</button>
+    </div>`;
+}
+
+window.doLogExpense=async function(){
+  const amt=parseInt(document.getElementById("fund-exp-amount")?.value||0);
+  const desc=(document.getElementById("fund-exp-desc")?.value||"").trim();
+  if(!amt||amt<=0){toast("Enter a valid amount.",2500);return;}
+  if(!desc){toast("Enter a description.",2500);return;}
+  try{
+    await _duesPost("/fund/expense",{amount:amt,description:desc});
+    toast(`✅ Expense ₹${amt} logged`,2800);
+    document.getElementById("fund-exp-amount").value="";
+    document.getElementById("fund-exp-desc").value="";
+    await refreshDues();
+  }catch(e){toast(e.message||"Failed.",4000);}
+};
+
+window.doFundTopup=async function(){
+  const amt=parseInt(document.getElementById("fund-top-amount")?.value||0);
+  const desc=(document.getElementById("fund-top-desc")?.value||"").trim();
+  if(!amt||amt<=0){toast("Enter a valid amount.",2500);return;}
+  try{
+    await _duesPost("/fund/topup",{amount:amt,description:desc});
+    toast(`✅ Fund +₹${amt}`,2800);
+    document.getElementById("fund-top-amount").value="";
+    document.getElementById("fund-top-desc").value="";
+    await refreshDues();
+  }catch(e){toast(e.message||"Failed.",4000);}
+};
+
+function renderSettingsAdmin(){
+  const el=document.getElementById("dues-settings-body");
+  if(!el||!_duesSettings)return;
+  const vpa=_duesSettings.upi_vpa||"";
+  const step=_duesSettings.dues_round_step||10;
+  const mode=_duesSettings.dues_self_paid_mode||"auto";
+  el.innerHTML=`
+    <div class="dues-settings-row">
+      <div><div class="dues-settings-label">UPI VPA</div><div class="dues-settings-sub">e.g. name@upi</div></div>
+      <input class="dues-settings-input" id="settings-vpa" type="text" value="${esc(vpa)}" placeholder="name@bank"/>
+    </div>
+    <div class="dues-settings-row">
+      <div><div class="dues-settings-label">Round step</div><div class="dues-settings-sub">₹ rounding for per-head</div></div>
+      <input class="dues-settings-input" id="settings-step" type="number" min="1" value="${step}"/>
+    </div>
+    <div class="dues-settings-row">
+      <div><div class="dues-settings-label">Self-paid</div><div class="dues-settings-sub">Members can self-report payments</div></div>
+      <label class="admin-toggle">
+        <input type="checkbox" id="settings-self-paid" ${mode==="auto"?"checked":""} onchange="toggleSelfPaidMode(this.checked)"/>
+        <span class="admin-toggle-slider"></span>
+      </label>
+    </div>
+    <button class="btn btn-primary" style="width:100%;padding:10px;border-radius:10px;margin-top:12px" onclick="saveSettings()">Save Settings</button>`;
+}
+
+window.saveSettings=async function(){
+  const vpa=(document.getElementById("settings-vpa")?.value||"").trim()||null;
+  const step=parseInt(document.getElementById("settings-step")?.value||10);
+  const body={};
+  if(vpa)body.upi_vpa=vpa;
+  if(step>0)body.dues_round_step=step;
+  try{
+    await _duesPatch("/settings",body);
+    toast("✅ Settings saved",2500);
+    _duesSettings=await _duesGet("/settings");
+    renderSettingsAdmin();
+    await refreshDues();
+  }catch(e){toast(e.message||"Save failed.",4000);}
+};
+
+window.toggleSelfPaidMode=async function(enabled){
+  try{
+    await _duesPatch("/settings",{dues_self_paid_mode:enabled?"auto":"off"});
+    if(_duesSettings)_duesSettings.dues_self_paid_mode=enabled?"auto":"off";
+    toast(enabled?"Self-paid ON":"Self-paid OFF",2000);
+    renderMemberDues();
+  }catch(e){
+    toast(e.message||"Failed.",4000);
+    const tog=document.getElementById("settings-self-paid");
+    if(tog)tog.checked=!enabled;
+  }
+};
+
+window.toggleDuesAdmin=function(){
+  const body=document.getElementById("dues-admin-body");
+  const btn=document.getElementById("dues-admin-toggle");
+  if(!body||!btn)return;
+  const hidden=body.classList.toggle("hidden");
+  btn.textContent=hidden?"▼":"▲";
+};
+
+const _adminSectionOpen={balances:false,close:false,fund:false,settings:false};
+window.toggleAdminSection=function(name){
+  _adminSectionOpen[name]=!_adminSectionOpen[name];
+  const el=document.getElementById(`dues-${name==="close"?"close":"fund"===name?"fund-admin":name==="settings"?"settings":"balances"}-body`);
+  const ch=document.getElementById(`${name}-chevron`);
+  // resolve the actual body id
+  const bodyMap={balances:"dues-balances-body",close:"dues-close-body",fund:"dues-fund-admin-body",settings:"dues-settings-body"};
+  const bodyEl=document.getElementById(bodyMap[name]);
+  if(bodyEl)bodyEl.classList.toggle("hidden",!_adminSectionOpen[name]);
+  if(ch)ch.textContent=_adminSectionOpen[name]?"▲":"▼";
+};
+
+async function refreshDues(){
+  if(!_idToken)return;
+  try{
+    _duesMemberData=await _duesGet("/my");
+    renderMemberDues();
+    if(_isWebAdmin){
+      [_duesSummaryData,_duesPreviewData]=await Promise.all([
+        _duesGet("/summary"),
+        _duesGet("/close-preview").catch(()=>null),
+      ]);
+      renderBalancesTable();
+      renderCloseGame();
+      renderFundAdmin();
+    }
+  }catch(e){console.warn("refreshDues:",e.message);}
+}
+
+// ── Modal helper ──────────────────────────────────────────────────────────
+function _showDuesModal(title,sublabel,defaultVal,onConfirm){
+  let m=document.getElementById("dues-confirm-modal");
+  if(!m){
+    m=document.createElement("div");m.id="dues-confirm-modal";
+    m.innerHTML=`<div class="dues-modal-sheet">
+      <div class="dues-modal-title" id="dm-title"></div>
+      <div class="dues-modal-sub" id="dm-sub"></div>
+      <input class="dues-modal-input" id="dm-input" type="number" min="1"/>
+      <div class="dues-modal-btns">
+        <button class="btn" style="background:var(--border);color:var(--text)" onclick="document.getElementById('dues-confirm-modal').classList.add('hidden')">Cancel</button>
+        <button class="btn btn-primary" id="dm-confirm-btn">Confirm</button>
+      </div>
+    </div>`;
+    document.body.appendChild(m);
+  }
+  document.getElementById("dm-title").textContent=title;
+  document.getElementById("dm-sub").textContent=sublabel;
+  const inp=document.getElementById("dm-input");
+  inp.value=defaultVal;inp.focus();
+  m.classList.remove("hidden");
+  const btn=document.getElementById("dm-confirm-btn");
+  btn.onclick=async()=>{
+    btn.disabled=true;btn.textContent="…";
+    try{await onConfirm(inp.value);m.classList.add("hidden");}
+    catch(e){toast(e.message||"Failed.",4000);btn.disabled=false;btn.textContent="Confirm";}
+  };
+}
 
 // ── Entry point ────────────────────────────────────────────────────────────
 if(URL_TOKEN&&(URL_MODE==="join"||URL_MODE==="group")){

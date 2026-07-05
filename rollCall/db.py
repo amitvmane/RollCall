@@ -723,6 +723,7 @@ _RECONCILE_COLUMNS = {
         ("penalty_late_t3",        "penalty_late_t3 INTEGER DEFAULT 100",      "penalty_late_t3 INTEGER DEFAULT 100"),
         ("penalty_ditch",          "penalty_ditch INTEGER DEFAULT 200",        "penalty_ditch INTEGER DEFAULT 200"),
         ("dues_enabled",           "dues_enabled BOOLEAN DEFAULT FALSE",       "dues_enabled INTEGER DEFAULT 0"),
+        ("dues_self_paid_mode",    "dues_self_paid_mode TEXT DEFAULT 'auto'",  "dues_self_paid_mode TEXT DEFAULT 'auto'"),
     ],
     "users": [
         ("in_pos",   "in_pos INTEGER DEFAULT NULL",   "in_pos INTEGER DEFAULT NULL"),
@@ -1575,7 +1576,7 @@ _VALID_CHAT_FIELDS = {
     'ghost_tracking_enabled', 'group_name', 'group_web_token',
     'upi_vpa', 'dues_round_step',
     'penalty_late_t1', 'penalty_late_t2', 'penalty_late_t3', 'penalty_ditch',
-    'dues_enabled',
+    'dues_enabled', 'dues_self_paid_mode',
 }
 
 def update_chat_settings(chat_id: int, **kwargs) -> bool:

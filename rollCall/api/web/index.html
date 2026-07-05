@@ -228,6 +228,61 @@
       </div>
     </div>
 
+    <!-- Dues member card — shown when dues enabled and identity verified -->
+    <div id="dues-member-card" class="card hidden">
+      <div class="dues-hdr">
+        <span class="dues-hdr-title">💰 Dues</span>
+        <button class="dues-hdr-toggle" id="dues-member-toggle" onclick="toggleDuesMember()">▲</button>
+      </div>
+      <div id="dues-member-body">
+        <div id="dues-balance-row" class="dues-balance-row"></div>
+        <div id="dues-pay-row" class="dues-pay-row hidden"></div>
+        <div id="dues-ledger-section">
+          <button class="dues-section-toggle" onclick="toggleDuesLedger()">My ledger <span id="dues-ledger-chevron">▼</span></button>
+          <div id="dues-ledger-body" class="hidden"></div>
+        </div>
+        <div id="dues-fund-row" class="dues-fund-row"></div>
+      </div>
+    </div>
+
+    <!-- Dues admin card — shown when is_web_admin and dues enabled -->
+    <div id="dues-admin-card" class="card hidden" style="border:1.5px dashed var(--border)">
+      <div class="dues-hdr">
+        <span class="dues-hdr-title">⚙️ Dues Admin</span>
+        <button class="dues-hdr-toggle" id="dues-admin-toggle" onclick="toggleDuesAdmin()">▲</button>
+      </div>
+      <div id="dues-admin-body">
+        <!-- Balances table -->
+        <div class="dues-admin-section">
+          <div class="dues-admin-section-hdr" onclick="toggleAdminSection('balances')">
+            Members <span id="balances-chevron">▼</span>
+          </div>
+          <div id="dues-balances-body" class="hidden"></div>
+        </div>
+        <!-- Close game -->
+        <div class="dues-admin-section">
+          <div class="dues-admin-section-hdr" onclick="toggleAdminSection('close')">
+            Close Game <span id="close-chevron">▼</span>
+          </div>
+          <div id="dues-close-body" class="hidden"></div>
+        </div>
+        <!-- Fund -->
+        <div class="dues-admin-section">
+          <div class="dues-admin-section-hdr" onclick="toggleAdminSection('fund')">
+            Fund <span id="fund-chevron">▼</span>
+          </div>
+          <div id="dues-fund-admin-body" class="hidden"></div>
+        </div>
+        <!-- Settings -->
+        <div class="dues-admin-section" style="border-bottom:none">
+          <div class="dues-admin-section-hdr" onclick="toggleAdminSection('settings')">
+            Settings <span id="settings-chevron">▼</span>
+          </div>
+          <div id="dues-settings-body" class="hidden"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Bookmark section — always visible in group mode -->
     <div id="bookmark-card" class="card hidden">
       <div style="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:8px">📌 Permanent group link</div>

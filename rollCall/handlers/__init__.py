@@ -14,3 +14,4 @@ from handlers import templates    # noqa: F401
 from handlers import stats        # noqa: F401
 from handlers import web          # noqa: F401
 from handlers import dues         # noqa: F401
+from handlers import penalty_panel  # noqa: F401

@@ -256,6 +256,7 @@ async def end_rollcall(
         "rc_number_ended_1based": ended_number_1based,
         "ghost_eligible": ghost_eligible,
         "ghost_rc_db_id": rc_db_id if ghost_eligible else None,
+        "rc_db_id": rc_db_id,
         "ended_by": {
             "id": ended_by_user_id,
             "name": ended_by_name,

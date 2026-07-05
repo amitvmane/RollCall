@@ -80,6 +80,13 @@ async def _post_end_cleanup(cid: int, ended_number: int, result: dict, rc_title:
                 text = f"Rollcall number {new_id}\n\n" + _build_panel_text(rollcall, new_id)
                 await bot.send_message(cid, text)
 
+    rc_db_id = result.get("rc_db_id")
+    if rc_db_id:
+        chat_row = db.get_or_create_chat(cid)
+        if chat_row.get("dues_enabled"):
+            from handlers.penalty_panel import send_penalty_panel
+            await send_penalty_panel(cid, rc_db_id, rc_title)
+
 
 def _group_web_url(cid: int) -> str:
     """Return the permanent group web URL for the keyboard button, or empty string."""
@@ -259,7 +266,7 @@ async def start_roll_call(message):
         if chat_row.get("dues_enabled") and not manager.get_shh_mode(cid):
             await bot.send_message(
                 cid,
-                "💰 *Dues active* — set the ground cost now so it's ready for /close\_game:\n"
+                "💰 *Dues active* — set the ground cost now so it's ready for /close_game:\n"
                 "`/ef <amount>`  e.g. `/ef 600`",
                 parse_mode="Markdown",
             )

@@ -20,6 +20,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request, status
 from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel
 
 import db as _db
 from api.identity import verify_identity_token
@@ -457,6 +458,89 @@ async def delete_scheduled_rollcall(
     # Non-blocking event log so the group knows the scheduled rollcall was cancelled
     _label = f'"{_sched_title}"' if _sched_title else f"#{item_id}"
     await _send_event_notification(chat_id, f"🗑 Scheduled rollcall {_label} cancelled (via web)")
+
+
+# ── Web login token issuance (admin → member) ────────────────────────────────
+
+class _WebloginRequest(BaseModel):
+    id_token: str
+    member_name: str
+
+
+class _WebloginResponse(BaseModel):
+    login_url: str
+    member_name: str
+    expires_in_days: int = 7
+
+
+@router.post(
+    "/web/group/{group_token}/issue-weblogin",
+    response_model=_WebloginResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Admin issues a single-use login URL for a group member",
+)
+async def issue_weblogin(
+    body: _WebloginRequest,
+    group_token: str = Path(...),
+) -> _WebloginResponse:
+    import uuid
+    from datetime import datetime, timedelta, timezone
+
+    chat = _db.get_chat_by_group_web_token(group_token)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Invalid group token")
+
+    actor_user_id = verify_identity_token(body.id_token)
+    if not actor_user_id:
+        raise HTTPException(status_code=401, detail="Verify with Telegram first.")
+
+    chat_id = int(chat["chat_id"])
+    if not _db.is_web_admin(chat_id, actor_user_id):
+        raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
+
+    # Resolve member name against chat_members
+    needle = body.member_name.strip().lstrip("@").lower()
+    if not needle:
+        raise HTTPException(status_code=400, detail="member_name is required")
+    members = _db.get_active_members(chat_id)
+    matched = [
+        m for m in members
+        if (m.get("first_name") or "").lower() == needle
+        or (m.get("username") or "").lower() == needle
+    ]
+    if not matched:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No member '{body.member_name}' found in this group's history. They must have voted at least once.",
+        )
+    if len(matched) > 1:
+        names = ", ".join(m.get("first_name") or m.get("username") or str(m["user_id"]) for m in matched)
+        raise HTTPException(status_code=409, detail=f"Ambiguous name — multiple matches: {names}")
+
+    member = matched[0]
+    tg_user_id = member["user_id"]
+    display_name = member.get("first_name") or (f"@{member['username']}" if member.get("username") else str(tg_user_id))
+
+    # Lookup actor name for audit
+    actor_info = _db.get_member_display_info(chat_id, actor_user_id)
+    actor_name = (actor_info.get("first_name") if actor_info else None) or "web admin"
+
+    token = uuid.uuid4().hex
+    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+    _db.create_web_direct_login_token(
+        token=token,
+        chat_id=chat_id,
+        tg_user_id=tg_user_id,
+        tg_name=display_name,
+        created_by_uid=actor_user_id,
+        created_by_name=actor_name,
+        expires_at=expires_at,
+    )
+
+    base = os.environ.get("WEB_BASE_URL", "").rstrip("/")
+    login_url = f"{base}/api/v1/auth/weblogin/{token}" if base else f"/api/v1/auth/weblogin/{token}"
+
+    return _WebloginResponse(login_url=login_url, member_name=display_name)
 
 
 # ── Per-rollcall endpoints (expire with rollcall) ────────────────────────────

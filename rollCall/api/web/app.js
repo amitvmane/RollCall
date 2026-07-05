@@ -1081,6 +1081,43 @@ function _syncShhToggle(){
   tog.checked=!!groupData.shh_mode;
 }
 
+let _lastWebloginUrl="";
+
+window.doIssueWeblogin=async function(){
+  if(!_idToken){toast("Verify with Telegram first.",3000);return;}
+  const nameEl=document.getElementById("weblogin-name-input");
+  const name=(nameEl?.value||"").trim();
+  if(!name){toast("Enter a name or @username.",2500);return;}
+  const resultEl=document.getElementById("weblogin-result");
+  const nameOut=document.getElementById("weblogin-result-name");
+  const urlOut=document.getElementById("weblogin-result-url");
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/issue-weblogin`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({id_token:_idToken,member_name:name}),
+      signal:AbortSignal.timeout(10000),
+    });
+    if(!res.ok){const d=await res.json().catch(()=>({}));throw new Error(d.detail||"Failed");}
+    const data=await res.json();
+    _lastWebloginUrl=data.login_url;
+    if(nameOut)nameOut.textContent=`Link for ${data.member_name} — valid 7 days, single use`;
+    if(urlOut)urlOut.textContent=data.login_url;
+    resultEl?.classList.remove("hidden");
+    if(nameEl)nameEl.value="";
+  }catch(e){toast(e.message||"Could not generate link.",4000);}
+};
+
+window.copyWebloginUrl=function(){
+  if(!_lastWebloginUrl)return;
+  if(navigator.clipboard){
+    navigator.clipboard.writeText(_lastWebloginUrl)
+      .then(()=>toast("Link copied!",2000))
+      .catch(()=>toast(_lastWebloginUrl,5000));
+  }else{
+    toast(_lastWebloginUrl,5000);
+  }
+};
+
 window.toggleShhMode=async function(enabled){
   if(!_idToken){toast("Verify with Telegram first.",3000);return;}
   try{

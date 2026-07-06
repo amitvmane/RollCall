@@ -378,6 +378,11 @@ html.dark .sp-dot-miss{background:#334155}
 .dues-modal-btns{display:flex;gap:10px}
 .dues-modal-btns .btn{flex:1;padding:12px;border-radius:10px;font-weight:600}
 
+/* "Create your own group" viral-loop footer */
+.group-cta{text-align:center;padding:16px 12px 22px;font-size:.82rem;color:var(--sub)}
+.group-cta a{color:var(--accent);font-weight:600;text-decoration:none}
+.group-cta a:hover{text-decoration:underline}
+
 /* Dark mode */
 .dark{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--sub:#94a3b8;--accent:#3b82f6}
 .dark .dues-close-preview{background:#0a1628}

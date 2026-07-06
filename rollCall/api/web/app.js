@@ -381,10 +381,7 @@ function renderCapBar(rc){
   }else{$("cap-row").classList.add("hidden");}
 }
 
-function renderRollcall(rc){
-  activeRcData=rc;
-  const totalRc=IS_GROUP&&groupData?groupData.rollcalls.length:1;
-  $("rc-title").textContent=totalRc>1?`#${activeTabIdx+1} · ${rc.title}`:rc.title;
+function renderRcMeta(rc){
   const meta=[];
   if(rc.finalize_date){
     const cd=formatCountdown(rc.finalize_epoch);
@@ -394,6 +391,20 @@ function renderRollcall(rc){
   if(rc.location)meta.push("📍 "+esc(rc.location));
   if(rc.fee)meta.push(`<strong style="color:var(--accent)">💰 Fee: ${esc(rc.fee)}/person</strong>`);
   $("rc-meta").innerHTML=meta.map(m=>`<span>${m}</span>`).join("<br/>");
+}
+
+// Live countdown: refresh the meta row every 30s so the "in Xh Ym" pill
+// stays accurate while the tab sits open. Meta-only — doesn't touch lists
+// or vote state, so it can't disrupt an in-progress interaction.
+setInterval(()=>{
+  if(activeRcData&&activeRcData.finalize_epoch)renderRcMeta(activeRcData);
+},30000);
+
+function renderRollcall(rc){
+  activeRcData=rc;
+  const totalRc=IS_GROUP&&groupData?groupData.rollcalls.length:1;
+  $("rc-title").textContent=totalRc>1?`#${activeTabIdx+1} · ${rc.title}`:rc.title;
+  renderRcMeta(rc);
   $("count-badge").textContent=rc.limit?rc.in.length+"/"+rc.limit+" IN":rc.in.length+" IN";
 
   // Label copy button for join mode
@@ -536,6 +547,25 @@ async function loadGroup(){
   if(bc)bc.classList.remove("hidden");
   const sb=document.getElementById("share-btn");
   if(sb&&navigator.share)sb.style.display="";
+  renderGroupCta();
+}
+
+// "Create your own group" footer — the viral loop for guests who arrived via
+// a shared link. Deep-links to the bot with ?startgroup so Telegram prompts
+// them to pick a group to add it to. Names and the username only — no tokens.
+function renderGroupCta(){
+  const u=groupData&&groupData.bot_username;
+  if(!u)return;
+  let el=document.getElementById("group-cta");
+  if(!el){
+    el=document.createElement("div");
+    el.id="group-cta";
+    el.className="group-cta";
+    const container=document.getElementById("bookmark-card")?.parentElement;
+    if(!container)return;
+    container.appendChild(el);
+  }
+  el.innerHTML=`⚡ Made with <strong>RollCall</strong> · <a href="https://t.me/${esc(u)}?startgroup=true" target="_blank" rel="noopener">Create your own group →</a>`;
 }
 
 // ── Auto-refresh ───────────────────────────────────────────────────────────

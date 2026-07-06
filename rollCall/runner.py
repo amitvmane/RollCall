@@ -644,6 +644,13 @@ async def main():
     _telegram_status["checked_at"] = datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
     if telegram_available:
         _telegram_status["bot_username"] = f"@{me.username}"
+        # Persist for the web layer's "create your own group" deep link —
+        # survives Telegram-down restarts where get_me() fails.
+        try:
+            from db import set_system_config
+            set_system_config("bot_username", me.username or "")
+        except Exception:
+            logger.warning("Could not persist bot_username to system_config")
 
     if telegram_available:
         await _post_connect_setup(me)

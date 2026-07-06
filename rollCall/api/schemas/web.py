@@ -46,6 +46,7 @@ class WebGroupResponse(BaseModel):
     upcoming: list[UpcomingRollcall] = Field(default_factory=list)
     shh_mode: bool = False
     dues_enabled: bool = False
+    bot_username: str = ""
 
 
 class WebGroupSettingsRequest(BaseModel):

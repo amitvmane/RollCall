@@ -583,3 +583,53 @@ async def schedules_toggle_callback(call):
             await bot.answer_callback_query(call.id, "Error updating schedule")
         except Exception:
             pass
+
+
+# ── Idle re-engagement callback ───────────────────────────────────────────────
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("idle_start_"))
+async def idle_start_callback(call):
+    """One-tap start-from-template from the idle-group re-engagement DM.
+
+    Callback data: idle_start_<chat_id>_<admin_uid>. The DM was sent privately
+    to that admin, and we additionally require the presser to BE that admin so
+    a forwarded message can't let someone else start rollcalls in the group.
+    """
+    try:
+        parts = call.data.split("_")  # ["idle", "start", "<chat_id>", "<uid>"]
+        chat_id = int(parts[2])
+        allowed_uid = int(parts[3])
+        if call.from_user.id != allowed_uid:
+            await bot.answer_callback_query(call.id, "This button isn't for you.", show_alert=True)
+            return
+
+        import db as _db
+        templates = _db.get_templates(chat_id)
+        if not templates:
+            await bot.answer_callback_query(call.id, "No templates found for that group.", show_alert=True)
+            return
+
+        from rollcall_manager import manager as _mgr
+        if _mgr.get_rollcalls(chat_id):
+            await bot.answer_callback_query(call.id, "A rollcall is already running there!", show_alert=True)
+            return
+
+        from check_reminders import _auto_start_from_template
+        tmpl = templates[0]
+        await _auto_start_from_template(chat_id, tmpl)
+
+        await bot.answer_callback_query(call.id, "✅ Rollcall started!")
+        try:
+            await bot.edit_message_text(
+                f"✅ Started a rollcall from '{tmpl.get('name')}' — check the group!",
+                call.message.chat.id, call.message.message_id,
+            )
+        except Exception:
+            pass
+        logging.info(f"[idle-start] admin {allowed_uid} started template rollcall in chat {chat_id}")
+    except Exception:
+        logging.exception("idle_start_callback failed")
+        try:
+            await bot.answer_callback_query(call.id, "Could not start — try /use_template in the group.", show_alert=True)
+        except Exception:
+            pass

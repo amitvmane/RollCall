@@ -239,6 +239,86 @@ def matchday_card(
     return _to_bytes(img)
 
 
+# ── Month wrap-up card ────────────────────────────────────────────────────────
+
+def month_wrapup_card(
+    group_name: str,
+    month_label: str,
+    session_count: int,
+    avg_attendance: float,
+    top_attendees: List[dict],
+) -> BytesIO:
+    """Generate the monthly season wrap-up card.
+
+    top_attendees is [{'name': str, 'attended': int}], most-attended first.
+    Shareable: names and counts only — no tokens, links, or user IDs.
+    """
+    W       = 640
+    PAD     = 28
+    HDR_H   = 96
+    STAT_H  = 72
+    ROW_H   = 34
+    COL_H   = 36
+    FTR_H   = 38
+
+    f_title  = _font(24, bold=True)
+    f_sub    = _font(15)
+    f_stat_v = _font(26, bold=True)
+    f_stat_l = _font(12)
+    f_col    = _font(13)
+    f_name   = _font(16)
+    f_count  = _font(16, bold=True)
+    f_footer = _font(13, bold=True)
+
+    top = top_attendees[:5]
+    body_h = COL_H + len(top) * ROW_H + PAD
+    H = HDR_H + STAT_H + body_h + FTR_H
+
+    img  = Image.new("RGB", (W, H), _C_BG)
+    draw = ImageDraw.Draw(img)
+
+    # Header
+    draw.rectangle([0, 0, W, HDR_H], fill=_C_HEADER_BG)
+    draw.text((PAD, 16), _ellipsize(_sanitize(group_name, "RollCall Group", bold=True), 34),
+              font=f_title, fill=_C_HEADER_FG)
+    draw.text((PAD, 52), f"Season wrap-up  •  {month_label}", font=f_sub, fill=_C_HEADER_SUB)
+
+    # Stat row: sessions + avg attendance
+    sy = HDR_H + 12
+    half = (W - PAD * 2) // 2
+    for i, (val, label) in enumerate([
+        (str(session_count), "GAMES PLAYED"),
+        (f"{avg_attendance:g}", "AVG PLAYERS / GAME"),
+    ]):
+        x = PAD + i * half
+        draw.text((x, sy), val, font=f_stat_v, fill=_C_ACCENT)
+        draw.text((x, sy + 34), label, font=f_stat_l, fill=_C_MUTED)
+
+    # Top attendees
+    y = HDR_H + STAT_H + 8
+    draw.text((PAD, y + 6), "MOST ACTIVE", font=f_col, fill=_C_MUTED)
+    y += COL_H
+    medals = ["🥇", "🥈", "🥉"]
+    for i, a in enumerate(top):
+        ry = y + i * ROW_H
+        if i % 2 == 0:
+            draw.rectangle([PAD, ry, W - PAD, ry + ROW_H - 2], fill=_C_STRIP_ODD)
+        rank = medals[i] if i < 3 else f"{i + 1}."
+        draw.text((PAD + 6, ry + 7), _sanitize(rank, f"{i + 1}."), font=f_name, fill=_C_MUTED)
+        clean = _sanitize(a.get("name") or "?", f"Player {i + 1}")
+        draw.text((PAD + 44, ry + 7), _ellipsize(clean, 28), font=f_name, fill=_C_TEXT)
+        cnt = f"{a.get('attended', 0)} games"
+        cw = _text_w(draw, cnt, f_count)
+        draw.text((W - PAD - cw - 6, ry + 7), cnt, font=f_count, fill=_C_SETTLED)
+
+    # Footer — the viral hook
+    fy = H - FTR_H
+    draw.rectangle([0, fy, W, H], fill=_C_FOOTER_BG)
+    draw.text((PAD, fy + 11), "⚡ made with RollCall", font=f_footer, fill=_C_ACCENT)
+
+    return _to_bytes(img)
+
+
 # ── Close receipt card ────────────────────────────────────────────────────────
 
 def close_receipt_card(

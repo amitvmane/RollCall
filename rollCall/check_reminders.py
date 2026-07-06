@@ -711,6 +711,14 @@ async def check_template_schedules():
         except Exception:
             logging.exception("Error in daily group-name refresh")
 
+        # Weekly dues nudges, monthly digest cards, idle re-engagement.
+        # Stamps persist in system_config, so restarts never re-fire.
+        try:
+            from periodic_jobs import run_periodic_jobs
+            await run_periodic_jobs()
+        except Exception:
+            logging.exception("Error in periodic jobs tick")
+
         try:
             scheduled = get_all_scheduled_templates()
             for tmpl in scheduled:

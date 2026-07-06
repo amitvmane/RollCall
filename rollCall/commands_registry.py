@@ -659,6 +659,18 @@ COMMANDS = [
         ),
     },
     {
+        "name": "dues_nudges", "aliases": [], "scope": "admin", "category": "Dues & Fund",
+        "args": "[on | off]", "sample": "/dues_nudges on",
+        "summary": "Weekly automatic dues reminders",
+        "details": (
+            "When on, every Sunday evening members with outstanding dues get a "
+            "group summary and an individual DM with the amount and UPI details "
+            "— the same output as a manual /remind_dues. Nothing is sent on weeks "
+            "when everyone is settled. Off by default. "
+            "/dues_nudges alone shows current status."
+        ),
+    },
+    {
         "name": "disable_dues", "aliases": [], "scope": "admin", "category": "Dues & Fund",
         "args": "", "sample": "/disable_dues",
         "summary": "Disable Dues & Treasury for this group",

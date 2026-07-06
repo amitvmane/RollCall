@@ -6184,5 +6184,132 @@ def get_attendance_between(chat_id: int, start_utc: str, end_utc: str) -> List[D
             release_connection(conn)
 
 
+def get_fund_transactions_between(chat_id: int, start_utc: str, end_utc: str) -> List[Dict]:
+    """Fund transactions in a UTC window (for the monthly statement)."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"""SELECT txn_type, amount, description, created_at
+                FROM fund_transactions
+                WHERE chat_id = {ph} AND created_at >= {ph} AND created_at < {ph}
+                ORDER BY created_at""",
+            (chat_id, start_utc, end_utc),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    except Exception:
+        logging.exception("get_fund_transactions_between failed")
+        return []
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def get_idle_chats(cutoff_utc: str) -> List[Dict]:
+    """Chats with at least one template whose most recent rollcall predates cutoff.
+
+    Returns [{'chat_id', 'last_rc_at', 'last_idle_nudge', 'group_name'}].
+    Only group chats (negative ids) — private chats can't hold rollcall games.
+    """
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"""SELECT c.chat_id, c.group_name, c.last_idle_nudge,
+                       MAX(r.created_at) AS last_rc_at
+                FROM chats c
+                JOIN rollcalls r ON r.chat_id = c.chat_id
+                WHERE c.chat_id < 0
+                  AND EXISTS (SELECT 1 FROM templates t WHERE t.chatid = c.chat_id)
+                GROUP BY c.chat_id, c.group_name, c.last_idle_nudge
+                HAVING MAX(r.created_at) < {ph}""",
+            (cutoff_utc,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    except Exception:
+        logging.exception("get_idle_chats failed")
+        return []
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def get_last_admin_actor(chat_id: int) -> Optional[Dict]:
+    """Most recent admin actor for a chat from the audit log — {'admin_id', 'admin_name'}."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"""SELECT admin_id, admin_name FROM admin_actions
+                WHERE chat_id = {ph} ORDER BY id DESC LIMIT 1""",
+            (chat_id,),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except Exception:
+        logging.exception("get_last_admin_actor failed")
+        return None
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def get_all_chat_ids_with_dues() -> List[int]:
+    """Chat ids where dues is enabled and the weekly auto-nudge is on."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        true_val = "TRUE" if db_type == "postgresql" else "1"
+        cursor.execute(
+            f"""SELECT chat_id FROM chats
+                WHERE dues_enabled = {true_val} AND dues_weekly_nudge = 1"""
+        )
+        return [row["chat_id"] if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
+    except Exception:
+        logging.exception("get_all_chat_ids_with_dues failed")
+        return []
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def get_active_group_chat_ids(since_utc: str) -> List[int]:
+    """Group chats with at least one rollcall created since the given UTC timestamp."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"""SELECT DISTINCT chat_id FROM rollcalls
+                WHERE chat_id < 0 AND created_at >= {ph}""",
+            (since_utc,),
+        )
+        return [row["chat_id"] if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
+    except Exception:
+        logging.exception("get_active_group_chat_ids failed")
+        return []
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
 # Initialize database on import
 init_db()

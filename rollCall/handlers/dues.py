@@ -769,6 +769,46 @@ async def enable_dues(message):
         await reply_error(message, e)
 
 
+@bot.message_handler(func=lambda m: _cmd(m.text) == "/dues_nudges")
+async def dues_nudges(message):
+    """Toggle the automatic weekly dues reminder (Sunday evening group post + DMs)."""
+    try:
+        if await admin_rights(message, manager) is False:
+            raise insufficientPermissions("Admin only: /dues_nudges")
+        cid = message.chat.id
+        _require_dues_enabled(cid)
+        args = _parse_args(message.text)
+
+        if not args:
+            current = bool(_db.get_or_create_chat(cid).get("dues_weekly_nudge"))
+            await bot.send_message(
+                cid,
+                f"🗓 Weekly dues nudge is {'ON — fires Sunday ~6pm' if current else 'OFF'}.\n"
+                "Usage: /dues_nudges on · /dues_nudges off\n"
+                "When on: every Sunday evening, members with outstanding dues get a "
+                "group summary + individual DM with the UPI details. Silent when "
+                "everyone is settled.",
+            )
+            return
+
+        arg = args[0].lower()
+        if arg in ("on", "true", "1", "enable"):
+            _db.update_chat_settings(cid, dues_weekly_nudge=1)
+            await bot.send_message(
+                cid,
+                "🗓 Weekly dues nudge ON — outstanding balances will be reminded "
+                "every Sunday evening (group summary + DMs). Nothing is sent when "
+                "everyone is settled.",
+            )
+        elif arg in ("off", "false", "0", "disable"):
+            _db.update_chat_settings(cid, dues_weekly_nudge=0)
+            await bot.send_message(cid, "🗓 Weekly dues nudge OFF.")
+        else:
+            raise incorrectParameter("Usage: /dues_nudges on · /dues_nudges off")
+    except Exception as e:
+        await reply_error(message, e)
+
+
 @bot.message_handler(func=lambda m: _cmd(m.text) == "/disable_dues")
 async def disable_dues(message):
     try:

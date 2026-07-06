@@ -272,6 +272,40 @@ def response_time_stats(chat_id: int, limit: int = 10) -> list:
     return get_response_time_leaderboard(chat_id, limit)
 
 
+def period_summary(chat_id: int, days: int = 7) -> dict:
+    """Recap of the last N days: sessions run, avg attendance, top attendees.
+
+    Powers /summary and the monthly season wrap-up card.
+    """
+    from datetime import datetime, timedelta, timezone as _tz
+    import db as _db
+
+    end = datetime.now(_tz.utc)
+    start = end - timedelta(days=days)
+    start_s = start.strftime("%Y-%m-%d %H:%M:%S")
+    end_s = end.strftime("%Y-%m-%d %H:%M:%S")
+
+    sessions = _db.get_rollcalls_between(chat_id, start_s, end_s)
+    attendance = _db.get_attendance_between(chat_id, start_s, end_s)
+
+    total_slots = sum(int(s.get("in_count") or 0) for s in sessions)
+    n = len(sessions)
+    return {
+        "days": days,
+        "sessions": [
+            {"title": s.get("title"), "in_count": int(s.get("in_count") or 0),
+             "ended_at": str(s.get("ended_at") or "")}
+            for s in sessions
+        ],
+        "session_count": n,
+        "avg_attendance": round(total_slots / n, 1) if n else 0.0,
+        "top_attendees": [
+            {"name": a["name"], "attended": int(a["attended"])}
+            for a in attendance[:5]
+        ],
+    }
+
+
 def web_group_stats(
     group_token: str,
     *,

@@ -6038,5 +6038,115 @@ def consume_web_direct_login_token(token: str) -> Optional[Dict]:
             release_connection(conn)
 
 
+# ── Digest / periodic-job helpers ─────────────────────────────────────────────
+
+def get_latest_ended_rollcall(chat_id: int) -> Optional[Dict]:
+    """Most recent ended, not-cancelled rollcall — full row (for /repeat)."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        active_false = "FALSE" if db_type == "postgresql" else "0"
+        cursor.execute(
+            f"""SELECT * FROM rollcalls
+                WHERE chat_id = {ph}
+                  AND is_active = {active_false}
+                  AND COALESCE(is_cancelled, {active_false}) = {active_false}
+                ORDER BY ended_at IS NULL ASC, ended_at DESC, id DESC LIMIT 1""",
+            (chat_id,),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except Exception:
+        logging.exception("get_latest_ended_rollcall failed")
+        return None
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def get_rollcalls_between(chat_id: int, start_utc: str, end_utc: str) -> List[Dict]:
+    """Ended rollcalls in a UTC window with IN counts (for /summary and wrap-up).
+
+    start_utc/end_utc are 'YYYY-MM-DD HH:MM:SS' strings compared against
+    ended_at (CURRENT_TIMESTAMP, UTC in both dialects).
+    """
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        active_false = "FALSE" if db_type == "postgresql" else "0"
+        cursor.execute(
+            f"""SELECT r.id, r.title, r.ended_at,
+                (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'in') +
+                (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND p.status = 'in') AS in_count
+                FROM rollcalls r
+                WHERE r.chat_id = {ph}
+                  AND r.is_active = {active_false}
+                  AND COALESCE(r.is_cancelled, {active_false}) = {active_false}
+                  AND r.ended_at IS NOT NULL
+                  AND r.ended_at >= {ph} AND r.ended_at < {ph}
+                ORDER BY r.ended_at DESC""",
+            (chat_id, start_utc, end_utc),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    except Exception:
+        logging.exception("get_rollcalls_between failed")
+        return []
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def get_attendance_between(chat_id: int, start_utc: str, end_utc: str) -> List[Dict]:
+    """Per-member IN counts for rollcalls ended in a UTC window.
+
+    Returns [{'name': ..., 'attended': N}] combining real users and proxies,
+    ordered most-attended first.
+    """
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        active_false = "FALSE" if db_type == "postgresql" else "0"
+        window = (
+            f"r.chat_id = {ph} AND r.is_active = {active_false} "
+            f"AND COALESCE(r.is_cancelled, {active_false}) = {active_false} "
+            f"AND r.ended_at IS NOT NULL AND r.ended_at >= {ph} AND r.ended_at < {ph}"
+        )
+        cursor.execute(
+            f"""SELECT name, SUM(cnt) AS attended FROM (
+                    SELECT u.first_name AS name, COUNT(*) AS cnt
+                    FROM users u JOIN rollcalls r ON r.id = u.rollcall_id
+                    WHERE {window} AND u.status = 'in'
+                    GROUP BY u.first_name
+                    UNION ALL
+                    SELECT p.name AS name, COUNT(*) AS cnt
+                    FROM proxy_users p JOIN rollcalls r ON r.id = p.rollcall_id
+                    WHERE {window} AND p.status = 'in'
+                    GROUP BY p.name
+                ) t
+                WHERE name IS NOT NULL
+                GROUP BY name ORDER BY attended DESC""",
+            (chat_id, start_utc, end_utc, chat_id, start_utc, end_utc),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    except Exception:
+        logging.exception("get_attendance_between failed")
+        return []
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
 # Initialize database on import
 init_db()

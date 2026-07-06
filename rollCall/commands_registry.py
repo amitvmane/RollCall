@@ -106,6 +106,15 @@ COMMANDS = [
         "details": "Lists previously-ended rollcalls with IN counts. Default 10 per page.",
     },
     {
+        "name": "summary", "aliases": [], "scope": "user", "category": "Stats & History",
+        "args": "[days]", "sample": "/summary 14",
+        "summary": "Recap of recent sessions",
+        "details": (
+            "Shows a recap of the last 7 days (or a custom period up to 90 days): "
+            "number of sessions, average attendance, top 3 attendees, and a per-session list."
+        ),
+    },
+    {
         "name": "timezone", "aliases": ["tz"], "scope": "user", "category": "Settings",
         "args": "Region/City", "sample": "/timezone Asia/Kolkata",
         "summary": "Set your timezone",
@@ -168,6 +177,16 @@ COMMANDS = [
             "Starts a rollcall in this chat. If title is omitted, defaults to 'Roll Call'. "
             "Sends the inline vote panel immediately so members can vote in one tap. "
             "Admin-only. If multiple rollcalls are active, each is numbered for ::N targeting."
+        ),
+    },
+    {
+        "name": "repeat", "aliases": ["rpt"], "scope": "admin", "category": "Rollcall",
+        "args": "", "sample": "/repeat",
+        "summary": "Start a new rollcall cloned from the last one",
+        "details": (
+            "Clones the last ended rollcall's title, IN-list limit, location, and event fee "
+            "into a fresh rollcall — no retyping the same settings every week. "
+            "Finalize time is NOT carried over; set it with /srt if needed."
         ),
     },
     {

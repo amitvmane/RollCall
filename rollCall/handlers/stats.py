@@ -257,3 +257,49 @@ def _fmt_bot_stats(data: dict) -> str:
         f"🗳 IN: {data['sum_in_votes']}  OUT: {data['sum_out_votes']}  MAYBE: {data['sum_maybe_votes']}", "",
         f"📝 Templates: {data['total_templates']}",
     ])
+
+
+# ── /summary — period recap ───────────────────────────────────────────────────
+
+@bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/summary")
+async def summary_command(message):
+    """Recap of the last 7 days (or /summary <days>): sessions, avg attendance, top 3."""
+    from bot_state import reply_error
+    cid = message.chat.id
+    try:
+        parts = message.text.split()
+        days = 7
+        if len(parts) > 1:
+            try:
+                days = max(1, min(90, int(parts[1])))
+            except ValueError:
+                pass
+
+        data = stats_svc.period_summary(cid, days=days)
+
+        if not data["session_count"]:
+            await bot.send_message(
+                cid,
+                f"No sessions in the last {days} days. Start one with /rc!"
+            )
+            return
+
+        lines = [f"*📊 Last {days} days*", ""]
+        lines.append(f"🏸 Sessions: {data['session_count']}")
+        lines.append(f"👥 Avg attendance: {data['avg_attendance']}")
+        if data["top_attendees"]:
+            lines.append("")
+            lines.append("*Top attendees:*")
+            medals = ["🥇", "🥈", "🥉"]
+            for i, a in enumerate(data["top_attendees"][:3]):
+                lines.append(f"{medals[i]} {_esc(a['name'])} — {a['attended']}")
+        if data["sessions"]:
+            lines.append("")
+            lines.append("*Sessions:*")
+            for s in data["sessions"][:7]:
+                date = s["ended_at"][:10]
+                lines.append(f"• {_esc(s['title'] or 'Roll Call')} — {s['in_count']} IN ({date})")
+
+        await bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
+    except Exception as e:
+        await reply_error(message, e)

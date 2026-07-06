@@ -279,6 +279,59 @@ async def start_roll_call(message):
         await reply_error(cid, e)
 
 
+# ── /repeat ───────────────────────────────────────────────────────────────────
+
+@bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/repeat")
+@bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/rpt")
+async def repeat_roll_call(message):
+    """Clone the last ended rollcall's settings (title, fee, location, limit) into a new one."""
+    cid = message.chat.id
+    try:
+        if await admin_rights(message, manager) == False:
+            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
+
+        last = db.get_latest_ended_rollcall(cid)
+        if not last:
+            raise incorrectParameter(
+                "No previous rollcall found to repeat. Start one with /rc <title>."
+            )
+
+        result = await rollcalls_svc.start_rollcall(
+            cid, last.get("title"),
+            message.from_user.id, message.from_user.first_name,
+            message.from_user.username,
+        )
+        rc_number_1based = result["number"]
+        rc = manager.get_rollcall(cid, result["rc_index"])
+
+        # Apply cloned settings before building the panel so it shows them
+        cloned = []
+        if last.get("in_list_limit"):
+            rc.inListLimit = last["in_list_limit"]
+            cloned.append(f"limit {last['in_list_limit']}")
+        if last.get("location"):
+            rc.location = last["location"]
+            cloned.append(f"location {last['location']}")
+        if last.get("event_fee"):
+            rc.event_fee = last["event_fee"]
+            cloned.append(f"fee {last['event_fee']}")
+        rc.save()
+
+        markup = await get_status_keyboard(rc_number_1based, web_url=_group_web_url(cid))
+        text = _build_panel_text(rc, rc_number_1based)
+        sent = await bot.send_message(cid, text, reply_markup=markup)
+        _panel_msg_ids[(cid, rc_number_1based)] = sent.message_id
+        _persist_panel_msg_id(rc, sent.message_id)
+
+        if cloned and not manager.get_shh_mode(cid):
+            await bot.send_message(
+                cid,
+                f"🔁 Repeated from last game — carried over: {', '.join(cloned)}",
+            )
+    except Exception as e:
+        await reply_error(cid, e)
+
+
 # ── /end_roll_call ────────────────────────────────────────────────────────────
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/end_roll_call")

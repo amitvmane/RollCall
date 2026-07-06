@@ -371,6 +371,18 @@ COMMANDS = [
         ),
     },
     {
+        "name": "auto_buzz", "aliases": [], "scope": "admin", "category": "User Management",
+        "args": "<hours | off>", "sample": "/auto_buzz 3",
+        "summary": "Auto-ping non-voters before close time",
+        "details": (
+            "Automatically pings members who haven't voted N hours (1-48) before a "
+            "rollcall's scheduled close time. Fires once per rollcall, survives bot "
+            "restarts, and is skipped when the IN list is already full. "
+            "Only applies to rollcalls with a close time set (/srt or scheduled templates). "
+            "/auto_buzz off disables. /auto_buzz alone shows current status."
+        ),
+    },
+    {
         "name": "set_admins", "aliases": [], "scope": "admin", "category": "User Management",
         "args": "", "sample": "/set_admins",
         "summary": "Enable admin-only mode",

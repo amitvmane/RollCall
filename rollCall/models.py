@@ -91,6 +91,7 @@ class RollCall:
                 self.id = None
                 self.chat_id = None
             self.absent_marked = False
+            self.auto_buzz_sent = False
 
     def _load_from_db(self, db_id):
         """Load rollcall data from database"""
@@ -106,6 +107,7 @@ class RollCall:
         self.location = data['location']
         self.event_fee = data['event_fee']
         self.absent_marked = bool(data.get('absent_marked', False))
+        self.auto_buzz_sent = bool(data.get('auto_buzz_sent', 0))
         self.web_token = data.get('web_token')
         raw_limit = data['in_list_limit']
         try:

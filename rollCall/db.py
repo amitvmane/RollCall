@@ -707,6 +707,7 @@ _RECONCILE_COLUMNS = {
         ("collector_uid",  "collector_uid INTEGER DEFAULT NULL",       "collector_uid BIGINT DEFAULT NULL"),
         ("collector_name", "collector_name TEXT DEFAULT NULL",         "collector_name TEXT DEFAULT NULL"),
         ("collector_paid_ground", "collector_paid_ground INTEGER DEFAULT 0", "collector_paid_ground INTEGER DEFAULT 0"),
+        ("auto_buzz_sent", "auto_buzz_sent INTEGER DEFAULT 0",         "auto_buzz_sent INTEGER DEFAULT 0"),
     ],
     "chats": [
         ("shh_mode",               "shh_mode INTEGER DEFAULT 0",               "shh_mode BOOLEAN DEFAULT FALSE"),
@@ -724,6 +725,9 @@ _RECONCILE_COLUMNS = {
         ("penalty_ditch",          "penalty_ditch INTEGER DEFAULT 200",        "penalty_ditch INTEGER DEFAULT 200"),
         ("dues_enabled",           "dues_enabled BOOLEAN DEFAULT FALSE",       "dues_enabled INTEGER DEFAULT 0"),
         ("dues_self_paid_mode",    "dues_self_paid_mode TEXT DEFAULT 'auto'",  "dues_self_paid_mode TEXT DEFAULT 'auto'"),
+        ("auto_buzz_hours",        "auto_buzz_hours INTEGER DEFAULT 0",        "auto_buzz_hours INTEGER DEFAULT 0"),
+        ("dues_weekly_nudge",      "dues_weekly_nudge INTEGER DEFAULT 0",      "dues_weekly_nudge INTEGER DEFAULT 0"),
+        ("last_idle_nudge",        "last_idle_nudge TEXT DEFAULT NULL",        "last_idle_nudge TEXT DEFAULT NULL"),
     ],
     "users": [
         ("in_pos",   "in_pos INTEGER DEFAULT NULL",   "in_pos INTEGER DEFAULT NULL"),
@@ -1608,6 +1612,7 @@ _VALID_CHAT_FIELDS = {
     'upi_vpa', 'dues_round_step',
     'penalty_late_t1', 'penalty_late_t2', 'penalty_late_t3', 'penalty_ditch',
     'dues_enabled', 'dues_self_paid_mode',
+    'auto_buzz_hours', 'dues_weekly_nudge', 'last_idle_nudge',
 }
 
 def update_chat_settings(chat_id: int, **kwargs) -> bool:
@@ -1793,6 +1798,7 @@ _VALID_ROLLCALL_FIELDS = {
     'timezone', 'reminder_hours', 'template_name', 'created_at',
     'is_cancelled',
     'collector_uid', 'collector_name', 'collector_paid_ground',
+    'auto_buzz_sent',
 }
 
 def update_rollcall(rollcall_id: int, **kwargs) -> bool:

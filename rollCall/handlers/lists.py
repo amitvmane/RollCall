@@ -327,3 +327,55 @@ def _build_mention_list(users: list) -> str:
         elif uid:
             parts.append(f"[{safe_name}](tg://user?id={uid})")
     return " ".join(parts)
+
+
+# ── /auto_buzz — smart escalation config ─────────────────────────────────────
+
+@bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/auto_buzz")
+async def auto_buzz_command(message):
+    """Configure automatic non-voter pings N hours before a rollcall's close time."""
+    cid = message.chat.id
+    try:
+        if await admin_rights(message, manager) == False:
+            raise insufficientPermissions("Admin only: /auto_buzz")
+
+        from db import update_chat_settings, get_or_create_chat
+        args = message.text.split()[1:]
+
+        if not args:
+            current = int(get_or_create_chat(cid).get("auto_buzz_hours") or 0)
+            status = f"ON — non-voters pinged {current}h before close" if current else "OFF"
+            await bot.send_message(
+                cid,
+                f"🔔 Auto-buzz is {status}.\n"
+                "Usage: /auto_buzz <hours 1-48> to enable · /auto_buzz off to disable.\n"
+                "Only fires for rollcalls with a close time (/srt), once per rollcall, "
+                "and skips groups whose IN list is already full."
+            )
+            return
+
+        arg = args[0].lower()
+        if arg in ("off", "0", "disable"):
+            update_chat_settings(cid, auto_buzz_hours=0)
+            await bot.send_message(cid, "🔕 Auto-buzz disabled.")
+            return
+
+        try:
+            hours = int(arg)
+        except ValueError:
+            raise incorrectParameter("Hours must be a number 1-48, or 'off'. Example: /auto_buzz 3")
+        if not 1 <= hours <= 48:
+            raise incorrectParameter("Hours must be between 1 and 48.")
+
+        update_chat_settings(cid, auto_buzz_hours=hours)
+        log_admin_action(cid, message.from_user.id, message.from_user.first_name,
+                         "auto_buzz", details=f"set to {hours}h")
+        await bot.send_message(
+            cid,
+            f"🔔 Auto-buzz enabled — members who haven't voted will be pinged "
+            f"*{hours}h before* each rollcall's close time (once per rollcall, "
+            f"skipped if the IN list is full).",
+            parse_mode="Markdown",
+        )
+    except Exception as e:
+        await reply_error(cid, e)

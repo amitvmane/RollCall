@@ -139,6 +139,47 @@ async def check(rollcalls, timezone, chat_id):
                 # BUG12: ensure finalizeDate is tz-aware before any comparison
                 finalize_dt = _ensure_aware(rollcall.finalizeDate, tz)
 
+                # ── Smart buzz escalation ─────────────────────────────────────
+                # Ping only non-voters N hours before finalize (admin opt-in via
+                # /auto_buzz). Fires once per rollcall; the flag is persisted so
+                # a restart can't re-ping. Skipped when the IN list is full.
+                try:
+                    if not getattr(rollcall, "auto_buzz_sent", False):
+                        chat_cfg = manager.get_chat(chat_id)
+                        buzz_hours = int(chat_cfg.get("auto_buzz_hours") or 0)
+                        if buzz_hours > 0 and finalize_dt - timedelta(hours=buzz_hours) <= now_date < finalize_dt:
+                            rollcall.auto_buzz_sent = True
+                            rc_db_id_b = getattr(rollcall, "db_id", None) or getattr(rollcall, "id", None)
+                            if rc_db_id_b is not None:
+                                try:
+                                    from db import update_rollcall
+                                    update_rollcall(rc_db_id_b, auto_buzz_sent=1)
+                                except Exception:
+                                    logging.exception("Failed to persist auto_buzz_sent")
+                            is_full = (
+                                rollcall.inListLimit is not None
+                                and len(rollcall.inList) >= rollcall.inListLimit
+                            )
+                            if not is_full:
+                                from services import lists as lists_svc
+                                from handlers.lists import _build_mention_list
+                                svc = lists_svc.get_non_responders(chat_id, rc_number - 1)
+                                candidates = svc.get("candidates") or []
+                                if candidates:
+                                    mentions = _build_mention_list(candidates)
+                                    await bot.send_message(
+                                        chat_id,
+                                        f"⏰ Hey {mentions}\n\n"
+                                        f"*{rollcall.title}* closes in ~{buzz_hours}h — have you voted?",
+                                        parse_mode="Markdown",
+                                    )
+                                    logging.info(
+                                        f"[auto-buzz] pinged {len(candidates)} non-voter(s) for "
+                                        f"rollcall #{rc_number} in chat {chat_id}"
+                                    )
+                except Exception:
+                    logging.exception("Error in auto-buzz escalation")
+
                 if rollcall.reminder is not None:
                     reminder_time = finalize_dt - timedelta(hours=int(rollcall.reminder))
                     if now_date >= reminder_time:

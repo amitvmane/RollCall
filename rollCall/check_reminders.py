@@ -232,6 +232,10 @@ async def check(rollcalls, timezone, chat_id):
                                 finish_text = f"{finish_text}\n\n🕐 Auto-closed at scheduled time"
 
                             # Snapshot user lists before clearing state.
+                            in_members_snapshot = [
+                                (u.user_id if isinstance(u.user_id, int) else None, u.name)
+                                for u in rollcall.inList
+                            ]
                             in_user_ids = {u.user_id for u in rollcall.inList if isinstance(u.user_id, int)}
                             participants = set(
                                 u.user_id for u in (rollcall.inList + rollcall.outList + rollcall.maybeList + rollcall.waitList)
@@ -298,6 +302,17 @@ async def check(rollcalls, timezone, chat_id):
                                     reset_proxy_streak(chat_id, name)
                                 except Exception:
                                     logging.exception(f"Failed to reset proxy streak for {name} in chat {chat_id}")
+
+                            # Achievement badges — after streaks + DB end commit;
+                            # celebratory, so they respect shh mode.
+                            if not manager.get_shh_mode(chat_id):
+                                try:
+                                    from services.badges import collect_badges
+                                    badge_lines = collect_badges(chat_id, in_members_snapshot)
+                                    if badge_lines:
+                                        await bot.send_message(chat_id, "🎉 Milestones!\n" + "\n".join(badge_lines))
+                                except Exception:
+                                    logging.exception("Failed to announce badges after auto-close")
 
                             # ── Telegram messages are best-effort after DB is committed ───
                             # Remove vote buttons from the existing panel message.

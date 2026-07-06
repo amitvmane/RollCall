@@ -214,8 +214,21 @@ async def end_rollcall(
     ended_snapshot = serialize_rollcall(rc, rc_number)
     ended_number_1based = rc_number + 1
     title = rc.title
+    in_members_snapshot = [
+        (u.user_id if isinstance(u.user_id, int) else None, u.name)
+        for u in in_users
+    ]
 
     manager.remove_rollcall(chat_id, rc_number)
+
+    # Achievement badges — after remove_rollcall so the DB end is committed
+    # and attendance counts include this game. Best-effort.
+    badges = []
+    try:
+        from services.badges import collect_badges
+        badges = collect_badges(chat_id, in_members_snapshot)
+    except Exception:
+        logging.exception("badge collection failed")
 
     logging.info(
         f"[{_ts()}] [CHAT {chat_id}] Rollcall ended: '{title}' "
@@ -264,6 +277,7 @@ async def end_rollcall(
         },
         "remaining": [serialize_rollcall(r, i) for i, r in enumerate(remaining)],
         "renumbered": renumbered,
+        "badges": badges,
     }
 
 

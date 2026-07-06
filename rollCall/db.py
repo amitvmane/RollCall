@@ -3517,6 +3517,36 @@ def reset_proxy_streak(chat_id: int, proxy_name: str) -> None:
             release_connection(conn)
 
 
+def get_user_streaks(chat_id: int, user_id: int) -> Dict:
+    """Return {current_streak, best_streak} for a real user, 0s if no stats row."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(f"""
+            SELECT current_streak, best_streak
+            FROM user_stats WHERE chat_id = {ph} AND user_id = {ph}
+        """, (chat_id, user_id))
+        row = cursor.fetchone()
+        if row is None:
+            return {'current_streak': 0, 'best_streak': 0}
+        if isinstance(row, dict):
+            return {
+                'current_streak': int(row.get('current_streak') or 0),
+                'best_streak':    int(row.get('best_streak') or 0),
+            }
+        return {'current_streak': int(row[0] or 0), 'best_streak': int(row[1] or 0)}
+    except Exception as e:
+        logging.error(f"Error fetching user streaks: {e}")
+        return {'current_streak': 0, 'best_streak': 0}
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
 def get_proxy_streaks(chat_id: int, proxy_name: str) -> Dict:
     """Return {current_streak, best_streak} for a proxy. Both default to 0
     if the proxy has no proxy_stats row yet (i.e. hasn't been through an

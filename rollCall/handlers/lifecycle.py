@@ -53,6 +53,14 @@ async def _post_end_cleanup(cid: int, ended_number: int, result: dict, rc_title:
         if old_key in _panel_msg_ids:
             _panel_msg_ids[(cid, entry["new"])] = _panel_msg_ids.pop(old_key)
 
+    # Achievement badges — celebratory, so they respect shh mode.
+    badges = result.get("badges") or []
+    if badges and not manager.get_shh_mode(cid):
+        try:
+            await bot.send_message(cid, "🎉 Milestones!\n" + "\n".join(badges))
+        except Exception:
+            logging.exception("Failed to send badge announcement")
+
     rc_db_id = result.get("rc_db_id")
     ghost_eligible = bool(result.get("ghost_eligible"))
 

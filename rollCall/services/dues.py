@@ -359,6 +359,20 @@ async def close_game(
 
     per_head, remainder = compute_shares(ground_cost, subsidy, in_count, step)
 
+    # ── Collector rotation ───────────────────────────────────────────────────
+    # When no collector was staged and /rotate_collector is on, auto-assign
+    # the next real (Telegram) IN member in uid order, cycling.
+    rotation_note = ""
+    if not collector_uid and not collector_name:
+        chat_row = db.get_or_create_chat(chat_id)
+        if chat_row.get("collector_rotation"):
+            pick = _next_rotation_collector(in_members, chat_row.get("last_collector_uid"))
+            if pick:
+                collector_uid, collector_name = pick
+                collector_paid_ground = 0
+                db.update_chat_settings(chat_id, last_collector_uid=collector_uid)
+                rotation_note = " (rotation)"
+
     # ── End active rollcall NOW — all validation passed ──────────────────────
     end_result: dict | None = None
     if _active_rc_idx is not None:
@@ -439,7 +453,7 @@ async def close_game(
     upi_line = f"\n💳 Pay ₹{per_head} to: `{upi}`" if upi else ""
     subsidy_line = f"\n💰 Fund subsidy: ₹{subsidy}" if subsidy > 0 else ""
     remainder_line = f"\n🏦 Rounding → fund: +₹{remainder}" if remainder > 0 else ""
-    collector_line = f"\n📦 Collector: {collector_name}" if collector_name else ""
+    collector_line = f"\n📦 Collector: {collector_name}{rotation_note}" if collector_name else ""
 
     announcement = (
         f"📊 Game closed: *{title}*\n"
@@ -711,6 +725,25 @@ def waive(
 
 
 # ── Payments & collector ──────────────────────────────────────────────────────
+
+def _next_rotation_collector(in_members: list, last_uid) -> tuple | None:
+    """Pick the next real-user collector in ascending-uid order, cycling.
+
+    Deterministic regardless of vote order; proxies are never picked (they
+    can't receive payments). Returns (uid, name) or None if no real users.
+    """
+    real = sorted(
+        ((m["user_id"], m["member_name"]) for m in in_members if m.get("user_id")),
+        key=lambda x: x[0],
+    )
+    if not real:
+        return None
+    if last_uid:
+        for uid, name in real:
+            if uid > last_uid:
+                return uid, name
+    return real[0]
+
 
 def set_collector(
     chat_id: int,

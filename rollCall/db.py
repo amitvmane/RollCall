@@ -728,6 +728,8 @@ _RECONCILE_COLUMNS = {
         ("auto_buzz_hours",        "auto_buzz_hours INTEGER DEFAULT 0",        "auto_buzz_hours INTEGER DEFAULT 0"),
         ("dues_weekly_nudge",      "dues_weekly_nudge INTEGER DEFAULT 0",      "dues_weekly_nudge INTEGER DEFAULT 0"),
         ("last_idle_nudge",        "last_idle_nudge TEXT DEFAULT NULL",        "last_idle_nudge TEXT DEFAULT NULL"),
+        ("collector_rotation",     "collector_rotation INTEGER DEFAULT 0",     "collector_rotation INTEGER DEFAULT 0"),
+        ("last_collector_uid",     "last_collector_uid INTEGER DEFAULT NULL",  "last_collector_uid BIGINT DEFAULT NULL"),
     ],
     "users": [
         ("in_pos",   "in_pos INTEGER DEFAULT NULL",   "in_pos INTEGER DEFAULT NULL"),
@@ -1613,6 +1615,7 @@ _VALID_CHAT_FIELDS = {
     'penalty_late_t1', 'penalty_late_t2', 'penalty_late_t3', 'penalty_ditch',
     'dues_enabled', 'dues_self_paid_mode',
     'auto_buzz_hours', 'dues_weekly_nudge', 'last_idle_nudge',
+    'collector_rotation', 'last_collector_uid',
 }
 
 def update_chat_settings(chat_id: int, **kwargs) -> bool:

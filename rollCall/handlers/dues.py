@@ -220,6 +220,142 @@ async def set_collector(message):
         await reply_error(message, e)
 
 
+# ── /pick_collector — inline selection panel ──────────────────────────────────
+
+@bot.message_handler(func=lambda m: _cmd(m.text) == "/pick_collector")
+async def pick_collector(message):
+    """Show the active rollcall's real IN members as buttons — tap to set collector."""
+    try:
+        if await admin_rights(message, manager) is False:
+            raise insufficientPermissions("Admin only: /pick_collector")
+        cid = message.chat.id
+        _require_dues_enabled(cid)
+        args = _parse_args(message.text)
+        rc_idx, _ = _parse_rc_suffix(args)
+
+        rollcalls = manager.get_rollcalls(cid)
+        if not rollcalls or rc_idx >= len(rollcalls):
+            from exceptions import rollCallNotStarted
+            raise rollCallNotStarted(
+                "No active rollcall. For an already-closed game use /set_collector <name>."
+            )
+        rc = rollcalls[rc_idx]
+        real_in = [u for u in rc.inList if isinstance(u.user_id, int) and u.user_id > 0]
+        if not real_in:
+            raise incorrectParameter(
+                "No real (Telegram) users are IN yet — proxies can't be collectors."
+            )
+
+        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+        markup = InlineKeyboardMarkup(row_width=2)
+        buttons = [
+            InlineKeyboardButton(u.name, callback_data=f"pickcol_{rc_idx}_{u.user_id}")
+            for u in real_in
+        ]
+        markup.add(*buttons)
+        await bot.send_message(
+            cid,
+            f"📦 Who is collecting for *{_esc_md(rc.title or 'this game')}*?",
+            parse_mode="Markdown", reply_markup=markup,
+        )
+    except Exception as e:
+        await reply_error(message, e)
+
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("pickcol_"))
+async def pick_collector_callback(call):
+    try:
+        cid = call.message.chat.id
+        # Financial write — same admin gate as the penalty panel.
+        if manager.get_admin_rights(cid):
+            member = await bot.get_chat_member(cid, call.from_user.id)
+            if member.status not in ("administrator", "creator"):
+                await bot.answer_callback_query(
+                    call.id, "⛔ Only admins can set the collector", show_alert=True
+                )
+                return
+
+        _, rc_idx_s, uid_s = call.data.split("_")
+        rc_idx, uid = int(rc_idx_s), int(uid_s)
+
+        async with manager.get_chat_write_lock(cid):
+            rollcalls = manager.get_rollcalls(cid)
+            if rc_idx >= len(rollcalls):
+                await bot.answer_callback_query(call.id, "That rollcall has ended.", show_alert=True)
+                return
+            rc = rollcalls[rc_idx]
+            target = next(
+                (u for u in rc.inList if isinstance(u.user_id, int) and u.user_id == uid),
+                None,
+            )
+            if target is None:
+                await bot.answer_callback_query(
+                    call.id, "That member is no longer IN — reopen /pick_collector.", show_alert=True
+                )
+                return
+            result = dues_svc.set_collector(
+                cid, target.name, False,
+                call.from_user.id,
+                call.from_user.first_name or "Admin",
+                rc_number=rc_idx,
+            )
+
+        await bot.answer_callback_query(call.id, f"📦 {target.name} is collecting")
+        try:
+            await bot.edit_message_text(
+                result["announcement"], cid, call.message.message_id,
+            )
+        except Exception:
+            pass
+    except Exception:
+        logging.exception("pick_collector_callback failed")
+        try:
+            await bot.answer_callback_query(call.id, "Could not set collector.", show_alert=True)
+        except Exception:
+            pass
+
+
+# ── /rotate_collector — round-robin auto-assignment ───────────────────────────
+
+@bot.message_handler(func=lambda m: _cmd(m.text) == "/rotate_collector")
+async def rotate_collector(message):
+    """Toggle round-robin collector auto-assignment at /close_game."""
+    try:
+        if await admin_rights(message, manager) is False:
+            raise insufficientPermissions("Admin only: /rotate_collector")
+        cid = message.chat.id
+        _require_dues_enabled(cid)
+        args = _parse_args(message.text)
+
+        if not args:
+            on = bool(_db.get_or_create_chat(cid).get("collector_rotation"))
+            await bot.send_message(
+                cid,
+                f"🔄 Collector rotation is {'ON' if on else 'OFF'}.\n"
+                "Usage: /rotate_collector on · /rotate_collector off\n"
+                "When on: if no collector was set before /close_game, the next "
+                "IN member (round-robin) is assigned automatically. "
+                "/set_collector or /pick_collector always override the rotation.",
+            )
+            return
+
+        arg = args[0].lower()
+        if arg in ("on", "true", "1", "enable"):
+            _db.update_chat_settings(cid, collector_rotation=1)
+            await bot.send_message(
+                cid,
+                "🔄 Collector rotation ON — each /close_game without a staged "
+                "collector auto-assigns the next IN member in turn.",
+            )
+        elif arg in ("off", "false", "0", "disable"):
+            _db.update_chat_settings(cid, collector_rotation=0)
+            await bot.send_message(cid, "🔄 Collector rotation OFF.")
+        else:
+            raise incorrectParameter("Usage: /rotate_collector on · /rotate_collector off")
+    except Exception as e:
+        await reply_error(message, e)
+
+
 # ── /mark_paid (/paid) ────────────────────────────────────────────────────────
 
 @bot.message_handler(func=lambda m: _cmd(m.text) == "/mark_paid")

@@ -122,3 +122,45 @@ class TestPeriodSummary:
         assert data["session_count"] == 2
         assert data["avg_attendance"] == 7.0
         assert data["top_attendees"][0] == {"name": "Amit", "attended": 2}
+
+
+# ── Collector rotation ────────────────────────────────────────────────────────
+
+class TestNextRotationCollector:
+    def _members(self, *pairs):
+        return [{"user_id": uid, "member_name": name} for uid, name in pairs]
+
+    def test_first_pick_no_history(self):
+        from services.dues import _next_rotation_collector
+        m = self._members((30, "C"), (10, "A"), (20, "B"))
+        assert _next_rotation_collector(m, None) == (10, "A")
+
+    def test_advances_past_last(self):
+        from services.dues import _next_rotation_collector
+        m = self._members((10, "A"), (20, "B"), (30, "C"))
+        assert _next_rotation_collector(m, 10) == (20, "B")
+        assert _next_rotation_collector(m, 20) == (30, "C")
+
+    def test_wraps_around(self):
+        from services.dues import _next_rotation_collector
+        m = self._members((10, "A"), (20, "B"))
+        assert _next_rotation_collector(m, 20) == (10, "A")
+        assert _next_rotation_collector(m, 999) == (10, "A")
+
+    def test_skips_proxies(self):
+        from services.dues import _next_rotation_collector
+        m = [{"user_id": None, "member_name": "Guest"},
+             {"user_id": 20, "member_name": "B"}]
+        assert _next_rotation_collector(m, None) == (20, "B")
+
+    def test_all_proxies_returns_none(self):
+        from services.dues import _next_rotation_collector
+        m = [{"user_id": None, "member_name": "Guest1"},
+             {"user_id": None, "member_name": "Guest2"}]
+        assert _next_rotation_collector(m, None) is None
+
+    def test_last_collector_absent_from_in_list(self):
+        # Last collector didn't play this game — rotation still advances
+        from services.dues import _next_rotation_collector
+        m = self._members((10, "A"), (30, "C"))
+        assert _next_rotation_collector(m, 20) == (30, "C")

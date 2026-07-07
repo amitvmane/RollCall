@@ -547,6 +547,29 @@ COMMANDS = [
         ),
     },
     {
+        "name": "pick_collector", "aliases": [], "scope": "admin", "category": "Dues & Fund",
+        "args": "[::N]", "sample": "/pick_collector",
+        "summary": "Pick the collector from a button panel",
+        "details": (
+            "Shows the active rollcall's IN members as inline buttons — tap one to "
+            "make them the collector. Only real Telegram users are shown (proxies "
+            "can't receive payments). Same effect as /set_collector, one tap instead "
+            "of typing a name."
+        ),
+    },
+    {
+        "name": "rotate_collector", "aliases": [], "scope": "admin", "category": "Dues & Fund",
+        "args": "[on | off]", "sample": "/rotate_collector on",
+        "summary": "Round-robin collector auto-assignment",
+        "details": (
+            "When on, /close_game with no staged collector automatically assigns "
+            "the next IN member in rotation (cycling through real users in a fixed "
+            "order) and announces it in the close summary. Manual /set_collector or "
+            "/pick_collector always take priority over the rotation. Off by default. "
+            "/rotate_collector alone shows current status."
+        ),
+    },
+    {
         "name": "reimburse", "aliases": [], "scope": "admin", "category": "Dues & Fund",
         "args": "name amount [reason]", "sample": "/reimburse Ravi 600 fronted ground",
         "summary": "Issue a reimbursement credit to a member",

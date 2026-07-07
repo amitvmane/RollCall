@@ -306,6 +306,68 @@ def period_summary(chat_id: int, days: int = 7) -> dict:
     }
 
 
+_BADGE_GAMES_TIERS = (200, 100, 50, 25, 10)
+
+
+def _entry_badges(chat_id: int, entry: dict) -> list:
+    """Badge chips for a leaderboard entry — streak fire + highest games tier."""
+    from db import get_user_streaks, get_proxy_streaks
+    badges = []
+    try:
+        if entry.get("kind") == "proxy" or entry.get("user_id") is None:
+            streak = get_proxy_streaks(chat_id, entry.get("display_name") or "").get("current_streak", 0)
+        else:
+            streak = get_user_streaks(chat_id, entry["user_id"]).get("current_streak", 0)
+        if streak >= 5:
+            badges.append(f"🔥{streak}")
+        attended = int(entry.get("sessions_attended") or 0)
+        for tier in _BADGE_GAMES_TIERS:
+            if attended >= tier:
+                badges.append(f"🏅{tier}")
+                break
+    except Exception:
+        pass
+    return badges
+
+
+def weekday_attendance(chat_id: int, days: int = 90) -> list:
+    """Average IN count per weekday over the last N days of ended sessions.
+
+    Powers the admin 'best days' scheduling hint. Aggregates only — no names.
+    """
+    from datetime import datetime, timedelta, timezone as _tz
+    import db as _db
+
+    end = datetime.now(_tz.utc)
+    start = end - timedelta(days=days)
+    sessions = _db.get_rollcalls_between(
+        chat_id,
+        start.strftime("%Y-%m-%d %H:%M:%S"),
+        end.strftime("%Y-%m-%d %H:%M:%S"),
+    )
+    by_day: dict = {}
+    for s in sessions:
+        raw = str(s.get("ended_at") or "")[:10]
+        try:
+            day = datetime.strptime(raw, "%Y-%m-%d").strftime("%A")
+        except ValueError:
+            continue
+        bucket = by_day.setdefault(day, {"sessions": 0, "total_in": 0})
+        bucket["sessions"] += 1
+        bucket["total_in"] += int(s.get("in_count") or 0)
+
+    out = [
+        {
+            "weekday": day,
+            "sessions": b["sessions"],
+            "avg_in": round(b["total_in"] / b["sessions"], 1),
+        }
+        for day, b in by_day.items()
+    ]
+    out.sort(key=lambda x: (-x["avg_in"], -x["sessions"]))
+    return out
+
+
 def web_group_stats(
     group_token: str,
     *,
@@ -332,6 +394,10 @@ def web_group_stats(
     gs = group_stats(chat_id)               # same data as /stats group in Telegram
     lb_data = leaderboard(chat_id, limit=10)  # same as /stats top (top 10)
     hist = history(chat_id, limit=5)
+
+    # Badge chips per leaderboard entry (streak fire + games tier)
+    for entry in lb_data["entries"]:
+        entry["badges"] = _entry_badges(chat_id, entry)
 
     total_pax = gs["real_participants"] + gs["proxy_participants"]
 
@@ -399,6 +465,7 @@ def web_group_stats(
         "ghost_leaderboard": gs["ghost_leaderboard"],
         "recent_history": hist,
         "personal": personal,
+        "weekday_stats": weekday_attendance(chat_id),
     }
 
 

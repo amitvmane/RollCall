@@ -122,6 +122,13 @@ class WebStatsLeaderEntry(BaseModel):
     total_sessions_voted: int = 0
     attendance_rate: Optional[float] = None
     voting_rate: Optional[float] = None
+    badges: List[str] = Field(default_factory=list)
+
+
+class WebStatsWeekday(BaseModel):
+    weekday: str
+    sessions: int = 0
+    avg_in: float = 0.0
 
 
 class WebStatsHistoryEntry(BaseModel):
@@ -151,6 +158,7 @@ class WebGroupStatsResponse(BaseModel):
     ghost_leaderboard: List[WebStatsGhostEntry] = Field(default_factory=list)
     recent_history: List[WebStatsHistoryEntry] = Field(default_factory=list)
     personal: Optional[WebStatsPersonal] = None
+    weekday_stats: List[WebStatsWeekday] = Field(default_factory=list)
 
 
 # ── Web push schemas ──────────────────────────────────────────────────────────

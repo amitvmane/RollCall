@@ -647,8 +647,36 @@ async function loadWebStats(){
   }catch(_){}
 }
 
+// Weekday scheduling hint — needs both stats data AND admin status, which
+// resolve independently; whichever finishes second triggers the render.
+let _weekdayStats=null;
+function _renderWeekdayHint(){
+  if(!_isWebAdmin||!_weekdayStats||_weekdayStats.length<2)return;
+  const card=document.getElementById("admin-card");
+  if(!card)return;
+  let el=document.getElementById("weekday-hint");
+  if(!el){
+    el=document.createElement("div");
+    el.id="weekday-hint";
+    el.style.cssText="border-top:1px solid var(--border);padding-top:12px;margin-top:10px";
+    card.appendChild(el);
+  }
+  const best=_weekdayStats[0];
+  const rows=_weekdayStats.map(w=>
+    `<div style="display:flex;justify-content:space-between;font-size:.8rem;padding:3px 0">
+      <span>${esc(w.weekday)}</span>
+      <span style="color:var(--sub)">${w.sessions} game${w.sessions===1?"":"s"} · <strong style="color:var(--text)">${w.avg_in} avg IN</strong></span>
+    </div>`).join("");
+  el.innerHTML=`
+    <div style="font-size:.82rem;font-weight:600;color:var(--sub);margin-bottom:6px">📅 Best days (last 90 days)</div>
+    ${rows}
+    <div style="font-size:.73rem;color:var(--sub);margin-top:6px">💡 ${esc(best.weekday)}s draw the most players — worth scheduling around.</div>`;
+}
+
 function renderStats(d){
   const sc=$("stats-card");if(!sc)return;
+  _weekdayStats=d.weekday_stats||null;
+  _renderWeekdayHint();
   const pct=v=>v==null?"—":`${v}%`;
   const n=v=>v??0;
   const me=d.personal;
@@ -696,9 +724,10 @@ function renderStats(d){
       (currentName&&e.display_name&&e.display_name.toLowerCase()===currentName.toLowerCase())
     );
     const w=Math.min(100,e.attendance_rate||0);
+    const chips=(e.badges||[]).map(b=>`<span class="slb-badge" title="${b.startsWith("🔥")?"Current attendance streak":"Games played milestone"}">${esc(b)}</span>`).join("");
     return `<div class="slb-row${isMe?" slb-you":""}${e.kind==="proxy"?" slb-proxy":""}">
       <span class="slb-rank">#${e.rank??i+1}</span>
-      <span class="slb-name">${esc(e.display_name||"—")}${isMe?" ← you":""}</span>
+      <span class="slb-name">${esc(e.display_name||"—")}${chips}${isMe?" ← you":""}</span>
       <div class="slb-bar-wrap"><div class="slb-bar"><div class="slb-fill" style="width:${w}%"></div></div></div>
       <span class="slb-pct">${pct(e.attendance_rate)}</span>
     </div>`;
@@ -1099,7 +1128,7 @@ async function _checkWebAdmin(){
     _isWebAdmin=!!d.is_admin;
     const card=document.getElementById("admin-card");
     if(card)card.classList.toggle("hidden",!_isWebAdmin);
-    if(_isWebAdmin)_syncShhToggle();
+    if(_isWebAdmin){_syncShhToggle();_renderWeekdayHint();}
   }catch(_){}
   // Load dues after admin status is resolved — both member and admin sections
   loadDuesSection().catch(()=>{});

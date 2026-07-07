@@ -282,6 +282,7 @@ async def enable_dues(
     _db.update_chat_settings(chat_id, dues_enabled=1)
     dues_svc.seed_default_penalty_tiers(chat_id)
     _db.log_admin_action(chat_id, actor_uid, actor_name, "enable_dues")
+    await _announce(chat_id, f"✅ Dues & Treasury enabled (by {actor_name}, via web)")
 
 
 @router.post(
@@ -300,6 +301,7 @@ async def disable_dues(
 
     _db.update_chat_settings(chat_id, dues_enabled=0)
     _db.log_admin_action(chat_id, actor_uid, actor_name, "disable_dues")
+    await _announce(chat_id, f"⛔ Dues & Treasury disabled (by {actor_name}, via web) — ledger data preserved")
 
 
 # ── Game close & cancel ───────────────────────────────────────────────────────
@@ -493,9 +495,13 @@ async def set_collector(
     actor_name = _actor_name(chat_id, actor_uid)
 
     async with _mgr.get_chat_write_lock(chat_id):
-        return dues_svc.set_collector(
+        result = dues_svc.set_collector(
             chat_id, body.member_name, body.paid_ground, actor_uid, actor_name
         )
+    # Collector changes who may run /mark_paid — the group must see it,
+    # same as the Telegram /set_collector command announces.
+    await _announce(chat_id, result.get("announcement"))
+    return result
 
 
 # ── Fund management ───────────────────────────────────────────────────────────

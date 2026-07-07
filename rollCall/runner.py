@@ -73,15 +73,26 @@ def _setup_logging():
         # RotatingFileHandler caps each file at 5 MB with 5 backups (total ≤30 MB).
         # We use size-based rotation as a practical cap; TimedRotatingFileHandler
         # doesn't support maxBytes so we pair both independently.
+        # An unwritable log file (bind-mount permission drift on the host) must
+        # never kill the bot — docker captures stdout regardless, so fall back
+        # to console-only logging and say so loudly.
         from logging.handlers import RotatingFileHandler
-        fh = RotatingFileHandler(
-            f"{log_dir}/bot.log",
-            maxBytes=5 * 1024 * 1024,
-            backupCount=5,
-            encoding="utf-8",
-        )
-        fh.setFormatter(fmt)
-        handlers.append(fh)
+        try:
+            fh = RotatingFileHandler(
+                f"{log_dir}/bot.log",
+                maxBytes=5 * 1024 * 1024,
+                backupCount=5,
+                encoding="utf-8",
+            )
+            fh.setFormatter(fmt)
+            handlers.append(fh)
+        except OSError as e:
+            print(
+                f"WARNING: cannot open {log_dir}/bot.log ({e}) — "
+                "file logging disabled, using stdout only. "
+                "Fix host permissions on the ./logs bind mount.",
+                flush=True,
+            )
 
     logging.basicConfig(level=logging.INFO, handlers=handlers, force=True)
     logging.getLogger("TeleBot").setLevel(logging.WARNING)

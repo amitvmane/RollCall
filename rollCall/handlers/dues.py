@@ -1088,6 +1088,51 @@ async def matchday_card(message):
         await reply_error(message, e)
 
 
+# ── /dues_report ─────────────────────────────────────────────────────────────
+
+@bot.message_handler(func=lambda m: _cmd(m.text) == "/dues_report")
+@bot.message_handler(func=lambda m: _cmd(m.text) == "/dr")
+async def dues_report(message):
+    """Toggle or query the weekly auto-posted dues snapshot (Sunday >= 20:00)."""
+    try:
+        if not await admin_rights(message, manager):
+            return
+        cid  = message.chat.id
+        args = _parse_args(message.text)
+        if not args:
+            chat = _db.get_or_create_chat(cid)
+            status = "on" if chat.get("dues_report_enabled") else "off"
+            await bot.send_message(
+                cid,
+                f"📋 Weekly dues report is currently *{status}*.\n"
+                f"Use /dues\\_report weekly to enable or /dues\\_report off to disable.",
+                parse_mode="Markdown",
+            )
+            return
+        sub = args[0].lower()
+        if sub in ("weekly", "on"):
+            _db.update_chat_settings(cid, dues_report_enabled=1)
+            await bot.send_message(
+                cid,
+                "✅ Weekly dues report *enabled*. A snapshot will be posted every "
+                "Sunday evening (≥ 20:00 local time).",
+                parse_mode="Markdown",
+            )
+        elif sub == "off":
+            _db.update_chat_settings(cid, dues_report_enabled=0)
+            await bot.send_message(cid, "🔕 Weekly dues report *disabled*.", parse_mode="Markdown")
+        else:
+            await bot.send_message(
+                cid,
+                "Usage: /dues\\_report weekly  — enable\n"
+                "       /dues\\_report off     — disable\n"
+                "       /dues\\_report         — show current status",
+                parse_mode="Markdown",
+            )
+    except Exception as e:
+        await reply_error(message, e)
+
+
 # ── Background helpers ────────────────────────────────────────────────────────
 
 async def _send_close_qr(cid: int, upi: str, per_head: int) -> None:

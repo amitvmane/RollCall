@@ -55,6 +55,7 @@ def _import_all():
         add_adhoc as dues_add_adhoc,
         dues_snapshot as dues_snapshot_cmd,
         dues_export as dues_export_cmd,
+        dues_report as dues_report_cmd,
     )
     return locals()
 
@@ -183,6 +184,7 @@ class IntegrationBase(unittest.IsolatedAsyncioTestCase):
         cls.dues_add_adhoc = staticmethod(h["dues_add_adhoc"])
         cls.dues_snapshot_cmd = staticmethod(h["dues_snapshot_cmd"])
         cls.dues_export_cmd = staticmethod(h["dues_export_cmd"])
+        cls.dues_report_cmd = staticmethod(h["dues_report_cmd"])
 
     def setUp(self):
         reset_db()

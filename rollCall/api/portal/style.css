@@ -164,3 +164,43 @@
 /* Sparkline */
 .sparkline{display:flex;gap:4px;margin-top:8px;flex-wrap:wrap;}
 .spark-dot{width:8px;height:8px;border-radius:50%;}
+
+/* Dues section */
+.dues-balance-box{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 14px;border-radius:10px;margin-bottom:8px;font-size:.9rem;
+}
+.dues-owed{background:#fee2e2;color:#991b1b;}
+.dues-credit{background:#d1fae5;color:#065f46;}
+.dues-settled{background:var(--hover);color:var(--sub);}
+.dark .dues-owed{background:#7f1d1d;color:#fca5a5;}
+.dark .dues-credit{background:#064e3b;color:#6ee7b7;}
+.dues-balance-lbl{font-weight:500;}
+.dues-balance-val{font-weight:700;font-size:1.05rem;}
+.dues-upi-row{
+  display:flex;align-items:center;gap:8px;padding:6px 0 10px;
+  font-size:.83rem;color:var(--sub);flex-wrap:wrap;
+}
+code.dues-upi{
+  background:var(--hover);padding:2px 7px;border-radius:5px;
+  font-size:.82rem;color:var(--fg);user-select:all;
+}
+.dues-entries-box{
+  border:1px solid var(--border);border-radius:8px;
+  padding:4px 10px;margin-bottom:8px;
+}
+.dues-entry-row{
+  display:flex;align-items:center;gap:6px;padding:6px 0;
+  border-bottom:1px solid var(--border);font-size:.82rem;
+}
+.dues-entry-row:last-child{border-bottom:none;}
+.dues-entry-type{flex:1;color:var(--sub);text-transform:capitalize;}
+.dues-entry-date{color:var(--sub);font-size:.76rem;white-space:nowrap;}
+.entry-debit{color:#ef4444;font-weight:600;white-space:nowrap;}
+.entry-credit{color:#22c55e;font-weight:600;white-space:nowrap;}
+.dues-admin-label{font-size:.76rem;font-weight:600;color:var(--sub);margin-bottom:4px;letter-spacing:.05em;}
+.dues-fund-row{
+  margin-top:8px;padding:8px 14px;background:var(--hover);
+  border-radius:8px;font-size:.85rem;color:var(--fg);
+}
+

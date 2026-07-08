@@ -46,6 +46,10 @@ async def run_periodic_jobs() -> None:
     except Exception:
         logging.exception("[periodic] weekly dues nudge sweep failed")
     try:
+        await _weekly_dues_report()
+    except Exception:
+        logging.exception("[periodic] weekly dues report sweep failed")
+    try:
         await _monthly_digests()
     except Exception:
         logging.exception("[periodic] monthly digest sweep failed")
@@ -85,6 +89,33 @@ async def _weekly_dues_nudges() -> None:
             logging.info(f"[periodic] weekly dues nudge sent for chat {chat_id}")
         except Exception:
             logging.exception(f"[periodic] weekly dues nudge failed for chat {chat_id}")
+
+
+# ── Weekly dues report ────────────────────────────────────────────────────────
+
+async def _weekly_dues_report() -> None:
+    import db as _db
+
+    for chat_id in _db.get_all_chat_ids_with_dues_report():
+        tz = _tz_for(chat_id)
+        now = datetime.now(tz)
+        if now.weekday() != 6 or now.hour < 20:  # Sunday >= 20:00 local
+            continue
+        week = now.strftime("%G-W%V")
+        stamp_key = f"dues_report:{chat_id}"
+        if _db.get_system_config(stamp_key) == week:
+            continue
+        _db.set_system_config(stamp_key, week)
+
+        try:
+            from services import dues as dues_svc
+            from bot_state import send_md_fallback
+            snapshot = dues_svc.dues_snapshot(chat_id)
+            text = "📋 *Weekly dues snapshot*\n\n" + snapshot["text"]
+            await send_md_fallback(chat_id, text)
+            logging.info(f"[periodic] weekly dues report sent for chat {chat_id}")
+        except Exception:
+            logging.exception(f"[periodic] weekly dues report failed for chat {chat_id}")
 
 
 # ── Monthly digests ───────────────────────────────────────────────────────────

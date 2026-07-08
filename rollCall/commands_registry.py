@@ -750,6 +750,20 @@ COMMANDS = [
             "a spreadsheet view. Open in Google Sheets or Excel. Alias: /de"
         ),
     },
+    {
+        "name": "dues_report", "aliases": ["dr"], "scope": "admin", "category": "Dues & Fund",
+        "args": "[weekly|off]", "sample": "/dues_report weekly",
+        "summary": "Enable/disable the weekly auto-posted dues snapshot",
+        "details": (
+            "Controls the automatic weekly dues snapshot posted to the group:\n\n"
+            "  /dues_report weekly  — enable (posts every Sunday >= 20:00 local time)\n"
+            "  /dues_report off     — disable\n"
+            "  /dues_report         — show current status\n\n"
+            "When enabled, the bot automatically posts the full dues state (same as "
+            "/dues_snapshot) every Sunday evening. Useful as a regular group reminder "
+            "without manual admin effort. Alias: /dr"
+        ),
+    },
 
     # ────────────────────────── SUPER ADMIN ─────────────────────────
     {

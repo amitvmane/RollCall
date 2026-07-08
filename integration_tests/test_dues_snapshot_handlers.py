@@ -172,3 +172,76 @@ class TestDuesExportHandler(IntegrationBase):
         caption = call_kwargs.kwargs.get("caption", "")
         self.assertIn("export", caption.lower(),
                       f"Caption should mention export; got: {caption}")
+
+
+class TestDuesReportHandler(IntegrationBase):
+
+    async def test_enable_weekly_stores_flag(self):
+        _enable()
+        await self.dues_report_cmd(self.msg("/dues_report weekly"))
+
+        import db
+        chat = db.get_or_create_chat(CHAT_ID)
+        self.assertEqual(chat.get("dues_report_enabled"), 1)
+
+    async def test_disable_off_clears_flag(self):
+        _enable()
+        import db
+        db.update_chat_settings(CHAT_ID, dues_report_enabled=1)
+
+        await self.dues_report_cmd(self.msg("/dues_report off"))
+
+        chat = db.get_or_create_chat(CHAT_ID)
+        self.assertFalse(chat.get("dues_report_enabled"))
+
+    async def test_enable_posts_confirmation(self):
+        _enable()
+        await self.dues_report_cmd(self.msg("/dues_report weekly"))
+
+        combined = "\n".join(self.sent_texts())
+        self.assertIn("enabled", combined.lower())
+
+    async def test_disable_posts_confirmation(self):
+        _enable()
+        await self.dues_report_cmd(self.msg("/dues_report off"))
+
+        combined = "\n".join(self.sent_texts())
+        self.assertIn("disabled", combined.lower())
+
+    async def test_status_shows_current(self):
+        _enable()
+        await self.dues_report_cmd(self.msg("/dues_report"))
+
+        combined = "\n".join(self.sent_texts())
+        self.assertTrue(
+            "off" in combined.lower() or "on" in combined.lower(),
+            f"Expected on/off status; got: {combined}",
+        )
+
+    async def test_invalid_arg_shows_usage(self):
+        _enable()
+        await self.dues_report_cmd(self.msg("/dues_report badarg"))
+
+        combined = "\n".join(self.sent_texts())
+        self.assertIn("Usage", combined)
+
+    async def test_alias_dr_works(self):
+        _enable()
+        await self.dues_report_cmd(self.msg("/dr weekly"))
+
+        import db
+        chat = db.get_or_create_chat(CHAT_ID)
+        self.assertEqual(chat.get("dues_report_enabled"), 1)
+
+    async def test_admin_only(self):
+        _enable()
+        self.mgr.set_admin_rights(CHAT_ID, True)
+        get_mock_bot().get_chat_member.return_value.status = "member"
+
+        await self.dues_report_cmd(self.msg("/dues_report weekly", user=USERS[1]))
+
+        import db
+        chat = db.get_or_create_chat(CHAT_ID)
+        self.assertFalse(chat.get("dues_report_enabled"))
+        self.mgr.set_admin_rights(CHAT_ID, False)
+        get_mock_bot().get_chat_member.return_value.status = "administrator"

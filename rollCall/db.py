@@ -733,6 +733,7 @@ _RECONCILE_COLUMNS = {
         ("dues_self_paid_mode",    "dues_self_paid_mode TEXT DEFAULT 'auto'",  "dues_self_paid_mode TEXT DEFAULT 'auto'"),
         ("auto_buzz_hours",        "auto_buzz_hours INTEGER DEFAULT 0",        "auto_buzz_hours INTEGER DEFAULT 0"),
         ("dues_weekly_nudge",      "dues_weekly_nudge INTEGER DEFAULT 0",      "dues_weekly_nudge INTEGER DEFAULT 0"),
+        ("dues_report_enabled",    "dues_report_enabled INTEGER DEFAULT 0",    "dues_report_enabled INTEGER DEFAULT 0"),
         ("last_idle_nudge",        "last_idle_nudge TEXT DEFAULT NULL",        "last_idle_nudge TEXT DEFAULT NULL"),
         ("collector_rotation",     "collector_rotation INTEGER DEFAULT 0",     "collector_rotation INTEGER DEFAULT 0"),
         ("last_collector_uid",     "last_collector_uid INTEGER DEFAULT NULL",  "last_collector_uid BIGINT DEFAULT NULL"),
@@ -1636,7 +1637,7 @@ _VALID_CHAT_FIELDS = {
     'upi_vpa', 'treasury_upi', 'dues_round_step',
     'penalty_late_t1', 'penalty_late_t2', 'penalty_late_t3', 'penalty_ditch',
     'dues_enabled', 'dues_self_paid_mode',
-    'auto_buzz_hours', 'dues_weekly_nudge', 'last_idle_nudge',
+    'auto_buzz_hours', 'dues_weekly_nudge', 'dues_report_enabled', 'last_idle_nudge',
     'collector_rotation', 'last_collector_uid',
 }
 
@@ -6308,6 +6309,28 @@ def get_all_chat_ids_with_dues() -> List[int]:
         return [row["chat_id"] if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
     except Exception:
         logging.exception("get_all_chat_ids_with_dues failed")
+        return []
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
+def get_all_chat_ids_with_dues_report() -> List[int]:
+    """Chat ids where dues is enabled and weekly dues report is on."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        true_val = "TRUE" if db_type == "postgresql" else "1"
+        cursor.execute(
+            f"""SELECT chat_id FROM chats
+                WHERE dues_enabled = {true_val} AND dues_report_enabled = 1"""
+        )
+        return [row["chat_id"] if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
+    except Exception:
+        logging.exception("get_all_chat_ids_with_dues_report failed")
         return []
     finally:
         if cursor is not None:

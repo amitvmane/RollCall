@@ -308,37 +308,132 @@ ${bestStreak>0?`<div class="milestone-box">🏆 Best streak ever: <strong>${best
   }
 
   html+=`<div class="section-label" style="margin-top:16px">RECENT SESSIONS</div>`;
-  $id("detail-body").innerHTML=html+'<div id="history-body"><div style="color:var(--sub)">Loading…</div></div>';
+  html+=`<div id="history-body"><div style="color:var(--sub)">Loading…</div></div>`;
+  if(g.group_web_token){
+    html+=`<div class="section-label" style="margin-top:16px">DUES &amp; TREASURY</div>`;
+    html+=`<div id="dues-section"><div style="color:var(--sub);font-size:.85rem;padding:8px 0">Loading…</div></div>`;
+  }
+  $id("detail-body").innerHTML=html;
 
-  try{
-    const data=await apiFetch(`/portal/groups/${g.chat_id}/history?id_token=${encodeURIComponent(_idToken)}&limit=30`);
-    const sessions=data.sessions||[];
-    if(!sessions.length){
-      $id("history-body").innerHTML='<div style="color:var(--sub);font-size:.85rem">No sessions yet.</div>';
-      return;
-    }
-    // Sparkline — oldest first, last 20
-    const spark=sessions.slice(0,20).reverse().map(s=>{
-      const cls={in:"dot-in",out:"dot-out",maybe:"dot-maybe",miss:"dot-miss",cancelled:"dot-cancelled"}[s.status]||"dot-miss";
-      return `<div class="spark-dot ${cls}" title="${esc(s.status==="cancelled"?"❌ Cancelled: "+(s.title||"Session"):s.title||"Session")}"></div>`;
-    }).join("");
-    const rows=sessions.map(s=>{
-      const st=s.status||"miss";
-      const cls={in:"dot-in",out:"dot-out",maybe:"dot-maybe",miss:"dot-miss",cancelled:"dot-cancelled"}[st]||"dot-miss";
-      const scls="status-"+st;
-      const dateStr=s.ended_at?s.ended_at.slice(0,10):"";
-      return `<div class="session-row${st==="cancelled"?" session-cancelled":""}">
+  // Load history and dues in parallel
+  const [,] = await Promise.allSettled([
+    (async()=>{
+      try{
+        const data=await apiFetch(`/portal/groups/${g.chat_id}/history?id_token=${encodeURIComponent(_idToken)}&limit=30`);
+        const sessions=data.sessions||[];
+        if(!sessions.length){
+          $id("history-body").innerHTML='<div style="color:var(--sub);font-size:.85rem">No sessions yet.</div>';
+          return;
+        }
+        const spark=sessions.slice(0,20).reverse().map(s=>{
+          const cls={in:"dot-in",out:"dot-out",maybe:"dot-maybe",miss:"dot-miss",cancelled:"dot-cancelled"}[s.status]||"dot-miss";
+          return `<div class="spark-dot ${cls}" title="${esc(s.status==="cancelled"?"❌ Cancelled: "+(s.title||"Session"):s.title||"Session")}"></div>`;
+        }).join("");
+        const rows=sessions.map(s=>{
+          const st=s.status||"miss";
+          const cls={in:"dot-in",out:"dot-out",maybe:"dot-maybe",miss:"dot-miss",cancelled:"dot-cancelled"}[st]||"dot-miss";
+          const scls="status-"+st;
+          const dateStr=s.ended_at?s.ended_at.slice(0,10):"";
+          return `<div class="session-row${st==="cancelled"?" session-cancelled":""}">
   <div class="session-dot ${cls}"></div>
   <div class="session-title">${esc(s.title||"Untitled")}</div>
   <div class="session-date">${esc(dateStr)}</div>
   <div class="session-status ${scls}">${st.toUpperCase()}</div>
 </div>`;
-    }).join("");
-    $id("history-body").innerHTML=`<div class="sparkline" style="margin-bottom:12px">${spark}</div>`+rows;
-  }catch(e){
-    $id("history-body").innerHTML='<div style="color:var(--sub)">Could not load history.</div>';
-  }
+        }).join("");
+        $id("history-body").innerHTML=`<div class="sparkline" style="margin-bottom:12px">${spark}</div>`+rows;
+      }catch(e){
+        $id("history-body").innerHTML='<div style="color:var(--sub)">Could not load history.</div>';
+      }
+    })(),
+    _loadDuesSection(g),
+  ]);
 };
+
+async function _loadDuesSection(g){
+  const el=$id("dues-section");
+  if(!el)return;
+  if(!g.group_web_token||!_idToken){el.innerHTML="";return;}
+
+  // Try user's own balance (always allowed for verified members)
+  let myDues=null;
+  try{
+    myDues=await apiFetch(`/web/group/${encodeURIComponent(g.group_web_token)}/dues/my?id_token=${encodeURIComponent(_idToken)}`);
+  }catch(e){
+    // 403 = dues not enabled, 404 = group not found — hide section silently
+    el.innerHTML="";
+    return;
+  }
+
+  let html="";
+
+  // Own balance
+  const bal=myDues.balance||0;
+  const upi=myDues.upi_vpa||null;
+  if(bal>0){
+    html+=`<div class="dues-balance-box dues-owed">
+  <span class="dues-balance-lbl">You owe</span>
+  <span class="dues-balance-val">₹${bal}</span>
+</div>`;
+    if(upi){
+      html+=`<div class="dues-upi-row">💳 Pay to: <code class="dues-upi">${esc(upi)}</code>
+  <button onclick="navigator.clipboard.writeText('${upi.replace(/'/g,"\\'")}').then(()=>toast('UPI copied!'))" class="copy-link-btn">Copy</button>
+</div>`;
+    }
+  }else if(bal<0){
+    html+=`<div class="dues-balance-box dues-credit">
+  <span class="dues-balance-lbl">You have a credit</span>
+  <span class="dues-balance-val">₹${Math.abs(bal)}</span>
+</div>`;
+  }else{
+    html+=`<div class="dues-balance-box dues-settled">✅ You're all settled</div>`;
+  }
+
+  // Recent own entries (last 3)
+  const entries=(myDues.entries||[]).slice(0,3);
+  if(entries.length){
+    const entryRows=entries.map(e=>{
+      const amtCls=e.amount>0?"entry-debit":"entry-credit";
+      const sign=e.amount>0?"+":"";
+      const date=(e.created_at||"").slice(0,10);
+      return `<div class="dues-entry-row">
+  <span class="dues-entry-type">${esc(e.entry_type)}</span>
+  <span class="dues-entry-date">${esc(date)}</span>
+  <span class="${amtCls}">${sign}₹${Math.abs(e.amount)}</span>
+</div>`;
+    }).join("");
+    html+=`<div class="dues-entries-box">${entryRows}</div>`;
+  }
+
+  // Admin view: full summary (try; skip if 403)
+  try{
+    const summary=await apiFetch(`/web/group/${encodeURIComponent(g.group_web_token)}/dues/summary?id_token=${encodeURIComponent(_idToken)}&nonzero_only=true`);
+    const balances=summary.balances||[];
+    const fundBal=summary.fund_balance||0;
+    if(balances.length){
+      const memberRows=balances.map(b=>{
+        const cls=b.balance>0?"entry-debit":"entry-credit";
+        return `<div class="dues-entry-row">
+  <span class="dues-entry-type">${esc(b.member_name)}</span>
+  <span class="${cls}">₹${Math.abs(b.balance)}</span>
+</div>`;
+      }).join("");
+      html+=`<div style="margin-top:12px"><div class="dues-admin-label">Outstanding (admin)</div>
+<div class="dues-entries-box">${memberRows}</div></div>`;
+    }
+    html+=`<div class="dues-fund-row">🏦 Fund balance: <strong>₹${fundBal}</strong></div>`;
+  }catch(e){
+    // Non-admin or dues not configured — fund balance still visible
+    try{
+      const fund=await apiFetch(`/web/group/${encodeURIComponent(g.group_web_token)}/dues/fund?id_token=${encodeURIComponent(_idToken)}`);
+      html+=`<div class="dues-fund-row">🏦 Fund balance: <strong>₹${fund.fund_balance||0}</strong></div>`;
+    }catch(e2){
+      // Fund endpoint failed — silently skip
+    }
+  }
+
+  el.innerHTML=html||'<div style="color:var(--sub);font-size:.85rem">No dues data.</div>';
+}
 
 window.closeDetail=function(){
   $id("detail-overlay").classList.remove("open");

@@ -397,7 +397,8 @@ async def memory_prune_loop(interval_seconds: int = 600):
     that's a slow leak. This loop bounds them."""
     from bot_state import (
         _rate_limits, _buzz_cooldowns, _pending_deletes, _pending_overrides,
-        _pending_proxy_add, _pending_reconf, _prune_pending, _panel_msg_ids,
+        _pending_proxy_add, _pending_reconf, _pending_subsidy_input,
+        _prune_pending, _panel_msg_ids,
     )
     from services import presence as presence_svc
 
@@ -419,6 +420,7 @@ async def memory_prune_loop(interval_seconds: int = 600):
             _prune_pending(_pending_overrides)
             _prune_pending(_pending_proxy_add)
             _prune_pending(_pending_reconf)
+            _prune_pending(_pending_subsidy_input)
 
             # Per-chat state — clean entries for chats whose rollcalls are
             # all gone, or panel ids past the current rollcall count.

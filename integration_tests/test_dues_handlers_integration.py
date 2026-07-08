@@ -59,7 +59,7 @@ class TestCloseGameActivePath(IntegrationBase):
         for u in USERS[:3]:
             await self.vote_in(u)
 
-        await self.dues_settle_dues(self.msg("/settle_dues"))
+        await self.dues_settle_dues(self.msg("/settle_dues 0"))
 
         texts = self.sent_texts()
         ann = next((t for t in texts if "₹" in t and "Friday Futsal" in t), None)
@@ -75,7 +75,7 @@ class TestCloseGameActivePath(IntegrationBase):
 
         self.assertIsNotNone(self.mgr.get_rollcall(CHAT_ID, 0))
 
-        await self.dues_settle_dues(self.msg("/settle_dues"))
+        await self.dues_settle_dues(self.msg("/settle_dues 0"))
 
         # RC must be gone from manager after close
         self.assertIsNone(self.mgr.get_rollcall(CHAT_ID, 0))
@@ -87,7 +87,7 @@ class TestCloseGameActivePath(IntegrationBase):
         for u in USERS[:5]:
             await self.vote_in(u)
 
-        await self.dues_settle_dues(self.msg("/settle_dues"))
+        await self.dues_settle_dues(self.msg("/settle_dues 0"))
 
         # 5 share entries written (500/5=100)
         balances = db.get_all_dues_balances(CHAT_ID)
@@ -102,7 +102,7 @@ class TestCloseGameActivePath(IntegrationBase):
         for u in USERS[:4]:
             await self.vote_in(u)
 
-        await self.dues_settle_dues(self.msg("/settle_dues"))
+        await self.dues_settle_dues(self.msg("/settle_dues 0"))
 
         # Exactly one game_closure must exist
         closures = db.get_fund_transactions(CHAT_ID, limit=100)  # sanity check fund
@@ -118,7 +118,7 @@ class TestCloseGameActivePath(IntegrationBase):
         for u in USERS[:3]:
             await self.vote_in(u)
 
-        await self.dues_settle_dues(self.msg("/settle_dues"))
+        await self.dues_settle_dues(self.msg("/settle_dues 0"))
 
         texts = self.sent_texts()
         ann = next((t for t in texts if "group@hdfc" in t), None)
@@ -137,13 +137,13 @@ class TestDoubleCloseGuard(IntegrationBase):
         for u in USERS[:3]:
             await self.vote_in(u)
 
-        await self.dues_settle_dues(self.msg("/settle_dues"))
+        await self.dues_settle_dues(self.msg("/settle_dues 0"))
         bot = get_mock_bot()
         first_send_count = bot.send_message.call_count
 
         # Second close — no active RC now, and the DB closure already exists
         # Service raises duesGameAlreadyClosed → reply_error posts it
-        await self.dues_settle_dues(self.msg("/settle_dues"))
+        await self.dues_settle_dues(self.msg("/settle_dues 0"))
 
         texts = self.sent_texts()
         new_texts = texts[first_send_count:]
@@ -160,8 +160,8 @@ class TestDoubleCloseGuard(IntegrationBase):
         for u in USERS[:2]:
             await self.vote_in(u)
 
-        await self.dues_settle_dues(self.msg("/settle_dues"))
-        await self.dues_settle_dues(self.msg("/settle_dues"))  # should be no-op
+        await self.dues_settle_dues(self.msg("/settle_dues 0"))
+        await self.dues_settle_dues(self.msg("/settle_dues 0"))  # should be no-op
 
         # Still only one closure row (second call fails at service layer)
         c1 = db.get_nth_game_closure(CHAT_ID, 0)
@@ -254,7 +254,7 @@ class TestSetCollectorWithUPIHandler(IntegrationBase):
         await self.dues_set_collector(self.msg("/set_collector User1 paid user1@axis"))
         get_mock_bot().send_message.reset_mock()
 
-        await self.dues_settle_dues(self.msg("/settle_dues"))
+        await self.dues_settle_dues(self.msg("/settle_dues 0"))
 
         texts = self.sent_texts()
         ann = next((t for t in texts if "₹" in t), None)
@@ -272,7 +272,7 @@ class TestSetCollectorWithUPIHandler(IntegrationBase):
             await self.vote_in(u)
 
         await self.dues_set_collector(self.msg("/set_collector User1 collector1@upi"))
-        await self.dues_settle_dues(self.msg("/settle_dues"))
+        await self.dues_settle_dues(self.msg("/settle_dues 0"))
 
         closure = db.get_nth_game_closure(CHAT_ID, 0)
         self.assertIsNotNone(closure)
@@ -286,7 +286,7 @@ class TestSetCollectorWithUPIHandler(IntegrationBase):
             await self.vote_in(u)
 
         await self.dues_set_collector(self.msg("/set_collector User1"))
-        await self.dues_settle_dues(self.msg("/settle_dues"))
+        await self.dues_settle_dues(self.msg("/settle_dues 0"))
 
         closure = db.get_nth_game_closure(CHAT_ID, 0)
         self.assertIsNone(closure.get("collector_upi"))
@@ -392,7 +392,7 @@ class TestMarkPaidByCollector(IntegrationBase):
         rc.event_fee = "300"
         for u in USERS[:3]:
             await self.vote_in(u)
-        await self.dues_settle_dues(self.msg("/settle_dues"))
+        await self.dues_settle_dues(self.msg("/settle_dues 0"))
         # Now set collector on the closed game via service (post-close path)
         dues_svc.set_collector(
             CHAT_ID,
@@ -480,7 +480,7 @@ class TestCancelAndReclose(IntegrationBase):
         rc.event_fee = "300"
         for u in USERS[:3]:
             await self.vote_in(u)
-        await self.dues_settle_dues(self.msg("/settle_dues"))
+        await self.dues_settle_dues(self.msg("/settle_dues 0"))
         get_mock_bot().send_message.reset_mock()
 
         await self.dues_cancel_game(self.msg("/cancel_game_dues"))
@@ -498,7 +498,7 @@ class TestCancelAndReclose(IntegrationBase):
         rc.event_fee = "300"
         for u in USERS[:3]:
             await self.vote_in(u)
-        await self.dues_settle_dues(self.msg("/settle_dues"))
+        await self.dues_settle_dues(self.msg("/settle_dues 0"))
 
         # Each of 3 users owes ₹100
         uid = USERS[0]["id"]
@@ -516,7 +516,7 @@ class TestCancelAndReclose(IntegrationBase):
         rc.event_fee = "300"
         for u in USERS[:3]:
             await self.vote_in(u)
-        await self.dues_settle_dues(self.msg("/settle_dues"))
+        await self.dues_settle_dues(self.msg("/settle_dues 0"))
 
         entries_before = db.get_dues_entries(CHAT_ID, limit=100)
         share_count = sum(1 for e in entries_before if e["entry_type"] == "share")
@@ -543,7 +543,7 @@ class TestCancelAndReclose(IntegrationBase):
         rc.event_fee = "300"
         for u in USERS[:3]:
             await self.vote_in(u)
-        await self.dues_settle_dues(self.msg("/settle_dues"))
+        await self.dues_settle_dues(self.msg("/settle_dues 0"))
 
         first_closure = db.get_nth_game_closure(CHAT_ID, 0)
         self.assertIsNotNone(first_closure)
@@ -556,7 +556,7 @@ class TestCancelAndReclose(IntegrationBase):
                           "Closure should be deleted by cancel so rollcall can be re-closed")
 
         get_mock_bot().send_message.reset_mock()
-        await self.dues_settle_dues(self.msg("/settle_dues"))
+        await self.dues_settle_dues(self.msg("/settle_dues 0"))
 
         texts = self.sent_texts()
         ann = next((t for t in texts if "₹" in t), None)
@@ -602,12 +602,34 @@ class TestSettleDuesPicker(IntegrationBase):
             await self.vote_in(u)
         await self.end_roll_call(self.msg("/erc", ADMIN_USER))
 
-    async def test_single_unsettled_game_closes_directly_no_picker(self):
+    async def test_single_unsettled_game_opens_penalty_panel_no_picker(self):
+        """No picker for a single unsettled game — goes straight to the
+        penalty panel (guided flow), not a direct close and not a picker."""
         _enable_dues()
         await self._end_unsettled_game("Only Game")
         get_mock_bot().send_message.reset_mock()
 
         await self.dues_settle_dues(self.msg("/settle_dues", ADMIN_USER))
+
+        texts = self.sent_texts()
+        self.assertTrue(any("penalty marking" in t.lower() for t in texts), texts)
+        self.assertFalse(any("games waiting" in t.lower() for t in texts), texts)
+        self.assertIsNone(db.get_nth_game_closure(CHAT_ID, 0))
+
+    async def test_single_unsettled_game_closes_after_done_and_subsidy_tap(self):
+        """Full guided flow end to end: penalty panel Done -> confirm card ->
+        tapping a subsidy preset performs the actual close."""
+        _enable_dues()
+        await self._end_unsettled_game("Only Game")
+        get_mock_bot().send_message.reset_mock()
+
+        await self.dues_settle_dues(self.msg("/settle_dues", ADMIN_USER))
+        rollcall_id = await self.tap_penalty_done()
+
+        texts = self.sent_texts()
+        self.assertIsNone(db.get_nth_game_closure(CHAT_ID, 0))  # still not closed after Done
+
+        await self.dues_settle_confirm_callback(self.call(f"settle_confirm:{rollcall_id}:0", ADMIN_USER))
 
         texts = self.sent_texts()
         self.assertTrue(any("game closed" in t.lower() for t in texts), texts)
@@ -643,6 +665,9 @@ class TestSettleDuesPicker(IntegrationBase):
 
         get_mock_bot().send_message.reset_mock()
         await self.dues_settle_pick_callback(self.call(f"settle_pick:{older['id']}", ADMIN_USER))
+        rollcall_id = await self.tap_penalty_done()
+        self.assertEqual(rollcall_id, older["id"])
+        await self.dues_settle_confirm_callback(self.call(f"settle_confirm:{rollcall_id}:0", ADMIN_USER))
 
         # The OLDER game got closed, the newer one is still open.
         closure = db.get_game_closure(older["id"])
@@ -678,6 +703,111 @@ class TestSettleDuesPicker(IntegrationBase):
 
         get_mock_bot().send_message.reset_mock()
         await self.dues_settle_pick_callback(self.call(f"settle_pick:{target['id']}", ADMIN_USER))
+        rollcall_id = await self.tap_penalty_done()
+        await self.dues_settle_confirm_callback(self.call(f"settle_confirm:{rollcall_id}:0", ADMIN_USER))
 
         texts = self.sent_texts()
         self.assertTrue(any("1 more unsettled game" in t for t in texts), texts)
+
+
+class TestSettleDuesZeroInAndConfirmCard(IntegrationBase):
+    """The rest of the guided /settle_dues flow: zero-IN dismissal, and the
+    confirm/subsidy card's cancel + custom-amount-reply paths."""
+
+    async def _end_unsettled_game(self, title, fee="300", n_in=3):
+        await self.start_rc(title)
+        await self.event_fee(self.msg(f"/ef {fee}", ADMIN_USER))
+        for u in USERS[:n_in]:
+            await self.vote_in(u)
+        await self.end_roll_call(self.msg("/erc", ADMIN_USER))
+
+    async def test_zero_in_game_shows_cancel_skip_card_not_error(self):
+        _enable_dues()
+        await self._end_unsettled_game("Empty Game", n_in=0)
+        get_mock_bot().send_message.reset_mock()
+
+        await self.dues_settle_dues(self.msg("/settle_dues", ADMIN_USER))
+
+        texts = self.sent_texts()
+        self.assertTrue(any("no in players" in t.lower() for t in texts), texts)
+        self.assertFalse(any("no players were in" in t.lower() for t in texts), texts)
+
+    async def test_cancel_this_game_removes_it_with_no_dues_entries(self):
+        _enable_dues()
+        await self._end_unsettled_game("Empty Game", n_in=0)
+        target = db.get_unsettled_rollcalls(CHAT_ID)[0]
+        get_mock_bot().send_message.reset_mock()
+
+        await self.dues_settle_empty_callback(self.call(f"settle_empty:{target['id']}", ADMIN_USER))
+
+        closure = db.get_game_closure(target["id"])
+        self.assertIsNotNone(closure)
+        self.assertEqual(closure["per_head"], 0)
+        self.assertEqual(closure["in_count"], 0)
+        self.assertEqual(len(db.get_all_dues_balances(CHAT_ID, nonzero_only=False)), 0)
+        self.assertEqual(db.get_unsettled_rollcalls(CHAT_ID), [])
+
+    async def test_skip_for_now_leaves_game_unsettled(self):
+        _enable_dues()
+        await self._end_unsettled_game("Empty Game", n_in=0)
+        target = db.get_unsettled_rollcalls(CHAT_ID)[0]
+
+        await self.dues_settle_skip_callback(self.call(f"settle_skip:{target['id']}", ADMIN_USER))
+
+        self.assertIsNone(db.get_game_closure(target["id"]))
+        self.assertEqual(len(db.get_unsettled_rollcalls(CHAT_ID)), 1)
+
+    async def test_empty_game_callback_rejects_non_admin(self):
+        _enable_dues()
+        await self._end_unsettled_game("Empty Game", n_in=0)
+        target = db.get_unsettled_rollcalls(CHAT_ID)[0]
+
+        self.mgr.set_admin_rights(CHAT_ID, True)
+        get_mock_bot().get_chat_member.return_value.status = "member"
+        try:
+            await self.dues_settle_empty_callback(self.call(f"settle_empty:{target['id']}", USERS[0]))
+        finally:
+            get_mock_bot().get_chat_member.return_value.status = "administrator"
+            self.mgr.set_admin_rights(CHAT_ID, False)
+
+        self.assertIsNone(db.get_game_closure(target["id"]))
+
+    async def test_confirm_card_cancel_leaves_game_unsettled(self):
+        _enable_dues()
+        await self._end_unsettled_game("Only Game")
+        await self.dues_settle_dues(self.msg("/settle_dues", ADMIN_USER))
+        rollcall_id = await self.tap_penalty_done()
+
+        await self.dues_settle_cancel_callback(self.call(f"settle_cancel:{rollcall_id}", ADMIN_USER))
+
+        self.assertIsNone(db.get_nth_game_closure(CHAT_ID, 0))
+        self.assertEqual(len(db.get_unsettled_rollcalls(CHAT_ID)), 1)
+
+    async def test_custom_subsidy_reply_closes_with_typed_amount(self):
+        _enable_dues()
+        await self.dues_fund_topup(self.msg("/fund_topup 200", ADMIN_USER))
+        await self._end_unsettled_game("Only Game", fee="300", n_in=3)
+        await self.dues_settle_dues(self.msg("/settle_dues", ADMIN_USER))
+        rollcall_id = await self.tap_penalty_done()
+
+        await self.dues_settle_custom_callback(self.call(f"settle_custom:{rollcall_id}", ADMIN_USER))
+        self.assertIn((CHAT_ID, ADMIN_ID), self.bs._pending_subsidy_input)
+
+        get_mock_bot().send_message.reset_mock()
+        await self.dues_settle_subsidy_reply(self.msg("60", ADMIN_USER))
+
+        self.assertNotIn((CHAT_ID, ADMIN_ID), self.bs._pending_subsidy_input)
+        closure = db.get_nth_game_closure(CHAT_ID, 0)
+        self.assertIsNotNone(closure)
+        self.assertEqual(closure["subsidy"], 60)
+        texts = self.sent_texts()
+        self.assertTrue(any("game closed" in t.lower() for t in texts), texts)
+
+    async def test_bare_numeric_reply_ignored_without_pending_state(self):
+        """A bare numeric message with no pending custom-subsidy request must
+        not be swallowed by the new handler — dispatch collision guard."""
+        _enable_dues()
+        get_mock_bot().send_message.reset_mock()
+        await self.dues_settle_subsidy_reply(self.msg("60", ADMIN_USER))
+        # No pending entry -> handler is a no-op, nothing closed, nothing sent.
+        self.assertEqual(get_mock_bot().send_message.call_count, 0)

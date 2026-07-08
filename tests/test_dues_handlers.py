@@ -121,7 +121,10 @@ class TestDuesHandlers(unittest.IsolatedAsyncioTestCase):
              patch("handlers.dues.manager", self.mgr), \
              patch("handlers.dues.dues_svc.close_game", new=AsyncMock(return_value=svc_result)), \
              _patch_post_end():
-            await settle_dues(_msg("/settle_dues"))
+            # Explicit subsidy arg hits the fast path (direct close, no
+            # penalty panel / confirm card) — bare /settle_dues now goes
+            # through the guided flow instead, covered separately.
+            await settle_dues(_msg("/settle_dues 0"))
         self.assertIn("Game closed", self._sent_text())
 
     async def test_close_game_with_subsidy_arg(self):
@@ -313,7 +316,8 @@ class TestDuesHandlers(unittest.IsolatedAsyncioTestCase):
              patch("handlers.dues.manager", self.mgr), \
              patch("handlers.dues.dues_svc.close_game", new=AsyncMock(return_value=svc_result)), \
              patch("handlers.dues._post_end_cleanup", cleanup_mock):
-            await settle_dues(_msg("/settle_dues"))
+            # Explicit subsidy arg hits the fast path (direct close).
+            await settle_dues(_msg("/settle_dues 0"))
         cleanup_mock.assert_called_once()
 
 

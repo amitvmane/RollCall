@@ -207,11 +207,16 @@ class TestAutoCloseLifecycle(IntegrationBase):
         self.assertFalse(any("in:" in t.lower() for t in texts))
         self.mgr.set_shh_mode(CHAT_ID, False)
 
-    async def test_auto_close_shows_penalty_panel_when_dues_enabled(self):
-        """Dues-enabled groups get the penalty panel on auto-close, not the
-        old ghost_yes/ghost_no prompt — regression test for the bug where
-        scheduled auto-close bypassed handlers.lifecycle._post_end_cleanup
-        entirely and never surfaced that a game needed settling."""
+    async def test_auto_close_nudges_to_settle_dues_when_dues_enabled(self):
+        """Dues-enabled groups get a short /settle_dues nudge on auto-close,
+        not the penalty panel and not the old ghost_yes/ghost_no prompt.
+        Ghost/penalty marking now happens later, as part of /settle_dues
+        itself, right before the financial close — this regression test
+        replaces an earlier version that (correctly, at the time) asserted
+        the opposite: that auto-close should show the penalty panel. That
+        was the fix for auto-close bypassing _post_end_cleanup entirely;
+        this test covers the newer decision to move marking out of /erc
+        and auto-close altogether."""
         from check_reminders import check
         from services.dues import seed_default_penalty_tiers
         db.get_or_create_chat(CHAT_ID)
@@ -223,8 +228,9 @@ class TestAutoCloseLifecycle(IntegrationBase):
         rollcalls = self.mgr.get_rollcalls(CHAT_ID)
         await check(rollcalls, "Asia/Kolkata", CHAT_ID)
         texts = self.sent_texts()
-        self.assertTrue(any("penalty marking" in t.lower() for t in texts))
-        self.assertFalse(any("did anyone ghost" in t.lower() for t in texts))
+        self.assertFalse(any("penalty marking" in t.lower() for t in texts), texts)
+        self.assertFalse(any("did anyone ghost" in t.lower() for t in texts), texts)
+        self.assertTrue(any("settle_dues" in t.lower() for t in texts), texts)
 
     async def test_auto_close_full_ghost_selection_flow(self):
         """Auto-close → ghost_yes → select → ghost_done → counts incremented."""

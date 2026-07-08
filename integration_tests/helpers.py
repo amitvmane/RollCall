@@ -23,6 +23,7 @@ def _import_all():
         ghost_callback_handler,
     )
     from handlers.admin import delete_user, set_status_override, audit_log_command, audit_pagination_callback
+    from handlers.penalty_panel import penalty_panel_callback, _sessions as penalty_panel_sessions
     from handlers.templates import (
         list_templates, set_template, start_template,
         delete_template_command, schedules_command, schedule_template_cmd, schedules_toggle_callback,
@@ -39,6 +40,12 @@ def _import_all():
     from handlers.dues import (
         settle_dues as dues_settle_dues,
         settle_pick_callback as dues_settle_pick_callback,
+        settle_empty_callback as dues_settle_empty_callback,
+        settle_skip_callback as dues_settle_skip_callback,
+        settle_confirm_callback as dues_settle_confirm_callback,
+        settle_custom_callback as dues_settle_custom_callback,
+        settle_cancel_callback as dues_settle_cancel_callback,
+        settle_subsidy_reply as dues_settle_subsidy_reply,
         mark_penalty as dues_mark_penalty,
         waive as dues_waive,
         set_collector as dues_set_collector,
@@ -169,6 +176,14 @@ class IntegrationBase(unittest.IsolatedAsyncioTestCase):
         cls.schedules_toggle_callback = staticmethod(h["schedules_toggle_callback"])
         cls.dues_settle_dues = staticmethod(h["dues_settle_dues"])
         cls.dues_settle_pick_callback = staticmethod(h["dues_settle_pick_callback"])
+        cls.dues_settle_empty_callback = staticmethod(h["dues_settle_empty_callback"])
+        cls.dues_settle_skip_callback = staticmethod(h["dues_settle_skip_callback"])
+        cls.dues_settle_confirm_callback = staticmethod(h["dues_settle_confirm_callback"])
+        cls.dues_settle_custom_callback = staticmethod(h["dues_settle_custom_callback"])
+        cls.dues_settle_cancel_callback = staticmethod(h["dues_settle_cancel_callback"])
+        cls.dues_settle_subsidy_reply = staticmethod(h["dues_settle_subsidy_reply"])
+        cls.penalty_panel_callback = staticmethod(h["penalty_panel_callback"])
+        cls.penalty_panel_sessions = h["penalty_panel_sessions"]
         cls.dues_mark_penalty = staticmethod(h["dues_mark_penalty"])
         cls.dues_waive = staticmethod(h["dues_waive"])
         cls.dues_set_collector = staticmethod(h["dues_set_collector"])
@@ -196,9 +211,11 @@ class IntegrationBase(unittest.IsolatedAsyncioTestCase):
         self.bs._pending_reconf.clear()
         self.bs._pending_deletes.clear()
         self.bs._pending_overrides.clear()
+        self.bs._pending_subsidy_input.clear()
         self.bs._rate_limits.clear()
         self.bs._buzz_cooldowns.clear()
         self.bs._panel_msg_ids.clear()
+        self.penalty_panel_sessions.clear()
         # Reset bot mock call history
         bot = get_mock_bot()
         bot.send_message.reset_mock()
@@ -239,6 +256,16 @@ class IntegrationBase(unittest.IsolatedAsyncioTestCase):
         """Start a rollcall and return it."""
         await self.start_roll_call(self.msg(f"/src {title}", ADMIN_USER))
         return self.rc(0)
+
+    async def tap_penalty_done(self, chat_id=CHAT_ID, user=None):
+        """Find the currently-open penalty panel session for `chat_id`, tap
+        its Done button, and return the rollcall_id it was scoped to (the
+        panel hands off to the /settle_dues confirm card in the same
+        message). Raises if no session is open."""
+        (cid, mid) = next((c, m) for (c, m) in self.penalty_panel_sessions if c == chat_id)
+        rollcall_id = self.penalty_panel_sessions[(cid, mid)].rollcall_id
+        await self.penalty_panel_callback(self.call(f"pen_d:{rollcall_id}", user, message_id=mid))
+        return rollcall_id
 
     def _clear_rate(self, user):
         """Remove rate-limit entry so the next vote isn't blocked."""

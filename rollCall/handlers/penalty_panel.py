@@ -372,12 +372,13 @@ async def penalty_panel_callback(call):
                     _decrement_attended(cid, in_users, session.ghost_marked)
                     mark_rollcall_absent_done(rc)
 
-            total   = sum(session.applied.values())
-            summary = f"✅ Penalty marking done — {total} penalties recorded." if total else "✅ No penalties marked."
-            await safe_edit_text(cid, mid, summary)
-            await safe_edit_markup(cid, mid, InlineKeyboardMarkup())
+            title = session.title
             _sessions.pop((cid, mid), None)
             await bot.answer_callback_query(call.id)
+            # Penalty/ghost marking is done — hand off to the financial
+            # confirm/subsidy card in the same message (/settle_dues flow).
+            from handlers.dues import show_settle_confirm
+            await show_settle_confirm(cid, rc, title, mid=mid)
 
         else:
             await bot.answer_callback_query(call.id)

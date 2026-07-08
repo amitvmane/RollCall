@@ -110,6 +110,12 @@ _pending_overrides: dict = {}
 # Pending /sif post-ghost-warning add: (chat_id, admin_user_id, proxy_name) -> {'comment': str, '_ts': float}
 _pending_proxy_add: dict = {}
 
+# Pending custom subsidy amount for /settle_dues's confirm card — the one
+# pending-state dict here that's consumed by the next free-text reply
+# (a bare integer) rather than a callback tap.
+# (chat_id, admin_user_id) -> {'rollcall_id': int, 'title': str, '_ts': float}
+_pending_subsidy_input: dict = {}
+
 # How long pending confirmations stay valid before being garbage-collected (seconds).
 _PENDING_TTL_SECONDS = 3600
 

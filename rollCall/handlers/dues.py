@@ -31,7 +31,10 @@ import logging
 from datetime import datetime
 
 import db as _db
-from bot_state import bot, reply_error, _log_task_exc, send_md_fallback, _esc_md, safe_edit_markup
+from bot_state import (
+    bot, reply_error, _log_task_exc, send_md_fallback, _esc_md,
+    safe_edit_markup, safe_edit_text, _pending_subsidy_input, _prune_pending,
+)
 from exceptions import (
     duesGameAlreadyClosed, duesNothingToClose,
     incorrectParameter, insufficientPermissions, parameterMissing,
@@ -39,6 +42,7 @@ from exceptions import (
 from functions import admin_rights
 from rollcall_manager import manager
 from services import dues as dues_svc
+from services import rollcalls as rollcalls_svc
 from handlers.lifecycle import _post_end_cleanup
 
 
@@ -76,6 +80,16 @@ def _parse_rc_suffix(args: list[str]) -> tuple[int, list[str]]:
 
 
 # ── /settle_dues ─────────────────────────────────────────────────────────────
+#
+# Guided flow (no args, the common case): resolve a target game → a 0-IN
+# game offers cancel/skip instead of a financial split → the penalty panel
+# opens scoped to that game → tapping "Done" there hands off to the
+# confirm/subsidy card below → tapping a subsidy preset (or replying with a
+# custom amount) performs the actual close.
+#
+# The explicit-args form (/settle_dues <subsidy> [::N]) is a deliberate fast
+# path that skips all of the above — direct close, no penalty panel, no
+# confirm card — unchanged from before this flow existed.
 
 def _fmt_unsettled_label(game: dict) -> str:
     title = game.get("title") or f"game #{game['id']}"
@@ -92,10 +106,33 @@ async def _send_unsettled_picker(cid: int, games: list, intro: str) -> None:
     await bot.send_message(cid, intro, reply_markup=markup)
 
 
+async def _settle_admin_ok(call) -> bool:
+    """Shared admin gate for every /settle_dues inline button — financial
+    writes, same pattern as the penalty panel / collector picker."""
+    cid = call.message.chat.id
+    if manager.get_admin_rights(cid):
+        member = await bot.get_chat_member(cid, call.from_user.id)
+        if member.status not in ("administrator", "creator"):
+            await bot.answer_callback_query(
+                call.id, "⛔ Only admins can settle dues", show_alert=True
+            )
+            return False
+    return True
+
+
+async def _send_remaining_unsettled_nudge(cid: int) -> None:
+    remaining = dues_svc.list_unsettled_games(cid)["games"]
+    if remaining:
+        n = len(remaining)
+        await send_md_fallback(
+            cid,
+            f"💰 {n} more unsettled game{'s' if n != 1 else ''} — `/settle_dues` to continue.",
+        )
+
+
 async def _finish_settle_dues(cid: int, result: dict, rc_idx_fallback: int = 0) -> None:
-    """Shared post-settle side effects: announcement, QR, receipt, post-end
-    cleanup, and a nudge listing any games still unsettled. Used by both the
-    direct /settle_dues path and the picker callback."""
+    """Shared post-close side effects: announcement, QR, receipt, post-end
+    cleanup, and a nudge listing any games still unsettled."""
     # Always post announcement — financial record
     await send_md_fallback(cid, result["announcement"])
 
@@ -120,15 +157,227 @@ async def _finish_settle_dues(cid: int, result: dict, rc_idx_fallback: int = 0) 
             rc_title=result.get("title", ""),
         )
 
-    # Surface any other unsettled games so admins don't have to remember them.
-    remaining = dues_svc.list_unsettled_games(cid)["games"]
-    if remaining:
-        n = len(remaining)
-        await send_md_fallback(
-            cid,
-            f"💰 {n} more unsettled game{'s' if n != 1 else ''} — `/settle_dues` to continue.",
-        )
+    await _send_remaining_unsettled_nudge(cid)
 
+
+# ── Zero-IN games: dismiss without a financial split ──────────────────────────
+
+async def _show_empty_game_card(cid: int, rollcall_id: int, title: str) -> None:
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton("🗑 Cancel this game", callback_data=f"settle_empty:{rollcall_id}"),
+        InlineKeyboardButton("⏭ Skip for now", callback_data=f"settle_skip:{rollcall_id}"),
+    )
+    await bot.send_message(
+        cid,
+        f"⚠️ *{_esc_md(title)}* has no IN players — nothing to split.",
+        parse_mode="Markdown",
+        reply_markup=markup,
+    )
+
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("settle_empty:"))
+async def settle_empty_callback(call):
+    try:
+        cid = call.message.chat.id
+        if not await _settle_admin_ok(call):
+            return
+        rollcall_id = int(call.data.split(":", 1)[1])
+        await bot.answer_callback_query(call.id, "Cancelling…")
+
+        async with manager.get_chat_write_lock(cid):
+            result = dues_svc.close_empty_game(
+                cid, rollcall_id,
+                call.from_user.id,
+                call.from_user.first_name or call.from_user.username or "Admin",
+            )
+
+        await safe_edit_text(cid, call.message.message_id, result["announcement"], parse_mode="Markdown")
+        from telebot.types import InlineKeyboardMarkup
+        await safe_edit_markup(cid, call.message.message_id, InlineKeyboardMarkup())
+        await _send_remaining_unsettled_nudge(cid)
+    except Exception as exc:
+        logging.exception("settle_empty_callback error")
+        await reply_error(call.message, exc)
+
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("settle_skip:"))
+async def settle_skip_callback(call):
+    try:
+        cid = call.message.chat.id
+        await bot.answer_callback_query(call.id, "Skipped")
+        await safe_edit_text(
+            cid, call.message.message_id,
+            "⏭ Skipped — still unsettled, run `/settle_dues` again anytime.",
+            parse_mode="Markdown",
+        )
+        from telebot.types import InlineKeyboardMarkup
+        await safe_edit_markup(cid, call.message.message_id, InlineKeyboardMarkup())
+    except Exception as exc:
+        logging.exception("settle_skip_callback error")
+        await reply_error(call.message, exc)
+
+
+# ── Guided resolve → penalty panel handoff ────────────────────────────────────
+
+async def _begin_settlement(cid: int, rollcall_id: int, title: str) -> None:
+    """Entry point once a settle target is resolved (freshly ended or already
+    sitting unsettled — this function re-reads current state either way, so
+    it doesn't need to know which). A 0-IN game gets the cancel/skip card;
+    otherwise the penalty panel opens scoped to this game, and its "Done"
+    button hands off to the confirm/subsidy card (see handlers.penalty_panel's
+    pen_d branch)."""
+    in_users = _db.get_rollcall_in_users(rollcall_id)
+    if not in_users:
+        await _show_empty_game_card(cid, rollcall_id, title)
+        return
+
+    row = _db.get_rollcall(rollcall_id) or {}
+    ghost_eligible = bool(
+        manager.get_ghost_tracking_enabled(cid) and not row.get("absent_marked")
+    )
+    from handlers.penalty_panel import send_penalty_panel
+    await send_penalty_panel(cid, rollcall_id, title, ghost_eligible=ghost_eligible)
+
+
+# ── Confirm / subsidy card ─────────────────────────────────────────────────────
+
+async def show_settle_confirm(cid: int, rollcall_id: int, title: str, mid: int | None = None) -> None:
+    """Preview card shown after penalty marking is done for this game.
+    Preset subsidy buttons ARE the confirmation — tapping one directly closes
+    the game with that amount, no separate extra tap required."""
+    row = _db.get_rollcall(rollcall_id) or {}
+    ground_cost = dues_svc._parse_ground_cost(row.get("event_fee"))
+    in_count = len(_db.get_rollcall_in_users(rollcall_id))
+    step = dues_svc.get_dues_settings(cid)["dues_round_step"]
+    per_head = 0
+    if ground_cost > 0 and in_count > 0:
+        per_head, _ = dues_svc.compute_shares(ground_cost, 0, in_count, step)
+    fund_balance = dues_svc.fund_summary(cid)["fund_balance"]
+
+    text = (
+        f"💰 *{_esc_md(title)}* — ready to close\n"
+        f"₹{ground_cost} ÷ {in_count} player{'s' if in_count != 1 else ''} → ₹{per_head}/head (no subsidy)\n"
+        f"Fund balance: ₹{fund_balance}"
+    )
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    markup = InlineKeyboardMarkup(row_width=3)
+    markup.row(
+        InlineKeyboardButton("No subsidy", callback_data=f"settle_confirm:{rollcall_id}:0"),
+        InlineKeyboardButton("−₹50", callback_data=f"settle_confirm:{rollcall_id}:50"),
+        InlineKeyboardButton("−₹100", callback_data=f"settle_confirm:{rollcall_id}:100"),
+    )
+    markup.row(
+        InlineKeyboardButton("✏️ Custom amount", callback_data=f"settle_custom:{rollcall_id}"),
+        InlineKeyboardButton("❌ Cancel", callback_data=f"settle_cancel:{rollcall_id}"),
+    )
+    if mid is not None:
+        await safe_edit_text(cid, mid, text, parse_mode="Markdown")
+        await safe_edit_markup(cid, mid, markup)
+    else:
+        await bot.send_message(cid, text, parse_mode="Markdown", reply_markup=markup)
+
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("settle_confirm:"))
+async def settle_confirm_callback(call):
+    try:
+        cid = call.message.chat.id
+        if not await _settle_admin_ok(call):
+            return
+        _, rc_id_s, subsidy_s = call.data.split(":")
+        rollcall_id, subsidy = int(rc_id_s), int(subsidy_s)
+        await bot.answer_callback_query(call.id, "Closing…")
+        from telebot.types import InlineKeyboardMarkup
+        await safe_edit_markup(cid, call.message.message_id, InlineKeyboardMarkup())
+
+        async with manager.get_chat_write_lock(cid):
+            result = await dues_svc.close_game(
+                cid, subsidy=subsidy,
+                admin_uid=call.from_user.id,
+                admin_name=call.from_user.first_name or call.from_user.username or "Admin",
+                target_rollcall_id=rollcall_id,
+            )
+
+        await _finish_settle_dues(cid, result)
+    except Exception as exc:
+        logging.exception("settle_confirm_callback error")
+        await reply_error(call.message, exc)
+
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("settle_custom:"))
+async def settle_custom_callback(call):
+    try:
+        cid = call.message.chat.id
+        if not await _settle_admin_ok(call):
+            return
+        rollcall_id = int(call.data.split(":", 1)[1])
+        row = _db.get_rollcall(rollcall_id) or {}
+        title = row.get("title") or "<Empty>"
+
+        _prune_pending(_pending_subsidy_input)
+        _pending_subsidy_input[(cid, call.from_user.id)] = {
+            "rollcall_id": rollcall_id, "title": title,
+            "_ts": datetime.now().timestamp(),
+        }
+        await bot.answer_callback_query(call.id)
+        await safe_edit_text(
+            cid, call.message.message_id,
+            f"✏️ Reply with the subsidy amount (₹) for *{_esc_md(title)}*, or 0 for none.",
+            parse_mode="Markdown",
+        )
+        from telebot.types import InlineKeyboardMarkup
+        await safe_edit_markup(cid, call.message.message_id, InlineKeyboardMarkup())
+    except Exception as exc:
+        logging.exception("settle_custom_callback error")
+        await reply_error(call.message, exc)
+
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("settle_cancel:"))
+async def settle_cancel_callback(call):
+    try:
+        cid = call.message.chat.id
+        await bot.answer_callback_query(call.id, "Cancelled")
+        await safe_edit_text(
+            cid, call.message.message_id,
+            "❌ Cancelled — still unsettled, run `/settle_dues` again anytime.",
+            parse_mode="Markdown",
+        )
+        from telebot.types import InlineKeyboardMarkup
+        await safe_edit_markup(cid, call.message.message_id, InlineKeyboardMarkup())
+    except Exception as exc:
+        logging.exception("settle_cancel_callback error")
+        await reply_error(call.message, exc)
+
+
+@bot.message_handler(func=lambda m: (
+    m.from_user is not None
+    and (m.chat.id, m.from_user.id) in _pending_subsidy_input
+    and m.text.strip().lstrip("-").isdigit()
+))
+async def settle_subsidy_reply(message):
+    try:
+        cid = message.chat.id
+        uid = message.from_user.id
+        pending = _pending_subsidy_input.pop((cid, uid), None)
+        if not pending:
+            return
+        subsidy = int(message.text.strip())
+
+        async with manager.get_chat_write_lock(cid):
+            result = await dues_svc.close_game(
+                cid, subsidy=subsidy,
+                admin_uid=uid,
+                admin_name=message.from_user.first_name or message.from_user.username or "Admin",
+                target_rollcall_id=pending["rollcall_id"],
+            )
+
+        await _finish_settle_dues(cid, result)
+    except Exception as e:
+        await reply_error(message, e)
+
+
+# ── /settle_dues handler ───────────────────────────────────────────────────────
 
 @bot.message_handler(func=lambda m: _cmd(m.text) == "/settle_dues")
 async def settle_dues(message):
@@ -139,12 +388,31 @@ async def settle_dues(message):
         _require_dues_enabled(cid)
         args = _parse_args(message.text)
 
-        # No args and nothing active: if more than one game is waiting to be
-        # settled, show a picker instead of silently closing only the latest
-        # (kept as a direct close when there's exactly one, or an active
-        # rollcall to close directly, or explicit subsidy/::N args).
-        if not args and not manager.get_rollcalls(cid):
+        if not args:
+            rollcalls = manager.get_rollcalls(cid)
+            if rollcalls:
+                # Active rollcall — end it now (same as /erc), then continue
+                # the guided flow (zero-IN check → penalty panel → confirm)
+                # on the game that was just ended.
+                rc = manager.get_rollcall(cid, 0)
+                title = rc.title or "<Empty>"
+                async with manager.get_chat_write_lock(cid):
+                    end_result = await rollcalls_svc.end_rollcall(
+                        cid, 0,
+                        message.from_user.id, message.from_user.first_name,
+                        message.from_user.username,
+                    )
+                await _post_end_cleanup(
+                    cid, end_result["rc_number_ended_1based"], end_result, rc_title=title,
+                )
+                await _begin_settlement(cid, end_result["rc_db_id"], title)
+                return
+
             unsettled = dues_svc.list_unsettled_games(cid)["games"]
+            if not unsettled:
+                raise duesNothingToClose(
+                    "No game to close. Start and end a rollcall first, or check if it was already closed."
+                )
             if len(unsettled) > 1:
                 await _send_unsettled_picker(
                     cid, unsettled,
@@ -152,6 +420,12 @@ async def settle_dues(message):
                 )
                 return
 
+            game = unsettled[0]
+            await _begin_settlement(cid, game["id"], game.get("title") or "<Empty>")
+            return
+
+        # Explicit subsidy/::N args — fast path, unchanged: direct close, no
+        # penalty panel, no confirm card.
         rc_idx, args = _parse_rc_suffix(args)
 
         subsidy = 0
@@ -178,28 +452,16 @@ async def settle_dues(message):
 async def settle_pick_callback(call):
     try:
         cid = call.message.chat.id
-        # Financial write — same admin gate as the penalty panel / collector picker.
-        if manager.get_admin_rights(cid):
-            member = await bot.get_chat_member(cid, call.from_user.id)
-            if member.status not in ("administrator", "creator"):
-                await bot.answer_callback_query(
-                    call.id, "⛔ Only admins can settle dues", show_alert=True
-                )
-                return
-
+        if not await _settle_admin_ok(call):
+            return
         target_id = int(call.data.split(":", 1)[1])
-        await bot.answer_callback_query(call.id, "Settling…")
-        await safe_edit_markup(cid, call.message.message_id, reply_markup=None)
+        await bot.answer_callback_query(call.id)
+        from telebot.types import InlineKeyboardMarkup
+        await safe_edit_markup(cid, call.message.message_id, InlineKeyboardMarkup())
 
-        async with manager.get_chat_write_lock(cid):
-            result = await dues_svc.close_game(
-                cid, subsidy=0,
-                admin_uid=call.from_user.id,
-                admin_name=call.from_user.first_name or call.from_user.username or "Admin",
-                target_rollcall_id=target_id,
-            )
-
-        await _finish_settle_dues(cid, result)
+        row = _db.get_rollcall(target_id) or {}
+        title = row.get("title") or "<Empty>"
+        await _begin_settlement(cid, target_id, title)
     except Exception as exc:
         logging.exception("settle_pick_callback error")
         await reply_error(call.message, exc)

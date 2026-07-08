@@ -68,10 +68,14 @@ async def _post_end_cleanup(cid: int, ended_number: int, result: dict, rc_title:
     dues_enabled = bool(chat_row.get("dues_enabled"))
 
     if dues_enabled and rc_db_id:
-        # Penalty panel absorbs ghost tracking — ditch tier = no-show marker.
-        # Ghost prompt is suppressed; the panel handles both in one step.
-        from handlers.penalty_panel import send_penalty_panel
-        await send_penalty_panel(cid, rc_db_id, rc_title, ghost_eligible=ghost_eligible)
+        # Ghost/penalty marking now happens as part of /settle_dues (right
+        # before the financial close), not immediately here — attendance
+        # ending and money-settling used to drift apart across two separate
+        # moments/admins. Just a discoverability nudge; no penalty panel.
+        await bot.send_message(
+            cid,
+            "💰 Dues enabled — run /settle_dues to mark penalties and close the books for this game.",
+        )
     elif ghost_eligible:
         ghost_markup = InlineKeyboardMarkup(row_width=2)
         ghost_markup.add(

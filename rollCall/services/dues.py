@@ -521,6 +521,48 @@ async def close_game(
     }
 
 
+def close_empty_game(
+    chat_id: int,
+    rollcall_id: int,
+    admin_uid: int,
+    admin_name: str,
+) -> dict:
+    """Dismiss a 0-IN-user game from the unsettled queue without a financial
+    split — there's nothing to divide. Writes a zero-value game_closures row
+    (no dues_entries, nothing to reverse later) so /settle_dues stops
+    surfacing it.
+
+    Raises duesGameAlreadyClosed if it was somehow already closed.
+    """
+    row = db.get_rollcall(rollcall_id)
+    if row is None or row.get("chat_id") != chat_id:
+        raise duesNothingToClose("That game was not found for this group.")
+    if db.get_game_closure(rollcall_id) is not None:
+        raise duesGameAlreadyClosed(f"'{row.get('title') or rollcall_id}' has already been closed.")
+
+    title = row.get("title") or "<Empty>"
+    db.create_game_closure(
+        chat_id=chat_id,
+        rollcall_id=rollcall_id,
+        title=title,
+        ground_cost=0,
+        in_count=0,
+        subsidy=0,
+        per_head=0,
+        rounding_step=get_dues_settings(chat_id)["dues_round_step"],
+        remainder=0,
+        closed_by_uid=admin_uid,
+        closed_by_name=admin_name,
+    )
+    db.log_admin_action(chat_id, admin_uid, admin_name, "close_empty_game", target_name=title)
+
+    return {
+        "rollcall_id": rollcall_id,
+        "title": title,
+        "announcement": f"🗑 *{_esc_md(title)}* closed with no players — no dues recorded.",
+    }
+
+
 # ── Reads ─────────────────────────────────────────────────────────────────────
 
 def my_dues(chat_id: int, user_id: int) -> dict:

@@ -70,3 +70,17 @@ def test_reconcile_is_idempotent():
     finally:
         conn.close()
         os.unlink(path)
+
+
+def test_reconcile_adds_treasury_upi_and_collector_upi():
+    """treasury_upi on chats and collector_upi on rollcalls are backfilled on old DBs."""
+    path, conn = _old_schema_conn()
+    try:
+        db._reconcile_columns(conn, conn.cursor())
+        assert "treasury_upi" in _cols(conn, "chats"), \
+            "chats.treasury_upi must be added by reconciler"
+        assert "collector_upi" in _cols(conn, "rollcalls"), \
+            "rollcalls.collector_upi must be added by reconciler"
+    finally:
+        conn.close()
+        os.unlink(path)

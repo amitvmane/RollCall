@@ -317,5 +317,171 @@ class TestDuesHandlers(unittest.IsolatedAsyncioTestCase):
         cleanup_mock.assert_called_once()
 
 
+# ── /set_treasury_upi handler ─────────────────────────────────────────────────
+
+class TestSetTreasuryUPI(unittest.IsolatedAsyncioTestCase):
+
+    def setUp(self):
+        import bot_state
+        self.bot_state = bot_state
+        bot_state.bot.send_message = AsyncMock()
+        self.mgr = _make_lock_manager()
+        patcher = patch("handlers.dues._require_dues_enabled")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _sent_text(self):
+        return self.bot_state.bot.send_message.call_args_list[0][0][1]
+
+    async def test_set_treasury_upi_posts_confirmation(self):
+        from handlers.dues import set_treasury_upi
+        svc_mock = MagicMock(return_value={"announcement": "🏦 Treasury UPI set: `treasurer@hdfc`"})
+        with _admin_ok(), \
+             patch("handlers.dues.manager", self.mgr), \
+             patch("handlers.dues.dues_svc.set_treasury_upi", svc_mock):
+            await set_treasury_upi(_msg("/set_treasury_upi treasurer@hdfc"))
+        svc_mock.assert_called_once()
+        args = svc_mock.call_args
+        self.assertEqual(args.args[1], "treasurer@hdfc")
+        self.assertIn("Treasury", self._sent_text())
+
+    async def test_set_treasury_upi_admin_only(self):
+        from handlers.dues import set_treasury_upi
+        with _admin_denied(), patch("handlers.dues.manager", self.mgr):
+            await set_treasury_upi(_msg("/set_treasury_upi x@y"))
+        text = self._sent_text()
+        self.assertIn("Admin", text)
+
+    async def test_set_treasury_upi_missing_arg(self):
+        from handlers.dues import set_treasury_upi
+        with _admin_ok(), patch("handlers.dues.manager", self.mgr):
+            await set_treasury_upi(_msg("/set_treasury_upi"))
+        text = self._sent_text()
+        self.assertIn("Usage", text)
+
+
+# ── /set_collector UPI arg parsing ───────────────────────────────────────────
+
+class TestSetCollectorUPIParsing(unittest.IsolatedAsyncioTestCase):
+
+    def setUp(self):
+        import bot_state
+        self.bot_state = bot_state
+        bot_state.bot.send_message = AsyncMock()
+        self.mgr = _make_lock_manager()
+        patcher = patch("handlers.dues._require_dues_enabled")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    async def _call_set_collector(self, text):
+        from handlers.dues import set_collector as sc_handler
+        svc_mock = MagicMock(return_value={"announcement": "📦 Collector: Ravi · `ravi@ybl`"})
+        with _admin_ok(), \
+             patch("handlers.dues.manager", self.mgr), \
+             patch("handlers.dues.dues_svc.set_collector", svc_mock):
+            await sc_handler(_msg(text))
+        return svc_mock
+
+    async def test_set_collector_parses_upi_arg(self):
+        svc = await self._call_set_collector("/set_collector Ravi ravi@ybl")
+        kwargs = svc.call_args.kwargs
+        self.assertEqual(kwargs.get("collector_upi"), "ravi@ybl")
+
+    async def test_set_collector_paid_and_upi(self):
+        svc = await self._call_set_collector("/set_collector Ravi paid ravi@ybl")
+        kwargs = svc.call_args.kwargs
+        self.assertEqual(kwargs.get("collector_upi"), "ravi@ybl")
+        self.assertTrue(kwargs.get("paid_ground") or svc.call_args.args[2])
+
+    async def test_set_collector_upi_without_paid(self):
+        """UPI arg accepted without the paid flag; paid_ground stays False."""
+        svc = await self._call_set_collector("/set_collector Ravi ravi@ybl")
+        kwargs = svc.call_args.kwargs
+        self.assertEqual(kwargs.get("collector_upi"), "ravi@ybl")
+        paid = kwargs.get("paid_ground", None)
+        if paid is None:
+            paid = svc.call_args.args[2] if len(svc.call_args.args) > 2 else False
+        self.assertFalse(paid)
+
+    async def test_set_collector_no_upi_passes_none(self):
+        svc = await self._call_set_collector("/set_collector Ravi paid")
+        kwargs = svc.call_args.kwargs
+        self.assertIsNone(kwargs.get("collector_upi"))
+
+    async def test_set_collector_upi_order_independent(self):
+        """UPI may come before 'paid' — should still be detected."""
+        svc = await self._call_set_collector("/set_collector Ravi ravi@ybl paid")
+        kwargs = svc.call_args.kwargs
+        self.assertEqual(kwargs.get("collector_upi"), "ravi@ybl")
+
+
+# ── /my_dues payment routing display ─────────────────────────────────────────
+
+class TestMyDuesPaymentRouting(unittest.IsolatedAsyncioTestCase):
+
+    def setUp(self):
+        import bot_state
+        self.bot_state = bot_state
+        bot_state.bot.send_message = AsyncMock()
+        patcher = patch("handlers.dues._require_dues_enabled")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _sent_text(self):
+        return self.bot_state.bot.send_message.call_args_list[0][0][1]
+
+    def _patch_my_dues(self, balance=90, upi_vpa=None, treasury_upi=None):
+        return patch.multiple(
+            "handlers.dues.dues_svc",
+            my_dues=MagicMock(return_value={
+                "balance": balance,
+                "entries": [{"amount": 90, "entry_type": "share", "memo": None}],
+            }),
+            get_dues_settings=MagicMock(return_value={
+                "upi_vpa": upi_vpa,
+                "treasury_upi": treasury_upi,
+            }),
+        )
+
+    async def test_my_dues_shows_both_upi_when_distinct(self):
+        from handlers.dues import my_dues
+        with self._patch_my_dues(upi_vpa="group@upi", treasury_upi="treasurer@hdfc"):
+            await my_dues(_msg("/my_dues"))
+        text = self._sent_text()
+        self.assertIn("group@upi", text)
+        self.assertIn("treasurer@hdfc", text)
+        self.assertIn("Game fees", text)
+        self.assertIn("Penalties", text)
+
+    async def test_my_dues_single_line_when_same_upi(self):
+        from handlers.dues import my_dues
+        with self._patch_my_dues(upi_vpa="shared@upi", treasury_upi="shared@upi"):
+            await my_dues(_msg("/my_dues"))
+        text = self._sent_text()
+        self.assertEqual(text.count("shared@upi"), 1)
+
+    async def test_my_dues_shows_group_upi_only_when_no_treasury(self):
+        from handlers.dues import my_dues
+        with self._patch_my_dues(upi_vpa="group@upi", treasury_upi=None):
+            await my_dues(_msg("/my_dues"))
+        text = self._sent_text()
+        self.assertIn("group@upi", text)
+        self.assertNotIn("Penalties", text)
+
+    async def test_my_dues_shows_treasury_upi_only_when_no_group_upi(self):
+        from handlers.dues import my_dues
+        with self._patch_my_dues(upi_vpa=None, treasury_upi="treasurer@hdfc"):
+            await my_dues(_msg("/my_dues"))
+        text = self._sent_text()
+        self.assertIn("treasurer@hdfc", text)
+
+    async def test_my_dues_no_upi_line_when_neither_set(self):
+        from handlers.dues import my_dues
+        with self._patch_my_dues(upi_vpa=None, treasury_upi=None):
+            await my_dues(_msg("/my_dues"))
+        text = self._sent_text()
+        self.assertNotIn("💳", text)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -83,13 +83,16 @@ def _seed_chat_members() -> None:
 def _insert_ended_rollcall(
     title: str,
     event_fee: int,
-    in_names: list[str],
-    proxies: list[dict] | None = None,
-    collector_uid: int | None = None,
-    collector_name: str | None = None,
+    in_names,
+    proxies=None,
+    collector_uid=None,
+    collector_name=None,
     collector_paid_ground: int = 0,
+    chat_id=None,
 ) -> int:
     """Insert a fully-ended rollcall with IN users into the DB and return its id."""
+    if chat_id is None:
+        chat_id = CHAT
     ended_at = datetime.datetime.utcnow().isoformat() + "Z"
     conn = db.get_connection()
     cur = conn.cursor()
@@ -98,7 +101,7 @@ def _insert_ended_rollcall(
         "(chat_id, title, is_active, is_cancelled, ended_at, event_fee,"
         " collector_uid, collector_name, collector_paid_ground)"
         " VALUES (?, ?, 0, 0, ?, ?, ?, ?, ?)",
-        (CHAT, title, ended_at, str(event_fee),
+        (chat_id, title, ended_at, str(event_fee),
          collector_uid, collector_name, collector_paid_ground),
     )
     rc_id = cur.lastrowid
@@ -568,6 +571,133 @@ class TestDuesScenario:
         assert txn_count > 5, "Expected multiple fund transactions"
         owed = [b for b in balances if b["balance"] > 0]
         assert len(owed) > 0, "At least some members should still owe dues"
+
+
+# ── UPI routing end-to-end (separate chat to avoid state pollution) ───────────
+
+CHAT_UPI = -98765  # isolated chat for UPI routing tests
+
+
+class TestUPIRouting:
+    """
+    End-to-end tests for per-collector UPI and treasury UPI routing.
+
+    Uses a separate chat ID so state doesn't bleed into the main scenario.
+    """
+
+    @classmethod
+    def setup_class(cls):
+        db.get_or_create_chat(CHAT_UPI)
+        db.update_chat_settings(
+            CHAT_UPI,
+            dues_enabled=1,
+            dues_round_step=10,
+            upi_vpa="group@fallback",
+        )
+        dues_svc.seed_default_penalty_tiers(CHAT_UPI)
+        db.upsert_chat_member(CHAT_UPI, 201, "Rahul", "rahul")
+        db.upsert_chat_member(CHAT_UPI, 202, "Priya", "priya")
+        db.upsert_chat_member(CHAT_UPI, 203, "Kiran", "kiran")
+
+    def _insert_rc(self, title="UPI Test Game", fee=600, collector_uid=None,
+                   collector_name=None, collector_paid=0, collector_upi=None):
+        rc_id = _insert_ended_rollcall(
+            title=title, event_fee=fee,
+            in_names=["Rahul", "Priya", "Kiran"],
+            collector_uid=collector_uid,
+            collector_name=collector_name,
+            collector_paid_ground=collector_paid,
+            chat_id=CHAT_UPI,
+        )
+        if collector_upi:
+            conn = db.get_connection()
+            cur = conn.cursor()
+            cur.execute("UPDATE rollcalls SET collector_upi=? WHERE id=?",
+                        (collector_upi, rc_id))
+            conn.commit()
+            cur.close()
+        return rc_id
+
+    def test_15_collector_upi_in_close_announcement(self):
+        """
+        When set_collector provides a UPI, the close announcement shows it
+        instead of the group fallback UPI.
+        """
+        rc_id = self._insert_rc(
+            title="UPI Routing Test",
+            collector_uid=201, collector_name="Rahul",
+            collector_paid=1, collector_upi="rahul@ybl",
+        )
+        result = asyncio.run(
+            dues_svc.close_game(CHAT_UPI, subsidy=0,
+                                admin_uid=999, admin_name="TestAdmin")
+        )
+        ann = result["announcement"]
+        assert "rahul@ybl" in ann, f"Expected collector UPI in announcement: {ann}"
+        assert "group@fallback" not in ann, \
+            f"Fallback group UPI should not appear when collector UPI is set: {ann}"
+        assert result["per_head"] == 200  # 600 / 3, step=10
+
+    def test_16_treasury_upi_shown_for_penalties(self):
+        """
+        When treasury_upi is set, penalty announcements show it.
+        Falls back to upi_vpa when treasury_upi is absent.
+        """
+        db.update_chat_settings(CHAT_UPI, treasury_upi="treasurer@hdfc")
+
+        result = dues_svc.mark_penalty(
+            CHAT_UPI, "ditch", "priya", admin_uid=999, admin_name="TestAdmin"
+        )
+        ann = result["announcement"]
+        assert "treasurer@hdfc" in ann, \
+            f"Expected treasury UPI in penalty announcement: {ann}"
+        assert "group@fallback" not in ann
+
+    def test_17_treasury_upi_fallback_when_not_set(self):
+        """When treasury_upi is cleared, penalty announcement falls back to upi_vpa."""
+        db.update_chat_settings(CHAT_UPI, treasury_upi=None)
+
+        result = dues_svc.mark_penalty(
+            CHAT_UPI, "ditch", "kiran", admin_uid=999, admin_name="TestAdmin"
+        )
+        ann = result["announcement"]
+        assert "group@fallback" in ann, \
+            f"Expected group UPI as fallback in penalty: {ann}"
+
+    def test_18_set_treasury_upi_service(self):
+        """set_treasury_upi persists to DB and is reflected in get_dues_settings."""
+        dues_svc.set_treasury_upi(CHAT_UPI, "newtreas@icici", admin_uid=999, admin_name="Admin")
+        settings = dues_svc.get_dues_settings(CHAT_UPI)
+        assert settings["treasury_upi"] == "newtreas@icici"
+
+    def test_19_set_collector_with_upi_stored_on_closure(self):
+        """
+        set_collector with a UPI on a post-close game stores the UPI on the closure
+        and it is returned via get_game_closure.
+        """
+        closure = db.get_latest_game_closure(CHAT_UPI)
+        assert closure is not None, "Need a closed game from test_15"
+        rc_id = closure["rollcall_id"]
+
+        dues_svc.set_collector(
+            CHAT_UPI, "rahul", paid_ground=True,
+            admin_uid=999, admin_name="Admin",
+            collector_upi="rahul@updated",
+        )
+
+        updated = db.get_game_closure(rc_id)
+        assert updated["collector_upi"] == "rahul@updated", \
+            f"Expected collector_upi stored on closure: {updated}"
+
+    def test_20_no_upi_line_when_neither_set(self):
+        """When both upi_vpa and treasury_upi are None, no UPI shown in penalty."""
+        db.update_chat_settings(CHAT_UPI, upi_vpa=None, treasury_upi=None)
+
+        result = dues_svc.mark_penalty(
+            CHAT_UPI, "late_short", "rahul", admin_uid=999, admin_name="Admin"
+        )
+        ann = result["announcement"]
+        assert "💳" not in ann, f"No UPI line expected when neither is set: {ann}"
 
 
 # ── Standalone runner ─────────────────────────────────────────────────────────

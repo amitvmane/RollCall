@@ -858,7 +858,7 @@ class TestSetCollector(unittest.TestCase):
             get_latest_game_closure=MagicMock(return_value=closure),
         ), patch("services.dues.manager", mgr):
             r = set_collector(1, "ravi", paid_ground=True, admin_uid=99, admin_name="Admin")
-        update_cl.assert_called_once_with(88, 55, "Ravi", collector_paid_ground=1)
+        update_cl.assert_called_once_with(88, 55, "Ravi", collector_paid_ground=1, collector_upi=None)
         self.assertEqual(r["collector_paid_ground"], 1)
 
     def test_proxy_user_raises(self):
@@ -1106,6 +1106,293 @@ class TestRemindDues(unittest.TestCase):
             r = remind_dues(1)
         self.assertEqual(r["members_owed"], [])
         self.assertIn("settled", r["announcement"])
+
+
+# ── Treasury UPI & per-collector UPI (new feature) ───────────────────────────
+
+class TestTreasuryUPI(unittest.TestCase):
+    """set_treasury_upi service function."""
+
+    def _patch_db(self, **kw):
+        defaults = dict(
+            update_chat_settings=MagicMock(),
+            log_admin_action=MagicMock(),
+            get_or_create_chat=MagicMock(return_value={
+                "upi_vpa": "group@upi",
+                "treasury_upi": None,
+                "dues_round_step": 10,
+            }),
+        )
+        defaults.update(kw)
+        return patch.multiple("services.dues.db", **defaults)
+
+    def test_set_treasury_upi_valid(self):
+        from services.dues import set_treasury_upi
+        with self._patch_db() as m:
+            r = set_treasury_upi(1, "treasurer@hdfc", 99, "Admin")
+        self.assertEqual(r["treasury_upi"], "treasurer@hdfc")
+        self.assertIn("treasurer@hdfc", r["announcement"])
+        self.assertIn("Treasury", r["announcement"])
+
+    def test_set_treasury_upi_invalid(self):
+        from exceptions import incorrectParameter
+        from services.dues import set_treasury_upi
+        with self._patch_db():
+            with self.assertRaises(incorrectParameter):
+                set_treasury_upi(1, "notaupi", 99, "Admin")
+
+    def test_set_treasury_upi_no_at(self):
+        from exceptions import incorrectParameter
+        from services.dues import set_treasury_upi
+        with self._patch_db():
+            with self.assertRaises(incorrectParameter):
+                set_treasury_upi(1, "treasure", 99, "Admin")
+
+    def test_get_dues_settings_includes_treasury_upi(self):
+        from services.dues import get_dues_settings
+        with patch.multiple("services.dues.db",
+            get_or_create_chat=MagicMock(return_value={
+                "upi_vpa": "group@upi",
+                "treasury_upi": "treasurer@hdfc",
+                "dues_round_step": 10,
+                "dues_self_paid_mode": "auto",
+            }),
+        ):
+            s = get_dues_settings(1)
+        self.assertEqual(s["treasury_upi"], "treasurer@hdfc")
+        self.assertEqual(s["upi_vpa"], "group@upi")
+
+
+class TestCloseGameUPIAnnouncement(unittest.IsolatedAsyncioTestCase):
+    """close_game announcement UPI routing: collector UPI > group UPI; treasury shown when distinct."""
+
+    def _patch_close(self, chat_row_overrides=None, **kw):
+        chat_row = {
+            "upi_vpa": "group@upi",
+            "treasury_upi": None,
+            "dues_round_step": 10,
+            "dues_self_paid_mode": "auto",
+            "collector_rotation": False,
+        }
+        if chat_row_overrides:
+            chat_row.update(chat_row_overrides)
+        defaults = dict(
+            get_or_create_chat=MagicMock(return_value=chat_row),
+            get_game_closure=MagicMock(return_value=None),
+            get_fund_balance=MagicMock(return_value=0),
+            create_game_closure=MagicMock(return_value=1),
+            add_dues_entry=MagicMock(),
+            add_fund_transaction=MagicMock(),
+            log_admin_action=MagicMock(),
+            get_rollcall_in_users=MagicMock(return_value=[]),
+            get_latest_closeable_rollcall=MagicMock(return_value=None),
+            get_active_members=MagicMock(return_value=[]),
+            update_chat_settings=MagicMock(),
+        )
+        defaults.update(kw)
+        return patch.multiple("services.dues.db", **defaults)
+
+    async def _close(self, rc, mgr=None, patch_kw=None):
+        from services.dues import close_game
+        if mgr is None:
+            mgr = _make_manager([rc])
+        mock_end = AsyncMock(return_value={
+            "ended": {}, "rc_number_ended_1based": 1, "ghost_eligible": False,
+            "ghost_rc_db_id": None, "ended_by": {}, "remaining": [], "renumbered": [],
+        })
+        with self._patch_close(**(patch_kw or {})), \
+             patch("services.dues.manager", mgr), \
+             patch("services.rollcalls.end_rollcall", mock_end):
+            return await close_game(1, subsidy=0, admin_uid=1, admin_name="Admin")
+
+    async def test_collector_upi_used_over_group_upi(self):
+        """When collector_upi is set it appears in the announcement instead of group UPI."""
+        alice = _make_user("Alice", user_id=101)
+        rc = _make_rc(in_list=[alice], event_fee="600", rc_id=77,
+                      collector_uid=202, collector_name="Ravi")
+        rc.collector_upi = "ravi@ybl"
+        result = await self._close(rc)
+        ann = result["announcement"]
+        self.assertIn("ravi@ybl", ann)
+        self.assertNotIn("group@upi", ann)  # fallback not shown when collector UPI set
+
+    async def test_falls_back_to_group_upi_when_no_collector_upi(self):
+        """When no collector_upi, group upi_vpa is used."""
+        alice = _make_user("Alice", user_id=101)
+        rc = _make_rc(in_list=[alice], event_fee="600", rc_id=77)
+        rc.collector_upi = None
+        result = await self._close(rc)
+        self.assertIn("group@upi", result["announcement"])
+
+    async def test_treasury_upi_shown_when_distinct_from_game_upi(self):
+        """When treasury_upi != collector_upi both appear in the announcement."""
+        alice = _make_user("Alice", user_id=101)
+        rc = _make_rc(in_list=[alice], event_fee="600", rc_id=77,
+                      collector_uid=202, collector_name="Ravi")
+        rc.collector_upi = "ravi@ybl"
+        result = await self._close(rc, patch_kw=dict(
+            get_or_create_chat=MagicMock(return_value={
+                "upi_vpa": "group@upi",
+                "treasury_upi": "treasurer@hdfc",
+                "dues_round_step": 10,
+                "dues_self_paid_mode": "auto",
+                "collector_rotation": False,
+            }),
+        ))
+        ann = result["announcement"]
+        self.assertIn("ravi@ybl", ann)
+        self.assertIn("treasurer@hdfc", ann)
+
+    async def test_no_duplicate_upi_line_when_same(self):
+        """When collector UPI == treasury UPI only one payment line appears."""
+        alice = _make_user("Alice", user_id=101)
+        rc = _make_rc(in_list=[alice], event_fee="600", rc_id=77)
+        rc.collector_upi = "shared@upi"
+        result = await self._close(rc, patch_kw=dict(
+            get_or_create_chat=MagicMock(return_value={
+                "upi_vpa": "shared@upi",
+                "treasury_upi": "shared@upi",
+                "dues_round_step": 10,
+                "dues_self_paid_mode": "auto",
+                "collector_rotation": False,
+            }),
+        ))
+        ann = result["announcement"]
+        self.assertEqual(ann.count("shared@upi"), 1)
+
+    async def test_no_upi_line_when_neither_set(self):
+        """When neither upi_vpa nor treasury_upi is set, no UPI line in announcement."""
+        alice = _make_user("Alice", user_id=101)
+        rc = _make_rc(in_list=[alice], event_fee="600", rc_id=77)
+        rc.collector_upi = None
+        result = await self._close(rc, patch_kw=dict(
+            get_or_create_chat=MagicMock(return_value={
+                "upi_vpa": None,
+                "treasury_upi": None,
+                "dues_round_step": 10,
+                "dues_self_paid_mode": "auto",
+                "collector_rotation": False,
+            }),
+        ))
+        self.assertNotIn("💳", result["announcement"])
+        self.assertNotIn("@", result["announcement"].split("📦")[0])  # no UPI before collector line
+
+
+class TestSetCollectorUPI(unittest.TestCase):
+    """set_collector passes collector_upi through to rollcall/closure."""
+
+    def _patch(self, **kw):
+        defaults = dict(
+            get_all_dues_balances=MagicMock(return_value=[]),
+            get_active_members=MagicMock(return_value=[
+                {"user_id": 55, "first_name": "Ravi", "username": "ravi"}
+            ]),
+            update_rollcall=MagicMock(return_value=True),
+            update_game_closure_collector=MagicMock(return_value=True),
+            get_latest_game_closure=MagicMock(return_value=None),
+            log_admin_action=MagicMock(),
+        )
+        defaults.update(kw)
+        return patch.multiple("services.dues.db", **defaults)
+
+    def test_pre_close_stores_collector_upi_in_rollcall(self):
+        from services.dues import set_collector
+        rc = _make_rc(rc_id=77)
+        mgr = _make_manager([rc])
+        update_rc = MagicMock(return_value=True)
+        with self._patch(update_rollcall=update_rc), \
+             patch("services.dues.manager", mgr):
+            r = set_collector(1, "ravi", paid_ground=False, admin_uid=99,
+                              admin_name="Admin", collector_upi="ravi@ybl")
+        self.assertEqual(r["collector_upi"], "ravi@ybl")
+        update_rc.assert_called_once_with(
+            77, collector_uid=55, collector_name="Ravi",
+            collector_paid_ground=0, collector_upi="ravi@ybl"
+        )
+
+    def test_pre_close_no_upi_kwarg_when_not_provided(self):
+        """When collector_upi is None, update_rollcall is called without the kwarg."""
+        from services.dues import set_collector
+        rc = _make_rc(rc_id=77)
+        mgr = _make_manager([rc])
+        update_rc = MagicMock(return_value=True)
+        with self._patch(update_rollcall=update_rc), \
+             patch("services.dues.manager", mgr):
+            set_collector(1, "ravi", paid_ground=False, admin_uid=99, admin_name="Admin")
+        kwargs = update_rc.call_args.kwargs
+        self.assertNotIn("collector_upi", kwargs)
+
+    def test_post_close_stores_collector_upi_in_closure(self):
+        from services.dues import set_collector
+        mgr = _make_manager([])
+        closure = {"rollcall_id": 88, "per_head": 90}
+        update_cl = MagicMock(return_value=True)
+        with self._patch(
+            update_game_closure_collector=update_cl,
+            get_latest_game_closure=MagicMock(return_value=closure),
+        ), patch("services.dues.manager", mgr):
+            r = set_collector(1, "ravi", paid_ground=True, admin_uid=99,
+                              admin_name="Admin", collector_upi="ravi@ybl")
+        update_cl.assert_called_once_with(
+            88, 55, "Ravi", collector_paid_ground=1, collector_upi="ravi@ybl"
+        )
+        self.assertEqual(r["collector_upi"], "ravi@ybl")
+
+    def test_announcement_includes_upi(self):
+        from services.dues import set_collector
+        rc = _make_rc(rc_id=77)
+        mgr = _make_manager([rc])
+        with self._patch(), patch("services.dues.manager", mgr):
+            r = set_collector(1, "ravi", paid_ground=False, admin_uid=99,
+                              admin_name="Admin", collector_upi="ravi@ybl")
+        self.assertIn("ravi@ybl", r["announcement"])
+
+    def test_announcement_no_upi_when_not_set(self):
+        from services.dues import set_collector
+        rc = _make_rc(rc_id=77)
+        mgr = _make_manager([rc])
+        with self._patch(), patch("services.dues.manager", mgr):
+            r = set_collector(1, "ravi", paid_ground=False, admin_uid=99, admin_name="Admin")
+        self.assertNotIn("@", r["announcement"])
+
+
+class TestMarkPenaltyUPI(unittest.TestCase):
+    """mark_penalty announcement includes treasury UPI with correct fallback logic."""
+
+    def _patch_for_penalty(self, upi_vpa=None, treasury_upi=None):
+        tier = {"name": "late_long", "amount": 100,
+                "description": "15+ min late", "is_ditch": False}
+        chat_row = {"upi_vpa": upi_vpa, "treasury_upi": treasury_upi}
+        return patch.multiple("services.dues.db",
+            get_penalty_tier=MagicMock(return_value=tier),
+            get_all_dues_balances=MagicMock(return_value=[]),
+            get_active_members=MagicMock(return_value=[
+                {"user_id": 10, "first_name": "Amit", "username": "amit"}
+            ]),
+            add_dues_entry=MagicMock(),
+            add_fund_transaction=MagicMock(),
+            log_admin_action=MagicMock(),
+            get_or_create_chat=MagicMock(return_value=chat_row),
+        )
+
+    def test_treasury_upi_in_announcement(self):
+        from services.dues import mark_penalty
+        with self._patch_for_penalty(upi_vpa="group@upi", treasury_upi="treasurer@hdfc"):
+            r = mark_penalty(1, "late_long", "amit", admin_uid=99, admin_name="Admin")
+        self.assertIn("treasurer@hdfc", r["announcement"])
+        self.assertNotIn("group@upi", r["announcement"])
+
+    def test_falls_back_to_upi_vpa_when_no_treasury_upi(self):
+        from services.dues import mark_penalty
+        with self._patch_for_penalty(upi_vpa="group@upi", treasury_upi=None):
+            r = mark_penalty(1, "late_long", "amit", admin_uid=99, admin_name="Admin")
+        self.assertIn("group@upi", r["announcement"])
+
+    def test_no_upi_line_when_neither_set(self):
+        from services.dues import mark_penalty
+        with self._patch_for_penalty(upi_vpa=None, treasury_upi=None):
+            r = mark_penalty(1, "late_long", "amit", admin_uid=99, admin_name="Admin")
+        self.assertNotIn("💳", r["announcement"])
 
 
 if __name__ == "__main__":

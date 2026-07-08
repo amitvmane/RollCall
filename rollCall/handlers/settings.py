@@ -183,18 +183,28 @@ async def event_fee(message):
             from handlers.lifecycle import _update_panel
             await _update_panel(cid, rc_number + 1, rc)
         else:
-            # No active rollcall: apply retroactively to the latest ended-but-unclosed game.
-            # This lets admins set the fee after /erc and then run /close_game.
-            closeable = db.get_latest_closeable_rollcall(cid)
-            if closeable is None:
-                raise rollCallNotStarted("Roll call is not active and no unclosed game found. Start a new rollcall with /rc.")
+            # No active rollcall: apply retroactively to an ended-but-unclosed
+            # game. This lets admins set the fee after /erc and then run
+            # /settle_dues. Without ::N this is the latest one (index 0);
+            # ::N indexes into the full unsettled list (newest-first) so an
+            # admin can also fix up an older missed game, not just the latest
+            # — /settle_dues itself had the same latest-only blind spot.
+            unsettled = db.get_unsettled_rollcalls(cid)
+            if rc_number < 0 or rc_number >= len(unsettled):
+                if not unsettled:
+                    raise rollCallNotStarted("Roll call is not active and no unclosed game found. Start a new rollcall with /rc.")
+                raise incorrectParameter(
+                    f"::{rc_number + 1} doesn't exist — there {'is' if len(unsettled) == 1 else 'are'} "
+                    f"{len(unsettled)} unsettled game(s). Check /settle_dues."
+                )
+            closeable = unsettled[rc_number]
             db.update_rollcall(closeable["id"], event_fee=event_price)
             db.log_admin_action(cid, message.from_user.id, message.from_user.first_name,
                                 "event_fee", details=event_price)
             title = closeable.get("title") or f"game #{closeable['id']}"
             await bot.send_message(
                 cid,
-                f"Event Fee set to {event_price} for *{title}*\n\nRun /close\\_game to financially close this game.",
+                f"Event Fee set to {event_price} for *{title}*\n\nRun `/settle_dues` to financially close this game.",
                 parse_mode="Markdown",
             )
 

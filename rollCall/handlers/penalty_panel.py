@@ -56,8 +56,25 @@ class _PenaltySession:
     active_tier: Optional[str] = None
     selections: Dict = field(default_factory=dict)    # tier_name → set of indices
     applied: Dict = field(default_factory=dict)       # tier_name → count applied
+    applied_indices: Dict = field(default_factory=dict)  # tier_name → set of applied indices
     ghost_marked: Set = field(default_factory=set)    # user_id (int) or proxy_name (str)
     ghost_finalised: bool = False
+
+
+def _locked_indices(session: "_PenaltySession", exclude_tier: Optional[str]) -> Set[int]:
+    """Indices already selected or applied in a tier other than `exclude_tier`.
+
+    A player can only be pending/applied in one tier at a time — this keeps
+    the penalty panel from double-marking the same player across tiers.
+    """
+    locked: Set[int] = set()
+    for t, sel in session.selections.items():
+        if t != exclude_tier:
+            locked |= sel
+    for t, idxs in session.applied_indices.items():
+        if t != exclude_tier:
+            locked |= idxs
+    return locked
 
 # keyed by (chat_id, message_id)
 _sessions: Dict[Tuple, _PenaltySession] = {}
@@ -70,7 +87,16 @@ def _tier_view(session: "_PenaltySession", tiers: list) -> Tuple[str, InlineKeyb
         f"\n  ✅ {name}: {cnt} marked"
         for name, cnt in session.applied.items() if cnt
     )
-    ghost_hint = "\n_Ditch tier also records ghost/no-show._" if session.ghost_eligible else ""
+    has_ditch_tier = any(t.get("is_ditch") for t in tiers)
+    if session.ghost_eligible:
+        ghost_hint = "\n_Ditch tier also records ghost/no-show._"
+    elif has_ditch_tier:
+        ghost_hint = (
+            "\n_Ghost tracking is off for this group — ditch will still charge the "
+            "penalty but won't update ghost stats. Enable with /toggle\\_ghost\\_tracking._"
+        )
+    else:
+        ghost_hint = ""
     text = (
         f"⚠️ *Penalty marking* — _{_esc_md(session.title)}_\n"
         f"Tap a tier to select players:{applied_notes}{ghost_hint}"
@@ -83,7 +109,10 @@ def _tier_view(session: "_PenaltySession", tiers: list) -> Tuple[str, InlineKeyb
         is_ditch = bool(t.get("is_ditch"))
         done_cnt = session.applied.get(name, 0)
         badge    = f" ✅{done_cnt}" if done_cnt else ""
-        ghost_tag = " (no-show)" if is_ditch and session.ghost_eligible else ""
+        if is_ditch:
+            ghost_tag = " (no-show)" if session.ghost_eligible else " (ghost tracking off)"
+        else:
+            ghost_tag = ""
         label    = f"{'🔴' if is_ditch else '🟡'} {name} ₹{amt}{ghost_tag}{badge}"
         kb.add(InlineKeyboardButton(label, callback_data=f"pen_t:{rc}:{name}"))
     kb.add(InlineKeyboardButton("✅ Done", callback_data=f"pen_d:{rc}"))
@@ -100,9 +129,15 @@ def _player_view(
     count     = len(selected)
     is_ditch  = bool(tier.get("is_ditch"))
 
-    ghost_note = "\n_Selecting these players also records them as ghosts._" if (
-        is_ditch and session.ghost_eligible
-    ) else ""
+    if is_ditch and session.ghost_eligible:
+        ghost_note = "\n_Selecting these players also records them as ghosts._"
+    elif is_ditch:
+        ghost_note = (
+            "\n_Ghost tracking is off — this only charges the penalty, no ghost "
+            "stats are recorded. Enable with /toggle\\_ghost\\_tracking._"
+        )
+    else:
+        ghost_note = ""
     text = (
         f"⚠️ *{_esc_md(tier_name)}* (₹{tier['amount']}) — tap to select players\n"
         f"_{_esc_md(tier.get('description') or 'Tap Apply when done.')}_"
@@ -110,7 +145,14 @@ def _player_view(
     )
     kb = InlineKeyboardMarkup(row_width=3)
     buttons = []
+    locked = _locked_indices(session, tier_name)
     for idx, m in enumerate(session.members):
+        if idx in locked:
+            label = f"🔒 {m['member_name']}"[:24]
+            buttons.append(
+                InlineKeyboardButton(label, callback_data=f"pen_locked:{rc}:{idx}")
+            )
+            continue
         check = "✅" if idx in selected else "◻"
         label = f"{check} {m['member_name']}"[:24]
         buttons.append(
@@ -209,6 +251,12 @@ async def penalty_panel_callback(call):
             await safe_edit_markup(cid, mid, kb)
             await bot.answer_callback_query(call.id)
 
+        # ── Locked player (already selected/applied in another tier) ────────
+        elif data.startswith(f"pen_locked:{rc}:"):
+            await bot.answer_callback_query(
+                call.id, "Already selected in another tier — deselect there first.", show_alert=True
+            )
+
         # ── Toggle player ────────────────────────────────────────────────────
         elif data.startswith(f"pen_g:{rc}:"):
             if not session.active_tier:
@@ -221,6 +269,11 @@ async def penalty_panel_callback(call):
                 return
             if idx < 0 or idx >= len(session.members):
                 await bot.answer_callback_query(call.id)
+                return
+            if idx in _locked_indices(session, session.active_tier):
+                await bot.answer_callback_query(
+                    call.id, "Already selected in another tier — deselect there first.", show_alert=True
+                )
                 return
             sel  = session.selections.setdefault(session.active_tier, set())
             name = session.members[idx]["member_name"]
@@ -250,6 +303,7 @@ async def penalty_panel_callback(call):
             actor_name = actor.first_name or actor.username or "Admin"
 
             applied_names = []
+            applied_idx   = set()
             errors        = []
             # Serialize with /erc, template auto-close, and manual /mark_*
             # commands — same invariant as every chat mutation (CLAUDE.md).
@@ -262,6 +316,7 @@ async def penalty_panel_callback(call):
                             actor.id, actor_name,
                         )
                         applied_names.append(m["member_name"])
+                        applied_idx.add(idx)
                     except Exception as exc:
                         errors.append(f"{m['member_name']}: {exc}")
 
@@ -280,6 +335,7 @@ async def penalty_panel_callback(call):
 
             count = len(applied_names)
             session.applied[tier_name] = session.applied.get(tier_name, 0) + count
+            session.applied_indices.setdefault(tier_name, set()).update(applied_idx)
             session.selections[tier_name] = set()
             session.active_tier = None
 

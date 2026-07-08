@@ -47,6 +47,7 @@ def _make_rc(
     collector_uid=None,
     collector_name=None,
     collector_paid_ground=0,
+    collector_upi=None,
 ):
     rc = MagicMock()
     rc.title = title
@@ -60,6 +61,7 @@ def _make_rc(
     rc.collector_uid = collector_uid
     rc.collector_name = collector_name
     rc.collector_paid_ground = collector_paid_ground
+    rc.collector_upi = collector_upi
     rc.absent_marked = False
     rc.save.return_value = None
     return rc
@@ -307,6 +309,44 @@ class TestCloseGameActivePath(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call_args.args[2], 101)    # user_id
         self.assertEqual(call_args.args[5], 600)    # amount
 
+    async def test_result_upi_vpa_prefers_collector_over_group(self):
+        """result['upi_vpa'] must resolve the same way as the announcement text
+        (collector UPI first, group fallback second) so /settle_dues's QR uses
+        the UPI that was actually announced."""
+        from services.dues import close_game
+
+        alice = _make_user("Alice", user_id=101)
+        rc = _make_rc(title="Sunday Game", in_list=[alice], event_fee="600", rc_id=77,
+                       collector_upi="collector@ybl")
+        mgr = _make_manager([rc])
+        mock_end = AsyncMock(return_value=_end_result())
+
+        with _patch_close(get_or_create_chat=MagicMock(return_value={
+                "upi_vpa": "group@ybl", "dues_round_step": 10,
+             })), \
+             patch("services.dues.manager", mgr), \
+             patch("services.rollcalls.end_rollcall", mock_end):
+            result = await close_game(1, subsidy=0, admin_uid=1, admin_name="Admin")
+
+        self.assertEqual(result["upi_vpa"], "collector@ybl")
+
+    async def test_result_upi_vpa_falls_back_to_group(self):
+        from services.dues import close_game
+
+        alice = _make_user("Alice", user_id=101)
+        rc = _make_rc(title="Sunday Game", in_list=[alice], event_fee="600", rc_id=77)
+        mgr = _make_manager([rc])
+        mock_end = AsyncMock(return_value=_end_result())
+
+        with _patch_close(get_or_create_chat=MagicMock(return_value={
+                "upi_vpa": "group@ybl", "dues_round_step": 10,
+             })), \
+             patch("services.dues.manager", mgr), \
+             patch("services.rollcalls.end_rollcall", mock_end):
+            result = await close_game(1, subsidy=0, admin_uid=1, admin_name="Admin")
+
+        self.assertEqual(result["upi_vpa"], "group@ybl")
+
     async def test_active_rc_7_players_step10(self):
         from services.dues import close_game
 
@@ -415,6 +455,91 @@ class TestCloseGameEndedPath(unittest.IsolatedAsyncioTestCase):
              patch("services.dues.manager", mgr):
             with self.assertRaises(duesNothingToClose):
                 await close_game(1, subsidy=0, admin_uid=1, admin_name="Admin")
+
+
+class TestCloseGameTargetRollcallId(unittest.IsolatedAsyncioTestCase):
+    """close_game(target_rollcall_id=...) — the /settle_dues picker path,
+    bypassing the latest-closeable lookup to reach a specific ended game."""
+
+    async def test_target_rollcall_id_uses_specific_row_not_latest(self):
+        from services.dues import close_game
+
+        mgr = _make_manager([])   # no active rollcalls
+        target_row = {"id": 42, "chat_id": 1, "title": "Older Game", "event_fee": "600",
+                       "collector_uid": None, "collector_name": None,
+                       "collector_paid_ground": 0, "collector_upi": None}
+        in_users = [{"user_id": 101, "first_name": "Alice", "proxy_name": None}]
+        add_dues_entry = MagicMock()
+
+        with _patch_close(
+            get_rollcall=MagicMock(return_value=target_row),
+            get_rollcall_in_users=MagicMock(return_value=in_users),
+            add_dues_entry=add_dues_entry,
+        ), patch("services.dues.manager", mgr):
+            result = await close_game(1, subsidy=0, admin_uid=1, admin_name="Admin",
+                                      target_rollcall_id=42)
+
+        self.assertEqual(result["rollcall_id"], 42)
+        self.assertEqual(result["title"], "Older Game")
+        add_dues_entry.assert_called_once()
+
+    async def test_target_rollcall_id_wrong_chat_raises(self):
+        from exceptions import duesNothingToClose
+        from services.dues import close_game
+
+        mgr = _make_manager([])
+        other_chat_row = {"id": 42, "chat_id": 999, "title": "Not Yours"}
+
+        with _patch_close(get_rollcall=MagicMock(return_value=other_chat_row)), \
+             patch("services.dues.manager", mgr):
+            with self.assertRaises(duesNothingToClose):
+                await close_game(1, subsidy=0, admin_uid=1, admin_name="Admin",
+                                 target_rollcall_id=42)
+
+    async def test_target_rollcall_id_not_found_raises(self):
+        from exceptions import duesNothingToClose
+        from services.dues import close_game
+
+        mgr = _make_manager([])
+        with _patch_close(get_rollcall=MagicMock(return_value=None)), \
+             patch("services.dues.manager", mgr):
+            with self.assertRaises(duesNothingToClose):
+                await close_game(1, subsidy=0, admin_uid=1, admin_name="Admin",
+                                 target_rollcall_id=999)
+
+    async def test_target_rollcall_id_ignores_active_rollcalls(self):
+        """An active rollcall existing must not shadow an explicit target — the
+        picker always means 'this specific ended game', never the active one."""
+        from services.dues import close_game
+
+        alice = _make_user("Alice", user_id=101)
+        active_rc = _make_rc(in_list=[alice], event_fee="999", rc_id=1)
+        mgr = _make_manager([active_rc])
+        target_row = {"id": 42, "chat_id": 1, "title": "Older Game", "event_fee": "600",
+                       "collector_uid": None, "collector_name": None,
+                       "collector_paid_ground": 0, "collector_upi": None}
+        in_users = [{"user_id": 101, "first_name": "Alice", "proxy_name": None}]
+
+        with _patch_close(
+            get_rollcall=MagicMock(return_value=target_row),
+            get_rollcall_in_users=MagicMock(return_value=in_users),
+        ), patch("services.dues.manager", mgr):
+            result = await close_game(1, subsidy=0, admin_uid=1, admin_name="Admin",
+                                      target_rollcall_id=42)
+
+        self.assertEqual(result["rollcall_id"], 42)
+        self.assertIsNone(result["end_result"])   # active rc must be untouched
+        self.assertIsNotNone(mgr.get_rollcall(1, 0))  # still active
+
+
+class TestListUnsettledGames(unittest.TestCase):
+
+    def test_wraps_db_call(self):
+        from services.dues import list_unsettled_games
+        games = [{"id": 1, "title": "A"}, {"id": 2, "title": "B"}]
+        with patch("services.dues.db.get_unsettled_rollcalls", return_value=games):
+            result = list_unsettled_games(1)
+        self.assertEqual(result["games"], games)
 
 
 class TestCloseGameDoubleClose(unittest.IsolatedAsyncioTestCase):

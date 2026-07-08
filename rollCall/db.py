@@ -5937,6 +5937,39 @@ def upsert_penalty_tier(
             release_connection(conn)
 
 
+def get_unsettled_rollcalls(chat_id: int, limit: int = 10) -> List[Dict]:
+    """All ended, not-cancelled rollcalls with no financial closure yet, newest
+    first. Same query as get_latest_closeable_rollcall minus the LIMIT 1 — used
+    by /settle_dues so an admin can reach an older unsettled game, not just the
+    latest one."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        active_false = "FALSE" if db_type == "postgresql" else "0"
+        cursor.execute(
+            f"""SELECT r.* FROM rollcalls r
+                LEFT JOIN game_closures gc ON gc.rollcall_id = r.id
+                WHERE r.chat_id = {ph}
+                  AND r.is_active = {active_false}
+                  AND COALESCE(r.is_cancelled, {active_false}) = {active_false}
+                  AND gc.id IS NULL
+                ORDER BY r.ended_at IS NULL ASC, r.ended_at DESC, r.id DESC LIMIT {ph}""",
+            (chat_id, limit),
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    except Exception:
+        logging.exception("get_unsettled_rollcalls failed")
+        return []
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
 def get_penalty_tiers(chat_id: int) -> List[Dict]:
     """Return all penalty tiers for a chat, ordered by amount ascending."""
     conn = get_connection()

@@ -478,11 +478,11 @@ COMMANDS = [
     },
     # ──────────────────────── DUES & FUND (admin) ───────────────────
     {
-        "name": "close_game", "aliases": ["cg"], "scope": "admin", "category": "Dues & Fund",
-        "args": "[subsidy] [::N]", "sample": "/cg",
-        "summary": "Financially close a game — split costs and record shares",
+        "name": "settle_dues", "aliases": [], "scope": "admin", "category": "Dues & Fund",
+        "args": "[subsidy] [::N]", "sample": "/settle_dues",
+        "summary": "Financially settle a game — split costs and record shares",
         "details": (
-            "Closes the current (or most-recent ended) game:\n"
+            "Settles the current (or most-recent ended) game:\n"
             "  1. Reads player count from the IN list.\n"
             "  2. Reads ground cost from /ef (first digit group).\n"
             "  3. Splits cost equally; rounds each share UP to the nearest step "
@@ -490,7 +490,11 @@ COMMANDS = [
             "  4. Rounding surplus goes to the group fund.\n"
             "  5. Optional [subsidy] deducts from fund balance before splitting.\n\n"
             "If an active rollcall is open, it's ended first (stats recorded).\n\n"
-            "Examples: /cg  |  /cg 60  |  /cg ::2"
+            "Run with no args and no active rollcall: if more than one game is "
+            "waiting to be settled, shows a picker instead of only ever reaching "
+            "the latest one — tap a game to settle it directly. After settling, "
+            "any remaining unsettled games are called out so none get forgotten.\n\n"
+            "Examples: /settle_dues  |  /settle_dues 60  |  /settle_dues ::2"
         ),
     },
     {
@@ -543,7 +547,7 @@ COMMANDS = [
             "Sets the collector for this game. Adding 'paid' means the collector "
             "fronted the ground cost and should be reimbursed when the game is closed.\n\n"
             "Optionally include the collector's UPI (e.g. ravi@upi) — it overrides the "
-            "group UPI in the /close_game announcement so players pay the right person directly.\n\n"
+            "group UPI in the /settle_dues announcement so players pay the right person directly.\n\n"
             "The designated collector can also run /mark_paid without being a chat admin.\n\n"
             "Examples:\n"
             "  /set_collector Ravi\n"
@@ -568,7 +572,7 @@ COMMANDS = [
         "args": "[on | off]", "sample": "/rotate_collector on",
         "summary": "Round-robin collector auto-assignment",
         "details": (
-            "When on, /close_game with no staged collector automatically assigns "
+            "When on, /settle_dues with no staged collector automatically assigns "
             "the next IN member in rotation (cycling through real users in a fixed "
             "order) and announces it in the close summary. Manual /set_collector or "
             "/pick_collector always take priority over the rotation. Off by default. "
@@ -587,7 +591,7 @@ COMMANDS = [
         "summary": "Charge a late-joining player the last game's per-head fee",
         "details": (
             "Adds the most recent closure's per-head as an 'adhoc' charge for a player "
-            "who joined after /close_game was run. Also credits the group fund."
+            "who joined after /settle_dues was run. Also credits the group fund."
         ),
     },
     {
@@ -597,7 +601,7 @@ COMMANDS = [
         "details": (
             "Writes compensating cancel_credit entries to undo share/adhoc charges. "
             "Payments already recorded remain as credits (they genuinely happened). "
-            "Use /close_game again to re-close after fixing the event fee or player count.\n\n"
+            "Use /settle_dues again to re-close after fixing the event fee or player count.\n\n"
             "Defaults to the most recently closed game.\n"
             "Use ::N to target an older game: /cancel_game_dues ::2 cancels the second most recent."
         ),
@@ -632,7 +636,7 @@ COMMANDS = [
         "summary": "Set the fallback group UPI for game fee payments",
         "details": (
             "Sets the group-level UPI shown when no per-game collector UPI is set. "
-            "Used as a fallback in /close_game summaries, /my_dues, and /remind_dues.\n\n"
+            "Used as a fallback in /settle_dues summaries, /my_dues, and /remind_dues.\n\n"
             "For per-game routing set the collector's UPI via /set_collector.\n"
             "For penalties and treasury payments use /set_treasury_upi.\n\n"
             "Format: name@bankname  e.g. amit@upi, 9876543210@paytm, squad@hdfc"
@@ -697,7 +701,7 @@ COMMANDS = [
         "summary": "Enable Dues & Treasury for this group",
         "details": (
             "Turns on the Dues & Treasury feature for this group. All dues commands "
-            "(/close_game, /my_dues, /fund, etc.) are blocked until this is run.\n\n"
+            "(/settle_dues, /my_dues, /fund, etc.) are blocked until this is run.\n\n"
             "Configure settings first: /set_upi, /set_penalties, /set_round_step.\n"
             "Existing ledger data is preserved if re-enabled after /disable_dues."
         ),

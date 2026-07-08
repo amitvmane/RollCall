@@ -207,6 +207,25 @@ class TestAutoCloseLifecycle(IntegrationBase):
         self.assertFalse(any("in:" in t.lower() for t in texts))
         self.mgr.set_shh_mode(CHAT_ID, False)
 
+    async def test_auto_close_shows_penalty_panel_when_dues_enabled(self):
+        """Dues-enabled groups get the penalty panel on auto-close, not the
+        old ghost_yes/ghost_no prompt — regression test for the bug where
+        scheduled auto-close bypassed handlers.lifecycle._post_end_cleanup
+        entirely and never surfaced that a game needed settling."""
+        from check_reminders import check
+        from services.dues import seed_default_penalty_tiers
+        db.get_or_create_chat(CHAT_ID)
+        db.update_chat_settings(CHAT_ID, dues_enabled=1)
+        seed_default_penalty_tiers(CHAT_ID)
+        rc = await self._start_and_populate(n_in=3)
+        await self._set_finalize_past(rc)
+        get_mock_bot().send_message.reset_mock()
+        rollcalls = self.mgr.get_rollcalls(CHAT_ID)
+        await check(rollcalls, "Asia/Kolkata", CHAT_ID)
+        texts = self.sent_texts()
+        self.assertTrue(any("penalty marking" in t.lower() for t in texts))
+        self.assertFalse(any("did anyone ghost" in t.lower() for t in texts))
+
     async def test_auto_close_full_ghost_selection_flow(self):
         """Auto-close → ghost_yes → select → ghost_done → counts incremented."""
         from check_reminders import check

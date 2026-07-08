@@ -222,14 +222,30 @@ async def send_md_fallback(cid: int, text: str, **kwargs):
     message with a 400. For ledger announcements that message IS the
     durability layer — losing it is data loss. Degrading to plain text keeps
     the record in the chat history.
+
+    Also retries once on transient network/timeout errors (getUpdates and
+    send_message share the bot's aiohttp session, so a connectivity blip can
+    make an otherwise-successful DB write's confirmation vanish silently —
+    seen in production as a "no ack" report even though the write logged
+    fine). A final failure is always logged loudly rather than swallowed.
     """
     try:
         return await bot.send_message(cid, text, parse_mode="Markdown", **kwargs)
     except Exception as e:
-        if "can't parse entities" not in str(e).lower():
+        if "can't parse entities" in str(e).lower():
+            logging.warning("Markdown parse failed for chat %s; resending plain", cid)
+            try:
+                return await bot.send_message(cid, text, **kwargs)
+            except Exception:
+                logging.exception("send_md_fallback: plain-text resend failed for chat %s", cid)
+                raise
+        logging.warning("send_md_fallback: send failed for chat %s (%s), retrying once", cid, e)
+        try:
+            await asyncio.sleep(0.5)
+            return await bot.send_message(cid, text, parse_mode="Markdown", **kwargs)
+        except Exception:
+            logging.exception("send_md_fallback: retry failed for chat %s — message lost: %r", cid, text[:200])
             raise
-        logging.warning("Markdown parse failed for chat %s; resending plain", cid)
-        return await bot.send_message(cid, text, **kwargs)
 
 
 # ── Task helpers ──────────────────────────────────────────────────────────────

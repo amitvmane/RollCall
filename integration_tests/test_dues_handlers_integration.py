@@ -2,7 +2,7 @@
 Handler-level integration tests for the dues system.
 
 Covers scenarios NOT reachable by service-layer tests:
-  - /close_game against a LIVE in-memory rollcall (active path through service)
+  - /settle_dues against a LIVE in-memory rollcall (active path through service)
   - Double-close guard raising duesGameAlreadyClosed through the handler
   - /set_treasury_upi handler → DB persisted → confirmation posted
   - /set_collector with UPI arg stored on rollcall via handler
@@ -42,11 +42,11 @@ def _enable_dues(chat_id=CHAT_ID, upi="test@upi", step=10):
     dues_svc.seed_default_penalty_tiers(chat_id)
 
 
-# ── /close_game — active in-memory rollcall path ─────────────────────────────
+# ── /settle_dues — active in-memory rollcall path ────────────────────────────
 
 class TestCloseGameActivePath(IntegrationBase):
     """
-    /close_game when there IS an active rollcall in memory.
+    /settle_dues when there IS an active rollcall in memory.
 
     The service must end the RC, write dues entries, and post the announcement.
     """
@@ -59,7 +59,7 @@ class TestCloseGameActivePath(IntegrationBase):
         for u in USERS[:3]:
             await self.vote_in(u)
 
-        await self.dues_close_game(self.msg("/close_game"))
+        await self.dues_settle_dues(self.msg("/settle_dues"))
 
         texts = self.sent_texts()
         ann = next((t for t in texts if "₹" in t and "Friday Futsal" in t), None)
@@ -75,7 +75,7 @@ class TestCloseGameActivePath(IntegrationBase):
 
         self.assertIsNotNone(self.mgr.get_rollcall(CHAT_ID, 0))
 
-        await self.dues_close_game(self.msg("/close_game"))
+        await self.dues_settle_dues(self.msg("/settle_dues"))
 
         # RC must be gone from manager after close
         self.assertIsNone(self.mgr.get_rollcall(CHAT_ID, 0))
@@ -87,7 +87,7 @@ class TestCloseGameActivePath(IntegrationBase):
         for u in USERS[:5]:
             await self.vote_in(u)
 
-        await self.dues_close_game(self.msg("/close_game"))
+        await self.dues_settle_dues(self.msg("/settle_dues"))
 
         # 5 share entries written (500/5=100)
         balances = db.get_all_dues_balances(CHAT_ID)
@@ -102,7 +102,7 @@ class TestCloseGameActivePath(IntegrationBase):
         for u in USERS[:4]:
             await self.vote_in(u)
 
-        await self.dues_close_game(self.msg("/close_game"))
+        await self.dues_settle_dues(self.msg("/settle_dues"))
 
         # Exactly one game_closure must exist
         closures = db.get_fund_transactions(CHAT_ID, limit=100)  # sanity check fund
@@ -118,17 +118,17 @@ class TestCloseGameActivePath(IntegrationBase):
         for u in USERS[:3]:
             await self.vote_in(u)
 
-        await self.dues_close_game(self.msg("/close_game"))
+        await self.dues_settle_dues(self.msg("/settle_dues"))
 
         texts = self.sent_texts()
         ann = next((t for t in texts if "group@hdfc" in t), None)
         self.assertIsNotNone(ann, f"UPI should appear in close announcement; got: {texts}")
 
 
-# ── /close_game — double-close guard ─────────────────────────────────────────
+# ── /settle_dues — double-close guard ────────────────────────────────────────
 
 class TestDoubleCloseGuard(IntegrationBase):
-    """Second /close_game on the same game must post an error, not a second closure."""
+    """Second /settle_dues on the same game must post an error, not a second closure."""
 
     async def test_double_close_posts_error(self):
         _enable_dues()
@@ -137,13 +137,13 @@ class TestDoubleCloseGuard(IntegrationBase):
         for u in USERS[:3]:
             await self.vote_in(u)
 
-        await self.dues_close_game(self.msg("/close_game"))
+        await self.dues_settle_dues(self.msg("/settle_dues"))
         bot = get_mock_bot()
         first_send_count = bot.send_message.call_count
 
         # Second close — no active RC now, and the DB closure already exists
         # Service raises duesGameAlreadyClosed → reply_error posts it
-        await self.dues_close_game(self.msg("/close_game"))
+        await self.dues_settle_dues(self.msg("/settle_dues"))
 
         texts = self.sent_texts()
         new_texts = texts[first_send_count:]
@@ -160,8 +160,8 @@ class TestDoubleCloseGuard(IntegrationBase):
         for u in USERS[:2]:
             await self.vote_in(u)
 
-        await self.dues_close_game(self.msg("/close_game"))
-        await self.dues_close_game(self.msg("/close_game"))  # should be no-op
+        await self.dues_settle_dues(self.msg("/settle_dues"))
+        await self.dues_settle_dues(self.msg("/settle_dues"))  # should be no-op
 
         # Still only one closure row (second call fails at service layer)
         c1 = db.get_nth_game_closure(CHAT_ID, 0)
@@ -254,7 +254,7 @@ class TestSetCollectorWithUPIHandler(IntegrationBase):
         await self.dues_set_collector(self.msg("/set_collector User1 paid user1@axis"))
         get_mock_bot().send_message.reset_mock()
 
-        await self.dues_close_game(self.msg("/close_game"))
+        await self.dues_settle_dues(self.msg("/settle_dues"))
 
         texts = self.sent_texts()
         ann = next((t for t in texts if "₹" in t), None)
@@ -272,7 +272,7 @@ class TestSetCollectorWithUPIHandler(IntegrationBase):
             await self.vote_in(u)
 
         await self.dues_set_collector(self.msg("/set_collector User1 collector1@upi"))
-        await self.dues_close_game(self.msg("/close_game"))
+        await self.dues_settle_dues(self.msg("/settle_dues"))
 
         closure = db.get_nth_game_closure(CHAT_ID, 0)
         self.assertIsNotNone(closure)
@@ -286,7 +286,7 @@ class TestSetCollectorWithUPIHandler(IntegrationBase):
             await self.vote_in(u)
 
         await self.dues_set_collector(self.msg("/set_collector User1"))
-        await self.dues_close_game(self.msg("/close_game"))
+        await self.dues_settle_dues(self.msg("/settle_dues"))
 
         closure = db.get_nth_game_closure(CHAT_ID, 0)
         self.assertIsNone(closure.get("collector_upi"))
@@ -392,7 +392,7 @@ class TestMarkPaidByCollector(IntegrationBase):
         rc.event_fee = "300"
         for u in USERS[:3]:
             await self.vote_in(u)
-        await self.dues_close_game(self.msg("/close_game"))
+        await self.dues_settle_dues(self.msg("/settle_dues"))
         # Now set collector on the closed game via service (post-close path)
         dues_svc.set_collector(
             CHAT_ID,
@@ -480,7 +480,7 @@ class TestCancelAndReclose(IntegrationBase):
         rc.event_fee = "300"
         for u in USERS[:3]:
             await self.vote_in(u)
-        await self.dues_close_game(self.msg("/close_game"))
+        await self.dues_settle_dues(self.msg("/settle_dues"))
         get_mock_bot().send_message.reset_mock()
 
         await self.dues_cancel_game(self.msg("/cancel_game_dues"))
@@ -498,7 +498,7 @@ class TestCancelAndReclose(IntegrationBase):
         rc.event_fee = "300"
         for u in USERS[:3]:
             await self.vote_in(u)
-        await self.dues_close_game(self.msg("/close_game"))
+        await self.dues_settle_dues(self.msg("/settle_dues"))
 
         # Each of 3 users owes ₹100
         uid = USERS[0]["id"]
@@ -516,7 +516,7 @@ class TestCancelAndReclose(IntegrationBase):
         rc.event_fee = "300"
         for u in USERS[:3]:
             await self.vote_in(u)
-        await self.dues_close_game(self.msg("/close_game"))
+        await self.dues_settle_dues(self.msg("/settle_dues"))
 
         entries_before = db.get_dues_entries(CHAT_ID, limit=100)
         share_count = sum(1 for e in entries_before if e["entry_type"] == "share")
@@ -543,7 +543,7 @@ class TestCancelAndReclose(IntegrationBase):
         rc.event_fee = "300"
         for u in USERS[:3]:
             await self.vote_in(u)
-        await self.dues_close_game(self.msg("/close_game"))
+        await self.dues_settle_dues(self.msg("/settle_dues"))
 
         first_closure = db.get_nth_game_closure(CHAT_ID, 0)
         self.assertIsNotNone(first_closure)
@@ -556,7 +556,7 @@ class TestCancelAndReclose(IntegrationBase):
                           "Closure should be deleted by cancel so rollcall can be re-closed")
 
         get_mock_bot().send_message.reset_mock()
-        await self.dues_close_game(self.msg("/close_game"))
+        await self.dues_settle_dues(self.msg("/settle_dues"))
 
         texts = self.sent_texts()
         ann = next((t for t in texts if "₹" in t), None)
@@ -581,3 +581,103 @@ class TestCancelAndReclose(IntegrationBase):
                 for t in texts),
             f"Should get 'no closed game' error; got: {texts}",
         )
+
+
+# ── /settle_dues — multi-game picker ─────────────────────────────────────────
+
+class TestSettleDuesPicker(IntegrationBase):
+    """
+    /settle_dues (the renamed /close_game — the old /close_game and /cg command
+    triggers no longer exist at all)
+    must reach every unsettled game, not just the latest — regression coverage
+    for db.get_latest_closeable_rollcall's old LIMIT-1 blind spot.
+    """
+
+    async def _end_unsettled_game(self, title, fee="300", n_in=3):
+        """Start, fee, populate, and /erc a rollcall — leaving it ended but
+        not financially closed."""
+        await self.start_rc(title)
+        await self.event_fee(self.msg(f"/ef {fee}", ADMIN_USER))
+        for u in USERS[:n_in]:
+            await self.vote_in(u)
+        await self.end_roll_call(self.msg("/erc", ADMIN_USER))
+
+    async def test_single_unsettled_game_closes_directly_no_picker(self):
+        _enable_dues()
+        await self._end_unsettled_game("Only Game")
+        get_mock_bot().send_message.reset_mock()
+
+        await self.dues_settle_dues(self.msg("/settle_dues", ADMIN_USER))
+
+        texts = self.sent_texts()
+        self.assertTrue(any("game closed" in t.lower() for t in texts), texts)
+        self.assertIsNotNone(db.get_nth_game_closure(CHAT_ID, 0))
+
+    async def test_multiple_unsettled_games_shows_picker_not_latest_only(self):
+        _enable_dues()
+        await self._end_unsettled_game("Older Game")
+        await self._end_unsettled_game("Newer Game")
+        get_mock_bot().send_message.reset_mock()
+
+        await self.dues_settle_dues(self.msg("/settle_dues", ADMIN_USER))
+
+        texts = self.sent_texts()
+        self.assertTrue(any("2 games waiting" in t for t in texts), texts)
+        # Neither game should have been closed yet — this is just the picker.
+        self.assertIsNone(db.get_nth_game_closure(CHAT_ID, 0))
+        # The picker keyboard must offer both games.
+        bot = get_mock_bot()
+        _, kwargs = bot.send_message.call_args_list[-1]
+        markup = kwargs.get("reply_markup")
+        labels = [btn.text for btn in markup.keyboard]
+        self.assertTrue(any("Older Game" in l for l in labels), labels)
+        self.assertTrue(any("Newer Game" in l for l in labels), labels)
+
+    async def test_picker_settles_the_specific_game_tapped(self):
+        _enable_dues()
+        await self._end_unsettled_game("Older Game", fee="200", n_in=2)
+        await self._end_unsettled_game("Newer Game", fee="300", n_in=3)
+        unsettled = db.get_unsettled_rollcalls(CHAT_ID)
+        older = next(g for g in unsettled if g["title"] == "Older Game")
+        newer = next(g for g in unsettled if g["title"] == "Newer Game")
+
+        get_mock_bot().send_message.reset_mock()
+        await self.dues_settle_pick_callback(self.call(f"settle_pick:{older['id']}", ADMIN_USER))
+
+        # The OLDER game got closed, the newer one is still open.
+        closure = db.get_game_closure(older["id"])
+        self.assertIsNotNone(closure)
+        self.assertIsNone(db.get_game_closure(newer["id"]))
+
+        texts = self.sent_texts()
+        self.assertTrue(any("Older Game" in t and "₹" in t for t in texts), texts)
+
+    async def test_picker_rejects_non_admin(self):
+        _enable_dues()
+        await self._end_unsettled_game("Older Game")
+        await self._end_unsettled_game("Newer Game")
+        unsettled = db.get_unsettled_rollcalls(CHAT_ID)
+        target = unsettled[0]
+
+        self.mgr.set_admin_rights(CHAT_ID, True)
+        get_mock_bot().get_chat_member.return_value.status = "member"
+        try:
+            await self.dues_settle_pick_callback(self.call(f"settle_pick:{target['id']}", USERS[0]))
+        finally:
+            get_mock_bot().get_chat_member.return_value.status = "administrator"
+            self.mgr.set_admin_rights(CHAT_ID, False)
+
+        self.assertIsNone(db.get_game_closure(target["id"]))
+
+    async def test_settling_one_reports_remaining_unsettled_count(self):
+        _enable_dues()
+        await self._end_unsettled_game("Older Game")
+        await self._end_unsettled_game("Newer Game")
+        unsettled = db.get_unsettled_rollcalls(CHAT_ID)
+        target = unsettled[0]
+
+        get_mock_bot().send_message.reset_mock()
+        await self.dues_settle_pick_callback(self.call(f"settle_pick:{target['id']}", ADMIN_USER))
+
+        texts = self.sent_texts()
+        self.assertTrue(any("1 more unsettled game" in t for t in texts), texts)

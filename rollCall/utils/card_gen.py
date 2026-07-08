@@ -330,7 +330,7 @@ def close_receipt_card(
     fund_balance: int,
     balances: List[dict],
 ) -> BytesIO:
-    """Generate a receipt card after /close_game.
+    """Generate a receipt card after /settle_dues.
 
     balances is a list of {member_name, balance} dicts (positive = owes,
     negative = credit). Sorted by balance descending.

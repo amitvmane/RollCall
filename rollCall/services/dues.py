@@ -278,12 +278,18 @@ async def close_game(
     admin_uid: int,
     admin_name: str,
     rc_number: int = 0,
+    target_rollcall_id: int | None = None,
 ) -> dict:
-    """Financially close the most recent game for a chat.
+    """Financially close a game for a chat.
 
-    Two modes:
-    - Active rollcall present: ends it first (streak/stats preserved), then closes.
-    - No active rollcall: closes the latest ended-but-not-closed rollcall from DB.
+    Three modes:
+    - target_rollcall_id given: close that specific ended-but-unsettled game
+      directly (used by /settle_dues's picker, for reaching a game other than
+      the latest one).
+    - target_rollcall_id not given, active rollcall present: ends it first
+      (streak/stats preserved), then closes.
+    - target_rollcall_id not given, no active rollcall: closes the latest
+      ended-but-not-closed rollcall from DB (back-compat default).
 
     Returns a dict with: rollcall_id, title, ground_cost, subsidy, per_head,
     remainder, in_count, members (list), fund_balance_after, announcement.
@@ -298,7 +304,7 @@ async def close_game(
     step = settings["dues_round_step"]
 
     # ── Resolve rollcall and IN list ─────────────────────────────────────────
-    active_rollcalls = manager.get_rollcalls(chat_id)
+    active_rollcalls = [] if target_rollcall_id is not None else manager.get_rollcalls(chat_id)
     rc_db_id: int | None = None
     title: str = ""
     ground_cost: int = 0
@@ -310,7 +316,19 @@ async def close_game(
 
     _active_rc_idx: int | None = None  # set when an active RC needs ending post-validation
 
-    if active_rollcalls:
+    if target_rollcall_id is not None:
+        row = db.get_rollcall(target_rollcall_id)
+        if row is None or row.get("chat_id") != chat_id:
+            raise duesNothingToClose("That game was not found for this group.")
+        rc_db_id = row["id"]
+        title = row.get("title") or "<Empty>"
+        ground_cost = _parse_ground_cost(row.get("event_fee"))
+        collector_uid = row.get("collector_uid")
+        collector_name = row.get("collector_name")
+        collector_paid_ground = row.get("collector_paid_ground") or 0
+        collector_upi = row.get("collector_upi")
+        in_members = _in_list_from_db(rc_db_id)
+    elif active_rollcalls:
         # Raise early if the requested rollcall slot doesn't exist (fix: was silently
         # falling back to idx=0 and closing the wrong game).
         if rc_number >= len(active_rollcalls):
@@ -360,7 +378,7 @@ async def close_game(
     if ground_cost <= 0:
         raise parameterMissing(
             "Ground cost is not set or couldn't be read from the event fee. "
-            "Run /ef <amount> on the rollcall before /close_game."
+            "Run /ef <amount> on the rollcall before /settle_dues."
         )
 
     fund_balance = db.get_fund_balance(chat_id)
@@ -499,6 +517,7 @@ async def close_game(
         "fund_balance_after": fund_balance_after,
         "end_result": end_result,
         "announcement": announcement,
+        "upi_vpa": game_upi,
     }
 
 
@@ -695,6 +714,16 @@ def remove_penalty_tier(
         )
     db.log_admin_action(chat_id, admin_uid, admin_name, "remove_penalty_tier", details=name)
     return {"name": name, "announcement": f"🗑 Penalty tier *{name}* removed."}
+
+
+def list_unsettled_games(chat_id: int) -> dict:
+    """All ended-but-not-financially-closed games for a chat, newest first.
+
+    Used by /settle_dues to show a picker instead of only ever reaching the
+    single latest one (db.get_latest_closeable_rollcall's old LIMIT-1 blind
+    spot for older missed games)."""
+    games = db.get_unsettled_rollcalls(chat_id)
+    return {"games": games}
 
 
 def list_penalty_tiers(chat_id: int) -> dict:
@@ -1072,7 +1101,7 @@ def add_adhoc(
     """
     closure = db.get_latest_game_closure(chat_id)
     if closure is None:
-        raise duesNothingToClose("No closed game found. Close a game first with /close_game.")
+        raise duesNothingToClose("No closed game found. Close a game first with /settle_dues.")
 
     all_names = [r["member_name"] for r in db.get_all_dues_balances(chat_id, nonzero_only=False)]
     member = _resolve_member(chat_id, token, dues_names=all_names)
@@ -1117,7 +1146,7 @@ def cancel_game_credit(
     if closure is None:
         raise incorrectParameter(
             f"No game closure found for rollcall id={rollcall_id}. "
-            "Use /close_game first, or check the rollcall id."
+            "Use /settle_dues first, or check the rollcall id."
         )
 
     entries = db.get_dues_entries_for_rollcall(rollcall_id)
@@ -1165,7 +1194,7 @@ def cancel_game_credit(
             f"🔁 Cancelled dues for '{closure['title']}': "
             f"{reversed_count} share entries reversed. "
             f"Payments already recorded remain as credits.\n"
-            f"Run /ef <amount> then /close_game to re-close with corrected figures."
+            f"Run /ef <amount> then /settle_dues to re-close with corrected figures."
         ),
     }
 

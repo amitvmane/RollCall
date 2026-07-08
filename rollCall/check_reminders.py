@@ -3,14 +3,12 @@ import logging
 from datetime import datetime, timedelta
 
 import pytz
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot_state import bot
 from db import (
-    end_rollcall, update_streak_on_checkin, reset_user_streak, get_all_scheduled_templates,
-    update_template_last_scheduled_date, get_all_chat_ids, increment_user_stat,
+    get_all_scheduled_templates,
+    update_template_last_scheduled_date, get_all_chat_ids,
     clear_rollcall_reminder,
-    update_proxy_streak_on_checkin, reset_proxy_streak,
     update_chat_group_name,
     get_pending_scheduled_rollcalls, mark_scheduled_rollcall_fired,
 )
@@ -231,88 +229,34 @@ async def check(rollcalls, timezone, chat_id):
                                 finish_text = rollcall.finishList().replace('__RCID__', str(rc_number))
                                 finish_text = f"{finish_text}\n\n🕐 Auto-closed at scheduled time"
 
-                            # Snapshot user lists before clearing state.
-                            in_members_snapshot = [
-                                (u.user_id if isinstance(u.user_id, int) else None, u.name)
-                                for u in rollcall.inList
-                            ]
-                            in_user_ids = {u.user_id for u in rollcall.inList if isinstance(u.user_id, int)}
-                            participants = set(
-                                u.user_id for u in (rollcall.inList + rollcall.outList + rollcall.maybeList + rollcall.waitList)
-                                if isinstance(u.user_id, int)
-                            )
-                            proxy_in_names = {
-                                u.name for u in rollcall.inList
-                                if not isinstance(u.user_id, int)
-                            }
-                            proxy_participants = {
-                                u.name for u in (rollcall.inList + rollcall.outList + rollcall.maybeList + rollcall.waitList)
-                                if not isinstance(u.user_id, int)
-                            }
+                            # Non-destructive lookup — the pop+renumber of _panel_msg_ids is
+                            # done by _post_end_cleanup below (same as /erc). We only need the
+                            # id here to strip the vote-button keyboard immediately.
+                            panel_msg_id = None
+                            try:
+                                from bot_state import _panel_msg_ids
+                                panel_msg_id = _panel_msg_ids.get((chat_id, rc_number))
+                            except Exception:
+                                pass
 
-                            # ── Commit DB close and in-memory teardown FIRST ──────────────
-                            # If the Telegram send below fails (network outage, timeout),
-                            # the rollcall is already properly ended — next check won't retry.
-                            if rc_db_id is not None:
-                                end_rollcall(rc_db_id)
+                            # ── Commit DB close and in-memory teardown FIRST, via the same
+                            # service /erc uses — streaks, stats, badges, and panel-id
+                            # renumber are no longer reimplemented here. If the Telegram
+                            # sends below fail (network outage, timeout), the rollcall is
+                            # already properly ended — next check won't retry.
+                            # ended_by_user_id=0 is a sentinel for "the scheduler, not a
+                            # human admin" — log_admin_action stores it as a plain int column,
+                            # no FK to violate.
+                            from services import rollcalls as rollcalls_svc
+                            result = await rollcalls_svc.end_rollcall(
+                                chat_id, rc_number - 1,
+                                ended_by_user_id=0, ended_by_name="Scheduler", ended_by_username=None,
+                            )
 
                             if rollcall in rollcalls:
                                 rollcalls.remove(rollcall)
 
-                            # Remove inline keyboard from the panel message so
-                            # vote buttons disappear immediately in Telegram.
-                            panel_msg_id = None
-                            try:
-                                from bot_state import _panel_msg_ids
-                                panel_msg_id = _panel_msg_ids.pop((chat_id, rc_number), None)
-                                for num in sorted(n for (c, n) in list(_panel_msg_ids) if c == chat_id and n > rc_number):
-                                    _panel_msg_ids[(chat_id, num - 1)] = _panel_msg_ids.pop((chat_id, num))
-                            except Exception:
-                                pass
-
                             rollcall.finalizeDate = None
-
-                            # ── Update attendance streaks ─────────────────────────────────
-                            for uid in in_user_ids:
-                                try:
-                                    update_streak_on_checkin(chat_id, uid)
-                                except Exception:
-                                    logging.exception(f"Failed to update streak for user {uid} in chat {chat_id}")
-
-                            # Reset streak for participants who voted OUT/MAYBE (didn't end up IN).
-                            for uid in participants - in_user_ids:
-                                try:
-                                    reset_user_streak(chat_id, uid)
-                                except Exception:
-                                    logging.exception(f"Failed to reset streak for user {uid} in chat {chat_id}")
-                            for uid in participants:
-                                try:
-                                    increment_user_stat(chat_id, uid, "total_rollcalls")
-                                except Exception:
-                                    logging.warning(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to increment total_rollcalls for user {uid}")
-
-                            # Proxy streaks
-                            for name in proxy_in_names:
-                                try:
-                                    update_proxy_streak_on_checkin(chat_id, name)
-                                except Exception:
-                                    logging.exception(f"Failed to update proxy streak for {name} in chat {chat_id}")
-                            for name in proxy_participants - proxy_in_names:
-                                try:
-                                    reset_proxy_streak(chat_id, name)
-                                except Exception:
-                                    logging.exception(f"Failed to reset proxy streak for {name} in chat {chat_id}")
-
-                            # Achievement badges — after streaks + DB end commit;
-                            # celebratory, so they respect shh mode.
-                            if not manager.get_shh_mode(chat_id):
-                                try:
-                                    from services.badges import collect_badges
-                                    badge_lines = collect_badges(chat_id, in_members_snapshot)
-                                    if badge_lines:
-                                        await bot.send_message(chat_id, "🎉 Milestones!\n" + "\n".join(badge_lines))
-                                except Exception:
-                                    logging.exception("Failed to announce badges after auto-close")
 
                             # ── Telegram messages are best-effort after DB is committed ───
                             # Remove vote buttons from the existing panel message.
@@ -331,22 +275,12 @@ async def check(rollcalls, timezone, chat_id):
                                         "(rollcall is ended in DB — message will not be retried)"
                                     )
 
-                            # Fire ghost prompt if tracking is enabled and rollcall had IN users
-                            if rc_db_id is not None:
-                                try:
-                                    from db import get_rollcall_in_users
-                                    ghost_tracking_on = manager.get_ghost_tracking_enabled(chat_id)
-                                    has_users = bool(get_rollcall_in_users(rc_db_id))
-                                    absent_already = getattr(rollcall, "absent_marked", False)
-                                    if ghost_tracking_on and has_users and not absent_already:
-                                        markup = InlineKeyboardMarkup(row_width=2)
-                                        markup.add(
-                                            InlineKeyboardButton("👻 Yes, select ghosts", callback_data=f"ghost_yes_{rc_db_id}"),
-                                            InlineKeyboardButton("✅ No, all showed up", callback_data=f"ghost_no_{rc_db_id}"),
-                                        )
-                                        await bot.send_message(chat_id, f"👻 Did anyone ghost '{rollcall.title}'?", reply_markup=markup)
-                                except Exception:
-                                    logging.exception("Error sending ghost prompt after auto-close")
+                            # Badges, dues-aware penalty panel / classic ghost prompt, and
+                            # renumbered-rollcall announcements — same path /erc uses, so a
+                            # dues-enabled group gets the settlement panel here too instead
+                            # of the old ghost-only prompt it used to silently miss.
+                            from handlers.lifecycle import _post_end_cleanup
+                            await _post_end_cleanup(chat_id, rc_number, result, rc_title=rollcall.title)
 
                         continue
 

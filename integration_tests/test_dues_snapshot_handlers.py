@@ -59,7 +59,7 @@ class TestDuesSnapshotHandler(IntegrationBase):
         rc.event_fee = "300"
         for u in USERS[:3]:
             await self.vote_in(u)
-        await self.dues_close_game(self.msg("/close_game"))
+        await self.dues_settle_dues(self.msg("/settle_dues"))
         get_mock_bot().send_message.reset_mock()
 
         await self.dues_snapshot_cmd(self.msg("/dues_snapshot"))

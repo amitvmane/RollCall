@@ -418,7 +418,7 @@ class TestDuesScenario:
           • Fund reversal: rounding(+40) + subsidy(−40) + adhoc adj(+40) = +40
             → cancel writes −40 → fund_reversal = −40.
 
-        Re-close via /ef + /close_game on the SAME rollcall (not a fresh insert):
+        Re-close via /ef + /settle_dues on the SAME rollcall (not a fresh insert):
           Corrected cost ₹600 (was ₹640), no subsidy, same 16 players.
           net=600, step=10 → raw=38 → per_head=40, remainder=40.
           (Same per_head coincidentally; different ground cost & remainder.)
@@ -449,7 +449,7 @@ class TestDuesScenario:
         assert _fund() == fund_before_cancel + cancel_result["fund_reversal"]
 
         # The rollcall is now closeable again — simulate /ef (corrected cost)
-        # then /close_game on the SAME rollcall row (no fresh insert needed).
+        # then /settle_dues on the SAME rollcall row (no fresh insert needed).
         db.update_rollcall(w3_rc_id, event_fee="600")
         reclose_result = _close(subsidy=0)
 

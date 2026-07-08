@@ -44,7 +44,7 @@ def _build_panel_text(rc, rc_number: int) -> str:
 async def _post_end_cleanup(cid: int, ended_number: int, result: dict, rc_title: str = "") -> None:
     """Panel-ID cleanup, ghost prompt, and renumber announcements after a rollcall ends.
 
-    Called by /erc and /close_game (whenever close_game ends an active rollcall).
+    Called by /erc and /settle_dues (whenever /settle_dues ends an active rollcall).
     `ended_number` is 1-based. `result` is the dict from rollcalls_svc.end_rollcall.
     """
     _panel_msg_ids.pop((cid, ended_number), None)
@@ -278,7 +278,7 @@ async def start_roll_call(message):
         if chat_row.get("dues_enabled") and not manager.get_shh_mode(cid):
             await bot.send_message(
                 cid,
-                "💰 *Dues active* — set the ground cost now so it's ready for /close_game:\n"
+                "💰 *Dues active* — set the ground cost now so it's ready for `/settle_dues`:\n"
                 "`/ef <amount>`  e.g. `/ef 600`",
                 parse_mode="Markdown",
             )
@@ -431,10 +431,10 @@ async def cancel_roll_call(message):
                 reason=reason,
             )
 
-            reason_part = f" — {reason}" if reason else ""
+            reason_part = f" — {_esc_md(reason)}" if reason else ""
             await bot.send_message(
                 cid,
-                f"❌ *{rc.title}* has been cancelled by {cancelled_by}{reason_part}.\n"
+                f"❌ *{_esc_md(rc.title)}* has been cancelled by {_esc_md(cancelled_by)}{reason_part}.\n"
                 "No attendance was recorded.",
                 parse_mode="Markdown",
             )

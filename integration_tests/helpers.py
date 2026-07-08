@@ -37,7 +37,8 @@ def _import_all():
     )
     from handlers.stats import stats_command
     from handlers.dues import (
-        close_game as dues_close_game,
+        settle_dues as dues_settle_dues,
+        settle_pick_callback as dues_settle_pick_callback,
         mark_penalty as dues_mark_penalty,
         waive as dues_waive,
         set_collector as dues_set_collector,
@@ -166,7 +167,8 @@ class IntegrationBase(unittest.IsolatedAsyncioTestCase):
         cls.audit_pagination_callback = staticmethod(h["audit_pagination_callback"])
         cls.schedule_template_cmd = staticmethod(h["schedule_template_cmd"])
         cls.schedules_toggle_callback = staticmethod(h["schedules_toggle_callback"])
-        cls.dues_close_game = staticmethod(h["dues_close_game"])
+        cls.dues_settle_dues = staticmethod(h["dues_settle_dues"])
+        cls.dues_settle_pick_callback = staticmethod(h["dues_settle_pick_callback"])
         cls.dues_mark_penalty = staticmethod(h["dues_mark_penalty"])
         cls.dues_waive = staticmethod(h["dues_waive"])
         cls.dues_set_collector = staticmethod(h["dues_set_collector"])

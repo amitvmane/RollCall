@@ -65,9 +65,9 @@ class TestDuesHandlers(unittest.IsolatedAsyncioTestCase):
     # ── admin guard ───────────────────────────────────────────────────────────
 
     async def test_close_game_admin_denied(self):
-        from handlers.dues import close_game
+        from handlers.dues import settle_dues
         with _admin_denied(), patch("handlers.dues.manager", self.mgr):
-            await close_game(_msg("/cg"))
+            await settle_dues(_msg("/settle_dues"))
         text = self._sent_text()
         self.assertIn("Admin", text)
 
@@ -111,7 +111,7 @@ class TestDuesHandlers(unittest.IsolatedAsyncioTestCase):
     # ── happy-path calls ──────────────────────────────────────────────────────
 
     async def test_close_game_calls_service_and_posts(self):
-        from handlers.dues import close_game
+        from handlers.dues import settle_dues
         svc_result = {
             "announcement": "📊 Game closed: Sunday",
             "end_result": None,
@@ -121,11 +121,11 @@ class TestDuesHandlers(unittest.IsolatedAsyncioTestCase):
              patch("handlers.dues.manager", self.mgr), \
              patch("handlers.dues.dues_svc.close_game", new=AsyncMock(return_value=svc_result)), \
              _patch_post_end():
-            await close_game(_msg("/cg"))
+            await settle_dues(_msg("/settle_dues"))
         self.assertIn("Game closed", self._sent_text())
 
     async def test_close_game_with_subsidy_arg(self):
-        from handlers.dues import close_game
+        from handlers.dues import settle_dues
         svc_mock = AsyncMock(return_value={
             "announcement": "📊 Game closed",
             "end_result": None,
@@ -135,12 +135,12 @@ class TestDuesHandlers(unittest.IsolatedAsyncioTestCase):
              patch("handlers.dues.manager", self.mgr), \
              patch("handlers.dues.dues_svc.close_game", new=svc_mock), \
              _patch_post_end():
-            await close_game(_msg("/cg 60"))
+            await settle_dues(_msg("/settle_dues 60"))
         call_kwargs = svc_mock.call_args
         self.assertEqual(call_kwargs.kwargs.get("subsidy") or call_kwargs.args[1], 60)
 
     async def test_close_game_with_rc_suffix(self):
-        from handlers.dues import close_game
+        from handlers.dues import settle_dues
         svc_mock = AsyncMock(return_value={
             "announcement": "📊 Game closed",
             "end_result": None,
@@ -150,7 +150,7 @@ class TestDuesHandlers(unittest.IsolatedAsyncioTestCase):
              patch("handlers.dues.manager", self.mgr), \
              patch("handlers.dues.dues_svc.close_game", new=svc_mock), \
              _patch_post_end():
-            await close_game(_msg("/cg ::2"))
+            await settle_dues(_msg("/settle_dues ::2"))
         call_args = svc_mock.call_args
         rc_number = call_args.kwargs.get("rc_number", call_args.args[4] if len(call_args.args) > 4 else 0)
         self.assertEqual(rc_number, 1)   # ::2 → 0-based index 1
@@ -270,16 +270,16 @@ class TestDuesHandlers(unittest.IsolatedAsyncioTestCase):
     # ── ::N suffix parsing ────────────────────────────────────────────────────
 
     async def test_invalid_rc_suffix_raises_error(self):
-        from handlers.dues import close_game
+        from handlers.dues import settle_dues
         with _admin_ok(), patch("handlers.dues.manager", self.mgr):
-            await close_game(_msg("/cg ::abc"))
+            await settle_dues(_msg("/settle_dues ::abc"))
         text = self._sent_text()
         self.assertIn("integer", text.lower())
 
     async def test_zero_rc_suffix_raises_error(self):
-        from handlers.dues import close_game
+        from handlers.dues import settle_dues
         with _admin_ok(), patch("handlers.dues.manager", self.mgr):
-            await close_game(_msg("/cg ::0"))
+            await settle_dues(_msg("/settle_dues ::0"))
         text = self._sent_text()
         self.assertIn("integer", text.lower())
 
@@ -298,7 +298,7 @@ class TestDuesHandlers(unittest.IsolatedAsyncioTestCase):
     # ── close_game calls _post_end_cleanup when end_result present ────────────
 
     async def test_close_game_calls_post_end_cleanup_when_rc_ended(self):
-        from handlers.dues import close_game
+        from handlers.dues import settle_dues
         end_res = {
             "ended": {}, "rc_number_ended_1based": 1, "ghost_eligible": False,
             "ghost_rc_db_id": None, "ended_by": {}, "remaining": [], "renumbered": [],
@@ -313,7 +313,7 @@ class TestDuesHandlers(unittest.IsolatedAsyncioTestCase):
              patch("handlers.dues.manager", self.mgr), \
              patch("handlers.dues.dues_svc.close_game", new=AsyncMock(return_value=svc_result)), \
              patch("handlers.dues._post_end_cleanup", cleanup_mock):
-            await close_game(_msg("/cg"))
+            await settle_dues(_msg("/settle_dues"))
         cleanup_mock.assert_called_once()
 
 

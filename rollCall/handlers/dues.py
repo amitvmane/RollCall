@@ -2,7 +2,7 @@
 Dues & Treasury handlers.
 
 Commands (all admin-only unless noted):
-  /close_game /cg [subsidy] [::N]
+  /settle_dues [subsidy] [::N]
   /mark_penalty tier_name player_name
   /waive name amount [reason]
   /set_collector name [paid] [::N]
@@ -31,7 +31,7 @@ import logging
 from datetime import datetime
 
 import db as _db
-from bot_state import bot, reply_error, _log_task_exc, send_md_fallback, _esc_md
+from bot_state import bot, reply_error, _log_task_exc, send_md_fallback, _esc_md, safe_edit_markup
 from exceptions import (
     duesGameAlreadyClosed, duesNothingToClose,
     incorrectParameter, insufficientPermissions, parameterMissing,
@@ -75,17 +75,83 @@ def _parse_rc_suffix(args: list[str]) -> tuple[int, list[str]]:
     return 0, args
 
 
-# ── /close_game (/cg) ────────────────────────────────────────────────────────
+# ── /settle_dues ─────────────────────────────────────────────────────────────
 
-@bot.message_handler(func=lambda m: _cmd(m.text) == "/close_game")
-@bot.message_handler(func=lambda m: _cmd(m.text) == "/cg")
-async def close_game(message):
+def _fmt_unsettled_label(game: dict) -> str:
+    title = game.get("title") or f"game #{game['id']}"
+    ended = str(game.get("ended_at") or "")[:10]
+    label = f"📋 {title}" + (f" — {ended}" if ended else "")
+    return label[:64]
+
+
+async def _send_unsettled_picker(cid: int, games: list, intro: str) -> None:
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    markup = InlineKeyboardMarkup(row_width=1)
+    for g in games:
+        markup.add(InlineKeyboardButton(_fmt_unsettled_label(g), callback_data=f"settle_pick:{g['id']}"))
+    await bot.send_message(cid, intro, reply_markup=markup)
+
+
+async def _finish_settle_dues(cid: int, result: dict, rc_idx_fallback: int = 0) -> None:
+    """Shared post-settle side effects: announcement, QR, receipt, post-end
+    cleanup, and a nudge listing any games still unsettled. Used by both the
+    direct /settle_dues path and the picker callback."""
+    # Always post announcement — financial record
+    await send_md_fallback(cid, result["announcement"])
+
+    # QR code + VPA (non-blocking best-effort). Prefer the per-game collector
+    # UPI (already resolved by dues_svc.close_game — same source as the
+    # announcement text) over the group fallback, so the QR always matches
+    # what was posted.
+    upi = result.get("upi_vpa")
+    if upi:
+        asyncio.create_task(_send_close_qr(cid, upi, result["per_head"])).add_done_callback(_log_task_exc)
+
+    # Receipt card (non-blocking best-effort)
+    asyncio.create_task(_send_close_receipt(cid, result)).add_done_callback(_log_task_exc)
+
+    # If an active rollcall was ended, run the standard post-end cleanup
+    end_res = result.get("end_result")
+    if end_res:
+        await _post_end_cleanup(
+            cid,
+            end_res.get("rc_number_ended_1based", rc_idx_fallback + 1),
+            end_res,
+            rc_title=result.get("title", ""),
+        )
+
+    # Surface any other unsettled games so admins don't have to remember them.
+    remaining = dues_svc.list_unsettled_games(cid)["games"]
+    if remaining:
+        n = len(remaining)
+        await send_md_fallback(
+            cid,
+            f"💰 {n} more unsettled game{'s' if n != 1 else ''} — `/settle_dues` to continue.",
+        )
+
+
+@bot.message_handler(func=lambda m: _cmd(m.text) == "/settle_dues")
+async def settle_dues(message):
     try:
         if await admin_rights(message, manager) is False:
-            raise insufficientPermissions("Admin only: /close_game")
+            raise insufficientPermissions("Admin only: /settle_dues")
         cid = message.chat.id
         _require_dues_enabled(cid)
         args = _parse_args(message.text)
+
+        # No args and nothing active: if more than one game is waiting to be
+        # settled, show a picker instead of silently closing only the latest
+        # (kept as a direct close when there's exactly one, or an active
+        # rollcall to close directly, or explicit subsidy/::N args).
+        if not args and not manager.get_rollcalls(cid):
+            unsettled = dues_svc.list_unsettled_games(cid)["games"]
+            if len(unsettled) > 1:
+                await _send_unsettled_picker(
+                    cid, unsettled,
+                    f"💰 {len(unsettled)} games waiting to be settled — pick one:",
+                )
+                return
+
         rc_idx, args = _parse_rc_suffix(args)
 
         subsidy = 0
@@ -93,7 +159,7 @@ async def close_game(message):
             try:
                 subsidy = int(args[0])
             except ValueError:
-                raise incorrectParameter("Subsidy must be a whole number (₹). Example: /close_game 60")
+                raise incorrectParameter("Subsidy must be a whole number (₹). Example: /settle_dues 60")
 
         async with manager.get_chat_write_lock(cid):
             result = await dues_svc.close_game(
@@ -103,28 +169,40 @@ async def close_game(message):
                 rc_number=rc_idx,
             )
 
-        # Always post announcement — financial record
-        await send_md_fallback(cid, result["announcement"])
-
-        # QR code + VPA (non-blocking best-effort)
-        upi = dues_svc.get_dues_settings(cid).get("upi_vpa")
-        if upi:
-            asyncio.create_task(_send_close_qr(cid, upi, result["per_head"])).add_done_callback(_log_task_exc)
-
-        # Receipt card (non-blocking best-effort)
-        asyncio.create_task(_send_close_receipt(cid, result)).add_done_callback(_log_task_exc)
-
-        # If an active rollcall was ended, run the standard post-end cleanup
-        end_res = result.get("end_result")
-        if end_res:
-            await _post_end_cleanup(
-                cid,
-                end_res.get("rc_number_ended_1based", rc_idx + 1),
-                end_res,
-                rc_title=result.get("title", ""),
-            )
+        await _finish_settle_dues(cid, result, rc_idx_fallback=rc_idx)
     except Exception as e:
         await reply_error(message, e)
+
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("settle_pick:"))
+async def settle_pick_callback(call):
+    try:
+        cid = call.message.chat.id
+        # Financial write — same admin gate as the penalty panel / collector picker.
+        if manager.get_admin_rights(cid):
+            member = await bot.get_chat_member(cid, call.from_user.id)
+            if member.status not in ("administrator", "creator"):
+                await bot.answer_callback_query(
+                    call.id, "⛔ Only admins can settle dues", show_alert=True
+                )
+                return
+
+        target_id = int(call.data.split(":", 1)[1])
+        await bot.answer_callback_query(call.id, "Settling…")
+        await safe_edit_markup(cid, call.message.message_id, reply_markup=None)
+
+        async with manager.get_chat_write_lock(cid):
+            result = await dues_svc.close_game(
+                cid, subsidy=0,
+                admin_uid=call.from_user.id,
+                admin_name=call.from_user.first_name or call.from_user.username or "Admin",
+                target_rollcall_id=target_id,
+            )
+
+        await _finish_settle_dues(cid, result)
+    except Exception as exc:
+        logging.exception("settle_pick_callback error")
+        await reply_error(call.message, exc)
 
 
 # ── /mark_penalty ────────────────────────────────────────────────────────────
@@ -333,7 +411,7 @@ async def pick_collector_callback(call):
 
 @bot.message_handler(func=lambda m: _cmd(m.text) == "/rotate_collector")
 async def rotate_collector(message):
-    """Toggle round-robin collector auto-assignment at /close_game."""
+    """Toggle round-robin collector auto-assignment at /settle_dues."""
     try:
         if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Admin only: /rotate_collector")
@@ -347,7 +425,7 @@ async def rotate_collector(message):
                 cid,
                 f"🔄 Collector rotation is {'ON' if on else 'OFF'}.\n"
                 "Usage: /rotate_collector on · /rotate_collector off\n"
-                "When on: if no collector was set before /close_game, the next "
+                "When on: if no collector was set before /settle_dues, the next "
                 "IN member (round-robin) is assigned automatically. "
                 "/set_collector or /pick_collector always override the rotation.",
             )
@@ -358,7 +436,7 @@ async def rotate_collector(message):
             _db.update_chat_settings(cid, collector_rotation=1)
             await bot.send_message(
                 cid,
-                "🔄 Collector rotation ON — each /close_game without a staged "
+                "🔄 Collector rotation ON — each /settle_dues without a staged "
                 "collector auto-assigns the next IN member in turn.",
             )
         elif arg in ("off", "false", "0", "disable"):
@@ -476,7 +554,7 @@ async def cancel_game_dues(message):
         n_idx, _ = _parse_rc_suffix(args)
 
         async with manager.get_chat_write_lock(cid):
-            # Fetch the target closure inside the lock so a concurrent /close_game
+            # Fetch the target closure inside the lock so a concurrent /settle_dues
             # cannot shift ordering between fetch and reversal.
             closure = _db.get_nth_game_closure(cid, n_idx)
             if closure is None:
@@ -937,15 +1015,15 @@ async def enable_dues(message):
         await bot.send_message(
             cid,
             "✅ *Dues & Treasury enabled* for this group.\n\n"
-            "Default penalty tiers seeded (edit with /add_penalty / /remove_penalty):\n"
+            "Default penalty tiers seeded (edit with `/add_penalty` / `/remove_penalty`):\n"
             "• *late\\_short* ₹50 — under 15 min late\n"
             "• *late\\_long* ₹100 — 15+ min late\n"
             "• *ditch* ₹200 — no-show / absent\n\n"
             "Other setup commands:\n"
-            "• /set_upi `vpa@bank` — fallback UPI for game fees\n"
-            "• /set_treasury_upi `vpa@bank` — UPI for penalties/fund (can differ per game)\n"
-            "• /set_round_step `step` — per-head rounding (default: ₹10)\n\n"
-            "Use /close_game after a game to split the ground fee.",
+            "• `/set_upi vpa@bank` — fallback UPI for game fees\n"
+            "• `/set_treasury_upi vpa@bank` — UPI for penalties/fund (can differ per game)\n"
+            "• `/set_round_step step` — per-head rounding (default: ₹10)\n\n"
+            "Use `/settle_dues` after a game to split the ground fee.",
             parse_mode="Markdown",
         )
     except Exception as e:
@@ -1002,7 +1080,7 @@ async def disable_dues(message):
         await bot.send_message(
             cid,
             "⛔ *Dues & Treasury disabled* for this group.\n"
-            "Existing ledger data is preserved. Re-enable with /enable_dues.",
+            "Existing ledger data is preserved. Re-enable with `/enable_dues`.",
             parse_mode="Markdown",
         )
     except Exception as e:
@@ -1136,7 +1214,7 @@ async def dues_report(message):
 # ── Background helpers ────────────────────────────────────────────────────────
 
 async def _send_close_qr(cid: int, upi: str, per_head: int) -> None:
-    """Send QR code + VPA text for the per-head amount after close_game."""
+    """Send QR code + VPA text for the per-head amount after /settle_dues."""
     try:
         from utils.card_gen import qr_png
         buf     = qr_png(upi, per_head)

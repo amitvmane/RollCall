@@ -75,6 +75,9 @@ def reset_db():
         "chat_members", "proxy_users", "rollcall_stats", "user_stats",
         "proxy_stats",
         "users", "rollcalls", "templates", "chats",
+        # dues tables
+        "game_closures", "dues_entries", "fund_transactions",
+        "penalty_tiers", "scheduled_rollcalls",
     ]:
         try:
             cur.execute(f"DELETE FROM {tbl}")

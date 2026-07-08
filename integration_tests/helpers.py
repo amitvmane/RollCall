@@ -36,6 +36,24 @@ def _import_all():
         broadcast, config_timezone, version_command, show_reminders,
     )
     from handlers.stats import stats_command
+    from handlers.dues import (
+        close_game as dues_close_game,
+        mark_penalty as dues_mark_penalty,
+        waive as dues_waive,
+        set_collector as dues_set_collector,
+        mark_paid as dues_mark_paid,
+        cancel_game_dues as dues_cancel_game,
+        my_dues as dues_my_dues,
+        dues as dues_cmd,
+        fund as dues_fund,
+        log_expense as dues_log_expense,
+        fund_topup as dues_fund_topup,
+        set_upi as dues_set_upi,
+        set_treasury_upi as dues_set_treasury_upi,
+        set_round_step as dues_set_round_step,
+        enable_dues as dues_enable,
+        add_adhoc as dues_add_adhoc,
+    )
     return locals()
 
 
@@ -145,6 +163,22 @@ class IntegrationBase(unittest.IsolatedAsyncioTestCase):
         cls.audit_pagination_callback = staticmethod(h["audit_pagination_callback"])
         cls.schedule_template_cmd = staticmethod(h["schedule_template_cmd"])
         cls.schedules_toggle_callback = staticmethod(h["schedules_toggle_callback"])
+        cls.dues_close_game = staticmethod(h["dues_close_game"])
+        cls.dues_mark_penalty = staticmethod(h["dues_mark_penalty"])
+        cls.dues_waive = staticmethod(h["dues_waive"])
+        cls.dues_set_collector = staticmethod(h["dues_set_collector"])
+        cls.dues_mark_paid = staticmethod(h["dues_mark_paid"])
+        cls.dues_cancel_game = staticmethod(h["dues_cancel_game"])
+        cls.dues_my_dues = staticmethod(h["dues_my_dues"])
+        cls.dues_cmd = staticmethod(h["dues_cmd"])
+        cls.dues_fund = staticmethod(h["dues_fund"])
+        cls.dues_log_expense = staticmethod(h["dues_log_expense"])
+        cls.dues_fund_topup = staticmethod(h["dues_fund_topup"])
+        cls.dues_set_upi = staticmethod(h["dues_set_upi"])
+        cls.dues_set_treasury_upi = staticmethod(h["dues_set_treasury_upi"])
+        cls.dues_set_round_step = staticmethod(h["dues_set_round_step"])
+        cls.dues_enable = staticmethod(h["dues_enable"])
+        cls.dues_add_adhoc = staticmethod(h["dues_add_adhoc"])
 
     def setUp(self):
         reset_db()

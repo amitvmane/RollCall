@@ -724,6 +724,32 @@ COMMANDS = [
             "Re-enable at any time with /enable_dues."
         ),
     },
+    {
+        "name": "dues_snapshot", "aliases": ["ds"], "scope": "admin", "category": "Dues & Fund",
+        "args": "", "sample": "/dues_snapshot",
+        "summary": "Post current dues state to the group",
+        "details": (
+            "Posts a formatted summary of the current dues state to the group:\n"
+            "• Outstanding balances (who owes what)\n"
+            "• Credits and settled members\n"
+            "• Last game closed (title, per-head, player count)\n"
+            "• Current fund balance\n\n"
+            "Use this as a weekly checkpoint or any time you want the group "
+            "to see the current picture. Alias: /ds"
+        ),
+    },
+    {
+        "name": "dues_export", "aliases": ["de"], "scope": "admin", "category": "Dues & Fund",
+        "args": "", "sample": "/dues_export",
+        "summary": "Export dues ledger as a CSV file",
+        "details": (
+            "Sends a .csv file to the chat with all member balances:\n"
+            "name, user_id, balance, status, last_entry_type, last_entry_date\n\n"
+            "status = owed | credit | settled\n\n"
+            "Use this as an offline backup or to share with members who want "
+            "a spreadsheet view. Open in Google Sheets or Excel. Alias: /de"
+        ),
+    },
 
     # ────────────────────────── SUPER ADMIN ─────────────────────────
     {

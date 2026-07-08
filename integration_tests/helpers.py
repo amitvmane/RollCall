@@ -53,6 +53,8 @@ def _import_all():
         set_round_step as dues_set_round_step,
         enable_dues as dues_enable,
         add_adhoc as dues_add_adhoc,
+        dues_snapshot as dues_snapshot_cmd,
+        dues_export as dues_export_cmd,
     )
     return locals()
 
@@ -179,6 +181,8 @@ class IntegrationBase(unittest.IsolatedAsyncioTestCase):
         cls.dues_set_round_step = staticmethod(h["dues_set_round_step"])
         cls.dues_enable = staticmethod(h["dues_enable"])
         cls.dues_add_adhoc = staticmethod(h["dues_add_adhoc"])
+        cls.dues_snapshot_cmd = staticmethod(h["dues_snapshot_cmd"])
+        cls.dues_export_cmd = staticmethod(h["dues_export_cmd"])
 
     def setUp(self):
         reset_db()
@@ -198,6 +202,7 @@ class IntegrationBase(unittest.IsolatedAsyncioTestCase):
         bot.edit_message_text.reset_mock()
         bot.edit_message_reply_markup.reset_mock()
         bot.answer_callback_query.reset_mock()
+        bot.send_document.reset_mock()
         bot.get_chat_member.return_value.status = "administrator"
 
     # ── convenience helpers ──────────────────────────────────────────────────

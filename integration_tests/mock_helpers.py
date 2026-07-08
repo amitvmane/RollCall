@@ -56,6 +56,7 @@ mock_bot.edit_message_text = AsyncMock(return_value=MagicMock())
 mock_bot.edit_message_reply_markup = AsyncMock(return_value=MagicMock())
 mock_bot.answer_callback_query = AsyncMock(return_value=None)
 mock_bot.get_chat_member = AsyncMock(return_value=MagicMock(status="administrator"))
+mock_bot.send_document = AsyncMock(return_value=MagicMock())
 mock_bot.set_my_commands = AsyncMock()
 mock_bot.message_handler = _noop_decorator
 mock_bot.callback_query_handler = _noop_decorator

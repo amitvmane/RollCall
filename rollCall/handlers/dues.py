@@ -1009,6 +1009,51 @@ async def disable_dues(message):
         await reply_error(message, e)
 
 
+# ── /dues_snapshot — post current state to group ─────────────────────────────
+
+@bot.message_handler(func=lambda m: _cmd(m.text) == "/dues_snapshot")
+@bot.message_handler(func=lambda m: _cmd(m.text) == "/ds")
+async def dues_snapshot(message):
+    try:
+        if await admin_rights(message, manager) is False:
+            raise insufficientPermissions("Admin only: /dues_snapshot")
+        cid = message.chat.id
+        _require_dues_enabled(cid)
+        result = dues_svc.dues_snapshot(cid)
+        await send_md_fallback(cid, result["text"])
+    except Exception as e:
+        await reply_error(message, e)
+
+
+# ── /dues_export — send CSV file to chat ─────────────────────────────────────
+
+@bot.message_handler(func=lambda m: _cmd(m.text) == "/dues_export")
+@bot.message_handler(func=lambda m: _cmd(m.text) == "/de")
+async def dues_export(message):
+    try:
+        if await admin_rights(message, manager) is False:
+            raise insufficientPermissions("Admin only: /dues_export")
+        cid = message.chat.id
+        _require_dues_enabled(cid)
+        import io, datetime as _dt
+        csv_str = dues_svc.dues_export_csv(cid)
+        data_rows = [l for l in csv_str.splitlines() if l.strip()][1:]  # skip header
+        if not data_rows:
+            await bot.send_message(cid, "No dues data yet.")
+            return
+        date_str = _dt.datetime.utcnow().strftime("%Y-%m-%d")
+        filename = f"dues_export_{date_str}.csv"
+        buf = io.BytesIO(csv_str.encode("utf-8"))
+        buf.name = filename
+        await bot.send_document(
+            cid, buf,
+            caption=f"📊 Dues export — {date_str}",
+            visible_file_name=filename,
+        )
+    except Exception as e:
+        await reply_error(message, e)
+
+
 # ── /card — match-day card ────────────────────────────────────────────────────
 
 @bot.message_handler(func=lambda m: _cmd(m.text) == "/card")

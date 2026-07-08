@@ -15,6 +15,7 @@ import re
 from typing import Optional
 
 import db
+from bot_state import _esc_md
 from exceptions import (
     duesGameAlreadyClosed,
     duesNothingToClose,
@@ -520,6 +521,101 @@ def fund_summary(chat_id: int) -> dict:
     """Return current fund balance."""
     balance = db.get_fund_balance(chat_id)
     return {"fund_balance": balance}
+
+
+def dues_snapshot(chat_id: int) -> dict:
+    """Build a human-readable snapshot of current dues state for the group.
+
+    Returns:
+        text        — formatted Markdown message ready to post
+        balances    — raw list for programmatic use
+        fund_balance — current fund balance
+    """
+    import datetime as _dt
+    balances = db.get_all_dues_balances(chat_id, nonzero_only=False)
+    fund_balance = db.get_fund_balance(chat_id)
+    last_closure = db.get_nth_game_closure(chat_id, 0)
+    tz_label = "UTC"
+
+    owed   = [b for b in balances if b["balance"] > 0]
+    credit = [b for b in balances if b["balance"] < 0]
+    settled = [b for b in balances if b["balance"] == 0]
+
+    now_str = _dt.datetime.utcnow().strftime("%d %b %Y %H:%M") + " UTC"
+    lines = [f"📊 *Dues Snapshot — {now_str}*"]
+
+    if last_closure:
+        closed_at = (last_closure.get("created_at") or "")[:10]
+        lines.append(
+            f"\n🏏 Last game: *{_esc_md(last_closure['title'])}*"
+            f" ({closed_at}) · ₹{last_closure['per_head']}/head"
+            f" · {last_closure['in_count']} players"
+        )
+
+    if owed:
+        lines.append("\n💰 *Outstanding:*")
+        for b in sorted(owed, key=lambda x: -x["balance"]):
+            lines.append(f"  {_esc_md(b['member_name'])}  ₹{b['balance']}")
+    else:
+        lines.append("\n✅ No outstanding balances")
+
+    if credit:
+        lines.append("\n🟢 *Credits:*")
+        for b in credit:
+            lines.append(f"  {_esc_md(b['member_name'])}  −₹{abs(b['balance'])}")
+
+    if settled:
+        names = ", ".join(_esc_md(b["member_name"]) for b in settled[:8])
+        extra = f" (+{len(settled) - 8} more)" if len(settled) > 8 else ""
+        lines.append(f"\n✔ Settled: {names}{extra}")
+
+    lines.append(f"\n🏦 *Fund balance: ₹{fund_balance}*")
+
+    return {
+        "text": "\n".join(lines),
+        "balances": balances,
+        "fund_balance": fund_balance,
+    }
+
+
+def dues_export_csv(chat_id: int) -> str:
+    """Build a CSV string of all member balances — for file export.
+
+    Columns: name, user_id, balance, status
+    status = 'owed' | 'credit' | 'settled'
+    """
+    import io, csv as _csv
+    balances = db.get_all_dues_balances(chat_id, nonzero_only=False)
+    last_entries = {}
+    for b in balances:
+        uid = b.get("user_id")
+        name = b.get("member_name", "")
+        rows = db.get_dues_entries(
+            chat_id,
+            user_id=uid if uid else None,
+            member_name=name if not uid else None,
+            limit=1,
+        )
+        last_entries[name] = rows[0] if rows else {}
+
+    buf = io.StringIO()
+    writer = _csv.writer(buf)
+    writer.writerow(["name", "user_id", "balance", "status",
+                     "last_entry_type", "last_entry_date", "last_amount"])
+    for b in sorted(balances, key=lambda x: -x["balance"]):
+        bal = b["balance"]
+        status = "owed" if bal > 0 else ("credit" if bal < 0 else "settled")
+        le = last_entries.get(b["member_name"], {})
+        writer.writerow([
+            b["member_name"],
+            b.get("user_id") or "",
+            bal,
+            status,
+            le.get("entry_type", ""),
+            (le.get("created_at") or "")[:10],
+            le.get("amount", ""),
+        ])
+    return buf.getvalue()
 
 
 def fund_history(chat_id: int, limit: int = 15, offset: int = 0) -> dict:

@@ -689,9 +689,9 @@ def add_penalty_tier(
     db.log_admin_action(chat_id, admin_uid, admin_name, "add_penalty_tier",
                         details=f"{name}=₹{amount}")
 
-    parts = [f"⚙️ Penalty tier *{name}*: ₹{amount}"]
+    parts = [f"⚙️ Penalty tier *{_esc_md(name)}*: ₹{amount}"]
     if description:
-        parts.append(f"— {description}")
+        parts.append(f"— {_esc_md(description)}")
     if late_minutes_threshold is not None:
         parts.append(f"(auto: ≥{late_minutes_threshold} min late)")
     if is_ditch:
@@ -713,7 +713,7 @@ def remove_penalty_tier(
             f"Tier '{name}' not found. Use /penalties to see defined tiers."
         )
     db.log_admin_action(chat_id, admin_uid, admin_name, "remove_penalty_tier", details=name)
-    return {"name": name, "announcement": f"🗑 Penalty tier *{name}* removed."}
+    return {"name": name, "announcement": f"🗑 Penalty tier *{_esc_md(name)}* removed."}
 
 
 def list_unsettled_games(chat_id: int) -> dict:
@@ -734,8 +734,8 @@ def list_penalty_tiers(chat_id: int) -> dict:
     else:
         lines = ["📋 *Penalty tiers:*"]
         for t in tiers:
-            desc = f" — {t['description']}" if t.get("description") else ""
-            lines.append(f"  • *{t['name']}*: ₹{t['amount']}{desc}")
+            desc = f" — {_esc_md(t['description'])}" if t.get("description") else ""
+            lines.append(f"  • *{_esc_md(t['name'])}*: ₹{t['amount']}{desc}")
         lines.append("\nUse: /mark_penalty <tier> <name>")
     return {"tiers": tiers, "announcement": "\n".join(lines)}
 
@@ -784,7 +784,7 @@ def mark_penalty(
         "user_id": member["user_id"],
         "tier_name": display_name,
         "amount": amount,
-        "announcement": f"⚠️ Penalty ({display_name}): {member['member_name']} → ₹{amount}  _{desc}_{upi_line}",
+        "announcement": f"⚠️ Penalty ({_esc_md(display_name)}): {_esc_md(member['member_name'])} → ₹{amount}  _{_esc_md(desc)}_{upi_line}",
     }
 
 
@@ -869,7 +869,7 @@ def waive(
         "user_id": member["user_id"],
         "amount": amount,
         "reason": reason,
-        "announcement": f"🕊 Waived ₹{amount} for {member['member_name']}: {reason or ''}".strip(),
+        "announcement": f"🕊 Waived ₹{amount} for {_esc_md(member['member_name'])}: {_esc_md(reason or '')}".strip(),
     }
 
 
@@ -961,7 +961,7 @@ def set_collector(
         "collector_paid_ground": paid_flag,
         "collector_upi": collector_upi,
         "source": source,
-        "announcement": f"📦 Collector: {name}{paid_note}{upi_note}",
+        "announcement": f"📦 Collector: {_esc_md(name)}{paid_note}{upi_note}",
     }
 
 
@@ -1020,7 +1020,7 @@ def mark_paid(
         "member_name": member["member_name"],
         "user_id": member["user_id"],
         "amount": amount,
-        "announcement": f"✅ Payment: {member['member_name']} paid ₹{amount} (received by {actor_name})",
+        "announcement": f"✅ Payment: {_esc_md(member['member_name'])} paid ₹{amount} (received by {_esc_md(actor_name)})",
     }
 
 
@@ -1052,7 +1052,7 @@ def self_paid(
         "member_name": member_name,
         "user_id": user_id,
         "amount": amount,
-        "announcement": f"✅ {member_name} marked ₹{amount} as paid (self-reported)",
+        "announcement": f"✅ {_esc_md(member_name)} marked ₹{amount} as paid (self-reported)",
     }
 
 
@@ -1082,7 +1082,7 @@ def reimburse(
     return {
         "member_name": member["member_name"],
         "amount": amount,
-        "announcement": f"💸 Reimbursed ₹{amount} to {member['member_name']}: {reason or ''}".strip(),
+        "announcement": f"💸 Reimbursed ₹{amount} to {_esc_md(member['member_name'])}: {_esc_md(reason or '')}".strip(),
     }
 
 
@@ -1123,7 +1123,7 @@ def add_adhoc(
     return {
         "member_name": member["member_name"],
         "per_head": per_head,
-        "announcement": f"➕ Ad-hoc: {member['member_name']} joined '{closure['title']}' → ₹{per_head}",
+        "announcement": f"➕ Ad-hoc: {_esc_md(member['member_name'])} joined '{_esc_md(closure['title'])}' → ₹{per_head}",
     }
 
 
@@ -1191,7 +1191,7 @@ def cancel_game_credit(
         "reversed_count": reversed_count,
         "fund_reversal": -fund_net,
         "announcement": (
-            f"🔁 Cancelled dues for '{closure['title']}': "
+            f"🔁 Cancelled dues for '{_esc_md(closure['title'])}': "
             f"{reversed_count} share entries reversed. "
             f"Payments already recorded remain as credits.\n"
             f"Run /ef <amount> then /settle_dues to re-close with corrected figures."
@@ -1222,7 +1222,7 @@ def log_expense(
         "amount": amount,
         "description": description,
         "fund_balance": balance,
-        "announcement": f"🏦 Fund: −₹{amount} — {description}. Balance: ₹{balance}",
+        "announcement": f"🏦 Fund: −₹{amount} — {_esc_md(description)}. Balance: ₹{balance}",
     }
 
 

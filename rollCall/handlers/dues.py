@@ -595,7 +595,8 @@ async def my_dues(message):
             lines.append("\n*Recent entries:*")
             for e in entries[:5]:
                 sign = "+" if e["amount"] > 0 else ""
-                lines.append(f"  {sign}₹{e['amount']} {e['entry_type']} {e.get('memo') or ''}")
+                memo = _esc_md(e.get("memo") or "")
+                lines.append(f"  {sign}₹{e['amount']} {_esc_md(e['entry_type'])} {memo}")
 
         settings = dues_svc.get_dues_settings(cid)
         if balance > 0:
@@ -609,7 +610,7 @@ async def my_dues(message):
             elif treasury_upi:
                 lines.append(f"\n💳 Pay: `{treasury_upi}`")
 
-        await bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
+        await send_md_fallback(cid, "\n".join(lines))
     except Exception as e:
         await reply_error(message, e)
 
@@ -631,12 +632,12 @@ async def dues(message):
 
         lines = ["📋 *Dues ledger:*"]
         for b in balances:
-            name = b["member_name"]
+            name = _esc_md(b["member_name"])
             bal = b["balance"]
             icon = "🔴" if bal > 0 else ("🟢" if bal < 0 else "⚪")
             lines.append(f"{icon} {name}: ₹{bal}")
 
-        await bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
+        await send_md_fallback(cid, "\n".join(lines))
     except Exception as e:
         await reply_error(message, e)
 
@@ -690,9 +691,10 @@ async def fund_history(message):
         for t in txns:
             sign = "+" if t["amount"] > 0 else ""
             ts = str(t.get("created_at", ""))[:10]
-            lines.append(f"  {sign}₹{t['amount']} {t['txn_type']} — {t.get('description', '')} [{ts}]")
+            desc = _esc_md(t.get("description", ""))
+            lines.append(f"  {sign}₹{t['amount']} {_esc_md(t['txn_type'])} — {desc} [{ts}]")
 
-        await bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
+        await send_md_fallback(cid, "\n".join(lines))
     except Exception as e:
         await reply_error(message, e)
 
@@ -827,7 +829,7 @@ async def penalties(message):
         # review tiers before or after enabling dues, consistent with /add_penalty
         # and /remove_penalty which also bypass the guard.
         result = dues_svc.list_penalty_tiers(message.chat.id)
-        await bot.send_message(message.chat.id, result["announcement"], parse_mode="Markdown")
+        await send_md_fallback(message.chat.id, result["announcement"])
     except Exception as e:
         await reply_error(message, e)
 

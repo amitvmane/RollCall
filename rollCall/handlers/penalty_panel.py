@@ -84,7 +84,7 @@ _sessions: Dict[Tuple, _PenaltySession] = {}
 
 def _tier_view(session: "_PenaltySession", tiers: list) -> Tuple[str, InlineKeyboardMarkup]:
     applied_notes = "".join(
-        f"\n  ✅ {name}: {cnt} marked"
+        f"\n  ✅ {_esc_md(name)}: {cnt} marked"
         for name, cnt in session.applied.items() if cnt
     )
     has_ditch_tier = any(t.get("is_ditch") for t in tiers)

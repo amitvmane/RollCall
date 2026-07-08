@@ -101,7 +101,7 @@ _UPI_RE = re.compile(r"^[a-zA-Z0-9.\-_]{2,}@[a-zA-Z]{2,}$")
 
 
 def set_upi(chat_id: int, vpa: str, admin_uid: int, admin_name: str) -> dict:
-    """Set the group UPI VPA used for payment instructions."""
+    """Set the fallback group UPI VPA (shown when no collector UPI is set)."""
     vpa = vpa.strip()
     if not _UPI_RE.match(vpa):
         raise incorrectParameter(
@@ -109,7 +109,19 @@ def set_upi(chat_id: int, vpa: str, admin_uid: int, admin_name: str) -> dict:
         )
     db.update_chat_settings(chat_id, upi_vpa=vpa)
     db.log_admin_action(chat_id, admin_uid, admin_name, "set_upi", details=vpa)
-    return {"upi_vpa": vpa, "announcement": f"💳 UPI VPA set: `{vpa}`"}
+    return {"upi_vpa": vpa, "announcement": f"💳 Group UPI set: `{vpa}`"}
+
+
+def set_treasury_upi(chat_id: int, vpa: str, admin_uid: int, admin_name: str) -> dict:
+    """Set the treasury UPI — shown on penalty/fund announcements."""
+    vpa = vpa.strip()
+    if not _UPI_RE.match(vpa):
+        raise incorrectParameter(
+            "Invalid UPI VPA. Expected format: yourname@bankname  (e.g. treasurer@upi)"
+        )
+    db.update_chat_settings(chat_id, treasury_upi=vpa)
+    db.log_admin_action(chat_id, admin_uid, admin_name, "set_treasury_upi", details=vpa)
+    return {"treasury_upi": vpa, "announcement": f"🏦 Treasury UPI set: `{vpa}`"}
 
 
 
@@ -128,6 +140,7 @@ def get_dues_settings(chat_id: int) -> dict:
     row = db.get_or_create_chat(chat_id)
     return {
         "upi_vpa": row.get("upi_vpa"),
+        "treasury_upi": row.get("treasury_upi"),
         "dues_round_step": row.get("dues_round_step") or 10,
         "dues_self_paid_mode": row.get("dues_self_paid_mode") or "auto",
     }
@@ -291,6 +304,7 @@ async def close_game(
     collector_uid: int | None = None
     collector_name: str | None = None
     collector_paid_ground: int = 0
+    collector_upi: str | None = None
     end_result: dict | None = None
 
     _active_rc_idx: int | None = None  # set when an active RC needs ending post-validation
@@ -313,6 +327,7 @@ async def close_game(
         collector_uid = getattr(rc, "collector_uid", None)
         collector_name = getattr(rc, "collector_name", None)
         collector_paid_ground = getattr(rc, "collector_paid_ground", 0) or 0
+        collector_upi = getattr(rc, "collector_upi", None)
         in_members = _in_list_from_active_rc(rc)
         _active_rc_idx = rc_number  # remember for after validation passes
     else:
@@ -328,6 +343,7 @@ async def close_game(
         collector_uid = row.get("collector_uid")
         collector_name = row.get("collector_name")
         collector_paid_ground = row.get("collector_paid_ground") or 0
+        collector_upi = row.get("collector_upi")
         in_members = _in_list_from_db(rc_db_id)
 
     # ── ALL validation before any side effects ───────────────────────────────
@@ -397,6 +413,7 @@ async def close_game(
         collector_uid=collector_uid,
         collector_name=collector_name,
         collector_paid_ground=collector_paid_ground,
+        collector_upi=collector_upi,
     )
 
     # ── Write per-member share entries ───────────────────────────────────────
@@ -449,8 +466,12 @@ async def close_game(
 
     db.log_admin_action(chat_id, admin_uid, admin_name, "close_game", target_name=title)
 
-    upi = settings.get("upi_vpa")
-    upi_line = f"\n💳 Pay ₹{per_head} to: `{upi}`" if upi else ""
+    # Payment destination: collector UPI > group fallback UPI
+    game_upi = collector_upi or settings.get("upi_vpa")
+    treasury_upi = settings.get("treasury_upi")
+    upi_line = f"\n💳 Pay ₹{per_head} game fee to: `{game_upi}`" if game_upi else ""
+    if treasury_upi and treasury_upi != game_upi:
+        upi_line += f"\n🏦 Penalties/fund → `{treasury_upi}`"
     subsidy_line = f"\n💰 Fund subsidy: ₹{subsidy}" if subsidy > 0 else ""
     remainder_line = f"\n🏦 Rounding → fund: +₹{remainder}" if remainder > 0 else ""
     collector_line = f"\n📦 Collector: {collector_name}{rotation_note}" if collector_name else ""
@@ -630,12 +651,15 @@ def mark_penalty(
                         target_name=member["member_name"], details=f"{display_name} ₹{amount}")
 
     desc = tier.get("description") or display_name
+    _chat_row = db.get_or_create_chat(chat_id)
+    treasury_upi = _chat_row.get("treasury_upi") or _chat_row.get("upi_vpa")
+    upi_line = f"\n💳 Pay to: `{treasury_upi}`" if treasury_upi else ""
     return {
         "member_name": member["member_name"],
         "user_id": member["user_id"],
         "tier_name": display_name,
         "amount": amount,
-        "announcement": f"⚠️ Penalty ({display_name}): {member['member_name']} → ₹{amount}  _{desc}_",
+        "announcement": f"⚠️ Penalty ({display_name}): {member['member_name']} → ₹{amount}  _{desc}_{upi_line}",
     }
 
 
@@ -752,11 +776,14 @@ def set_collector(
     admin_uid: int,
     admin_name: str,
     rc_number: int = 0,
+    collector_upi: str | None = None,
 ) -> dict:
     """Designate a collector for the current or most-recent game.
 
     Pre-close (active RC): persists to rollcalls table columns.
     Post-close: updates game_closures collector metadata.
+    collector_upi is optional — if provided it overrides the group UPI in the
+    close announcement so game fees are routed to this collector directly.
     """
     all_names = [r["member_name"] for r in db.get_all_dues_balances(chat_id, nonzero_only=False)]
     member = _resolve_member(chat_id, token, dues_names=all_names)
@@ -776,12 +803,14 @@ def set_collector(
         if rc_db_id:
             db.update_rollcall(rc_db_id,
                                collector_uid=uid, collector_name=name,
-                               collector_paid_ground=paid_flag)
+                               collector_paid_ground=paid_flag,
+                               **({'collector_upi': collector_upi} if collector_upi else {}))
         # Update in-memory object too so close_game picks it up without DB re-fetch
         try:
             rc.collector_uid = uid
             rc.collector_name = name
             rc.collector_paid_ground = paid_flag
+            rc.collector_upi = collector_upi
         except Exception:
             pass
         source = "active rollcall"
@@ -791,19 +820,23 @@ def set_collector(
         if closure is None:
             raise duesNothingToClose("No active rollcall or closed game to assign a collector to.")
         db.update_game_closure_collector(
-            closure["rollcall_id"], uid, name, collector_paid_ground=paid_flag
+            closure["rollcall_id"], uid, name,
+            collector_paid_ground=paid_flag,
+            collector_upi=collector_upi,
         )
         source = "last game closure"
 
     paid_note = " (fronted ground cost)" if paid_ground else ""
+    upi_note = f" · `{collector_upi}`" if collector_upi else ""
     db.log_admin_action(chat_id, admin_uid, admin_name, "set_collector", target_name=name)
 
     return {
         "collector_uid": uid,
         "collector_name": name,
         "collector_paid_ground": paid_flag,
+        "collector_upi": collector_upi,
         "source": source,
-        "announcement": f"📦 Collector: {name}{paid_note}",
+        "announcement": f"📦 Collector: {name}{paid_note}{upi_note}",
     }
 
 

@@ -199,14 +199,27 @@ async def set_collector(message):
         args = _parse_args(message.text)
         rc_idx, args = _parse_rc_suffix(args)
         if not args:
-            raise parameterMissing("Usage: /set_collector <name> [paid] [::N]")
+            raise parameterMissing("Usage: /set_collector <name> [paid] [upi@bank] [::N]")
+
+        # Extract optional UPI (any arg matching vpa@handle pattern)
+        import re as _re
+        _UPI_PAT = _re.compile(r'^[a-zA-Z0-9.\-_]{2,}@[a-zA-Z]{2,}$')
+        collector_upi = None
+        filtered = []
+        for a in args:
+            if _UPI_PAT.match(a) and not collector_upi:
+                collector_upi = a
+            else:
+                filtered.append(a)
+        args = filtered
+
         paid_ground = False
-        if args[-1].lower() == "paid":
+        if args and args[-1].lower() == "paid":
             paid_ground = True
             args = args[:-1]
         name = " ".join(args)
         if not name:
-            raise parameterMissing("Usage: /set_collector <name> [paid]")
+            raise parameterMissing("Usage: /set_collector <name> [paid] [upi@bank]")
 
         async with manager.get_chat_write_lock(cid):
             result = dues_svc.set_collector(
@@ -214,6 +227,7 @@ async def set_collector(message):
                 message.from_user.id,
                 message.from_user.first_name or "Admin",
                 rc_number=rc_idx,
+                collector_upi=collector_upi,
             )
         await send_md_fallback(cid, result["announcement"])
     except Exception as e:
@@ -506,8 +520,16 @@ async def my_dues(message):
                 lines.append(f"  {sign}₹{e['amount']} {e['entry_type']} {e.get('memo') or ''}")
 
         settings = dues_svc.get_dues_settings(cid)
-        if balance > 0 and settings.get("upi_vpa"):
-            lines.append(f"\n💳 Pay: `{settings['upi_vpa']}`")
+        if balance > 0:
+            game_upi = settings.get("upi_vpa")
+            treasury_upi = settings.get("treasury_upi")
+            if treasury_upi and game_upi and treasury_upi != game_upi:
+                lines.append(f"\n💳 Game fees → `{game_upi}`")
+                lines.append(f"🏦 Penalties → `{treasury_upi}`")
+            elif game_upi:
+                lines.append(f"\n💳 Pay: `{game_upi}`")
+            elif treasury_upi:
+                lines.append(f"\n💳 Pay: `{treasury_upi}`")
 
         await bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
     except Exception as e:
@@ -685,6 +707,30 @@ async def set_upi(message):
             raise parameterMissing("Usage: /set_upi <vpa@bank>  e.g. /set_upi amit@upi")
         vpa = args[0]
         result = dues_svc.set_upi(
+            cid, vpa,
+            message.from_user.id,
+            message.from_user.first_name or "Admin",
+        )
+        await send_md_fallback(cid, result["announcement"])
+    except Exception as e:
+        await reply_error(message, e)
+
+
+# ── /set_treasury_upi ─────────────────────────────────────────────────────────
+
+@bot.message_handler(func=lambda m: _cmd(m.text) == "/set_treasury_upi")
+async def set_treasury_upi(message):
+    try:
+        if await admin_rights(message, manager) is False:
+            raise insufficientPermissions("Admin only: /set_treasury_upi")
+        cid = message.chat.id
+        args = _parse_args(message.text)
+        if not args:
+            raise parameterMissing(
+                "Usage: /set_treasury_upi <vpa@bank>  e.g. /set_treasury_upi treasurer@upi"
+            )
+        vpa = args[0]
+        result = dues_svc.set_treasury_upi(
             cid, vpa,
             message.from_user.id,
             message.from_user.first_name or "Admin",
@@ -896,7 +942,8 @@ async def enable_dues(message):
             "• *late\\_long* ₹100 — 15+ min late\n"
             "• *ditch* ₹200 — no-show / absent\n\n"
             "Other setup commands:\n"
-            "• /set_upi `vpa@bank` — UPI address for payment links\n"
+            "• /set_upi `vpa@bank` — fallback UPI for game fees\n"
+            "• /set_treasury_upi `vpa@bank` — UPI for penalties/fund (can differ per game)\n"
             "• /set_round_step `step` — per-head rounding (default: ₹10)\n\n"
             "Use /close_game after a game to split the ground fee.",
             parse_mode="Markdown",

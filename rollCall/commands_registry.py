@@ -537,13 +537,19 @@ COMMANDS = [
     },
     {
         "name": "set_collector", "aliases": [], "scope": "admin", "category": "Dues & Fund",
-        "args": "name [paid] [::N]", "sample": "/set_collector Ravi paid",
+        "args": "name [paid] [upi@bank] [::N]", "sample": "/set_collector Ravi paid ravi@upi",
         "summary": "Designate a member as the game's cash collector",
         "details": (
             "Sets the collector for this game. Adding 'paid' means the collector "
             "fronted the ground cost and should be reimbursed when the game is closed.\n\n"
+            "Optionally include the collector's UPI (e.g. ravi@upi) — it overrides the "
+            "group UPI in the /close_game announcement so players pay the right person directly.\n\n"
             "The designated collector can also run /mark_paid without being a chat admin.\n\n"
-            "Examples: /set_collector Ravi  |  /set_collector Ravi paid  |  /set_collector Ravi paid ::2"
+            "Examples:\n"
+            "  /set_collector Ravi\n"
+            "  /set_collector Ravi paid\n"
+            "  /set_collector Ravi paid ravi@ybl\n"
+            "  /set_collector Ravi paid ravi@ybl ::2"
         ),
     },
     {
@@ -623,11 +629,26 @@ COMMANDS = [
     {
         "name": "set_upi", "aliases": [], "scope": "admin", "category": "Dues & Fund",
         "args": "vpa@bank", "sample": "/set_upi amit@upi",
-        "summary": "Set the group UPI VPA for payment instructions",
+        "summary": "Set the fallback group UPI for game fee payments",
         "details": (
-            "Configures the UPI address shown in /close_game summaries, "
-            "/my_dues, and /remind_dues.\n\n"
+            "Sets the group-level UPI shown when no per-game collector UPI is set. "
+            "Used as a fallback in /close_game summaries, /my_dues, and /remind_dues.\n\n"
+            "For per-game routing set the collector's UPI via /set_collector.\n"
+            "For penalties and treasury payments use /set_treasury_upi.\n\n"
             "Format: name@bankname  e.g. amit@upi, 9876543210@paytm, squad@hdfc"
+        ),
+    },
+    {
+        "name": "set_treasury_upi", "aliases": [], "scope": "admin", "category": "Dues & Fund",
+        "args": "vpa@bank", "sample": "/set_treasury_upi treasurer@upi",
+        "summary": "Set the treasury UPI for penalties and fund payments",
+        "details": (
+            "Configures a separate UPI address for the group fund/treasury — shown "
+            "on penalty announcements (/mark_late, /mark_ditch) and /my_dues when "
+            "the treasury UPI differs from the game-fee UPI.\n\n"
+            "This keeps game fees (→ collector) and penalty money (→ treasurer) "
+            "clearly routed to different people.\n\n"
+            "Format: name@bankname  e.g. treasurer@upi, fund@hdfc"
         ),
     },
     {

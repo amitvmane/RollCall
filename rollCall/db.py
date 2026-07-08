@@ -176,6 +176,7 @@ def create_tables():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     group_name TEXT DEFAULT NULL,
                     upi_vpa TEXT DEFAULT NULL,
+                    treasury_upi TEXT DEFAULT NULL,
                     dues_round_step INTEGER DEFAULT 10,
                     penalty_late_t1 INTEGER DEFAULT 50,
                     penalty_late_t2 INTEGER DEFAULT 75,
@@ -205,6 +206,7 @@ def create_tables():
                     collector_uid BIGINT DEFAULT NULL,
                     collector_name TEXT DEFAULT NULL,
                     collector_paid_ground INTEGER DEFAULT 0,
+                    collector_upi TEXT DEFAULT NULL,
                     FOREIGN KEY (chat_id) REFERENCES chats(chat_id) ON DELETE CASCADE
                 )
             """)
@@ -346,6 +348,7 @@ def create_tables():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     group_name TEXT DEFAULT NULL,
                     upi_vpa TEXT DEFAULT NULL,
+                    treasury_upi TEXT DEFAULT NULL,
                     dues_round_step INTEGER DEFAULT 10,
                     penalty_late_t1 INTEGER DEFAULT 50,
                     penalty_late_t2 INTEGER DEFAULT 75,
@@ -375,6 +378,7 @@ def create_tables():
                     collector_uid INTEGER DEFAULT NULL,
                     collector_name TEXT DEFAULT NULL,
                     collector_paid_ground INTEGER DEFAULT 0,
+                    collector_upi TEXT DEFAULT NULL,
                     FOREIGN KEY (chat_id) REFERENCES chats(chat_id) ON DELETE CASCADE
                 )
             """)
@@ -707,6 +711,7 @@ _RECONCILE_COLUMNS = {
         ("collector_uid",  "collector_uid INTEGER DEFAULT NULL",       "collector_uid BIGINT DEFAULT NULL"),
         ("collector_name", "collector_name TEXT DEFAULT NULL",         "collector_name TEXT DEFAULT NULL"),
         ("collector_paid_ground", "collector_paid_ground INTEGER DEFAULT 0", "collector_paid_ground INTEGER DEFAULT 0"),
+        ("collector_upi",  "collector_upi TEXT DEFAULT NULL",          "collector_upi TEXT DEFAULT NULL"),
         ("auto_buzz_sent", "auto_buzz_sent INTEGER DEFAULT 0",         "auto_buzz_sent INTEGER DEFAULT 0"),
     ],
     "chats": [
@@ -718,6 +723,7 @@ _RECONCILE_COLUMNS = {
         ("group_web_token",        "group_web_token TEXT DEFAULT NULL",        "group_web_token TEXT DEFAULT NULL"),
         ("group_name",             "group_name TEXT DEFAULT NULL",             "group_name TEXT DEFAULT NULL"),
         ("upi_vpa",                "upi_vpa TEXT DEFAULT NULL",                "upi_vpa TEXT DEFAULT NULL"),
+        ("treasury_upi",           "treasury_upi TEXT DEFAULT NULL",           "treasury_upi TEXT DEFAULT NULL"),
         ("dues_round_step",        "dues_round_step INTEGER DEFAULT 10",       "dues_round_step INTEGER DEFAULT 10"),
         ("penalty_late_t1",        "penalty_late_t1 INTEGER DEFAULT 50",       "penalty_late_t1 INTEGER DEFAULT 50"),
         ("penalty_late_t2",        "penalty_late_t2 INTEGER DEFAULT 75",       "penalty_late_t2 INTEGER DEFAULT 75"),
@@ -1296,6 +1302,7 @@ def _run_migrations(conn, cursor):
                     collector_uid   BIGINT DEFAULT NULL,
                     collector_name  TEXT DEFAULT NULL,
                     collector_paid_ground INTEGER DEFAULT 0,
+                    collector_upi   TEXT DEFAULT NULL,
                     closed_by_uid   BIGINT NOT NULL,
                     closed_by_name  TEXT NOT NULL,
                     created_at      TEXT NOT NULL
@@ -1378,6 +1385,7 @@ def _run_migrations(conn, cursor):
                     collector_uid   INTEGER DEFAULT NULL,
                     collector_name  TEXT DEFAULT NULL,
                     collector_paid_ground INTEGER DEFAULT 0,
+                    collector_upi   TEXT DEFAULT NULL,
                     closed_by_uid   INTEGER NOT NULL,
                     closed_by_name  TEXT NOT NULL,
                     created_at      TEXT NOT NULL
@@ -1493,6 +1501,20 @@ def _run_migrations(conn, cursor):
         conn.commit()
     except Exception:
         conn.rollback()
+
+    # Add collector_upi to game_closures (per-game collector UPI, distinct from treasury_upi)
+    if db_type == 'postgresql':
+        try:
+            cursor.execute("ALTER TABLE game_closures ADD COLUMN IF NOT EXISTS collector_upi TEXT DEFAULT NULL")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    else:
+        try:
+            cursor.execute("ALTER TABLE game_closures ADD COLUMN collector_upi TEXT DEFAULT NULL")
+            conn.commit()
+        except Exception:
+            conn.rollback()  # column already exists — safe to ignore
 
 
 def get_or_create_chat(chat_id: int) -> Dict:
@@ -1611,7 +1633,7 @@ def get_chat_by_group_web_token(token: str) -> Optional[Dict]:
 _VALID_CHAT_FIELDS = {
     'shh_mode', 'admin_rights', 'timezone', 'absent_limit',
     'ghost_tracking_enabled', 'group_name', 'group_web_token',
-    'upi_vpa', 'dues_round_step',
+    'upi_vpa', 'treasury_upi', 'dues_round_step',
     'penalty_late_t1', 'penalty_late_t2', 'penalty_late_t3', 'penalty_ditch',
     'dues_enabled', 'dues_self_paid_mode',
     'auto_buzz_hours', 'dues_weekly_nudge', 'last_idle_nudge',
@@ -1800,7 +1822,7 @@ _VALID_ROLLCALL_FIELDS = {
     'event_fee', 'in_list_limit', 'panel_msg_id', 'web_token',
     'timezone', 'reminder_hours', 'template_name', 'created_at',
     'is_cancelled',
-    'collector_uid', 'collector_name', 'collector_paid_ground',
+    'collector_uid', 'collector_name', 'collector_paid_ground', 'collector_upi',
     'auto_buzz_sent',
 }
 
@@ -5304,6 +5326,7 @@ def create_game_closure(
     collector_uid: int = None,
     collector_name: str = None,
     collector_paid_ground: int = 0,
+    collector_upi: str = None,
 ) -> int:
     """Create the financial-close record for a game. Raises on duplicate
     rollcall_id (UNIQUE constraint) — that is the double-close guard."""
@@ -5315,11 +5338,11 @@ def create_game_closure(
         cursor.execute(
             f"INSERT INTO game_closures (chat_id, rollcall_id, title, ground_cost, in_count,"
             f" subsidy, per_head, rounding_step, remainder, collector_uid, collector_name,"
-            f" collector_paid_ground, closed_by_uid, closed_by_name, created_at)"
-            f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+            f" collector_paid_ground, collector_upi, closed_by_uid, closed_by_name, created_at)"
+            f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
             (chat_id, rollcall_id, title, ground_cost, in_count, subsidy, per_head,
              rounding_step, remainder, collector_uid, collector_name,
-             collector_paid_ground, closed_by_uid, closed_by_name, _dues_now()),
+             collector_paid_ground, collector_upi, closed_by_uid, closed_by_name, _dues_now()),
         )
         conn.commit()
         if db_type == "postgresql":
@@ -5412,7 +5435,8 @@ def get_latest_game_closure(chat_id: int) -> Optional[Dict]:
 
 
 def update_game_closure_collector(
-    rollcall_id: int, collector_uid: int, collector_name: str, collector_paid_ground: int = None,
+    rollcall_id: int, collector_uid: int, collector_name: str,
+    collector_paid_ground: int = None, collector_upi: str = None,
 ) -> bool:
     """Set/replace the collector on an existing closure (post-close /set_collector).
     Not a money row — game_closures records metadata; ledgers stay append-only."""
@@ -5421,18 +5445,19 @@ def update_game_closure_collector(
     try:
         cursor = conn.cursor()
         ph = "%s" if db_type == "postgresql" else "?"
-        if collector_paid_ground is None:
-            cursor.execute(
-                f"UPDATE game_closures SET collector_uid = {ph}, collector_name = {ph}"
-                f" WHERE rollcall_id = {ph}",
-                (collector_uid, collector_name, rollcall_id),
-            )
-        else:
-            cursor.execute(
-                f"UPDATE game_closures SET collector_uid = {ph}, collector_name = {ph},"
-                f" collector_paid_ground = {ph} WHERE rollcall_id = {ph}",
-                (collector_uid, collector_name, collector_paid_ground, rollcall_id),
-            )
+        sets = [f"collector_uid = {ph}", f"collector_name = {ph}"]
+        params: list = [collector_uid, collector_name]
+        if collector_paid_ground is not None:
+            sets.append(f"collector_paid_ground = {ph}")
+            params.append(collector_paid_ground)
+        if collector_upi is not None:
+            sets.append(f"collector_upi = {ph}")
+            params.append(collector_upi)
+        params.append(rollcall_id)
+        cursor.execute(
+            f"UPDATE game_closures SET {', '.join(sets)} WHERE rollcall_id = {ph}",
+            params,
+        )
         updated = cursor.rowcount > 0
         conn.commit()
         return updated

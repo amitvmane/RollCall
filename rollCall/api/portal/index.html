@@ -30,6 +30,11 @@
     <p class="sub">Verify your Telegram identity to see your attendance history across all groups.</p>
     <button class="btn btn-primary" id="verify-btn" style="width:100%;padding:12px;justify-content:center;margin-top:8px">Verify with Telegram →</button>
     <div id="verify-status" style="margin-top:12px;font-size:.85rem;color:var(--sub);text-align:center;display:none"></div>
+    <div id="tg-widget-wrap" style="display:none">
+      <div class="login-divider"><span>or</span></div>
+      <p class="sub" style="font-size:.8rem;text-align:center">No Telegram app on this device? Log in with your Telegram account directly:</p>
+      <div id="tg-login-widget" style="display:flex;justify-content:center;margin-top:8px"></div>
+    </div>
   </div>
 </div>
 
@@ -104,7 +109,7 @@
     <h3>Upcoming</h3>
     <p>Scheduled rollcalls that haven't started yet appear at the top so you can plan ahead.</p>
     <h3>Identity</h3>
-    <p>Use <b>Unlink</b> to detach your Telegram identity from this browser. You can re-verify any time with the <b>Verify with Telegram</b> button.</p>
+    <p>Use <b>Unlink</b> to detach your Telegram identity from this browser. You can re-verify any time with the <b>Verify with Telegram</b> button (opens the Telegram app), or use the <b>Log in with Telegram</b> widget — it works in any browser with just your Telegram account, no app needed.</p>
     <p style="margin-top:14px">Need the bot commands? Run <code>/help</code> in any group.</p>
   </div>
 </div>

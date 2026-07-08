@@ -1,7 +1,7 @@
 """
-Telegram deep-link identity verification.
+Telegram identity verification — two independent browser flows.
 
-Flow:
+Deep-link flow (works when the user has the Telegram app):
   1. Browser calls POST /auth/tg-verify/start — gets a one-time code + t.me deep link.
   2. Browser opens the deep link; the bot receives /start v_{code}.
   3. Bot calls db.mark_web_verify_token(), associating the code with the Telegram user.
@@ -9,8 +9,20 @@ Flow:
   5. When verified the browser gets {verified:true, user_id, name} and stores the identity.
 
 Codes expire in 10 minutes and are single-use.
+
+Login Widget flow (works in any browser, no app or prior bot chat needed):
+  1. Portal renders Telegram's official widget (bot username from GET /auth/tg-login/config).
+  2. User authorizes in Telegram's OAuth popup; the widget hands the browser a signed
+     payload {id, first_name, auth_date, hash, ...}.
+  3. Browser POSTs it to /auth/tg-login; we verify the HMAC and mint the same
+     signed id_token the deep-link flow issues.
+
+NOTE: the widget only appears on domains registered with @BotFather via /setdomain.
 """
 
+import hashlib
+import hmac
+import os
 import secrets
 import time
 from collections import defaultdict, deque
@@ -20,11 +32,20 @@ from fastapi import APIRouter, HTTPException, Path, Request, status
 
 import db as _db
 from bot_state import _telegram_status
-from api.schemas.tg_verify import TgVerifyStartResponse, TgVerifyStatusResponse
+from api.schemas.tg_verify import (
+    TgLoginConfigResponse,
+    TgLoginRequest,
+    TgVerifyStartResponse,
+    TgVerifyStatusResponse,
+)
 
 router = APIRouter()
 
 _CODE_TTL_SECONDS = 600  # 10 minutes
+
+# Login Widget payloads are generated at click time; allow generous clock skew
+# but reject stale replays.
+_LOGIN_WIDGET_MAX_AGE_SECONDS = 3600  # 1 hour
 
 # Strict per-IP rate limit for start: 5 req / 60 s (separate from global middleware)
 _verify_buckets: dict = defaultdict(deque)
@@ -121,5 +142,95 @@ async def tg_verify_status(
         user_id=result["tg_user_id"],
         name=result["tg_name"],
         username=result.get("tg_username"),
+        id_token=id_token,
+    )
+
+
+# ── Telegram Login Widget ─────────────────────────────────────────────────────
+
+def _verify_login_widget(payload: dict, bot_token: str,
+                         max_age: int = _LOGIN_WIDGET_MAX_AGE_SECONDS) -> dict:
+    """
+    Verify a Telegram Login Widget auth payload.
+
+    Per https://core.telegram.org/widgets/login#checking-authorization:
+      data_check_string = sorted "key=value" lines of all fields except hash
+      secret_key        = SHA256(bot_token)   ← plain digest, NOT the
+                          HMAC("WebAppData", …) used for Mini App initData
+      valid iff HMAC-SHA256(secret_key, data_check_string) == hash
+
+    Returns the verified payload dict. Raises ValueError with a user-safe
+    message on any failure.
+    """
+    fields = {k: v for k, v in payload.items() if v is not None}
+    received_hash = fields.pop("hash", None)
+    if not received_hash:
+        raise ValueError("Missing hash in login payload")
+
+    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(fields.items()))
+    secret_key = hashlib.sha256(bot_token.encode()).digest()
+    expected = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+
+    if not hmac.compare_digest(expected, received_hash):
+        raise ValueError("Login signature verification failed")
+
+    try:
+        auth_date = int(fields.get("auth_date", 0))
+    except (TypeError, ValueError):
+        raise ValueError("Invalid auth_date in login payload")
+    if time.time() - auth_date > max_age:
+        raise ValueError("Login data is stale — please log in again")
+
+    return fields
+
+
+@router.get(
+    "/auth/tg-login/config",
+    response_model=TgLoginConfigResponse,
+    summary="Bot username for rendering the Telegram Login Widget",
+)
+async def tg_login_config() -> TgLoginConfigResponse:
+    username = _bot_username()
+    if not username:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Bot not connected to Telegram yet — try again in a moment",
+        )
+    return TgLoginConfigResponse(bot_username=username)
+
+
+@router.post(
+    "/auth/tg-login",
+    response_model=TgVerifyStatusResponse,
+    summary="Verify a Telegram Login Widget payload and issue an identity token",
+)
+async def tg_login(body: TgLoginRequest, request: Request) -> TgVerifyStatusResponse:
+    _check_verify_rate(request)
+
+    bot_token = os.environ.get("TELEGRAM_TOKEN") or os.environ.get("API_KEY", "")
+    if not bot_token:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Bot token not configured — cannot verify login",
+        )
+
+    try:
+        _verify_login_widget(body.model_dump(), bot_token)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
+
+    name = body.first_name + (f" {body.last_name}" if body.last_name else "")
+
+    from api.identity import issue_identity_token, IdentityError
+    try:
+        id_token = issue_identity_token(body.id)
+    except IdentityError:
+        id_token = None
+
+    return TgVerifyStatusResponse(
+        verified=True,
+        user_id=body.id,
+        name=name,
+        username=body.username,
         id_token=id_token,
     )

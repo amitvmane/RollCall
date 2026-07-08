@@ -95,7 +95,49 @@ function showVerifyScreen(){
   $id("verify-screen").style.display="";
   $id("app").style.display="none";
   $id("verify-btn").addEventListener("click",startVerify,{once:true});
+  _loadLoginWidget();
 }
+
+// ── Telegram Login Widget (works without the Telegram app) ──────────────────
+
+let _widgetLoaded=false;
+
+async function _loadLoginWidget(){
+  if(_widgetLoaded)return;
+  try{
+    const cfg=await apiFetch("/auth/tg-login/config");
+    if(!cfg.bot_username)return;
+    const s=document.createElement("script");
+    s.async=true;
+    s.src="https://telegram.org/js/telegram-widget.js?22";
+    s.setAttribute("data-telegram-login",cfg.bot_username);
+    s.setAttribute("data-size","large");
+    s.setAttribute("data-onauth","onTelegramAuth(user)");
+    s.setAttribute("data-request-access","write");
+    $id("tg-login-widget").appendChild(s);
+    $id("tg-widget-wrap").style.display="";
+    _widgetLoaded=true;
+  }catch(e){
+    // Bot not connected yet or config endpoint unavailable — deep-link verify
+    // still works, so just don't show the widget.
+  }
+}
+
+window.onTelegramAuth=async function(user){
+  try{
+    const res=await apiFetch("/auth/tg-login",{method:"POST",body:JSON.stringify(user)});
+    if(!res.verified)throw new Error("Verification failed");
+    if(_pollTimer){clearInterval(_pollTimer);_pollTimer=null;}
+    localStorage.removeItem(LS_VERIFY_CODE);
+    _userId=res.user_id;_userName=res.name;_idToken=res.id_token||null;
+    localStorage.setItem(LS_TG_USER_ID,String(_userId));
+    localStorage.setItem(LS_TG_NAME,_userName);
+    if(_idToken)localStorage.setItem(LS_ID_TOKEN,_idToken);
+    showApp();
+  }catch(e){
+    toast("Login failed: "+e.message);
+  }
+};
 
 function showApp(){
   $id("verify-screen").style.display="none";

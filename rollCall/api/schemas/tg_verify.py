@@ -9,6 +9,22 @@ class TgVerifyStartResponse(BaseModel):
     expires_in: int  # seconds
 
 
+class TgLoginConfigResponse(BaseModel):
+    """Bot username needed to render the Telegram Login Widget script tag."""
+    bot_username: str
+
+
+class TgLoginRequest(BaseModel):
+    """Payload the Telegram Login Widget passes to its onauth callback."""
+    id: int
+    first_name: str
+    auth_date: int
+    hash: str
+    last_name: Optional[str] = None
+    username: Optional[str] = None
+    photo_url: Optional[str] = None
+
+
 class TgVerifyStatusResponse(BaseModel):
     verified: bool
     user_id: Optional[int] = None

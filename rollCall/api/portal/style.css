@@ -165,6 +165,15 @@
 .sparkline{display:flex;gap:4px;margin-top:8px;flex-wrap:wrap;}
 .spark-dot{width:8px;height:8px;border-radius:50%;}
 
+/* Login Widget divider */
+.login-divider{
+  display:flex;align-items:center;gap:10px;margin:18px 0 10px;
+  color:var(--sub);font-size:.78rem;text-transform:uppercase;letter-spacing:.08em;
+}
+.login-divider::before,.login-divider::after{
+  content:"";flex:1;height:1px;background:var(--border);
+}
+
 /* Dues section */
 .dues-balance-box{
   display:flex;align-items:center;justify-content:space-between;

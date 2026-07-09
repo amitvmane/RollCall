@@ -24,6 +24,10 @@ def _import_all():
     )
     from handlers.admin import delete_user, set_status_override, audit_log_command, audit_pagination_callback
     from handlers.penalty_panel import penalty_panel_callback, _sessions as penalty_panel_sessions
+    from handlers.payment_panel import (
+        payment_panel_callback, payment_partial_reply,
+        _sessions as payment_panel_sessions,
+    )
     from handlers.templates import (
         list_templates, set_template, start_template,
         delete_template_command, schedules_command, schedule_template_cmd, schedules_toggle_callback,
@@ -184,6 +188,9 @@ class IntegrationBase(unittest.IsolatedAsyncioTestCase):
         cls.dues_settle_subsidy_reply = staticmethod(h["dues_settle_subsidy_reply"])
         cls.penalty_panel_callback = staticmethod(h["penalty_panel_callback"])
         cls.penalty_panel_sessions = h["penalty_panel_sessions"]
+        cls.payment_panel_callback = staticmethod(h["payment_panel_callback"])
+        cls.payment_partial_reply = staticmethod(h["payment_partial_reply"])
+        cls.payment_panel_sessions = h["payment_panel_sessions"]
         cls.dues_mark_penalty = staticmethod(h["dues_mark_penalty"])
         cls.dues_waive = staticmethod(h["dues_waive"])
         cls.dues_set_collector = staticmethod(h["dues_set_collector"])
@@ -212,10 +219,12 @@ class IntegrationBase(unittest.IsolatedAsyncioTestCase):
         self.bs._pending_deletes.clear()
         self.bs._pending_overrides.clear()
         self.bs._pending_subsidy_input.clear()
+        self.bs._pending_payment_input.clear()
         self.bs._rate_limits.clear()
         self.bs._buzz_cooldowns.clear()
         self.bs._panel_msg_ids.clear()
         self.penalty_panel_sessions.clear()
+        self.payment_panel_sessions.clear()
         # Reset bot mock call history
         bot = get_mock_bot()
         bot.send_message.reset_mock()
@@ -247,6 +256,31 @@ class IntegrationBase(unittest.IsolatedAsyncioTestCase):
 
     def sent_count(self):
         return get_mock_bot().send_message.call_count
+
+    def edited_texts(self):
+        """All text args from bot.edit_message_text (safe_edit_text calls) —
+        panel view transitions edit in place rather than sending new messages."""
+        bot = get_mock_bot()
+        results = []
+        for args, kwargs in bot.edit_message_text.call_args_list:
+            if len(args) >= 1:
+                results.append(str(args[0]))
+            else:
+                results.append(str(kwargs.get("text", "")))
+        return results
+
+    def last_sent_markup(self):
+        """reply_markup from the most recent bot.send_message call."""
+        _, kwargs = get_mock_bot().send_message.call_args
+        return kwargs.get("reply_markup")
+
+    def last_edited_markup(self):
+        """reply_markup from the most recent bot.edit_message_reply_markup call
+        (safe_edit_markup's 3rd positional arg or its reply_markup kwarg)."""
+        args, kwargs = get_mock_bot().edit_message_reply_markup.call_args
+        if "reply_markup" in kwargs:
+            return kwargs["reply_markup"]
+        return args[2] if len(args) > 2 else None
 
     def rc(self, n=0):
         """Get rollcall n (0-based) for the test chat."""

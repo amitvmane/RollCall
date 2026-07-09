@@ -720,7 +720,18 @@ async def mark_paid(message):
         _require_dues_enabled(cid)
         args = _parse_args(message.text)
         if not args:
-            raise parameterMissing("Usage: /mark_paid <name> [amount]")
+            # No args: admin-only panel listing everyone with an outstanding
+            # balance. /mark_paid <name> [amount] below is unchanged — still
+            # works for admins AND the designated collector, from a script or
+            # muscle memory.
+            if await admin_rights(message, manager) is False:
+                raise insufficientPermissions(
+                    "Admin only: /mark_paid with no arguments. "
+                    "The designated collector can still use /mark_paid <name> [amount]."
+                )
+            from handlers.payment_panel import send_payment_panel
+            await send_payment_panel(cid)
+            return
 
         amount = None
         if len(args) >= 2:

@@ -465,7 +465,7 @@ COMMANDS = [
     },
     {
         "name": "mark_paid", "aliases": ["paid"], "scope": "user", "category": "Dues & Fund",
-        "args": "name [amount]", "sample": "/paid Alice",
+        "args": "[name] [amount]", "sample": "/paid Alice",
         "summary": "Record a payment received from a member",
         "details": (
             "Records a payment, clearing dues.\n\n"
@@ -473,7 +473,10 @@ COMMANDS = [
             "• Designated collector (set via /set_collector): can record payment too.\n"
             "• Amount defaults to the member's full outstanding balance.\n"
             "  Overpayments are accepted and appear as negative balance (credit).\n\n"
-            "Example: /paid Alice 90"
+            "Example: /paid Alice 90\n\n"
+            "Run /mark_paid with no arguments (admin only) for a panel listing "
+            "everyone with an outstanding balance — tap a name to mark it paid "
+            "in full, mark a partial amount, or view their recent ledger history."
         ),
     },
     # ──────────────────────── DUES & FUND (admin) ───────────────────

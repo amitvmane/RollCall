@@ -811,3 +811,132 @@ class TestSettleDuesZeroInAndConfirmCard(IntegrationBase):
         await self.dues_settle_subsidy_reply(self.msg("60", ADMIN_USER))
         # No pending entry -> handler is a no-op, nothing closed, nothing sent.
         self.assertEqual(get_mock_bot().send_message.call_count, 0)
+
+
+class TestPaymentPanel(IntegrationBase):
+    """Bare /mark_paid (no args) opens a panel listing outstanding balances;
+    /mark_paid <name> [amount] is untouched."""
+
+    def _seed_balance(self, user, amount, entry_type="share"):
+        # _resolve_member (used by dues_svc.mark_paid) only matches a real
+        # user by name via chat_members — register them active first, same
+        # as what a real /in vote does via upsert_chat_member.
+        db.upsert_chat_member(CHAT_ID, user["id"], user["first_name"], user.get("username"))
+        db.add_dues_entry(
+            CHAT_ID, None, user["id"], user["first_name"],
+            entry_type, amount, "test seed", ADMIN_ID, "Admin",
+        )
+
+    def _panel_mid(self):
+        (cid, mid), = [(c, m) for (c, m) in self.payment_panel_sessions if c == CHAT_ID]
+        return mid
+
+    async def test_bare_mark_paid_lists_outstanding_balances(self):
+        _enable_dues()
+        self._seed_balance(USERS[0], 100)
+        self._seed_balance(USERS[1], 50)
+        get_mock_bot().send_message.reset_mock()
+
+        await self.dues_mark_paid(self.msg("/mark_paid", ADMIN_USER))
+
+        texts = self.sent_texts()
+        self.assertTrue(any("Outstanding balances" in t for t in texts), texts)
+        markup = self.last_sent_markup()
+        labels = [btn.text for btn in markup.keyboard]
+        self.assertTrue(any(USERS[0]["first_name"] in l for l in labels), labels)
+        self.assertTrue(any(USERS[1]["first_name"] in l for l in labels), labels)
+
+    async def test_bare_mark_paid_admin_only(self):
+        _enable_dues()
+        self._seed_balance(USERS[0], 100)
+        get_mock_bot().send_message.reset_mock()
+
+        self.mgr.set_admin_rights(CHAT_ID, True)
+        get_mock_bot().get_chat_member.return_value.status = "member"
+        try:
+            await self.dues_mark_paid(self.msg("/mark_paid", USERS[0]))
+        finally:
+            get_mock_bot().get_chat_member.return_value.status = "administrator"
+            self.mgr.set_admin_rights(CHAT_ID, False)
+
+        texts = self.sent_texts()
+        self.assertTrue(any("admin" in t.lower() for t in texts), texts)
+        self.assertFalse(any("outstanding balances" in t.lower() for t in texts), texts)
+
+    async def test_explicit_args_form_still_marks_directly_no_panel(self):
+        _enable_dues()
+        self._seed_balance(USERS[0], 100)
+        get_mock_bot().send_message.reset_mock()
+
+        await self.dues_mark_paid(self.msg(f"/mark_paid {USERS[0]['first_name']} 100", ADMIN_USER))
+
+        self.assertEqual(len(self.payment_panel_sessions), 0)
+        self.assertEqual(db.get_dues_balance(CHAT_ID, user_id=USERS[0]["id"]), 0)
+        texts = self.sent_texts()
+        self.assertTrue(any("payment" in t.lower() for t in texts), texts)
+
+    async def test_full_payment_one_tap_clears_balance_and_refreshes_list(self):
+        _enable_dues()
+        self._seed_balance(USERS[0], 100)
+        self._seed_balance(USERS[1], 50)
+        await self.dues_mark_paid(self.msg("/mark_paid", ADMIN_USER))
+        mid = self._panel_mid()
+
+        await self.payment_panel_callback(self.call("pay_pick:0", ADMIN_USER, message_id=mid))
+        await self.payment_panel_callback(self.call("pay_full:0", ADMIN_USER, message_id=mid))
+
+        self.assertEqual(db.get_dues_balance(CHAT_ID, user_id=USERS[0]["id"]), 0)
+        texts = self.sent_texts()
+        self.assertTrue(any("paid" in t.lower() and "₹100" in t for t in texts), texts)
+        # Refreshed list still shows the second member, not the paid-off first.
+        last_list_text = [t for t in texts if "Outstanding balances" in t][-1]
+        self.assertNotIn(USERS[0]["first_name"], last_list_text)
+
+    async def test_partial_payment_reply_reduces_balance(self):
+        _enable_dues()
+        self._seed_balance(USERS[0], 100)
+        await self.dues_mark_paid(self.msg("/mark_paid", ADMIN_USER))
+        mid = self._panel_mid()
+
+        await self.payment_panel_callback(self.call("pay_pick:0", ADMIN_USER, message_id=mid))
+        await self.payment_panel_callback(self.call("pay_partial:0", ADMIN_USER, message_id=mid))
+        self.assertIn((CHAT_ID, ADMIN_ID), self.bs._pending_payment_input)
+
+        await self.payment_partial_reply(self.msg("40", ADMIN_USER))
+
+        self.assertNotIn((CHAT_ID, ADMIN_ID), self.bs._pending_payment_input)
+        self.assertEqual(db.get_dues_balance(CHAT_ID, user_id=USERS[0]["id"]), 60)
+
+    async def test_history_shows_recent_entries_and_back_returns(self):
+        _enable_dues()
+        self._seed_balance(USERS[0], 100, entry_type="share")
+        await self.dues_mark_paid(self.msg("/mark_paid", ADMIN_USER))
+        mid = self._panel_mid()
+
+        await self.payment_panel_callback(self.call("pay_pick:0", ADMIN_USER, message_id=mid))
+        await self.payment_panel_callback(self.call("pay_history:0", ADMIN_USER, message_id=mid))
+
+        texts = self.edited_texts()
+        self.assertTrue(any("recent entries" in t.lower() and "share" in t.lower() for t in texts), texts)
+
+        # Back returns to the player-action view (Full/Partial buttons), not
+        # an error.
+        await self.payment_panel_callback(self.call("pay_back:0", ADMIN_USER, message_id=mid))
+        texts = self.edited_texts()
+        self.assertTrue(any("owes" in t.lower() for t in texts), texts)
+
+    async def test_panel_callback_rejects_non_admin(self):
+        _enable_dues()
+        self._seed_balance(USERS[0], 100)
+        await self.dues_mark_paid(self.msg("/mark_paid", ADMIN_USER))
+        mid = self._panel_mid()
+
+        self.mgr.set_admin_rights(CHAT_ID, True)
+        get_mock_bot().get_chat_member.return_value.status = "member"
+        try:
+            await self.payment_panel_callback(self.call("pay_full:0", USERS[0], message_id=mid))
+        finally:
+            get_mock_bot().get_chat_member.return_value.status = "administrator"
+            self.mgr.set_admin_rights(CHAT_ID, False)
+
+        self.assertEqual(db.get_dues_balance(CHAT_ID, user_id=USERS[0]["id"]), 100)

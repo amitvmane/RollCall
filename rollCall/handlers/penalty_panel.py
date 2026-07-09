@@ -314,6 +314,7 @@ async def penalty_panel_callback(call):
                         dues_svc.mark_penalty(
                             cid, tier_name, m["member_name"],
                             actor.id, actor_name,
+                            known_identity=m["_identity"],
                         )
                         applied_names.append(m["member_name"])
                         applied_idx.add(idx)

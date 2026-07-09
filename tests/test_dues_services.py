@@ -826,6 +826,37 @@ class TestMarkPenalty(unittest.TestCase):
             with self.assertRaises(incorrectParameter):
                 mark_penalty(1, "nonexistent", "alice", 99, "Admin")
 
+    def test_first_time_proxy_with_no_ledger_history_raises_without_known_identity(self):
+        """Regression guard for the bug this fixes: a proxy with zero prior
+        dues_entries (get_all_dues_balances empty) can't be found by
+        _resolve_member's name-matching alone."""
+        from exceptions import incorrectParameter
+        from services.dues import mark_penalty
+        with self._patch(get_active_members=MagicMock(return_value=[])):
+            with self.assertRaises(incorrectParameter):
+                mark_penalty(1, "ditch", "A1", 99, "Admin")
+
+    def test_known_identity_bypasses_resolution_for_first_time_proxy(self):
+        """The actual fix: the penalty panel already knows the concrete
+        identity from the rollcall's IN list, so it should never need
+        _resolve_member's name lookup at all."""
+        from services.dues import mark_penalty
+        add_dues = MagicMock()
+        with self._patch(get_active_members=MagicMock(return_value=[]), add_dues_entry=add_dues):
+            r = mark_penalty(1, "ditch", "A1", 99, "Admin", known_identity="A1")
+        self.assertEqual(r["member_name"], "A1")
+        add_dues.assert_called_once()
+        self.assertIsNone(add_dues.call_args.args[2])   # user_id None for a proxy
+        self.assertEqual(add_dues.call_args.args[3], "A1")  # member_name
+
+    def test_known_identity_real_user_id_bypasses_resolution(self):
+        from services.dues import mark_penalty
+        add_dues = MagicMock()
+        with self._patch(get_active_members=MagicMock(return_value=[]), add_dues_entry=add_dues):
+            r = mark_penalty(1, "ditch", "Bob", 99, "Admin", known_identity=555)
+        self.assertEqual(r["user_id"], 555)
+        self.assertEqual(r["member_name"], "Bob")
+
 
 class TestWaive(unittest.TestCase):
 

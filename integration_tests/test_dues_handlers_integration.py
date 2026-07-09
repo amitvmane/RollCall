@@ -940,3 +940,38 @@ class TestPaymentPanel(IntegrationBase):
             self.mgr.set_admin_rights(CHAT_ID, False)
 
         self.assertEqual(db.get_dues_balance(CHAT_ID, user_id=USERS[0]["id"]), 100)
+
+
+class TestPenaltyPanelFirstTimeProxy(IntegrationBase):
+    """Regression: a proxy being penalized for the first time (no prior
+    dues_entries — /sif'd in just for this game, before any game-share entry
+    exists) must resolve via the penalty panel's known identity, not by
+    re-resolving the name through ledger history."""
+
+    async def test_first_time_proxy_penalty_applies_without_not_found_error(self):
+        _enable_dues()
+        await self.start_rc("Proxy Penalty Test")
+        await self.set_in_for(self.msg("/sif A1", ADMIN_USER))
+        await self.event_fee(self.msg("/ef 300", ADMIN_USER))
+        await self.end_roll_call(self.msg("/erc", ADMIN_USER))
+
+        await self.dues_settle_dues(self.msg("/settle_dues", ADMIN_USER))
+        (cid, mid), = [(c, m) for (c, m) in self.penalty_panel_sessions if c == CHAT_ID]
+        session = self.penalty_panel_sessions[(cid, mid)]
+        rollcall_id = session.rollcall_id
+        self.assertEqual(session.members[0]["member_name"], "A1")
+
+        get_mock_bot().send_message.reset_mock()
+        await self.penalty_panel_callback(self.call(f"pen_t:{rollcall_id}:late_short", ADMIN_USER, message_id=mid))
+        await self.penalty_panel_callback(self.call(f"pen_g:{rollcall_id}:0", ADMIN_USER, message_id=mid))
+        await self.penalty_panel_callback(self.call(f"pen_a:{rollcall_id}", ADMIN_USER, message_id=mid))
+
+        texts = self.sent_texts()
+        self.assertFalse(any("could not be applied" in t.lower() for t in texts), texts)
+        self.assertFalse(any("not found" in t.lower() for t in texts), texts)
+        self.assertTrue(any("applied to" in t.lower() and "A1" in t for t in texts), texts)
+
+        entries = db.get_dues_entries(CHAT_ID, member_name="A1")
+        penalty_entries = [e for e in entries if e["entry_type"] == "penalty"]
+        self.assertEqual(len(penalty_entries), 1)
+        self.assertEqual(penalty_entries[0]["amount"], 50)   # late_short default tier

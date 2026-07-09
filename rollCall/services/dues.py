@@ -789,19 +789,34 @@ def mark_penalty(
     admin_uid: int,
     admin_name: str,
     rollcall_id: int | None = None,
+    known_identity: int | str | None = None,
 ) -> dict:
     """Assess a named penalty tier against a member.
 
     Writes a dues entry (entry_type='penalty', memo=tier_name) and a fund
     penalty transaction.
+
+    known_identity — bypasses name resolution when the caller already knows
+    the concrete identity (int user_id or str proxy_name), e.g. the penalty
+    panel picks players straight from a rollcall's IN list. Without this,
+    _resolve_member can't find a proxy being penalized for the first time —
+    it only matches proxy names that already have prior ledger history, and
+    penalty marking now happens *before* that first game-share entry exists
+    (it's applied ahead of the financial close in the /settle_dues flow).
     """
     tier = db.get_penalty_tier(chat_id, tier_name)
     if tier is None:
         raise incorrectParameter(
             f"Penalty tier '{tier_name}' not found. Use /penalties to see defined tiers."
         )
-    all_names = [r["member_name"] for r in db.get_all_dues_balances(chat_id, nonzero_only=False)]
-    member = _resolve_member(chat_id, token, dues_names=all_names)
+    if known_identity is not None:
+        if isinstance(known_identity, int):
+            member = {"user_id": known_identity, "member_name": token}
+        else:
+            member = {"user_id": None, "member_name": known_identity}
+    else:
+        all_names = [r["member_name"] for r in db.get_all_dues_balances(chat_id, nonzero_only=False)]
+        member = _resolve_member(chat_id, token, dues_names=all_names)
     amount = tier["amount"]
     display_name = tier["name"]
 

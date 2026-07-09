@@ -134,6 +134,14 @@ class TestComputeShares(unittest.TestCase):
                 ph, rem = self._call(gc, 0, n, 10)
                 self.assertGreaterEqual(rem, 0)
 
+    def test_subsidy_exceeding_ground_cost_never_produces_negative_per_head(self):
+        """Defensive floor — close_game validates subsidy <= ground_cost
+        before calling this, but the function itself should never be able
+        to return a negative per_head even if a future caller skips that."""
+        per_head, _ = self._call(100, 500, 5, 10)
+        self.assertGreaterEqual(per_head, 0)
+        self.assertEqual(per_head, 0)
+
 
 # ── _resolve_member ───────────────────────────────────────────────────────────
 
@@ -191,6 +199,88 @@ class TestResolveMember(unittest.TestCase):
         with self._mock_active([]):
             r = self._call(1, "walk-in guest", dues_names=["Walk-in Guest"])
         self.assertEqual(r["member_name"], "Walk-in Guest")
+
+    def test_departed_real_user_resolved_via_ledger_history(self):
+        """A real user no longer in get_active_members (e.g. left the group)
+        but with prior dues_entries must still resolve — with their actual
+        user_id, not fall through to a proxy-style user_id=None match that
+        then can't find their balance."""
+        history = [{"user_id": 555, "member_name": "Bob", "balance": 100}]
+        with self._mock_active([]), \
+             patch("services.dues.db.get_all_dues_balances", return_value=history):
+            r = self._call(1, "Bob")
+        self.assertEqual(r["user_id"], 555)
+        self.assertEqual(r["member_name"], "Bob")
+
+    def test_ledger_history_ambiguous_raises(self):
+        from exceptions import incorrectParameter
+        history = [
+            {"user_id": 1, "member_name": "Sam", "balance": 10},
+            {"user_id": 2, "member_name": "Sam", "balance": 20},
+        ]
+        with self._mock_active([]), \
+             patch("services.dues.db.get_all_dues_balances", return_value=history):
+            with self.assertRaises(incorrectParameter):
+                self._call(1, "Sam")
+
+    def test_active_real_user_takes_priority_over_ledger_history(self):
+        """If someone is both currently active AND has ledger history under
+        a different user_id (shouldn't normally happen, but step 1 must win
+        so the freshest identity is used)."""
+        active = [{"user_id": 9, "first_name": "Nina", "username": None}]
+        history = [{"user_id": 9, "member_name": "Nina", "balance": 50}]
+        with self._mock_active(active), \
+             patch("services.dues.db.get_all_dues_balances", return_value=history):
+            r = self._call(1, "Nina")
+        self.assertEqual(r["user_id"], 9)
+
+
+class TestKnownProxyNames(unittest.TestCase):
+
+    def test_collects_proxies_from_active_rollcall_in_list(self):
+        from services.dues import _known_proxy_names
+        proxy = MagicMock()
+        proxy.user_id = "A1"
+        proxy.name = "A1"
+        rc = MagicMock(inList=[proxy], outList=[], maybeList=[], waitList=[])
+        mgr = MagicMock()
+        mgr.get_rollcalls.return_value = [rc]
+        with patch("services.dues.manager", mgr), \
+             patch("services.dues.db.get_unsettled_rollcalls", return_value=[]):
+            names = _known_proxy_names(1)
+        self.assertIn("A1", names)
+
+    def test_excludes_real_users_from_active_rollcall(self):
+        from services.dues import _known_proxy_names
+        real = MagicMock()
+        real.user_id = 101
+        real.name = "Alice"
+        rc = MagicMock(inList=[real], outList=[], maybeList=[], waitList=[])
+        mgr = MagicMock()
+        mgr.get_rollcalls.return_value = [rc]
+        with patch("services.dues.manager", mgr), \
+             patch("services.dues.db.get_unsettled_rollcalls", return_value=[]):
+            names = _known_proxy_names(1)
+        self.assertNotIn("Alice", names)
+
+    def test_collects_proxies_from_unsettled_rollcalls(self):
+        from services.dues import _known_proxy_names
+        mgr = MagicMock()
+        mgr.get_rollcalls.return_value = []
+        with patch("services.dues.manager", mgr), \
+             patch("services.dues.db.get_unsettled_rollcalls", return_value=[{"id": 42}]), \
+             patch("services.dues.db.get_rollcall_in_users", return_value=[{"proxy_name": "B5"}]):
+            names = _known_proxy_names(1)
+        self.assertIn("B5", names)
+
+    def test_swallows_scan_failures_and_returns_empty(self):
+        from services.dues import _known_proxy_names
+        mgr = MagicMock()
+        mgr.get_rollcalls.side_effect = Exception("boom")
+        with patch("services.dues.manager", mgr), \
+             patch("services.dues.db.get_unsettled_rollcalls", side_effect=Exception("boom too")):
+            names = _known_proxy_names(1)   # must not raise
+        self.assertEqual(names, [])
 
 
 # ── settings setters ──────────────────────────────────────────────────────────
@@ -704,6 +794,37 @@ class TestReadServices(unittest.TestCase):
         self.assertEqual(len(r["transactions"]), 1)
         self.assertEqual(r["total"], 3)
 
+    def test_dues_export_csv_no_name_collision_between_same_named_members(self):
+        """Regression: last_entries used to be keyed by bare member_name, so
+        a real user and a proxy (or two real users) sharing a display name
+        would overwrite each other's 'last entry' CSV columns."""
+        from services.dues import dues_export_csv
+
+        balances = [
+            {"user_id": 101, "member_name": "Sam", "balance": 50},
+            {"user_id": None, "member_name": "Sam", "balance": 30},   # proxy, same name
+        ]
+
+        def _entries(chat_id, user_id=None, member_name=None, limit=1):
+            if user_id == 101:
+                return [{"entry_type": "share", "created_at": "2026-01-01", "amount": 50}]
+            if user_id is None and member_name == "Sam":
+                return [{"entry_type": "penalty", "created_at": "2026-02-02", "amount": 30}]
+            return []
+
+        with self._patch_db(
+            get_all_dues_balances=MagicMock(return_value=balances),
+            get_dues_entries=MagicMock(side_effect=_entries),
+        ):
+            csv_text = dues_export_csv(1)
+
+        rows = csv_text.strip().splitlines()[1:]  # skip header
+        self.assertEqual(len(rows), 2)
+        real_row = next(r for r in rows if r.startswith("Sam,101,"))
+        proxy_row = next(r for r in rows if r.startswith("Sam,,"))
+        self.assertIn("share", real_row)
+        self.assertIn("penalty", proxy_row)
+
 
 # ── Penalties ─────────────────────────────────────────────────────────────────
 
@@ -936,6 +1057,31 @@ class TestMarkPaid(unittest.TestCase):
             r = mark_paid(1, "alice", actor_uid=55, actor_name="Ravi",
                           is_admin=False)
         self.assertEqual(r["amount"], 90)
+
+    def test_known_identity_bypasses_resolution(self):
+        """The payment panel already knows the concrete identity from its own
+        balances snapshot — this must skip _resolve_member entirely, so it
+        works even for a member no active-member/ledger-history lookup would
+        find (e.g. a fresh test double with no matching active member)."""
+        from services.dues import mark_paid
+        add_dues = MagicMock()
+        with self._patch(add_dues_entry=add_dues,
+                         get_active_members=MagicMock(return_value=[])):
+            r = mark_paid(1, "Ghost Name", actor_uid=99, actor_name="Admin",
+                          is_admin=True, known_identity=777)
+        self.assertEqual(r["user_id"], 777)
+        add_dues.assert_called_once()
+        self.assertEqual(add_dues.call_args.args[2], 777)
+
+    def test_known_identity_proxy_bypasses_resolution(self):
+        from services.dues import mark_paid
+        add_dues = MagicMock()
+        with self._patch(add_dues_entry=add_dues,
+                         get_active_members=MagicMock(return_value=[])):
+            r = mark_paid(1, "A1", actor_uid=99, actor_name="Admin",
+                          is_admin=True, known_identity="A1")
+        self.assertIsNone(r["user_id"])
+        self.assertEqual(r["member_name"], "A1")
 
     def test_non_admin_non_collector_denied(self):
         from exceptions import insufficientPermissions

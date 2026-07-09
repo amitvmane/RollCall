@@ -975,3 +975,93 @@ class TestPenaltyPanelFirstTimeProxy(IntegrationBase):
         penalty_entries = [e for e in entries if e["entry_type"] == "penalty"]
         self.assertEqual(len(penalty_entries), 1)
         self.assertEqual(penalty_entries[0]["amount"], 50)   # late_short default tier
+
+
+class TestAddAdhocFirstTimeProxy(IntegrationBase):
+    """Regression: /add_adhoc on a proxy with zero prior ledger history used
+    to fail resolution the same way /mark_penalty did before its fix — now
+    covered by _resolve_member's broader lookup (_known_proxy_names)."""
+
+    async def test_add_adhoc_resolves_first_time_proxy(self):
+        _enable_dues()
+        rc = await self.start_rc("Adhoc Test")
+        rc.event_fee = "300"
+        for u in USERS[:3]:
+            await self.vote_in(u)
+        await self.dues_settle_dues(self.msg("/settle_dues 0"))
+
+        # A late joiner shows up for the *next* session (voted IN on the new
+        # active rollcall) — /add_adhoc backdates them onto the just-closed
+        # game's per-head fee. LateGuest has zero prior dues_entries at the
+        # moment /add_adhoc runs.
+        await self.start_rc("Next Session")
+        await self.set_in_for(self.msg("/sif LateGuest", ADMIN_USER))
+        get_mock_bot().send_message.reset_mock()
+
+        await self.dues_add_adhoc(self.msg("/add_adhoc LateGuest", ADMIN_USER))
+
+        texts = self.sent_texts()
+        self.assertFalse(any("not found" in t.lower() for t in texts), texts)
+        entries = db.get_dues_entries(CHAT_ID, member_name="LateGuest")
+        self.assertTrue(any(e["entry_type"] == "adhoc" for e in entries))
+
+
+class TestWaiveDepartedRealUser(IntegrationBase):
+    """Regression: a real user no longer 'active' (left the group) but with
+    an outstanding balance from a prior game used to be unresolvable by
+    /waive — _resolve_member's real-user step only checked currently-active
+    chat_members, ignoring ledger history for departed users entirely."""
+
+    async def test_waive_resolves_departed_real_user_by_ledger_history(self):
+        _enable_dues()
+        rc = await self.start_rc("Departure Test")
+        rc.event_fee = "300"
+        for u in USERS[:3]:
+            await self.vote_in(u)
+        await self.dues_settle_dues(self.msg("/settle_dues 0"))
+
+        # Simulate the member leaving the group after the game.
+        db.mark_member_inactive(CHAT_ID, USERS[0]["id"])
+        get_mock_bot().send_message.reset_mock()
+
+        await self.dues_waive(self.msg(f"/waive {USERS[0]['first_name']} 50 goodwill", ADMIN_USER))
+
+        texts = self.sent_texts()
+        self.assertFalse(any("not found" in t.lower() for t in texts), texts)
+        self.assertTrue(any("Waived" in t for t in texts), texts)
+        self.assertEqual(db.get_dues_balance(CHAT_ID, user_id=USERS[0]["id"]), 50)  # 100 - 50
+
+
+class TestPenaltyPanelAlreadyClosedGuard(IntegrationBase):
+    """A penalty panel session left open on a game that gets financially
+    closed via a different path in the interim must refuse to apply more
+    penalties instead of writing orphaned, unreversible entries."""
+
+    async def test_apply_rejected_after_game_closed_elsewhere(self):
+        _enable_dues()
+        rc = await self.start_rc("Race Test")
+        rc.event_fee = "300"
+        for u in USERS[:3]:
+            await self.vote_in(u)
+        await self.end_roll_call(self.msg("/erc", ADMIN_USER))
+
+        await self.dues_settle_dues(self.msg("/settle_dues", ADMIN_USER))
+        (cid, mid), = [(c, m) for (c, m) in self.penalty_panel_sessions if c == CHAT_ID]
+        session = self.penalty_panel_sessions[(cid, mid)]
+        rollcall_id = session.rollcall_id
+
+        # Another admin closes the same game directly via the fast path
+        # while the panel above is still open.
+        await self.dues_settle_dues(self.msg(f"/settle_dues 0 ::1", ADMIN_USER))
+        self.assertIsNotNone(db.get_game_closure(rollcall_id))
+
+        await self.penalty_panel_callback(self.call(f"pen_t:{rollcall_id}:late_short", ADMIN_USER, message_id=mid))
+        await self.penalty_panel_callback(self.call(f"pen_g:{rollcall_id}:0", ADMIN_USER, message_id=mid))
+        get_mock_bot().answer_callback_query.reset_mock()
+        await self.penalty_panel_callback(self.call(f"pen_a:{rollcall_id}", ADMIN_USER, message_id=mid))
+
+        # No penalty entry should have been written for the already-closed game.
+        entries = db.get_dues_entries_for_rollcall(rollcall_id)
+        self.assertFalse(any(e["entry_type"] == "penalty" for e in entries))
+        alert_call = get_mock_bot().answer_callback_query.call_args
+        self.assertIn("already", str(alert_call).lower())

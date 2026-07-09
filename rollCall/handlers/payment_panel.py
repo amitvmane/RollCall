@@ -181,10 +181,11 @@ async def payment_panel_callback(call):
             row = session.balances[idx]
             actor = call.from_user
             actor_name = actor.first_name or actor.username or "Admin"
+            known = row["user_id"] if row["user_id"] is not None else row["member_name"]
             async with manager.get_chat_write_lock(cid):
                 result = dues_svc.mark_paid(
                     cid, row["member_name"], actor.id, actor_name,
-                    amount=None, is_admin=True,
+                    amount=None, is_admin=True, known_identity=known,
                 )
             await send_md_fallback(cid, result["announcement"])
             await _refresh_list(cid, mid, session)
@@ -194,7 +195,7 @@ async def payment_panel_callback(call):
             row = session.balances[idx]
             _prune_pending(_pending_payment_input)
             _pending_payment_input[(cid, call.from_user.id)] = {
-                "member_name": row["member_name"], "mid": mid,
+                "member_name": row["member_name"], "user_id": row["user_id"], "mid": mid,
                 "_ts": datetime.now().timestamp(),
             }
             await bot.answer_callback_query(call.id)
@@ -243,11 +244,13 @@ async def payment_partial_reply(message):
             return
         amount = int(message.text.strip())
         actor_name = message.from_user.first_name or message.from_user.username or "Admin"
+        pending_uid = pending.get("user_id")
+        known = pending_uid if pending_uid is not None else pending["member_name"]
 
         async with manager.get_chat_write_lock(cid):
             result = dues_svc.mark_paid(
                 cid, pending["member_name"], uid, actor_name,
-                amount=amount, is_admin=True,
+                amount=amount, is_admin=True, known_identity=known,
             )
         await send_md_fallback(cid, result["announcement"])
 

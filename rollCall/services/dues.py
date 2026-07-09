@@ -46,6 +46,10 @@ def compute_shares(
     net = ground_cost - subsidy
     raw = -(-net // in_count)           # ceiling division, integer-only
     per_head = -(-raw // step) * step   # round raw up to next step
+    # Defensive floor — callers are expected to validate subsidy <= ground_cost
+    # before calling (close_game does), but a negative per_head should never
+    # be possible to produce even if a future caller skips that check.
+    per_head = max(per_head, 0)
     remainder = per_head * in_count - net
     return per_head, remainder
 
@@ -59,9 +63,23 @@ def _resolve_member(
 ) -> dict:
     """Resolve a name/handle token to a member dict.
 
-    Tries:
-      1. @username or first_name match against active chat members (real users)
-      2. Case-insensitive match against dues_names (proxy names from ledger history)
+    Tries, in order:
+      1. @username or first_name match against currently-active chat members
+         (real users who've voted at least once and haven't been detected as
+         having left the group).
+      2. Match against anyone who already has dues ledger history
+         (get_all_dues_balances) — covers proxies with prior entries AND real
+         users no longer "active" (e.g. left the group after running up a
+         balance). Returns their actual historical user_id either way, so a
+         departed real user resolves correctly instead of being silently
+         downgraded to a proxy-style user_id=None match that then can't find
+         their balance (their entries have a real user_id, not None).
+      3. Case-insensitive match against `dues_names` — an *additional* name
+         list the caller supplies for identities not yet in ledger history,
+         e.g. a proxy just /sif'd in for the current game and never charged
+         anything before. Callers should pass `_known_proxy_names(chat_id)`
+         here, not their own get_all_dues_balances scan (step 2 already
+         covers that, with the correct user_id).
 
     Returns: {'user_id': int|None, 'member_name': str}
     Raises:  incorrectParameter if ambiguous or not found.
@@ -69,7 +87,7 @@ def _resolve_member(
     token = token.lstrip("@").strip()
     token_lower = token.lower()
 
-    # Real users from chat_members table
+    # 1. Currently-active real users
     active = db.get_active_members(chat_id)
     real_matches = [
         m for m in active
@@ -83,7 +101,17 @@ def _resolve_member(
         names = ", ".join(m.get("first_name", str(m["user_id"])) for m in real_matches)
         raise incorrectParameter(f"'{token}' matches multiple members: {names}. Use a more specific name.")
 
-    # Proxy / name-keyed members from dues history
+    # 2. Ledger history — proxies with prior entries, or real users no longer active
+    history = db.get_all_dues_balances(chat_id, nonzero_only=False)
+    hist_matches = [r for r in history if (r.get("member_name") or "").lower() == token_lower]
+    if len(hist_matches) == 1:
+        r = hist_matches[0]
+        return {"user_id": r.get("user_id"), "member_name": r["member_name"]}
+    if len(hist_matches) > 1:
+        names = ", ".join(r["member_name"] for r in hist_matches)
+        raise incorrectParameter(f"'{token}' is ambiguous in dues history: {names}.")
+
+    # 3. Extra known names not yet in ledger history
     if dues_names:
         proxy_matches = [n for n in dues_names if n.lower() == token_lower]
         if len(proxy_matches) == 1:
@@ -94,6 +122,33 @@ def _resolve_member(
     raise incorrectParameter(
         f"'{token}' not found. Use the exact first name, @username, or proxy name."
     )
+
+
+def _known_proxy_names(chat_id: int) -> list[str]:
+    """Proxy names resolvable by name even with zero prior ledger history —
+    anyone currently IN (or OUT/MAYBE/waitlisted) on an active rollcall, or IN
+    on an ended-but-unsettled one. Without this, a first-time proxy (e.g. just
+    /sif'd in) can't be targeted by /waive, /add_adhoc, /reimburse,
+    /mark_paid, /set_collector, /mark_penalty, or their web-UI equivalents
+    until they already have a dues_entries row."""
+    names: set[str] = set()
+    try:
+        for rc in manager.get_rollcalls(chat_id):
+            for lst in (rc.inList, rc.outList, rc.maybeList, getattr(rc, "waitList", [])):
+                for u in lst:
+                    if not isinstance(u.user_id, int):
+                        names.add(u.name)
+    except Exception:
+        logging.exception("_known_proxy_names: active rollcall scan failed")
+    try:
+        for row in db.get_unsettled_rollcalls(chat_id):
+            for r in db.get_rollcall_in_users(row["id"]):
+                proxy_name = r.get("proxy_name")
+                if proxy_name:
+                    names.add(proxy_name)
+    except Exception:
+        logging.exception("_known_proxy_names: unsettled rollcall scan failed")
+    return list(names)
 
 
 # ── Settings ─────────────────────────────────────────────────────────────────
@@ -657,7 +712,11 @@ def dues_export_csv(chat_id: int) -> str:
             member_name=name if not uid else None,
             limit=1,
         )
-        last_entries[name] = rows[0] if rows else {}
+        # Keyed by (user_id, name) — a bare name key would collide (and
+        # silently overwrite) whenever a real user and a proxy, or two real
+        # users, share a display name; get_all_dues_balances itself groups
+        # on this same composite identity.
+        last_entries[(uid, name)] = rows[0] if rows else {}
 
     buf = io.StringIO()
     writer = _csv.writer(buf)
@@ -666,7 +725,7 @@ def dues_export_csv(chat_id: int) -> str:
     for b in sorted(balances, key=lambda x: -x["balance"]):
         bal = b["balance"]
         status = "owed" if bal > 0 else ("credit" if bal < 0 else "settled")
-        le = last_entries.get(b["member_name"], {})
+        le = last_entries.get((b.get("user_id"), b["member_name"]), {})
         writer.writerow([
             b["member_name"],
             b.get("user_id") or "",
@@ -815,7 +874,7 @@ def mark_penalty(
         else:
             member = {"user_id": None, "member_name": known_identity}
     else:
-        all_names = [r["member_name"] for r in db.get_all_dues_balances(chat_id, nonzero_only=False)]
+        all_names = _known_proxy_names(chat_id)
         member = _resolve_member(chat_id, token, dues_names=all_names)
     amount = tier["amount"]
     display_name = tier["name"]
@@ -906,7 +965,7 @@ def waive(
     """
     if amount <= 0:
         raise incorrectParameter("Waive amount must be positive.")
-    all_names = [r["member_name"] for r in db.get_all_dues_balances(chat_id, nonzero_only=False)]
+    all_names = _known_proxy_names(chat_id)
     member = _resolve_member(chat_id, token, dues_names=all_names)
 
     db.add_dues_entry(
@@ -967,7 +1026,7 @@ def set_collector(
     collector_upi is optional — if provided it overrides the group UPI in the
     close announcement so game fees are routed to this collector directly.
     """
-    all_names = [r["member_name"] for r in db.get_all_dues_balances(chat_id, nonzero_only=False)]
+    all_names = _known_proxy_names(chat_id)
     member = _resolve_member(chat_id, token, dues_names=all_names)
     uid = member["user_id"]
     name = member["member_name"]
@@ -1030,6 +1089,7 @@ def mark_paid(
     amount: int | None = None,
     is_admin: bool = False,
     rollcall_id: int | None = None,
+    known_identity: int | str | None = None,
 ) -> dict:
     """Record a payment from a member.
 
@@ -1038,9 +1098,22 @@ def mark_paid(
 
     amount=None defaults to the member's full outstanding balance.
     Overpayments are allowed and appear as negative balance (credit).
+
+    known_identity — bypasses name resolution when the caller already knows
+    the concrete identity (int user_id or str proxy_name), e.g. the payment
+    panel picks a row straight from its own balances snapshot. Without this,
+    re-resolving by name can raise on an ambiguous shared first name, or
+    (before the ledger-history lookup in _resolve_member) fail entirely for
+    a real user no longer in the active-members table.
     """
-    all_names = [r["member_name"] for r in db.get_all_dues_balances(chat_id, nonzero_only=False)]
-    member = _resolve_member(chat_id, token, dues_names=all_names)
+    if known_identity is not None:
+        if isinstance(known_identity, int):
+            member = {"user_id": known_identity, "member_name": token}
+        else:
+            member = {"user_id": None, "member_name": known_identity}
+    else:
+        all_names = _known_proxy_names(chat_id)
+        member = _resolve_member(chat_id, token, dues_names=all_names)
 
     # Permission check: admin OR current collector
     if not is_admin:
@@ -1125,7 +1198,7 @@ def reimburse(
     """Issue a reimbursement credit to a member (admin only)."""
     if amount <= 0:
         raise incorrectParameter("Reimbursement amount must be positive.")
-    all_names = [r["member_name"] for r in db.get_all_dues_balances(chat_id, nonzero_only=False)]
+    all_names = _known_proxy_names(chat_id)
     member = _resolve_member(chat_id, token, dues_names=all_names)
 
     db.add_dues_entry(
@@ -1160,7 +1233,7 @@ def add_adhoc(
     if closure is None:
         raise duesNothingToClose("No closed game found. Close a game first with /settle_dues.")
 
-    all_names = [r["member_name"] for r in db.get_all_dues_balances(chat_id, nonzero_only=False)]
+    all_names = _known_proxy_names(chat_id)
     member = _resolve_member(chat_id, token, dues_names=all_names)
     per_head = closure["per_head"]
     rc_id = closure["rollcall_id"]

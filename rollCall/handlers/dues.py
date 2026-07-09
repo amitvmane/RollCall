@@ -509,12 +509,19 @@ async def waive(message):
         args = _parse_args(message.text)
         if len(args) < 2:
             raise parameterMissing("Usage: /waive <name> <amount> [reason]")
-        try:
-            amount = int(args[1])
-        except ValueError:
+        # The amount marks where the name ends — scan from index 1 onward (the
+        # name always has at least one token) for the first integer-looking
+        # token, so multi-word proxy names (e.g. "Team B") resolve correctly
+        # instead of the old fixed args[0]/args[1] split truncating the name.
+        amount_idx = next(
+            (i for i, tok in enumerate(args) if i > 0 and tok.lstrip("-").isdigit()),
+            None,
+        )
+        if amount_idx is None:
             raise incorrectParameter("Amount must be a whole number. Example: /waive Alice 75 injured")
-        name = args[0]
-        reason = " ".join(args[2:]) if len(args) > 2 else ""
+        name = " ".join(args[:amount_idx])
+        amount = int(args[amount_idx])
+        reason = " ".join(args[amount_idx + 1:])
 
         async with manager.get_chat_write_lock(cid):
             result = dues_svc.waive(
@@ -769,12 +776,17 @@ async def reimburse(message):
         args = _parse_args(message.text)
         if len(args) < 2:
             raise parameterMissing("Usage: /reimburse <name> <amount> [reason]")
-        try:
-            amount = int(args[1])
-        except ValueError:
+        # Same multi-word-name handling as /waive — scan for the amount
+        # token instead of assuming the name is always exactly args[0].
+        amount_idx = next(
+            (i for i, tok in enumerate(args) if i > 0 and tok.lstrip("-").isdigit()),
+            None,
+        )
+        if amount_idx is None:
             raise incorrectParameter("Amount must be a whole number.")
-        name = args[0]
-        reason = " ".join(args[2:]) if len(args) > 2 else ""
+        name = " ".join(args[:amount_idx])
+        amount = int(args[amount_idx])
+        reason = " ".join(args[amount_idx + 1:])
 
         async with manager.get_chat_write_lock(cid):
             result = dues_svc.reimburse(

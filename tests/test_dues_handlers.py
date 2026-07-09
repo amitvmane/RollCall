@@ -178,6 +178,45 @@ class TestDuesHandlers(unittest.IsolatedAsyncioTestCase):
             await waive(_msg("/waive Alice 75 injury"))
         self.assertIn("Waived", self._sent_text())
 
+    async def test_waive_multi_word_proxy_name(self):
+        """Regression: /waive used to assume the name was always a single
+        token (args[0]), silently truncating multi-word proxy names and
+        misinterpreting the next word as the amount."""
+        from handlers.dues import waive
+        svc_mock = MagicMock(return_value={"announcement": "🕊 Waived ₹75 for Team B: injury"})
+        with _admin_ok(), \
+             patch("handlers.dues.manager", self.mgr), \
+             patch("handlers.dues.dues_svc.waive", svc_mock):
+            await waive(_msg("/waive Team B 75 injury"))
+        args = svc_mock.call_args.args
+        self.assertEqual(args[1], "Team B")
+        self.assertEqual(args[2], 75)
+        self.assertEqual(args[3], "injury")
+
+    async def test_waive_multi_word_name_no_reason(self):
+        from handlers.dues import waive
+        svc_mock = MagicMock(return_value={"announcement": "🕊 Waived"})
+        with _admin_ok(), \
+             patch("handlers.dues.manager", self.mgr), \
+             patch("handlers.dues.dues_svc.waive", svc_mock):
+            await waive(_msg("/waive Team B 75"))
+        args = svc_mock.call_args.args
+        self.assertEqual(args[1], "Team B")
+        self.assertEqual(args[2], 75)
+        self.assertEqual(args[3], "")
+
+    async def test_reimburse_multi_word_proxy_name(self):
+        from handlers.dues import reimburse
+        svc_mock = MagicMock(return_value={"announcement": "💸 Reimbursed"})
+        with _admin_ok(), \
+             patch("handlers.dues.manager", self.mgr), \
+             patch("handlers.dues.dues_svc.reimburse", svc_mock):
+            await reimburse(_msg("/reimburse Team B 40 travel"))
+        args = svc_mock.call_args.args
+        self.assertEqual(args[1], "Team B")
+        self.assertEqual(args[2], 40)
+        self.assertEqual(args[3], "travel")
+
     async def test_my_dues_no_balance(self):
         from handlers.dues import my_dues
         with patch("handlers.dues.dues_svc.my_dues", return_value={"balance": 0, "entries": []}), \

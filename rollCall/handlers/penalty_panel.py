@@ -308,6 +308,20 @@ async def penalty_panel_callback(call):
             # Serialize with /erc, template auto-close, and manual /mark_*
             # commands — same invariant as every chat mutation (CLAUDE.md).
             async with manager.get_chat_write_lock(cid):
+                # This game may have been financially closed via a different
+                # path (e.g. another admin ran /settle_dues's fast path on it
+                # directly) while this panel sat open. Penalty entries are
+                # NOT reversed by /cancel_game_dues ("stand independently"),
+                # so applying more against an already-closed game would be
+                # an orphaned, unreversible write — refuse instead.
+                if db.get_game_closure(rc) is not None:
+                    await bot.answer_callback_query(
+                        call.id,
+                        "This game was already financially closed elsewhere — "
+                        "no more penalties can be applied here.",
+                        show_alert=True,
+                    )
+                    return
                 for idx in sorted(indices):
                     m = session.members[idx]
                     try:

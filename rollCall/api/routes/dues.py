@@ -387,9 +387,10 @@ async def mark_penalty(
     actor_uid = _require_admin(chat_id, body.id_token)
     actor_name = _actor_name(chat_id, actor_uid)
 
-    result = dues_svc.mark_penalty(
-        chat_id, body.tier_name, body.member_name, actor_uid, actor_name
-    )
+    async with _mgr.get_chat_write_lock(chat_id):
+        result = dues_svc.mark_penalty(
+            chat_id, body.tier_name, body.member_name, actor_uid, actor_name
+        )
     await _announce(chat_id, result.get("announcement"))
     return result
 
@@ -409,10 +410,11 @@ async def mark_paid(
     actor_name = _actor_name(chat_id, actor_uid)
     is_admin = bool(_db.is_web_admin(chat_id, actor_uid))
 
-    result = dues_svc.mark_paid(
-        chat_id, body.member_name, actor_uid, actor_name,
-        amount=body.amount, is_admin=is_admin,
-    )
+    async with _mgr.get_chat_write_lock(chat_id):
+        result = dues_svc.mark_paid(
+            chat_id, body.member_name, actor_uid, actor_name,
+            amount=body.amount, is_admin=is_admin,
+        )
     await _announce(chat_id, result.get("announcement"))
     return result
 
@@ -431,10 +433,11 @@ async def waive(
     actor_uid = _require_admin(chat_id, body.id_token)
     actor_name = _actor_name(chat_id, actor_uid)
 
-    result = dues_svc.waive(
-        chat_id, body.member_name, body.amount, body.reason,
-        actor_uid, actor_name,
-    )
+    async with _mgr.get_chat_write_lock(chat_id):
+        result = dues_svc.waive(
+            chat_id, body.member_name, body.amount, body.reason,
+            actor_uid, actor_name,
+        )
     await _announce(chat_id, result.get("announcement"))
     return result
 
@@ -453,10 +456,11 @@ async def reimburse(
     actor_uid = _require_admin(chat_id, body.id_token)
     actor_name = _actor_name(chat_id, actor_uid)
 
-    result = dues_svc.reimburse(
-        chat_id, body.member_name, body.amount, body.reason,
-        actor_uid, actor_name,
-    )
+    async with _mgr.get_chat_write_lock(chat_id):
+        result = dues_svc.reimburse(
+            chat_id, body.member_name, body.amount, body.reason,
+            actor_uid, actor_name,
+        )
     await _announce(chat_id, result.get("announcement"))
     return result
 
@@ -475,7 +479,8 @@ async def add_adhoc(
     actor_uid = _require_admin(chat_id, body.id_token)
     actor_name = _actor_name(chat_id, actor_uid)
 
-    result = dues_svc.add_adhoc(chat_id, body.member_name, actor_uid, actor_name)
+    async with _mgr.get_chat_write_lock(chat_id):
+        result = dues_svc.add_adhoc(chat_id, body.member_name, actor_uid, actor_name)
     await _announce(chat_id, result.get("announcement"))
     return result
 
@@ -520,7 +525,8 @@ async def log_expense(
     actor_uid = _require_admin(chat_id, body.id_token)
     actor_name = _actor_name(chat_id, actor_uid)
 
-    result = dues_svc.log_expense(chat_id, body.amount, body.description, actor_uid, actor_name)
+    async with _mgr.get_chat_write_lock(chat_id):
+        result = dues_svc.log_expense(chat_id, body.amount, body.description, actor_uid, actor_name)
     await _announce(chat_id, result.get("announcement"))
     return result
 
@@ -539,7 +545,8 @@ async def fund_topup(
     actor_uid = _require_admin(chat_id, body.id_token)
     actor_name = _actor_name(chat_id, actor_uid)
 
-    result = dues_svc.fund_topup(chat_id, body.amount, body.description, actor_uid, actor_name)
+    async with _mgr.get_chat_write_lock(chat_id):
+        result = dues_svc.fund_topup(chat_id, body.amount, body.description, actor_uid, actor_name)
     await _announce(chat_id, result.get("announcement"))
     return result
 

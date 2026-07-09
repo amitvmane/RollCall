@@ -91,6 +91,21 @@ def test_get_latest_game_closure():
     assert latest["per_head"] == 120
 
 
+def test_has_ever_been_collector_survives_newer_closure_by_someone_else():
+    """A collector's standing shouldn't expire just because a later game
+    closed with a different collector — has_ever_been_collector must check
+    every closure for the chat, not just the latest one."""
+    chat = CHAT - 2
+    rc1 = _mk_rollcall(chat_id=chat, title="Game 1")
+    rc2 = _mk_rollcall(chat_id=chat, title="Game 2")
+    _close(rc1, chat_id=chat, collector_uid=42, collector_name="Ravi")
+    _close(rc2, chat_id=chat, collector_uid=99, collector_name="Someone Else")
+
+    assert db.has_ever_been_collector(chat, 42) is True
+    assert db.has_ever_been_collector(chat, 99) is True
+    assert db.has_ever_been_collector(chat, 12345) is False
+
+
 # ── dues_entries ─────────────────────────────────────────────────────────────
 
 def test_dues_balance_real_user():

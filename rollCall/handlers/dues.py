@@ -548,17 +548,15 @@ async def set_collector(message):
         if not args:
             raise parameterMissing("Usage: /set_collector <name> [paid] [upi@bank] [::N]")
 
-        # Extract optional UPI (any arg matching vpa@handle pattern)
+        # Fixed format: <name> [paid] [upi@bank] — only the trailing token(s)
+        # are ever inspected for "paid"/UPI, so a name can never be split
+        # apart by an @-shaped word in the middle of it.
         import re as _re
         _UPI_PAT = _re.compile(r'^[a-zA-Z0-9.\-_]{2,}@[a-zA-Z]{2,}$')
         collector_upi = None
-        filtered = []
-        for a in args:
-            if _UPI_PAT.match(a) and not collector_upi:
-                collector_upi = a
-            else:
-                filtered.append(a)
-        args = filtered
+        if args and _UPI_PAT.match(args[-1]):
+            collector_upi = args[-1]
+            args = args[:-1]
 
         paid_ground = False
         if args and args[-1].lower() == "paid":

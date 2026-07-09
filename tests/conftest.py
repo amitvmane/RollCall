@@ -75,6 +75,7 @@ db_mock.load_ghost_selections.return_value = None
 db_mock.save_ghost_selections.return_value = True
 db_mock.get_ghost_count_by_proxy_name.return_value = 0
 db_mock.get_game_closure.return_value = None
+db_mock.has_ever_been_collector.return_value = False
 db_mock.db_type = "sqlite"
 sys.modules["db"] = db_mock
 

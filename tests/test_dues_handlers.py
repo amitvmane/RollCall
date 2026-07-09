@@ -451,11 +451,25 @@ class TestSetCollectorUPIParsing(unittest.IsolatedAsyncioTestCase):
         kwargs = svc.call_args.kwargs
         self.assertIsNone(kwargs.get("collector_upi"))
 
-    async def test_set_collector_upi_order_independent(self):
-        """UPI may come before 'paid' — should still be detected."""
+    async def test_set_collector_fixed_format_only_trailing_token_is_upi(self):
+        """Format is fixed as <name> [paid] [upi@bank] — only the very last
+        token is ever checked for the UPI pattern. If 'ravi@ybl' isn't last,
+        it's just part of the name, not silently spliced out. This is the
+        intentional trade for eliminating the old free-scan misclassification
+        risk (an @-shaped word anywhere in a multi-word name used to get torn
+        out no matter where it appeared)."""
         svc = await self._call_set_collector("/set_collector Ravi ravi@ybl paid")
         kwargs = svc.call_args.kwargs
-        self.assertEqual(kwargs.get("collector_upi"), "ravi@ybl")
+        self.assertIsNone(kwargs.get("collector_upi"))
+        self.assertEqual(svc.call_args.args[1], "Ravi ravi@ybl")
+
+    async def test_set_collector_upi_never_extracted_from_middle_of_name(self):
+        """A UPI-shaped word in the middle of a multi-word name must never be
+        torn out — only the trailing token is inspected."""
+        svc = await self._call_set_collector("/set_collector John ravi@ybl Smith")
+        kwargs = svc.call_args.kwargs
+        self.assertIsNone(kwargs.get("collector_upi"))
+        self.assertEqual(svc.call_args.args[1], "John ravi@ybl Smith")
 
 
 # ── /my_dues payment routing display ─────────────────────────────────────────

@@ -5435,6 +5435,33 @@ def get_latest_game_closure(chat_id: int) -> Optional[Dict]:
             release_connection(conn)
 
 
+def has_ever_been_collector(chat_id: int, user_id: int) -> bool:
+    """True if user_id was the collector on ANY past game closure for this chat.
+
+    No time/count bound by design — once you've collected for this chat,
+    you can keep marking payments (mirrors real-world treasurer handoffs
+    where the group, not a rotation, decides who's still trusted).
+    """
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"SELECT 1 FROM game_closures WHERE chat_id = {ph} AND collector_uid = {ph} LIMIT 1",
+            (chat_id, user_id),
+        )
+        return cursor.fetchone() is not None
+    except Exception:
+        logging.exception("has_ever_been_collector failed")
+        return False
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
 def update_game_closure_collector(
     rollcall_id: int, collector_uid: int, collector_name: str,
     collector_paid_ground: int = None, collector_upi: str = None,

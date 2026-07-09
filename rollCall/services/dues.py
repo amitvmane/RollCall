@@ -1093,8 +1093,11 @@ def mark_paid(
 ) -> dict:
     """Record a payment from a member.
 
-    Permitted when actor_uid is an admin (is_admin=True) or when they are
-    the collector of the most recent game closure.
+    Permitted when actor_uid is an admin (is_admin=True) or when they have
+    ever been the collector on any past game closure for this chat — not
+    just the most recent one. No time/count limit: once trusted to collect,
+    that trust doesn't silently expire the next time someone else closes a
+    game.
 
     amount=None defaults to the member's full outstanding balance.
     Overpayments are allowed and appear as negative balance (credit).
@@ -1115,13 +1118,11 @@ def mark_paid(
         all_names = _known_proxy_names(chat_id)
         member = _resolve_member(chat_id, token, dues_names=all_names)
 
-    # Permission check: admin OR current collector
+    # Permission check: admin OR anyone who has ever collected for this chat
     if not is_admin:
-        closure = db.get_latest_game_closure(chat_id)
-        collector_uid = closure.get("collector_uid") if closure else None
-        if collector_uid != actor_uid:
+        if not db.has_ever_been_collector(chat_id, actor_uid):
             raise insufficientPermissions(
-                "Only admins or the designated collector can record payments."
+                "Only admins or a past collector can record payments."
             )
 
     # Default amount = full outstanding balance

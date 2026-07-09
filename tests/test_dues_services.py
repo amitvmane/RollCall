@@ -1025,7 +1025,7 @@ class TestWaive(unittest.TestCase):
 
 class TestMarkPaid(unittest.TestCase):
 
-    def _patch(self, balance=90, closure=None, **kw):
+    def _patch(self, balance=90, closure=None, has_been_collector=False, **kw):
         defaults = dict(
             get_all_dues_balances=MagicMock(return_value=[]),
             get_active_members=MagicMock(return_value=[
@@ -1033,6 +1033,7 @@ class TestMarkPaid(unittest.TestCase):
             ]),
             get_dues_balance=MagicMock(return_value=balance),
             get_latest_game_closure=MagicMock(return_value=closure),
+            has_ever_been_collector=MagicMock(return_value=has_been_collector),
             add_dues_entry=MagicMock(),
             log_admin_action=MagicMock(),
         )
@@ -1052,8 +1053,21 @@ class TestMarkPaid(unittest.TestCase):
     def test_collector_can_mark_paid(self):
         from services.dues import mark_paid
         add_dues = MagicMock()
-        closure = {"collector_uid": 55, "per_head": 90}
-        with self._patch(add_dues_entry=add_dues, closure=closure):
+        with self._patch(add_dues_entry=add_dues, has_been_collector=True):
+            r = mark_paid(1, "alice", actor_uid=55, actor_name="Ravi",
+                          is_admin=False)
+        self.assertEqual(r["amount"], 90)
+
+    def test_past_collector_from_older_closure_can_mark_paid(self):
+        """A collector's standing doesn't expire once someone else closes the
+        next game — has_ever_been_collector checks all closures, not just
+        get_latest_game_closure."""
+        from services.dues import mark_paid
+        add_dues = MagicMock()
+        # latest closure belongs to someone else; actor collected an older game
+        with self._patch(add_dues_entry=add_dues,
+                         closure={"collector_uid": 999, "per_head": 90},
+                         has_been_collector=True):
             r = mark_paid(1, "alice", actor_uid=55, actor_name="Ravi",
                           is_admin=False)
         self.assertEqual(r["amount"], 90)
@@ -1086,8 +1100,7 @@ class TestMarkPaid(unittest.TestCase):
     def test_non_admin_non_collector_denied(self):
         from exceptions import insufficientPermissions
         from services.dues import mark_paid
-        closure = {"collector_uid": 55}
-        with self._patch(closure=closure):
+        with self._patch(has_been_collector=False):
             with self.assertRaises(insufficientPermissions):
                 mark_paid(1, "alice", actor_uid=999, actor_name="Nobody",
                           is_admin=False)

@@ -8,13 +8,8 @@
   <meta name="theme-color" content="#2563eb"/>
   <title>RollCall — My Groups</title>
   <link rel="icon" href="/admin/logo.svg" type="image/svg+xml"/>
-  <script>
-  (function(){
-    var p=localStorage.getItem("rc_dark");
-    var sys=window.matchMedia&&window.matchMedia("(prefers-color-scheme:dark)").matches;
-    if(p==="1"||(p!=="0"&&sys))document.documentElement.classList.add("dark");
-  })();
-  </script>
+  <script src="/shared/theme-init.js"></script>
+  <link rel="stylesheet" href="/shared/tokens.css"/>
   <link rel="stylesheet" href="/admin/style.css"/>
   <link rel="stylesheet" href="/portal/style.css"/>
 </head>

@@ -201,6 +201,12 @@ def create_app() -> FastAPI:
     async def _join_redirect(token: str):
         return RedirectResponse(url=f"/web/group/{token}", status_code=302)
 
+    # Serve shared design tokens (CSS vars + dark-mode init script) consumed
+    # by all 5 web surfaces at /shared/
+    _shared_dir = Path(__file__).parent / "shared"
+    if _shared_dir.is_dir():
+        app.mount("/shared", StaticFiles(directory=str(_shared_dir)), name="shared")
+
     # Serve Mini App static files at /miniapp/
     _miniapp_dir = Path(__file__).parent / "miniapp"
     if _miniapp_dir.is_dir():

@@ -1,11 +1,6 @@
+/* Base tokens (--bg, --accent, --danger, --radius, etc.) come from
+   /shared/tokens.css, linked before this file in admin/index.html. */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{
-  --bg:#f0f4f8;--card:#fff;--border:#e4e8ef;
-  --text:#0f172a;--sub:#64748b;--accent:#2563eb;--accent-dim:#eff6ff;
-  --danger:#dc2626;--danger-dim:#fef2f2;--success:#16a34a;--warn:#d97706;
-  --radius:14px;--radius-sm:8px;--shadow:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.06);
-  --shadow-md:0 4px 16px rgba(0,0,0,.1);
-}
 html,body{height:100%}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);-webkit-text-size-adjust:100%}
 
@@ -256,16 +251,8 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:12px 0}
   .btn-row{flex-wrap:wrap}
 }
 
-/* ── Dark mode — applied via html.dark class (JS-driven: manual toggle or system pref) ── */
-html.dark{
-  --bg:#0f172a;--card:#1e293b;--border:#334155;
-  --text:#f1f5f9;--sub:#94a3b8;
-  --accent:#3b82f6;--accent-dim:rgba(59,130,246,.15);
-  --danger:#f87171;--danger-dim:rgba(248,113,113,.12);
-  --success:#4ade80;--warn:#fbbf24;
-  --shadow:0 1px 3px rgba(0,0,0,.5),0 1px 2px rgba(0,0,0,.4);
-  --shadow-md:0 4px 16px rgba(0,0,0,.5);
-}
+/* ── Dark mode — variable overrides come from /shared/tokens.css; only
+   admin-specific dark-mode rules that aren't plain var() lookups live here ── */
 html.dark #login-screen{background:linear-gradient(135deg,#0f172a 0%,#1e3a8a 100%)}
 html.dark .login-card input{background:var(--card);color:var(--text)}
 html.dark .topbar{box-shadow:0 2px 12px rgba(0,0,0,.6)}

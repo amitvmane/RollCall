@@ -5,16 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RollCall — attendance for your group, made simple</title>
 <meta name="description" content="RollCall is a Telegram bot for running attendance rollcalls in your group — vote in/out/maybe, track streaks and stats, and vote from the web.">
+<script src="/shared/theme-init.js"></script>
+<link rel="stylesheet" href="/shared/tokens.css">
 <style>
+  /* --bg/--card/--border/--accent come from /shared/tokens.css (light +
+     dark). --ink/--muted/--accent-dark are landing-page-only aliases/shades
+     that don't have a shared equivalent. */
   :root {
-    --accent: #2563eb;
     --accent-dark: #1d4ed8;
-    --ink: #0f172a;
-    --muted: #64748b;
-    --bg: #f8fafc;
-    --card: #ffffff;
-    --border: #e2e8f0;
+    --ink: var(--text);
+    --muted: var(--sub);
   }
+  html.dark { --accent-dark: #60a5fa; }
   * { box-sizing: border-box; }
   body {
     margin: 0;
@@ -81,6 +83,7 @@
     padding: 1px 6px; border-radius: 5px;
     font-size: .9em;
   }
+  html.dark code { background: rgba(59,130,246,.15); }
   footer {
     text-align: center; color: var(--muted);
     font-size: .85rem; padding: 32px 20px 48px;

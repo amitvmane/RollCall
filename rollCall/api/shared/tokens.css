@@ -1,0 +1,56 @@
+/* Canonical design tokens shared by all 5 web surfaces (index, admin, portal,
+   web, miniapp). Load this BEFORE any surface-specific stylesheet so it can
+   override nothing and just supply the variables they consume.
+
+   Values match admin/style.css (the most complete existing palette) so
+   migrating admin itself causes zero visual diff. Vote-specific (--in/--out/
+   --maybe) and dues-specific (--dues-owed/--dues-credit/--dues-settled)
+   tokens are deliberately aliased to the same hex as the generic
+   success/danger/warn tokens where the underlying concept is the same —
+   that alias is what makes "vote IN" look identical to "success" everywhere
+   instead of three different greens depending which surface you're on. */
+
+:root{
+  --bg:#f0f4f8;--card:#fff;--border:#e4e8ef;--hover:#f1f5f9;
+  --text:#0f172a;--sub:#64748b;--accent:#2563eb;--accent-dim:#eff6ff;
+  --danger:#dc2626;--danger-dim:#fef2f2;--success:#16a34a;--warn:#d97706;
+  --radius:14px;--radius-sm:8px;--shadow:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.06);
+  --shadow-md:0 4px 16px rgba(0,0,0,.1);
+
+  --in:var(--success);--out:var(--danger);--maybe:var(--warn);
+
+  --dues-owed:var(--danger);--dues-credit:#0891b2;--dues-settled:var(--success);
+
+  /* "Light pill" bg+fg pairs — the same combo shows up verbatim under many
+     different class names across surfaces (vote status badges, session
+     history dots' labels, dues status badges, milestone banners). One pair
+     per semantic color, so every surface's version of "this is a success
+     state" renders identically instead of each having its own shade. */
+  --success-bg:#dcfce7;--success-fg:#15803d;
+  --danger-bg:#fee2e2;--danger-fg:#b91c1c;
+  --warn-bg:#fef3c7;--warn-fg:#b45309;
+}
+
+html.dark{
+  --bg:#0f172a;--card:#1e293b;--border:#334155;--hover:#293548;
+  --text:#f1f5f9;--sub:#94a3b8;
+  --accent:#3b82f6;--accent-dim:rgba(59,130,246,.15);
+  --danger:#f87171;--danger-dim:rgba(248,113,113,.12);
+  --success:#4ade80;--warn:#fbbf24;
+  --shadow:0 1px 3px rgba(0,0,0,.5),0 1px 2px rgba(0,0,0,.4);
+  --shadow-md:0 4px 16px rgba(0,0,0,.5);
+
+  --dues-credit:#22d3ee;
+
+  --success-bg:rgba(74,222,128,.18);--success-fg:#4ade80;
+  --danger-bg:rgba(248,113,113,.18);--danger-fg:#f87171;
+  --warn-bg:rgba(251,191,36,.18);--warn-fg:#fbbf24;
+}
+
+/* Ready-made "light pill" status chips built from the pairs above.
+   Existing per-surface selectors (.pill-in, .status-in, .vote-status.in,
+   etc.) are NOT renamed — they just reference the same variables instead
+   of repeating the hex, so this class is opportunistic, not mandatory. */
+.chip-in{background:var(--success-bg);color:var(--success-fg)}
+.chip-out{background:var(--danger-bg);color:var(--danger-fg)}
+.chip-maybe{background:var(--warn-bg);color:var(--warn-fg)}

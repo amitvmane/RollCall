@@ -39,9 +39,8 @@
 .summary-lbl{font-size:.7rem;color:var(--sub);margin-top:2px;}
 .live-banner{
   margin-top:12px;padding:7px 12px;border-radius:8px;font-size:.8rem;font-weight:600;
-  background:#d1fae5;color:#065f46;text-align:center;
+  background:var(--success-bg);color:var(--success-fg);text-align:center;
 }
-.dark .live-banner{background:#064e3b;color:#6ee7b7;}
 
 /* Upcoming section */
 .upcoming-section{
@@ -75,10 +74,9 @@
 
 /* Personal best milestone */
 .milestone-box{
-  background:#fef3c7;color:#92400e;border-radius:8px;padding:9px 14px;
+  background:var(--warn-bg);color:var(--warn-fg);border-radius:8px;padding:9px 14px;
   font-size:.82rem;margin-bottom:8px;
 }
-.dark .milestone-box{background:#78350f;color:#fcd34d;}
 
 /* Group cards */
 .group-card{
@@ -91,8 +89,7 @@
 .group-badge{
   font-size:.72rem;padding:3px 8px;border-radius:20px;font-weight:600;white-space:nowrap;
 }
-.badge-active{background:#d1fae5;color:#065f46;}
-.dark .badge-active{background:#064e3b;color:#6ee7b7;}
+.badge-active{background:var(--success-bg);color:var(--success-fg);}
 .badge-inactive{background:var(--hover);color:var(--sub);}
 
 .group-stats{
@@ -118,7 +115,7 @@
   display:flex;flex-wrap:wrap;gap:8px;margin-bottom:4px;font-size:.78rem;color:var(--sub);
 }
 .detail-meta-item{display:flex;align-items:center;gap:4px;}
-.ghost-flag{color:#f59e0b;font-weight:600;}
+.ghost-flag{color:var(--warn);font-weight:600;}
 
 .join-link-box{
   background:var(--hover);border-radius:8px;padding:10px 12px;
@@ -139,9 +136,9 @@
 }
 .session-row:last-child{border-bottom:none;}
 .session-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
-.dot-in{background:#22c55e;}
-.dot-out{background:#ef4444;}
-.dot-maybe{background:#f59e0b;}
+.dot-in{background:var(--in);}
+.dot-out{background:var(--out);}
+.dot-maybe{background:var(--maybe);}
 .dot-miss{background:#d1d5db;}
 .dark .dot-miss{background:#4b5563;}
 .dot-cancelled{background:#e5e7eb;border:1.5px dashed #9ca3af;box-sizing:border-box;}
@@ -150,16 +147,13 @@
 .session-status{
   font-size:.72rem;font-weight:600;padding:2px 7px;border-radius:10px;white-space:nowrap;
 }
-.status-in{background:#d1fae5;color:#065f46;}
-.status-out{background:#fee2e2;color:#991b1b;}
-.status-maybe{background:#fef3c7;color:#92400e;}
+.status-in{background:var(--success-bg);color:var(--success-fg);}
+.status-out{background:var(--danger-bg);color:var(--danger-fg);}
+.status-maybe{background:var(--warn-bg);color:var(--warn-fg);}
 .status-miss{background:var(--hover);color:var(--sub);}
 .status-cancelled{background:#f3f4f6;color:#6b7280;font-style:italic;}
 .session-cancelled{opacity:.7;}
 .dark .status-cancelled{background:#374151;color:#9ca3af;}
-.dark .status-in{background:#064e3b;color:#6ee7b7;}
-.dark .status-out{background:#7f1d1d;color:#fca5a5;}
-.dark .status-maybe{background:#78350f;color:#fcd34d;}
 
 /* Sparkline */
 .sparkline{display:flex;gap:4px;margin-top:8px;flex-wrap:wrap;}
@@ -179,11 +173,9 @@
   display:flex;align-items:center;justify-content:space-between;
   padding:10px 14px;border-radius:10px;margin-bottom:8px;font-size:.9rem;
 }
-.dues-owed{background:#fee2e2;color:#991b1b;}
-.dues-credit{background:#d1fae5;color:#065f46;}
+.dues-owed{background:var(--danger-bg);color:var(--danger-fg);}
+.dues-credit{background:var(--success-bg);color:var(--success-fg);}
 .dues-settled{background:var(--hover);color:var(--sub);}
-.dark .dues-owed{background:#7f1d1d;color:#fca5a5;}
-.dark .dues-credit{background:#064e3b;color:#6ee7b7;}
 .dues-balance-lbl{font-weight:500;}
 .dues-balance-val{font-weight:700;font-size:1.05rem;}
 .dues-upi-row{
@@ -192,7 +184,7 @@
 }
 code.dues-upi{
   background:var(--hover);padding:2px 7px;border-radius:5px;
-  font-size:.82rem;color:var(--fg);user-select:all;
+  font-size:.82rem;color:var(--text);user-select:all;
 }
 .dues-entries-box{
   border:1px solid var(--border);border-radius:8px;
@@ -205,11 +197,11 @@ code.dues-upi{
 .dues-entry-row:last-child{border-bottom:none;}
 .dues-entry-type{flex:1;color:var(--sub);text-transform:capitalize;}
 .dues-entry-date{color:var(--sub);font-size:.76rem;white-space:nowrap;}
-.entry-debit{color:#ef4444;font-weight:600;white-space:nowrap;}
-.entry-credit{color:#22c55e;font-weight:600;white-space:nowrap;}
+.entry-debit{color:var(--out);font-weight:600;white-space:nowrap;}
+.entry-credit{color:var(--in);font-weight:600;white-space:nowrap;}
 .dues-admin-label{font-size:.76rem;font-weight:600;color:var(--sub);margin-bottom:4px;letter-spacing:.05em;}
 .dues-fund-row{
   margin-top:8px;padding:8px 14px;background:var(--hover);
-  border-radius:8px;font-size:.85rem;color:var(--fg);
+  border-radius:8px;font-size:.85rem;color:var(--text);
 }
 

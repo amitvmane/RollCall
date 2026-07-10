@@ -1,10 +1,6 @@
+/* Base + vote (--in/--out/--maybe) tokens come from /shared/tokens.css,
+   linked before this file in web/index.html. */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{
-  --bg:#f0f4f8;--card:#fff;--border:#e4e8ef;
-  --text:#0f172a;--sub:#64748b;
-  --in:#16a34a;--out:#dc2626;--maybe:#d97706;--accent:#2563eb;
-  --radius:14px;--shadow:0 1px 4px rgba(0,0,0,.08)
-}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding:0 0 32px;-webkit-text-size-adjust:100%}
 #app{padding:0 14px}
 
@@ -164,12 +160,8 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .upcoming-meta{font-size:.78rem;color:var(--sub)}
 
 /* ── Dark mode — applied via html.dark class (JS-driven: manual toggle or system pref) ── */
-html.dark{
-  --bg:#0f172a;--card:#1e293b;--border:#334155;
-  --text:#f1f5f9;--sub:#94a3b8;
-  --in:#4ade80;--out:#f87171;--maybe:#fbbf24;--accent:#3b82f6;
-  --shadow:0 1px 4px rgba(0,0,0,.3);
-}
+/* Dark-mode variable overrides come from /shared/tokens.css; only rules
+   that aren't plain var() lookups live here. */
 html.dark body{background:var(--bg);color:var(--text)}
 html.dark .card{background:var(--card)}
 html.dark .id-badge.tg{background:rgba(56,189,248,.18);color:#7dd3fc}
@@ -292,8 +284,8 @@ html.dark .sp-dot-miss{background:#334155}
 .sched-cancel-btn:hover{background:var(--danger);color:#fff}
 .sched-empty{color:var(--sub);font-size:.82rem;text-align:center;padding:10px 0}
 
-/* ── Dues cards ── */
-:root{--dues-owed:#dc2626;--dues-settled:#16a34a;--dues-credit:#0891b2;--danger:#dc2626;--danger-dim:#fef2f2}
+/* ── Dues cards — --dues-owed/--dues-settled/--dues-credit/--danger/--danger-dim
+   come from /shared/tokens.css ── */
 .dues-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
 .dues-hdr-title{font-size:.88rem;font-weight:700;color:var(--sub)}
 .dues-hdr-toggle{background:none;border:none;color:var(--sub);font-size:.85rem;cursor:pointer;padding:2px 6px}
@@ -390,3 +382,16 @@ html.dark .sp-dot-miss{background:#334155}
 .dark{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--sub:#94a3b8;--accent:#3b82f6}
 .dark .dues-close-preview{background:#0a1628}
 .dark .dues-fund-form input,.dark .dues-settings-input,.dark .dues-modal-input{background:#0a1628;border-color:#334155}
+
+/* Prevent long member names/entries from forcing page-level horizontal scroll */
+#dues-balances-body,#dues-ledger-body{overflow-x:auto}
+
+/* ── Narrow-phone breakpoints ── */
+@media(max-width:400px){
+  .sp-mini-stats{grid-template-columns:repeat(2,1fr)}
+  .sp-group-row{grid-template-columns:repeat(2,1fr)}
+}
+@media(max-width:360px){
+  .dues-tbl,.dues-ledger-table{font-size:.75rem}
+  .dues-modal-sheet{padding:16px 12px 26px}
+}

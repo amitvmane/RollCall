@@ -18,6 +18,11 @@ from exceptions import (
     duesGameAlreadyClosed, duesNothingToClose,
 )
 from models import RollCall, User
+# Re-exported for backward compat — all existing `from bot_state import
+# _esc_md` call sites keep working. The actual implementation lives in
+# utils/text.py (dependency-free) so the services layer can use it without
+# importing bot_state (which constructs AsyncTeleBot on import).
+from utils.text import esc_md as _esc_md
 
 # Exceptions whose str(e) is a curated user-facing message — safe to expose
 # directly. Anything outside this set is treated as an internal error.
@@ -332,16 +337,6 @@ def format_mention_with_name(user: User) -> str:
             return f"@{user.username} ({user.name})"
         return f"[{user.name}](tg://user?id={user.user_id})"
     return user.name
-
-
-def _esc_md(text: str) -> str:
-    """Escape Markdown v1 special characters in user-supplied strings.
-    Includes `]` so display names cannot break `[name](tg://user?id=X)` links."""
-    if not text:
-        return text or ""
-    for c in ('_', '*', '`', '[', ']'):
-        text = text.replace(c, f'\\{c}')
-    return text
 
 
 def format_mention_with_name_md(user: User) -> str:

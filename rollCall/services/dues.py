@@ -15,7 +15,7 @@ import re
 from typing import Optional
 
 import db
-from bot_state import _esc_md
+from utils.text import esc_md as _esc_md
 from exceptions import (
     duesGameAlreadyClosed,
     duesNothingToClose,

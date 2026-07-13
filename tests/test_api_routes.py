@@ -828,6 +828,30 @@ class TestRateLimitMiddleware(unittest.TestCase):
         # First N requests get 401 (no auth); once rate-limited, get 429
         self.assertIn(429, statuses, f"Expected 429 among {statuses}")
 
+    def test_stale_buckets_swept_when_over_threshold(self):
+        """_buckets never shrinks on its own — a client that made one
+        request and never returned leaves an empty/stale deque forever.
+        Once cardinality passes the sweep threshold, the next non-bypassed
+        request must drop all empty/fully-stale entries."""
+        import time
+        from api.main import create_app
+        from api.rate_limit import reset_buckets_for_tests, _buckets
+        reset_buckets_for_tests()
+
+        # Seed well past the sweep threshold with buckets whose only entry
+        # is far outside any plausible window — guaranteed stale.
+        stale_ts = time.monotonic() - 9999
+        for i in range(1500):
+            _buckets[f"ip:stale-{i}"].append(stale_ts)
+        self.assertEqual(len(_buckets), 1500)
+
+        client = TestClient(create_app(), raise_server_exceptions=False)
+        client.get("/api/v1/health")  # bypassed path — must not trigger the sweep
+        self.assertEqual(len(_buckets), 1500)
+
+        client.get("/api/v1/chats/100/rollcalls")  # non-bypassed — triggers the sweep
+        self.assertLess(len(_buckets), 1500)
+
 
 if __name__ == "__main__":
     unittest.main()

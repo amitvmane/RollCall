@@ -99,4 +99,15 @@ async def rate_limit_middleware(request: Request, call_next):
         )
 
     bucket.append(now)
+
+    # Occasional sweep: bucket entries never shrink to nothing on their own
+    # once trimmed empty — a client that made one request and never
+    # returned leaves an empty deque in _buckets forever. Internet-facing
+    # (anonymous traffic buckets by IP), so key cardinality is effectively
+    # unbounded over time. Only pay the full-dict scan once cardinality
+    # actually grows large enough to matter.
+    if len(_buckets) > 1000:
+        for k in [k for k, dq in _buckets.items() if not dq or dq[-1] < cutoff]:
+            del _buckets[k]
+
     return await call_next(request)

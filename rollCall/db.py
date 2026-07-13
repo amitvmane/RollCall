@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 import json
 import logging
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 
@@ -155,6 +156,41 @@ def release_connection(conn):
         db_pool.putconn(conn)
         if _pool_in_use > 0:
             _pool_in_use -= 1
+
+
+@contextmanager
+def _cursor(commit: bool = False):
+    """Yield a cursor with the connection lifecycle handled — replaces the
+    get_connection/cursor/try/finally/release_connection boilerplate repeated
+    across this module's ~150 functions.
+
+    commit=True commits after the body completes; any exception rolls back
+    first. Exceptions ALWAYS propagate to the caller — each function keeps its
+    own except clause and its own error convention (raise vs return
+    False/None/[]), which this helper deliberately does not unify.
+
+    Note for id-returning mutators: SELECT last_insert_rowid() (connection-
+    scoped) and lastval() (PG session-scoped) both work inside the body even
+    though the commit now happens after the body instead of before the id
+    fetch.
+    """
+    conn = get_connection()
+    cur = None
+    try:
+        cur = conn.cursor()
+        yield cur
+        if commit:
+            conn.commit()
+    except Exception:
+        if commit:
+            conn.rollback()
+        raise
+    finally:
+        if cur is not None:
+            cur.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
 
 def create_tables():
     """Create database tables if they don't exist"""
@@ -5415,35 +5451,26 @@ def create_game_closure(
 ) -> int:
     """Create the financial-close record for a game. Raises on duplicate
     rollcall_id (UNIQUE constraint) — that is the double-close guard."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        cursor.execute(
-            f"INSERT INTO game_closures (chat_id, rollcall_id, title, ground_cost, in_count,"
-            f" subsidy, per_head, rounding_step, remainder, collector_uid, collector_name,"
-            f" collector_paid_ground, collector_upi, closed_by_uid, closed_by_name, created_at)"
-            f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (chat_id, rollcall_id, title, ground_cost, in_count, subsidy, per_head,
-             rounding_step, remainder, collector_uid, collector_name,
-             collector_paid_ground, collector_upi, closed_by_uid, closed_by_name, _dues_now()),
-        )
-        conn.commit()
-        if db_type == "postgresql":
-            cursor.execute("SELECT lastval()")
-        else:
-            cursor.execute("SELECT last_insert_rowid()")
-        return cursor.fetchone()[0]
+        with _cursor(commit=True) as cur:
+            ph = "%s" if db_type == "postgresql" else "?"
+            cur.execute(
+                f"INSERT INTO game_closures (chat_id, rollcall_id, title, ground_cost, in_count,"
+                f" subsidy, per_head, rounding_step, remainder, collector_uid, collector_name,"
+                f" collector_paid_ground, collector_upi, closed_by_uid, closed_by_name, created_at)"
+                f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+                (chat_id, rollcall_id, title, ground_cost, in_count, subsidy, per_head,
+                 rounding_step, remainder, collector_uid, collector_name,
+                 collector_paid_ground, collector_upi, closed_by_uid, closed_by_name, _dues_now()),
+            )
+            if db_type == "postgresql":
+                cur.execute("SELECT lastval()")
+            else:
+                cur.execute("SELECT last_insert_rowid()")
+            return cur.fetchone()[0]
     except Exception:
         logging.exception("create_game_closure failed")
-        conn.rollback()
         raise
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def write_game_closure_batch(
@@ -5472,83 +5499,67 @@ def write_game_closure_batch(
     All rows share one created_at timestamp (computed once) — they represent
     a single atomic financial event. Returns the new game_closures.id.
     """
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        now = _dues_now()
+        with _cursor(commit=True) as cur:
+            ph = "%s" if db_type == "postgresql" else "?"
+            now = _dues_now()
 
-        cursor.execute(
-            f"INSERT INTO game_closures (chat_id, rollcall_id, title, ground_cost, in_count,"
-            f" subsidy, per_head, rounding_step, remainder, collector_uid, collector_name,"
-            f" collector_paid_ground, collector_upi, closed_by_uid, closed_by_name, created_at)"
-            f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (closure["chat_id"], closure["rollcall_id"], closure["title"], closure["ground_cost"],
-             closure["in_count"], closure["subsidy"], closure["per_head"], closure["rounding_step"],
-             closure["remainder"], closure.get("collector_uid"), closure.get("collector_name"),
-             closure.get("collector_paid_ground", 0), closure.get("collector_upi"),
-             closure["closed_by_uid"], closure["closed_by_name"], now),
-        )
-        if db_type == "postgresql":
-            cursor.execute("SELECT lastval()")
-        else:
-            cursor.execute("SELECT last_insert_rowid()")
-        closure_id = cursor.fetchone()[0]
-
-        for e in dues_entries:
-            cursor.execute(
-                f"INSERT INTO dues_entries (chat_id, rollcall_id, user_id, member_name,"
-                f" entry_type, amount, memo, created_by_uid, created_by_name, created_at)"
-                f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
-                (e["chat_id"], e["rollcall_id"], e["user_id"], e["member_name"],
-                 e["entry_type"], e["amount"], e.get("memo"), e["created_by_uid"],
-                 e["created_by_name"], now),
+            cur.execute(
+                f"INSERT INTO game_closures (chat_id, rollcall_id, title, ground_cost, in_count,"
+                f" subsidy, per_head, rounding_step, remainder, collector_uid, collector_name,"
+                f" collector_paid_ground, collector_upi, closed_by_uid, closed_by_name, created_at)"
+                f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+                (closure["chat_id"], closure["rollcall_id"], closure["title"], closure["ground_cost"],
+                 closure["in_count"], closure["subsidy"], closure["per_head"], closure["rounding_step"],
+                 closure["remainder"], closure.get("collector_uid"), closure.get("collector_name"),
+                 closure.get("collector_paid_ground", 0), closure.get("collector_upi"),
+                 closure["closed_by_uid"], closure["closed_by_name"], now),
             )
+            if db_type == "postgresql":
+                cur.execute("SELECT lastval()")
+            else:
+                cur.execute("SELECT last_insert_rowid()")
+            closure_id = cur.fetchone()[0]
 
-        for t in fund_transactions:
-            cursor.execute(
-                f"INSERT INTO fund_transactions (chat_id, rollcall_id, txn_type, amount,"
-                f" description, created_by_uid, created_by_name, created_at)"
-                f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
-                (t["chat_id"], t["rollcall_id"], t["txn_type"], t["amount"],
-                 t["description"], t["created_by_uid"], t["created_by_name"], now),
-            )
+            for e in dues_entries:
+                cur.execute(
+                    f"INSERT INTO dues_entries (chat_id, rollcall_id, user_id, member_name,"
+                    f" entry_type, amount, memo, created_by_uid, created_by_name, created_at)"
+                    f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+                    (e["chat_id"], e["rollcall_id"], e["user_id"], e["member_name"],
+                     e["entry_type"], e["amount"], e.get("memo"), e["created_by_uid"],
+                     e["created_by_name"], now),
+                )
 
-        conn.commit()
-        return closure_id
+            for t in fund_transactions:
+                cur.execute(
+                    f"INSERT INTO fund_transactions (chat_id, rollcall_id, txn_type, amount,"
+                    f" description, created_by_uid, created_by_name, created_at)"
+                    f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+                    (t["chat_id"], t["rollcall_id"], t["txn_type"], t["amount"],
+                     t["description"], t["created_by_uid"], t["created_by_name"], now),
+                )
+
+            return closure_id
     except Exception:
         logging.exception("write_game_closure_batch failed")
-        conn.rollback()
         raise
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def get_game_closure(rollcall_id: int) -> Optional[Dict]:
     """Return the closure row for a rollcall, or None if not financially closed."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        cursor.execute(
-            f"SELECT * FROM game_closures WHERE rollcall_id = {ph}",
-            (rollcall_id,),
-        )
-        row = cursor.fetchone()
-        return dict(row) if row else None
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            cursor.execute(
+                f"SELECT * FROM game_closures WHERE rollcall_id = {ph}",
+                (rollcall_id,),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
     except Exception:
         logging.exception("get_game_closure failed")
         return None
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def get_nth_game_closure(chat_id: int, n: int = 0) -> Optional[Dict]:
@@ -5556,49 +5567,35 @@ def get_nth_game_closure(chat_id: int, n: int = 0) -> Optional[Dict]:
 
     Used by /cancel_game_dues ::N to target a specific past game by position.
     """
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        cursor.execute(
-            f"SELECT * FROM game_closures WHERE chat_id = {ph}"
-            f" ORDER BY id DESC LIMIT 1 OFFSET {ph}",
-            (chat_id, n),
-        )
-        row = cursor.fetchone()
-        return dict(row) if row else None
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            cursor.execute(
+                f"SELECT * FROM game_closures WHERE chat_id = {ph}"
+                f" ORDER BY id DESC LIMIT 1 OFFSET {ph}",
+                (chat_id, n),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
     except Exception:
         logging.exception("get_nth_game_closure failed")
         return None
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def get_latest_game_closure(chat_id: int) -> Optional[Dict]:
     """Return the most recent closure for a chat (for /add_adhoc and defaults)."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        cursor.execute(
-            f"SELECT * FROM game_closures WHERE chat_id = {ph} ORDER BY id DESC LIMIT 1",
-            (chat_id,),
-        )
-        row = cursor.fetchone()
-        return dict(row) if row else None
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            cursor.execute(
+                f"SELECT * FROM game_closures WHERE chat_id = {ph} ORDER BY id DESC LIMIT 1",
+                (chat_id,),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
     except Exception:
         logging.exception("get_latest_game_closure failed")
         return None
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def has_ever_been_collector(chat_id: int, user_id: int) -> bool:
@@ -5608,24 +5605,17 @@ def has_ever_been_collector(chat_id: int, user_id: int) -> bool:
     you can keep marking payments (mirrors real-world treasurer handoffs
     where the group, not a rotation, decides who's still trusted).
     """
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        cursor.execute(
-            f"SELECT 1 FROM game_closures WHERE chat_id = {ph} AND collector_uid = {ph} LIMIT 1",
-            (chat_id, user_id),
-        )
-        return cursor.fetchone() is not None
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            cursor.execute(
+                f"SELECT 1 FROM game_closures WHERE chat_id = {ph} AND collector_uid = {ph} LIMIT 1",
+                (chat_id, user_id),
+            )
+            return cursor.fetchone() is not None
     except Exception:
         logging.exception("has_ever_been_collector failed")
         return False
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def update_game_closure_collector(
@@ -5634,36 +5624,27 @@ def update_game_closure_collector(
 ) -> bool:
     """Set/replace the collector on an existing closure (post-close /set_collector).
     Not a money row — game_closures records metadata; ledgers stay append-only."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        sets = [f"collector_uid = {ph}", f"collector_name = {ph}"]
-        params: list = [collector_uid, collector_name]
-        if collector_paid_ground is not None:
-            sets.append(f"collector_paid_ground = {ph}")
-            params.append(collector_paid_ground)
-        if collector_upi is not None:
-            sets.append(f"collector_upi = {ph}")
-            params.append(collector_upi)
-        params.append(rollcall_id)
-        cursor.execute(
-            f"UPDATE game_closures SET {', '.join(sets)} WHERE rollcall_id = {ph}",
-            params,
-        )
-        updated = cursor.rowcount > 0
-        conn.commit()
-        return updated
+        with _cursor(commit=True) as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            sets = [f"collector_uid = {ph}", f"collector_name = {ph}"]
+            params: list = [collector_uid, collector_name]
+            if collector_paid_ground is not None:
+                sets.append(f"collector_paid_ground = {ph}")
+                params.append(collector_paid_ground)
+            if collector_upi is not None:
+                sets.append(f"collector_upi = {ph}")
+                params.append(collector_upi)
+            params.append(rollcall_id)
+            cursor.execute(
+                f"UPDATE game_closures SET {', '.join(sets)} WHERE rollcall_id = {ph}",
+                params,
+            )
+            updated = cursor.rowcount > 0
+            return updated
     except Exception:
         logging.exception("update_game_closure_collector failed")
-        conn.rollback()
         return False
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def delete_game_closure(rollcall_id: int) -> bool:
@@ -5673,27 +5654,18 @@ def delete_game_closure(rollcall_id: int) -> bool:
     is permitted.  The compensating dues_entries and fund_transactions written
     by cancel_game_credit remain for a complete audit trail.
     """
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        cursor.execute(
-            f"DELETE FROM game_closures WHERE rollcall_id = {ph}",
-            (rollcall_id,),
-        )
-        deleted = cursor.rowcount > 0
-        conn.commit()
-        return deleted
+        with _cursor(commit=True) as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            cursor.execute(
+                f"DELETE FROM game_closures WHERE rollcall_id = {ph}",
+                (rollcall_id,),
+            )
+            deleted = cursor.rowcount > 0
+            return deleted
     except Exception:
         logging.exception("delete_game_closure failed")
-        conn.rollback()
         return False
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def add_dues_entry(
@@ -5708,33 +5680,24 @@ def add_dues_entry(
     created_by_name: str,
 ) -> int:
     """Append one dues ledger entry. Positive amount = member owes; negative = credit."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        cursor.execute(
-            f"INSERT INTO dues_entries (chat_id, rollcall_id, user_id, member_name,"
-            f" entry_type, amount, memo, created_by_uid, created_by_name, created_at)"
-            f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (chat_id, rollcall_id, user_id, member_name, entry_type, amount, memo,
-             created_by_uid, created_by_name, _dues_now()),
-        )
-        conn.commit()
-        if db_type == "postgresql":
-            cursor.execute("SELECT lastval()")
-        else:
-            cursor.execute("SELECT last_insert_rowid()")
-        return cursor.fetchone()[0]
+        with _cursor(commit=True) as cur:
+            ph = "%s" if db_type == "postgresql" else "?"
+            cur.execute(
+                f"INSERT INTO dues_entries (chat_id, rollcall_id, user_id, member_name,"
+                f" entry_type, amount, memo, created_by_uid, created_by_name, created_at)"
+                f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+                (chat_id, rollcall_id, user_id, member_name, entry_type, amount, memo,
+                 created_by_uid, created_by_name, _dues_now()),
+            )
+            if db_type == "postgresql":
+                cur.execute("SELECT lastval()")
+            else:
+                cur.execute("SELECT last_insert_rowid()")
+            return cur.fetchone()[0]
     except Exception:
         logging.exception("add_dues_entry failed")
-        conn.rollback()
         raise
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 # Member key: entries for real users aggregate on user_id; entries for unowned
@@ -5744,60 +5707,46 @@ _DUES_MEMBER_KEY = "COALESCE(CAST(user_id AS TEXT), LOWER(member_name))"
 
 def get_dues_balance(chat_id: int, user_id: int = None, member_name: str = None) -> int:
     """Balance for one member: SUM(amount). Positive = owes."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        if user_id is not None:
-            cursor.execute(
-                f"SELECT COALESCE(SUM(amount), 0) FROM dues_entries"
-                f" WHERE chat_id = {ph} AND user_id = {ph}",
-                (chat_id, user_id),
-            )
-        else:
-            cursor.execute(
-                f"SELECT COALESCE(SUM(amount), 0) FROM dues_entries"
-                f" WHERE chat_id = {ph} AND user_id IS NULL AND LOWER(member_name) = {ph}",
-                (chat_id, (member_name or "").lower()),
-            )
-        row = cursor.fetchone()
-        return int(row[0] or 0)
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            if user_id is not None:
+                cursor.execute(
+                    f"SELECT COALESCE(SUM(amount), 0) FROM dues_entries"
+                    f" WHERE chat_id = {ph} AND user_id = {ph}",
+                    (chat_id, user_id),
+                )
+            else:
+                cursor.execute(
+                    f"SELECT COALESCE(SUM(amount), 0) FROM dues_entries"
+                    f" WHERE chat_id = {ph} AND user_id IS NULL AND LOWER(member_name) = {ph}",
+                    (chat_id, (member_name or "").lower()),
+                )
+            row = cursor.fetchone()
+            return int(row[0] or 0)
     except Exception:
         logging.exception("get_dues_balance failed")
         return 0
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def get_all_dues_balances(chat_id: int, nonzero_only: bool = False) -> List[Dict]:
     """Per-member balances for a chat. Each row: user_id, member_name (latest), balance."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        having = "HAVING SUM(amount) != 0" if nonzero_only else ""
-        cursor.execute(
-            f"SELECT MAX(user_id) AS user_id, MAX(member_name) AS member_name,"
-            f" SUM(amount) AS balance"
-            f" FROM dues_entries WHERE chat_id = {ph}"
-            f" GROUP BY {_DUES_MEMBER_KEY} {having}"
-            f" ORDER BY balance DESC",
-            (chat_id,),
-        )
-        return [dict(r) for r in cursor.fetchall()]
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            having = "HAVING SUM(amount) != 0" if nonzero_only else ""
+            cursor.execute(
+                f"SELECT MAX(user_id) AS user_id, MAX(member_name) AS member_name,"
+                f" SUM(amount) AS balance"
+                f" FROM dues_entries WHERE chat_id = {ph}"
+                f" GROUP BY {_DUES_MEMBER_KEY} {having}"
+                f" ORDER BY balance DESC",
+                (chat_id,),
+            )
+            return [dict(r) for r in cursor.fetchall()]
     except Exception:
         logging.exception("get_all_dues_balances failed")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def get_dues_entries(
@@ -5805,56 +5754,42 @@ def get_dues_entries(
     limit: int = 15, offset: int = 0,
 ) -> List[Dict]:
     """Paginated ledger lines, newest first. Filter by member when key given."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        where = f"chat_id = {ph}"
-        params = [chat_id]
-        if user_id is not None:
-            where += f" AND user_id = {ph}"
-            params.append(user_id)
-        elif member_name is not None:
-            where += f" AND user_id IS NULL AND LOWER(member_name) = {ph}"
-            params.append(member_name.lower())
-        params += [limit, offset]
-        cursor.execute(
-            f"SELECT * FROM dues_entries WHERE {where}"
-            f" ORDER BY id DESC LIMIT {ph} OFFSET {ph}",
-            params,
-        )
-        return [dict(r) for r in cursor.fetchall()]
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            where = f"chat_id = {ph}"
+            params = [chat_id]
+            if user_id is not None:
+                where += f" AND user_id = {ph}"
+                params.append(user_id)
+            elif member_name is not None:
+                where += f" AND user_id IS NULL AND LOWER(member_name) = {ph}"
+                params.append(member_name.lower())
+            params += [limit, offset]
+            cursor.execute(
+                f"SELECT * FROM dues_entries WHERE {where}"
+                f" ORDER BY id DESC LIMIT {ph} OFFSET {ph}",
+                params,
+            )
+            return [dict(r) for r in cursor.fetchall()]
     except Exception:
         logging.exception("get_dues_entries failed")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def get_dues_entries_for_rollcall(rollcall_id: int) -> List[Dict]:
     """All ledger lines attached to one game (for cancel-credit reversal)."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        cursor.execute(
-            f"SELECT * FROM dues_entries WHERE rollcall_id = {ph} ORDER BY id ASC",
-            (rollcall_id,),
-        )
-        return [dict(r) for r in cursor.fetchall()]
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            cursor.execute(
+                f"SELECT * FROM dues_entries WHERE rollcall_id = {ph} ORDER BY id ASC",
+                (rollcall_id,),
+            )
+            return [dict(r) for r in cursor.fetchall()]
     except Exception:
         logging.exception("get_dues_entries_for_rollcall failed")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def get_proxy_owner_uid(chat_id: int, member_name: str) -> Optional[int]:
@@ -5865,50 +5800,36 @@ def get_proxy_owner_uid(chat_id: int, member_name: str) -> Optional[int]:
     Returns None for unowned proxies or if the memo format is older.
     """
     import re as _re
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        cursor.execute(
-            f"SELECT memo FROM dues_entries WHERE chat_id = {ph}"
-            f" AND LOWER(member_name) = LOWER({ph})"
-            f" AND memo LIKE 'owner:%'"
-            f" ORDER BY id DESC LIMIT 1",
-            (chat_id, member_name),
-        )
-        row = cursor.fetchone()
-        if not row or not row[0]:
-            return None
-        m = _re.match(r"owner:(\d+):", row[0])
-        return int(m.group(1)) if m else None
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            cursor.execute(
+                f"SELECT memo FROM dues_entries WHERE chat_id = {ph}"
+                f" AND LOWER(member_name) = LOWER({ph})"
+                f" AND memo LIKE 'owner:%'"
+                f" ORDER BY id DESC LIMIT 1",
+                (chat_id, member_name),
+            )
+            row = cursor.fetchone()
+            if not row or not row[0]:
+                return None
+            m = _re.match(r"owner:(\d+):", row[0])
+            return int(m.group(1)) if m else None
     except Exception:
         logging.exception("get_proxy_owner_uid failed")
         return None
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def count_dues_entries(chat_id: int) -> int:
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        cursor.execute(f"SELECT COUNT(*) FROM dues_entries WHERE chat_id = {ph}", (chat_id,))
-        row = cursor.fetchone()
-        return row[0] if row else 0
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            cursor.execute(f"SELECT COUNT(*) FROM dues_entries WHERE chat_id = {ph}", (chat_id,))
+            row = cursor.fetchone()
+            return row[0] if row else 0
     except Exception:
         logging.exception("count_dues_entries failed")
         return 0
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def add_fund_transaction(
@@ -5921,148 +5842,104 @@ def add_fund_transaction(
     created_by_name: str,
 ) -> int:
     """Append one fund ledger entry. Positive = into fund; negative = out."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        cursor.execute(
-            f"INSERT INTO fund_transactions (chat_id, rollcall_id, txn_type, amount,"
-            f" description, created_by_uid, created_by_name, created_at)"
-            f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (chat_id, rollcall_id, txn_type, amount, description,
-             created_by_uid, created_by_name, _dues_now()),
-        )
-        conn.commit()
-        if db_type == "postgresql":
-            cursor.execute("SELECT lastval()")
-        else:
-            cursor.execute("SELECT last_insert_rowid()")
-        return cursor.fetchone()[0]
+        with _cursor(commit=True) as cur:
+            ph = "%s" if db_type == "postgresql" else "?"
+            cur.execute(
+                f"INSERT INTO fund_transactions (chat_id, rollcall_id, txn_type, amount,"
+                f" description, created_by_uid, created_by_name, created_at)"
+                f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+                (chat_id, rollcall_id, txn_type, amount, description,
+                 created_by_uid, created_by_name, _dues_now()),
+            )
+            if db_type == "postgresql":
+                cur.execute("SELECT lastval()")
+            else:
+                cur.execute("SELECT last_insert_rowid()")
+            return cur.fetchone()[0]
     except Exception:
         logging.exception("add_fund_transaction failed")
-        conn.rollback()
         raise
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def get_fund_balance(chat_id: int) -> int:
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        cursor.execute(
-            f"SELECT COALESCE(SUM(amount), 0) FROM fund_transactions WHERE chat_id = {ph}",
-            (chat_id,),
-        )
-        row = cursor.fetchone()
-        return int(row[0] or 0)
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            cursor.execute(
+                f"SELECT COALESCE(SUM(amount), 0) FROM fund_transactions WHERE chat_id = {ph}",
+                (chat_id,),
+            )
+            row = cursor.fetchone()
+            return int(row[0] or 0)
     except Exception:
         logging.exception("get_fund_balance failed")
         return 0
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def get_fund_transactions(chat_id: int, limit: int = 15, offset: int = 0) -> List[Dict]:
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        cursor.execute(
-            f"SELECT * FROM fund_transactions WHERE chat_id = {ph}"
-            f" ORDER BY id DESC LIMIT {ph} OFFSET {ph}",
-            (chat_id, limit, offset),
-        )
-        return [dict(r) for r in cursor.fetchall()]
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            cursor.execute(
+                f"SELECT * FROM fund_transactions WHERE chat_id = {ph}"
+                f" ORDER BY id DESC LIMIT {ph} OFFSET {ph}",
+                (chat_id, limit, offset),
+            )
+            return [dict(r) for r in cursor.fetchall()]
     except Exception:
         logging.exception("get_fund_transactions failed")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def get_fund_transactions_for_rollcall(rollcall_id: int) -> List[Dict]:
     """All fund transactions attached to one rollcall (for cancellation reversal)."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        cursor.execute(
-            f"SELECT * FROM fund_transactions WHERE rollcall_id = {ph} ORDER BY id ASC",
-            (rollcall_id,),
-        )
-        return [dict(r) for r in cursor.fetchall()]
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            cursor.execute(
+                f"SELECT * FROM fund_transactions WHERE rollcall_id = {ph} ORDER BY id ASC",
+                (rollcall_id,),
+            )
+            return [dict(r) for r in cursor.fetchall()]
     except Exception:
         logging.exception("get_fund_transactions_for_rollcall failed")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def count_fund_transactions(chat_id: int) -> int:
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        cursor.execute(f"SELECT COUNT(*) FROM fund_transactions WHERE chat_id = {ph}", (chat_id,))
-        row = cursor.fetchone()
-        return row[0] if row else 0
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            cursor.execute(f"SELECT COUNT(*) FROM fund_transactions WHERE chat_id = {ph}", (chat_id,))
+            row = cursor.fetchone()
+            return row[0] if row else 0
     except Exception:
         logging.exception("count_fund_transactions failed")
         return 0
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def get_latest_closeable_rollcall(chat_id: int) -> Optional[Dict]:
     """Most recent ended, not-cancelled rollcall with no financial closure yet."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        active_false = "FALSE" if db_type == "postgresql" else "0"
-        cursor.execute(
-            f"""SELECT r.* FROM rollcalls r
-                LEFT JOIN game_closures gc ON gc.rollcall_id = r.id
-                WHERE r.chat_id = {ph}
-                  AND r.is_active = {active_false}
-                  AND COALESCE(r.is_cancelled, {active_false}) = {active_false}
-                  AND gc.id IS NULL
-                ORDER BY r.ended_at IS NULL ASC, r.ended_at DESC, r.id DESC LIMIT 1""",
-            (chat_id,),
-        )
-        row = cursor.fetchone()
-        return dict(row) if row else None
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            active_false = "FALSE" if db_type == "postgresql" else "0"
+            cursor.execute(
+                f"""SELECT r.* FROM rollcalls r
+                    LEFT JOIN game_closures gc ON gc.rollcall_id = r.id
+                    WHERE r.chat_id = {ph}
+                      AND r.is_active = {active_false}
+                      AND COALESCE(r.is_cancelled, {active_false}) = {active_false}
+                      AND gc.id IS NULL
+                    ORDER BY r.ended_at IS NULL ASC, r.ended_at DESC, r.id DESC LIMIT 1""",
+                (chat_id,),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
     except Exception:
         logging.exception("get_latest_closeable_rollcall failed")
         return None
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 # ── penalty_tiers ─────────────────────────────────────────────────────────────

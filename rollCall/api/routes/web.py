@@ -32,9 +32,13 @@ from services import push as push_svc
 from api.schemas.web import (
     PushSubscribeRequest,
     PushUnsubscribeRequest,
+    ScheduledRollcallCreateResponse,
+    ScheduledRollcallItem,
+    ScheduledRollcallsResponse,
     VapidPublicKeyResponse,
     WebAdminStatusResponse,
     WebEndRollcallRequest,
+    WebEndRollcallResponse,
     WebGroupResponse,
     WebGroupSettingsRequest,
     WebGroupStatsResponse,
@@ -294,12 +298,13 @@ async def web_start_rollcall(
 @router.post(
     "/web/group/{group_token}/end-rollcall",
     status_code=status.HTTP_200_OK,
+    response_model=WebEndRollcallResponse,
     summary="End a rollcall via web (requires web-admin identity)",
 )
 async def web_end_rollcall(
     body: WebEndRollcallRequest,
     group_token: str = Path(...),
-) -> dict:
+) -> WebEndRollcallResponse:
     chat = _db.get_chat_by_group_web_token(group_token)
     if not chat:
         raise HTTPException(status_code=404, detail="Invalid group token")
@@ -333,7 +338,7 @@ async def web_end_rollcall(
     rc_num_ended = result["rc_number_ended_1based"]
     await _mirror_panel_to_telegram(chat_id, rc_num_ended)
 
-    return {"ended": result["rc_number_ended_1based"]}
+    return WebEndRollcallResponse(ended=result["rc_number_ended_1based"])
 
 
 # ── Scheduled rollcalls ───────────────────────────────────────────────────────
@@ -341,12 +346,13 @@ async def web_end_rollcall(
 @router.post(
     "/web/group/{group_token}/scheduled-rollcalls",
     status_code=status.HTTP_201_CREATED,
+    response_model=ScheduledRollcallCreateResponse,
     summary="Schedule a one-shot rollcall to auto-start at a future time (admin only)",
 )
 async def create_scheduled_rollcall(
     body: "ScheduledRollcallRequest",
     group_token: str = Path(...),
-) -> dict:
+) -> ScheduledRollcallCreateResponse:
     from api.schemas.web import ScheduledRollcallRequest as _Req
     chat = _db.get_chat_by_group_web_token(group_token)
     if not chat:
@@ -391,17 +397,18 @@ async def create_scheduled_rollcall(
         f"📅 Rollcall scheduled: \"{body.title}\" at {_dt_label} (by {actor_name}, via web)",
     )
 
-    return {"id": row_id, "title": body.title, "scheduled_at": body.scheduled_at}
+    return ScheduledRollcallCreateResponse(id=row_id, title=body.title, scheduled_at=body.scheduled_at)
 
 
 @router.get(
     "/web/group/{group_token}/scheduled-rollcalls",
+    response_model=ScheduledRollcallsResponse,
     summary="List upcoming scheduled rollcalls for a group (admin only)",
 )
 async def list_scheduled_rollcalls(
     group_token: str = Path(...),
     id_token: Optional[str] = Query(None),
-) -> dict:
+) -> ScheduledRollcallsResponse:
     chat = _db.get_chat_by_group_web_token(group_token)
     if not chat:
         raise HTTPException(status_code=404, detail="Invalid group token")
@@ -412,17 +419,17 @@ async def list_scheduled_rollcalls(
     if not _db.is_web_admin(chat_id, actor_user_id):
         raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
     rows = _db.get_upcoming_scheduled_rollcalls(chat_id)
-    return {
-        "items": [
-            {
-                "id": r["id"],
-                "title": r["title"],
-                "scheduled_at": r["scheduled_at"],
-                "created_by_name": r["created_by_name"],
-            }
+    return ScheduledRollcallsResponse(
+        items=[
+            ScheduledRollcallItem(
+                id=r["id"],
+                title=r["title"],
+                scheduled_at=r["scheduled_at"],
+                created_by_name=r["created_by_name"],
+            )
             for r in rows
         ]
-    }
+    )
 
 
 @router.delete(

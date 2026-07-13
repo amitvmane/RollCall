@@ -71,6 +71,16 @@ class ScheduledRollcallsResponse(BaseModel):
     items: List[ScheduledRollcallItem] = Field(default_factory=list)
 
 
+class ScheduledRollcallCreateResponse(BaseModel):
+    id: int
+    title: str
+    scheduled_at: str
+
+
+class WebEndRollcallResponse(BaseModel):
+    ended: int = Field(..., description="1-based rollcall number that was ended")
+
+
 class WebVoteRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=64, description="Display name for the voter")
     vote: Literal["in", "out", "maybe"]

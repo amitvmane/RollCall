@@ -7,3 +7,9 @@ data/rollcall.db
 logs/bot.log
 rollcall.db
 *.db
+.DS_Store
+.coverage
+.venv/
+.venv*/
+__pycache__/
+*.pyc

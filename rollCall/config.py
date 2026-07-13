@@ -18,6 +18,10 @@ def _parse_admins():
 
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN") or os.environ.get("API_KEY")
+if not TELEGRAM_TOKEN:
+    raise ValueError(
+        "TELEGRAM_TOKEN (or API_KEY) is not set — the bot cannot start without it."
+    )
 ADMINS = _parse_admins()
 
 # MEMORY_MODE: all data lives in RAM and is lost on restart (original v1 behaviour).
@@ -27,6 +31,12 @@ MEMORY_MODE = _memory_mode_raw in ("1", "true", "yes", "on")
 
 # Default to SQLite if DATABASE_URL is not set
 DATABASE_URL = "sqlite:///:memory:" if MEMORY_MODE else os.environ.get("DATABASE_URL", "sqlite:///rollcall.db")
+if not DATABASE_URL.startswith(("sqlite://", "postgresql://", "postgres://")):
+    raise ValueError(
+        f"DATABASE_URL must start with sqlite://, postgresql://, or postgres:// "
+        f"(got: {DATABASE_URL!r}). db.py silently treats any other scheme as a "
+        f"literal sqlite file path, which is easy to misconfigure by accident."
+    )
 
 # Webhook mode: set WEBHOOK_URL to your public HTTPS URL to enable webhooks.
 # Leave unset (or empty) to use long-polling (default).

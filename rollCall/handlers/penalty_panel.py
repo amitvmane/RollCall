@@ -401,7 +401,7 @@ async def penalty_panel_callback(call):
         try:
             await bot.answer_callback_query(call.id, "Error — try /mark_late or /mark_penalty manually.")
         except Exception:
-            pass
+            pass  # already logged above; nothing more useful to do if even the alert fails
         await reply_error(call.message, exc)
 
 

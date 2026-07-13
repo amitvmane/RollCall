@@ -243,7 +243,7 @@ async def notify_proxy_owner_wait_to_in(rc, moved_user: User, cid, title: str, r
                 parse_mode="Markdown",
             )
         except Exception:
-            pass
+            pass  # DM best-effort (user may have blocked the bot / never started a chat with it) — the group announcement above already happened
     except Exception:
         logging.exception("Failed to notify proxy owner for WAITING→IN")
 
@@ -793,7 +793,7 @@ async def _cb_end_confirm(call, cid: int, rc_number: int, rc) -> None:
             try:
                 await bot.edit_message_reply_markup(cid, call.message.message_id, reply_markup=None)
             except Exception:
-                pass
+                pass  # cosmetic (clear stale buttons); already logged above, and the real finish-list content is sent unconditionally next
             try:
                 await bot.send_message(cid, final_text)
             except Exception:
@@ -916,4 +916,4 @@ async def callback_handler(call):
         try:
             await bot.answer_callback_query(call.id, "⚠️ Something went wrong.")
         except Exception:
-            pass
+            pass  # already logged above; nothing more useful to do if even the alert fails

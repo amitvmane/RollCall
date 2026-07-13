@@ -544,4 +544,4 @@ async def ghost_callback_handler(call):
         try:
             await bot.answer_callback_query(call.id, "⚠️ Something went wrong.")
         except Exception:
-            pass
+            pass  # already logged above; nothing more useful to do if even the alert fails

@@ -372,4 +372,4 @@ async def audit_pagination_callback(call):
         try:
             await bot.answer_callback_query(call.id, "Error loading page")
         except Exception:
-            pass
+            pass  # already logged above; nothing more useful to do if even the alert fails

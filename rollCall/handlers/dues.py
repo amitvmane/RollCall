@@ -655,13 +655,13 @@ async def pick_collector_callback(call):
                 result["announcement"], cid, call.message.message_id,
             )
         except Exception:
-            pass
+            pass  # collector was already set and confirmed above; the panel text is cosmetic
     except Exception:
         logging.exception("pick_collector_callback failed")
         try:
             await bot.answer_callback_query(call.id, "Could not set collector.", show_alert=True)
         except Exception:
-            pass
+            pass  # already logged above; nothing more useful to do if even the alert fails
 
 
 # ── /rotate_collector — round-robin auto-assignment ───────────────────────────

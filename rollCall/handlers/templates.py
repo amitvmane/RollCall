@@ -127,8 +127,9 @@ async def _send_schedules(cid: int, edit_msg_id: int = None):
         if edit_msg_id:
             try:
                 await bot.edit_message_text(text, cid, edit_msg_id)
-            except Exception:
-                pass
+            except Exception as e:
+                if "message is not modified" not in str(e).lower():
+                    logging.warning("Schedules panel edit failed (chat=%s msg=%s): %s", cid, edit_msg_id, e)
         else:
             await bot.send_message(cid, text)
         return
@@ -582,7 +583,7 @@ async def schedules_toggle_callback(call):
         try:
             await bot.answer_callback_query(call.id, "Error updating schedule")
         except Exception:
-            pass
+            pass  # already logged above; nothing more useful to do if even the alert fails
 
 
 # ── Idle re-engagement callback ───────────────────────────────────────────────
@@ -625,11 +626,11 @@ async def idle_start_callback(call):
                 call.message.chat.id, call.message.message_id,
             )
         except Exception:
-            pass
+            pass  # cosmetic DM edit; success was already confirmed via answer_callback_query above
         logging.info(f"[idle-start] admin {allowed_uid} started template rollcall in chat {chat_id}")
     except Exception:
         logging.exception("idle_start_callback failed")
         try:
             await bot.answer_callback_query(call.id, "Could not start — try /use_template in the group.", show_alert=True)
         except Exception:
-            pass
+            pass  # already logged above; nothing more useful to do if even the alert fails

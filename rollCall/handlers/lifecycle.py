@@ -665,6 +665,64 @@ async def _cb_vote(call, cid: int, rc_number: int, action: str) -> None:
             logging.warning("Panel edit failed after vote (chat=%s msg=%s): %s", cid, call.message.message_id, e)
 
 
+async def _cb_lists_menu(call, cid: int, rc_number: int) -> None:
+    """btn_lists_{rc_number} — show the lists submenu (wi/wo/wm/ww buttons)."""
+    await bot.answer_callback_query(call.id)
+    markup = await get_lists_keyboard(rc_number)
+    try:
+        await bot.edit_message_text("Select list:", cid, call.message.message_id, reply_markup=markup)
+    except Exception as e:
+        if "message is not modified" not in str(e).lower():
+            logging.warning("Lists menu edit failed (chat=%s msg=%s): %s", cid, call.message.message_id, e)
+
+
+async def _cb_list_view(call, cid: int, rc_number: int, rc, action: str) -> None:
+    """btn_{wi,wo,wm,ww}_{rc_number} — render one specific list in place."""
+    await bot.answer_callback_query(call.id)
+    if action == "wi":
+        text = rc.inListText()
+    elif action == "wo":
+        text = rc.outListText()
+    elif action == "wm":
+        text = rc.maybeListText()
+    else:
+        text = rc.waitListText()
+    try:
+        await bot.edit_message_text(
+            text if text.strip() else "List is empty.",
+            cid, call.message.message_id,
+            reply_markup=await get_lists_keyboard(rc_number),
+        )
+    except Exception as e:
+        if "message is not modified" not in str(e).lower():
+            logging.warning("List view edit failed (chat=%s msg=%s): %s", cid, call.message.message_id, e)
+
+
+async def _cb_status(call, cid: int, rc_number: int, rc) -> None:
+    """btn_status_{rc_number} — back to the main panel."""
+    await bot.answer_callback_query(call.id)
+    text = _build_panel_text(rc, rc_number)
+    markup = await get_status_keyboard(rc_number, web_url=_group_web_url(cid))
+    try:
+        await bot.edit_message_text(text, cid, call.message.message_id, reply_markup=markup)
+    except Exception as e:
+        if "message is not modified" not in str(e).lower():
+            logging.warning("Status edit failed (chat=%s msg=%s): %s", cid, call.message.message_id, e)
+
+
+async def _cb_refresh(call, cid: int, rc_number: int, rc) -> None:
+    """btn_refresh_{rc_number} — re-render the main panel in place."""
+    await bot.answer_callback_query(call.id, "Refreshed")
+    text = _build_panel_text(rc, rc_number)
+    markup = await get_status_keyboard(rc_number, web_url=_group_web_url(cid))
+    try:
+        await bot.edit_message_text(text, cid, call.message.message_id, reply_markup=markup)
+        _panel_msg_ids[(cid, rc_number)] = call.message.message_id
+    except Exception as e:
+        if "message is not modified" not in str(e).lower():
+            logging.warning("Refresh edit failed (chat=%s msg=%s): %s", cid, call.message.message_id, e)
+
+
 async def callback_handler(call):
     try:
         raw_data = call.data or ""
@@ -697,59 +755,21 @@ async def callback_handler(call):
 
         # ── Lists submenu ─────────────────────────────────────────────────────
         if action == "lists":
-            await bot.answer_callback_query(call.id)
-            markup = await get_lists_keyboard(rc_number)
-            try:
-                await bot.edit_message_text("Select list:", cid, call.message.message_id, reply_markup=markup)
-            except Exception as e:
-                if "message is not modified" not in str(e).lower():
-                    logging.warning("Lists menu edit failed (chat=%s msg=%s): %s", cid, call.message.message_id, e)
+            await _cb_lists_menu(call, cid, rc_number)
             return
 
         if action in ("wi", "wo", "wm", "ww"):
-            await bot.answer_callback_query(call.id)
-            if action == "wi":
-                text = rc.inListText()
-            elif action == "wo":
-                text = rc.outListText()
-            elif action == "wm":
-                text = rc.maybeListText()
-            else:
-                text = rc.waitListText()
-            try:
-                await bot.edit_message_text(
-                    text if text.strip() else "List is empty.",
-                    cid, call.message.message_id,
-                    reply_markup=await get_lists_keyboard(rc_number),
-                )
-            except Exception as e:
-                if "message is not modified" not in str(e).lower():
-                    logging.warning("List view edit failed (chat=%s msg=%s): %s", cid, call.message.message_id, e)
+            await _cb_list_view(call, cid, rc_number, rc, action)
             return
 
         # ── Back to main panel ────────────────────────────────────────────────
         if action == "status":
-            await bot.answer_callback_query(call.id)
-            text = _build_panel_text(rc, rc_number)
-            markup = await get_status_keyboard(rc_number, web_url=_group_web_url(cid))
-            try:
-                await bot.edit_message_text(text, cid, call.message.message_id, reply_markup=markup)
-            except Exception as e:
-                if "message is not modified" not in str(e).lower():
-                    logging.warning("Status edit failed (chat=%s msg=%s): %s", cid, call.message.message_id, e)
+            await _cb_status(call, cid, rc_number, rc)
             return
 
         # ── Refresh ───────────────────────────────────────────────────────────
         if action == "refresh":
-            await bot.answer_callback_query(call.id, "Refreshed")
-            text = _build_panel_text(rc, rc_number)
-            markup = await get_status_keyboard(rc_number, web_url=_group_web_url(cid))
-            try:
-                await bot.edit_message_text(text, cid, call.message.message_id, reply_markup=markup)
-                _panel_msg_ids[(cid, rc_number)] = call.message.message_id
-            except Exception as e:
-                if "message is not modified" not in str(e).lower():
-                    logging.warning("Refresh edit failed (chat=%s msg=%s): %s", cid, call.message.message_id, e)
+            await _cb_refresh(call, cid, rc_number, rc)
             return
 
         # ── Show end confirmation ─────────────────────────────────────────────

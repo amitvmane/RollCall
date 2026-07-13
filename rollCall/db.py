@@ -5013,7 +5013,7 @@ def mark_web_verify_token(code: str, tg_user_id: int, tg_name: str, tg_username:
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
-        now = __import__('datetime').datetime.utcnow().isoformat()
+        now = _utcnow_naive().isoformat()
         cursor.execute(
             f"UPDATE web_verify_tokens SET tg_user_id={ph}, tg_name={ph}, tg_username={ph} "
             f"WHERE code={ph} AND tg_user_id IS NULL AND used_at IS NULL AND expires_at > {ph}",
@@ -5040,7 +5040,7 @@ def get_web_verify_token(code: str) -> Optional[Dict]:
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
-        now = __import__('datetime').datetime.utcnow().isoformat()
+        now = _utcnow_naive().isoformat()
         cursor.execute(
             f"SELECT code, tg_user_id, tg_name, tg_username, used_at FROM web_verify_tokens "
             f"WHERE code={ph} AND expires_at > {ph}",
@@ -5069,7 +5069,7 @@ def consume_web_verify_token(code: str) -> Optional[Dict]:
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
-        now = __import__('datetime').datetime.utcnow().isoformat()
+        now = _utcnow_naive().isoformat()
         cursor.execute(
             f"UPDATE web_verify_tokens SET used_at={ph} "
             f"WHERE code={ph} AND tg_user_id IS NOT NULL AND used_at IS NULL AND expires_at > {ph}",
@@ -5247,7 +5247,7 @@ def create_scheduled_rollcall(
     try:
         cursor = conn.cursor()
         ph = "%s" if db_type == "postgresql" else "?"
-        now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = _utcnow_naive().strftime("%Y-%m-%dT%H:%M:%SZ")
         cursor.execute(
             f"INSERT INTO scheduled_rollcalls (chat_id, title, scheduled_at, created_by_uid, created_by_name, created_at)"
             f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph})",
@@ -5277,7 +5277,7 @@ def get_pending_scheduled_rollcalls() -> List[Dict]:
     try:
         cursor = conn.cursor()
         ph = "%s" if db_type == "postgresql" else "?"
-        now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = _utcnow_naive().strftime("%Y-%m-%dT%H:%M:%SZ")
         if db_type == "postgresql":
             cursor.execute(
                 "SELECT * FROM scheduled_rollcalls WHERE is_fired = FALSE AND scheduled_at <= %s ORDER BY scheduled_at",
@@ -5335,7 +5335,7 @@ def mark_scheduled_rollcall_fired(row_id: int) -> None:
     try:
         cursor = conn.cursor()
         ph = "%s" if db_type == "postgresql" else "?"
-        now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = _utcnow_naive().strftime("%Y-%m-%dT%H:%M:%SZ")
         if db_type == "postgresql":
             cursor.execute(
                 "UPDATE scheduled_rollcalls SET is_fired = TRUE, fired_at = %s WHERE id = %s",
@@ -5393,7 +5393,7 @@ def delete_scheduled_rollcall(row_id: int, chat_id: int) -> bool:
 # history stays fully reconstructable (see CLAUDE.md).
 
 def _dues_now() -> str:
-    return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    return _utcnow_naive().strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def create_game_closure(
@@ -6080,13 +6080,12 @@ def upsert_penalty_tier(
     If is_ditch=True, clears the is_ditch flag from all other tiers for this
     chat first (only one ditch tier per group).
     """
-    import datetime
     conn = get_connection()
     cursor = None
     try:
         cursor = conn.cursor()
         ph = "%s" if db_type == "postgresql" else "?"
-        now = datetime.datetime.utcnow().isoformat()
+        now = _utcnow_naive().isoformat()
         clean_name = name.strip().lower()
         ditch_int = 1 if is_ditch else 0
 
@@ -6298,7 +6297,7 @@ def consume_web_direct_login_token(token: str) -> Optional[Dict]:
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
-        now = __import__('datetime').datetime.utcnow().isoformat()
+        now = _utcnow_naive().isoformat()
         cursor.execute(
             f"UPDATE web_direct_login_tokens SET used_at={ph} "
             f"WHERE token={ph} AND used_at IS NULL AND expires_at > {ph}",

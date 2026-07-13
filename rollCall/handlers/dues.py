@@ -1392,7 +1392,7 @@ async def dues_export(message):
         if not data_rows:
             await bot.send_message(cid, "No dues data yet.")
             return
-        date_str = _dt.datetime.utcnow().strftime("%Y-%m-%d")
+        date_str = _dt.datetime.now(_dt.UTC).strftime("%Y-%m-%d")
         filename = f"dues_export_{date_str}.csv"
         buf = io.BytesIO(csv_str.encode("utf-8"))
         buf.name = filename

@@ -669,7 +669,7 @@ def dues_snapshot(chat_id: int) -> dict:
     credit = [b for b in balances if b["balance"] < 0]
     settled = [b for b in balances if b["balance"] == 0]
 
-    now_str = _dt.datetime.utcnow().strftime("%d %b %Y %H:%M") + " UTC"
+    now_str = _dt.datetime.now(_dt.UTC).strftime("%d %b %Y %H:%M") + " UTC"
     lines = [f"📊 *Dues Snapshot — {now_str}*"]
 
     if last_closure:

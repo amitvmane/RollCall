@@ -1,6 +1,11 @@
 # RollCall Refactoring Report
 
 **Generated:** 2026-07-13 at commit `751bdff`.
+**Priority 1 (R1-R5) and Priority 2 (R6-R11) all executed 2026-07-13** —
+see each item's Status line for commit hashes. R8 is step-1-only by
+design (step 2 deferred). R9 (db.py boilerplate migration) was
+intentionally NOT started — explicitly flagged multi-session/optional in
+its own entry. Priority 3 (R12-R18) is untouched.
 **Purpose:** Self-contained backlog of code-quality issues and enhancements, written so any
 session (including a smaller/cheaper model) can execute items one at a time without
 re-exploring the codebase. Every claim below was verified against the code at the commit
@@ -47,6 +52,11 @@ above — re-verify file:line anchors if the file has changed since.
 # Priority 1 — correctness / durability
 
 ## R1. `close_game` writes the financial close non-atomically
+**Status: DONE — commit `62ab3b2`.** Added `db.write_game_closure_batch`
+(single connection/commit, rollback-proof); `close_game` collects writes
+into lists and makes one batch call. New integration test
+(`test_write_game_closure_batch_is_atomic`) forces a mid-batch constraint
+violation and proves the closure row does not survive.
 - **Files:** `rollCall/services/dues.py` (close_game, ~lines 330–576); the db writers it
   calls in `rollCall/db.py` (`create_game_closure`, `add_dues_entry`,
   `add_fund_transaction`) each open their own connection and `conn.commit()` individually.
@@ -70,6 +80,8 @@ above — re-verify file:line anchors if the file has changed since.
   `/settle_dues` flow via existing tests (`test_dues_scenario.py` must stay green).
 
 ## R2. `/rotate_collector` handler: no write lock, bypasses services layer
+**Status: DONE — commit `4b47dd6`.** Added `services/dues.py::set_collector_rotation`;
+handler now wraps the call in `manager.get_chat_write_lock`.
 - **Files:** `rollCall/handlers/dues.py:703` and `:710` — `_db.update_chat_settings(cid,
   collector_rotation=…)` called directly from the handler, outside any
   `manager.get_chat_write_lock(cid)` block.
@@ -84,6 +96,10 @@ above — re-verify file:line anchors if the file has changed since.
   the service function calls `db.update_chat_settings` with the right kwarg.
 
 ## R3. Services layer imports from the bot layer (`_esc_md`)
+**Status: DONE — commit `b2e2250`.** `_esc_md` moved to new
+`utils/text.py` (dependency-free); `bot_state.py` re-exports it under the
+same name. Note: `services/rollcalls.py` has a separate pre-existing
+`bot_state` import (`_log_task_exc`) not covered by this item.
 - **Files:** `rollCall/services/dues.py:18` — `from bot_state import _esc_md`; ~20 call
   sites in that file.
 - **Problem:** The services layer is documented as platform-agnostic (the whole
@@ -98,6 +114,8 @@ above — re-verify file:line anchors if the file has changed since.
 - **Verify:** smoke test + both pytest suites green; `grep -rn "from bot_state" rollCall/services/` returns nothing.
 
 ## R4. `_sched_selection` never pruned (slow memory leak)
+**Status: DONE — commit `30b30c6`.** Went with option (b): size-guard
+clear in `memory_prune_loop` if the dict exceeds 500 entries.
 - **Files:** `rollCall/bot_state.py:98` (`_sched_selection: dict = {}`); consumers in
   `rollCall/handlers/templates.py` (lines ~94, 137, 528–553); prune loop in
   `rollCall/runner.py` (`memory_prune_loop`) covers `_pending_deletes`,
@@ -117,6 +135,9 @@ above — re-verify file:line anchors if the file has changed since.
   accesses in templates.py compile (`python -m py_compile`).
 
 ## R5. Rate limiter never deletes empty buckets
+**Status: DONE — commit `aa3d64d`.** Threshold-gated sweep (>1000 keys)
+drops empty/fully-stale buckets. New test
+`test_stale_buckets_swept_when_over_threshold`.
 - **Files:** `rollCall/api/rate_limit.py` — `bucket = _buckets[key]` (~line 82; it's a
   defaultdict-style dict of deques), trim loop `while bucket and bucket[0] < cutoff:
   bucket.popleft()` — no `del _buckets[key]` anywhere.
@@ -136,6 +157,10 @@ above — re-verify file:line anchors if the file has changed since.
 # Priority 2 — duplication / structure
 
 ## R6. Admin-gate check copy-pasted 4×
+**Status: DONE — commit `328ba00`.** Added `bot_state.is_chat_admin(cid, uid)`;
+all 4 sites call it, keeping their own alert message. `manager` is now a
+module-level import in `bot_state.py` (needed so tests can patch
+`bot_state.manager`, same pattern used elsewhere).
 - **Files:** `rollCall/handlers/payment_panel.py:125` (`_payment_admin_ok`),
   `rollCall/handlers/penalty_panel.py:224` (inline in callback handler),
   `rollCall/handlers/dues.py:113` (`_settle_admin_ok`) and `:629` (inline). All four do:
@@ -153,6 +178,11 @@ above — re-verify file:line anchors if the file has changed since.
   payment panel) all green.
 
 ## R7. `::N` rollcall-suffix parsing duplicated ~7×
+**Status: DONE — commit `82aeb9d`.** Moved to `utils.text.parse_rc_suffix`;
+dues.py re-imports it under the old name. `/buzz`'s genuinely-different
+handling was left untouched as planned. Side effect: `set_status_override`
+previously had no negative-index guard (unlike dues.py's version) — now
+inherits the shared function's rejection of `::0`.
 - **Files:** `rollCall/handlers/dues.py:69–79` has the extracted helper
   (`_parse_rc_suffix`); `rollCall/handlers/admin.py:119–124` and `:189–191`, and
   `rollCall/handlers/lists.py` (5 copies: ~35, 65, 95, 125, 210) re-implement it inline
@@ -165,6 +195,10 @@ above — re-verify file:line anchors if the file has changed since.
 - **Verify:** `tests/` green (list/dues suffix tests exist: grep `::` in tests/).
 
 ## R8. `_require_identity` duplicated across API route modules
+**Status: STEP 1 DONE — commit `7b2dd36`.** Added `identity.require_identity`;
+dues.py/portal.py delegate to it. Step 2 (web.py's inline sites) still
+NOT done — several are optional-identity paths, needs a dedicated
+needs-care pass, not attempted.
 - **Files:** `rollCall/api/routes/dues.py:71` and `rollCall/api/routes/portal.py:28` —
   identical helper (verify_identity_token → 401 on failure); `rollCall/api/routes/web.py`
   additionally calls `verify_identity_token` inline ~8–12 times with per-site null
@@ -198,6 +232,11 @@ above — re-verify file:line anchors if the file has changed since.
   `pytest tests/ -q` + smoke test.
 
 ## R10. `services/stats.py` executes raw SQL directly
+**Status: DONE — commit `77a638e`.** Added `db.find_user_by_username_for_stats`,
+`db.find_users_by_name_for_stats`, `db.get_user_stats_row`; `resolve_user`
+and `personal_stats` now call these. Note: `bot_stats()` (line ~420) has
+its own separate raw-SQL block, not audited/flagged by this item — left
+untouched, still open if picked up later.
 - **Files:** `rollCall/services/stats.py:44` and `:106` — `from db import get_connection,
   db_type, release_connection` + inline SQL inside service functions.
 - **Problem:** Only service module that bypasses db.py helpers; breaks the layering that
@@ -210,6 +249,13 @@ above — re-verify file:line anchors if the file has changed since.
   `get_connection` in `rollCall/services/` returns nothing afterward.
 
 ## R11. `lifecycle.py::callback_handler` is a 324-line monolith
+**Status: DONE — commits `474d12c`, `8f169e8`, `ae6698a`** (3 commits,
+one branch family each, exactly as prescribed). `callback_handler` is now
+a ~65-line router dispatching to 8 helpers (`_cb_vote`, `_cb_lists_menu`,
+`_cb_list_view`, `_cb_status`, `_cb_refresh`, `_cb_end_prompt`,
+`_cb_end_confirm`, `_cb_end_cancel`). Full integration suite (real
+SQLite, heavy voting/ghost/end-rollcall coverage) stayed green after each
+commit — no logic changed, pure mechanical split.
 - **Files:** `rollCall/handlers/lifecycle.py:554–877` (single function to EOF) —
   dispatches votes, reconfirmation, end-rollcall buttons, waitlist promotion, ghost logic.
 - **Fix shape:** Mechanical split into a router + per-action helpers

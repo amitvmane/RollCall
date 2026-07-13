@@ -24,6 +24,9 @@ from db import (
     get_user_attendance_count,
     get_user_session_history,
     find_proxy_in_chat,
+    find_user_by_username_for_stats,
+    find_users_by_name_for_stats,
+    get_user_stats_row,
 )
 from rollcall_manager import manager
 
@@ -41,60 +44,26 @@ def resolve_user(chat_id: int, arg: str) -> Optional[tuple]:
     All queries restrict to ENDED rollcalls so in-progress sessions don't
     shadow real history.
     """
-    from db import get_connection, db_type, release_connection
     raw = arg.strip()
     username = raw[1:] if raw.startswith("@") else None
     name = None if username else raw
 
-    conn = get_connection()
-    cur = None
-    try:
-        cur = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        active_false = "FALSE" if db_type == "postgresql" else "0"
-
-        if username:
-            cur.execute(f"""
-                SELECT DISTINCT u.user_id, u.first_name FROM users u
-                JOIN rollcalls r ON u.rollcall_id = r.id
-                WHERE r.chat_id = {ph} AND u.username = {ph}
-                  AND r.is_active = {active_false}
-                ORDER BY u.user_id LIMIT 1
-            """, (chat_id, username))
-            row = cur.fetchone()
-            if row is not None:
-                if isinstance(row, dict):
-                    return ("real", row["user_id"], row.get("first_name") or arg)
-                return ("real", row[0], row[1] or arg)
-            return None
-
-        cur.execute(f"""
-            SELECT u.user_id, MAX(u.first_name) AS first_name,
-                   MAX(u.updated_at) AS latest_seen
-            FROM users u
-            JOIN rollcalls r ON u.rollcall_id = r.id
-            WHERE r.chat_id = {ph} AND u.first_name = {ph}
-              AND r.is_active = {active_false}
-            GROUP BY u.user_id
-            ORDER BY latest_seen DESC
-        """, (chat_id, name))
-        rows = cur.fetchall()
-        if rows:
-            if len(rows) > 1:
-                return ("ambiguous", len(rows), name)
-            r = rows[0]
-            if isinstance(r, dict):
-                return ("real", r["user_id"], r.get("first_name") or arg)
-            return ("real", r[0], r[1] or arg)
-
-        if find_proxy_in_chat(chat_id, name):
-            return ("proxy", name, name)
+    if username:
+        row = find_user_by_username_for_stats(chat_id, username)
+        if row is not None:
+            return ("real", row["user_id"], row.get("first_name") or arg)
         return None
-    finally:
-        if cur:
-            cur.close()
-        if db_type == "postgresql":
-            release_connection(conn)
+
+    rows = find_users_by_name_for_stats(chat_id, name)
+    if rows:
+        if len(rows) > 1:
+            return ("ambiguous", len(rows), name)
+        r = rows[0]
+        return ("real", r["user_id"], r.get("first_name") or arg)
+
+    if find_proxy_in_chat(chat_id, name):
+        return ("proxy", name, name)
+    return None
 
 
 def _pct(num: int, denom: int) -> Optional[float]:
@@ -103,30 +72,9 @@ def _pct(num: int, denom: int) -> Optional[float]:
 
 def personal_stats(chat_id: int, user_id: int) -> dict:
     """Return attendance + vote stats for one real user in a chat."""
-    from db import get_connection, db_type, release_connection
     total_rollcalls = get_chat_ended_rollcall_count(chat_id)
     attended = get_user_attendance_count(chat_id, user_id)
-
-    conn = get_connection()
-    cur = None
-    row = {}
-    try:
-        cur = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        cur.execute(f"""
-            SELECT total_in, total_out, total_maybe, total_rollcalls,
-                   total_waiting_to_in, best_streak, current_streak
-            FROM user_stats WHERE chat_id = {ph} AND user_id = {ph}
-        """, (chat_id, user_id))
-        r = cur.fetchone()
-        if r:
-            row = dict(r)
-    finally:
-        if cur:
-            cur.close()
-        if db_type == "postgresql":
-            release_connection(conn)
-
+    row = get_user_stats_row(chat_id, user_id) or {}
     ghost_count = get_ghost_count(chat_id, user_id)
     absent_limit = manager.get_absent_limit(chat_id)
     return {

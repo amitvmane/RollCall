@@ -4081,6 +4081,90 @@ def find_proxy_in_chat(chat_id: int, name: str) -> bool:
             release_connection(conn)
 
 
+def find_user_by_username_for_stats(chat_id: int, username: str) -> Optional[Dict]:
+    """Look up a real user by @username in this chat's ENDED rollcalls (for
+    /stats <@user> resolution). Restricting to ended rollcalls keeps
+    in-progress sessions from shadowing real history."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        active_false = 'FALSE' if db_type == 'postgresql' else '0'
+        cursor.execute(f"""
+            SELECT DISTINCT u.user_id, u.first_name FROM users u
+            JOIN rollcalls r ON u.rollcall_id = r.id
+            WHERE r.chat_id = {ph} AND u.username = {ph}
+              AND r.is_active = {active_false}
+            ORDER BY u.user_id LIMIT 1
+        """, (chat_id, username))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except Exception as e:
+        logging.error(f"Error finding user by username for stats: {e}")
+        return None
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def find_users_by_name_for_stats(chat_id: int, name: str) -> List[Dict]:
+    """Look up real users by display name in this chat's ENDED rollcalls
+    (for /stats <name> resolution). May return multiple rows if several
+    users share the name — caller decides how to handle ambiguity."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        active_false = 'FALSE' if db_type == 'postgresql' else '0'
+        cursor.execute(f"""
+            SELECT u.user_id, MAX(u.first_name) AS first_name,
+                   MAX(u.updated_at) AS latest_seen
+            FROM users u
+            JOIN rollcalls r ON u.rollcall_id = r.id
+            WHERE r.chat_id = {ph} AND u.first_name = {ph}
+              AND r.is_active = {active_false}
+            GROUP BY u.user_id
+            ORDER BY latest_seen DESC
+        """, (chat_id, name))
+        return [dict(r) for r in cursor.fetchall()]
+    except Exception as e:
+        logging.error(f"Error finding users by name for stats: {e}")
+        return []
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
+def get_user_stats_row(chat_id: int, user_id: int) -> Optional[Dict]:
+    """Raw user_stats row (vote totals, streaks) for personal_stats."""
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = '%s' if db_type == 'postgresql' else '?'
+        cursor.execute(f"""
+            SELECT total_in, total_out, total_maybe, total_rollcalls,
+                   total_waiting_to_in, best_streak, current_streak
+            FROM user_stats WHERE chat_id = {ph} AND user_id = {ph}
+        """, (chat_id, user_id))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except Exception as e:
+        logging.error(f"Error fetching user_stats row: {e}")
+        return None
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == 'postgresql':
+            release_connection(conn)
+
+
 def get_rollcall_history(chat_id: int, limit: int = 10, offset: int = 0) -> List[Dict]:
     """Return ended rollcalls for a chat with participant counts, supporting pagination."""
     conn = get_connection()

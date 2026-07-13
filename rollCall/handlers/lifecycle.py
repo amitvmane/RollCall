@@ -723,6 +723,124 @@ async def _cb_refresh(call, cid: int, rc_number: int, rc) -> None:
             logging.warning("Refresh edit failed (chat=%s msg=%s): %s", cid, call.message.message_id, e)
 
 
+async def _cb_end_prompt(call, cid: int, rc_number: int, rc) -> None:
+    """btn_end_{rc_number} — show the "are you sure?" end-rollcall confirmation."""
+    member = await bot.get_chat_member(cid, call.from_user.id)
+    admin_mode = manager.get_admin_rights(cid)
+    if admin_mode and member.status not in ["administrator", "creator"]:
+        await bot.answer_callback_query(call.id, "⛔ Only admins can end rollcalls", show_alert=True)
+        return
+    await bot.answer_callback_query(call.id)
+    markup = await get_end_confirm_keyboard(rc_number)
+    # Auto-started rollcalls + /src with no args can leave rc.title empty
+    # or "<Empty>". Show a sensible label instead of "''" in the prompt.
+    if rc.title and rc.title != "<Empty>":
+        rc_label = f"'{rc.title}'"
+    else:
+        rc_label = "this rollcall"
+    try:
+        await bot.edit_message_text(
+            f"Are you sure you want to end {rc_label} (#{rc_number})?",
+            cid, call.message.message_id, reply_markup=markup,
+        )
+    except Exception as e:
+        if "message is not modified" not in str(e).lower():
+            logging.warning("End-confirm edit failed (chat=%s msg=%s): %s", cid, call.message.message_id, e)
+
+
+async def _cb_end_confirm(call, cid: int, rc_number: int, rc) -> None:
+    """btn_endconfirm_{rc_number} — actually end the rollcall: finish list,
+    stats/renumbering, ghost-check prompt, panel re-posting."""
+    admin_mode = manager.get_admin_rights(cid)
+    if admin_mode:
+        member = await bot.get_chat_member(cid, call.from_user.id)
+        if member.status not in ["administrator", "creator"]:
+            await bot.answer_callback_query(call.id, "⛔ Only admins can end rollcalls", show_alert=True)
+            return
+
+    async with manager.get_erc_lock(cid):
+        rc = manager.get_rollcall(cid, rc_number - 1)
+        if rc is None:
+            await bot.answer_callback_query(call.id, "Rollcall already ended.")
+            return
+
+        ended_by = call.from_user.first_name or call.from_user.username or "someone"
+        ended_number = rc_number
+
+        # Capture finish text before the service removes the rollcall.
+        try:
+            final_text = rc.finishList().replace("__RCID__", str(rc_number))
+            final_text = f"{final_text}\n\n🎉 Ended by {ended_by}"
+        except Exception:
+            logging.exception(f"Failed to build finish list for rollcall #{rc_number}")
+            final_text = f"Rollcall #{rc_number} ended by {ended_by}."
+
+        result = await rollcalls_svc.end_rollcall(
+            cid, rc_number - 1,
+            call.from_user.id, ended_by,
+            getattr(call.from_user, "username", None),
+        )
+
+        await bot.answer_callback_query(call.id, "Rollcall ended")
+
+        # Replace the "Are you sure?" prompt in-place with the finish list.
+        try:
+            await bot.edit_message_text(
+                final_text, cid, call.message.message_id, reply_markup=None,
+            )
+        except Exception:
+            logging.exception(f"Failed to edit end-confirm message for chat {cid}")
+            try:
+                await bot.edit_message_reply_markup(cid, call.message.message_id, reply_markup=None)
+            except Exception:
+                pass
+            try:
+                await bot.send_message(cid, final_text)
+            except Exception:
+                logging.exception(f"Failed to send finish list for chat {cid}")
+
+        # Update panel IDs
+        _panel_msg_ids.pop((cid, ended_number), None)
+        for entry in sorted(result["renumbered"], key=lambda x: x["old"]):
+            old_key = (cid, entry["old"])
+            if old_key in _panel_msg_ids:
+                _panel_msg_ids[(cid, entry["new"])] = _panel_msg_ids.pop(old_key)
+
+        if result["ghost_eligible"]:
+            ghost_markup = InlineKeyboardMarkup(row_width=2)
+            ghost_markup.add(
+                InlineKeyboardButton("👻 Yes, select ghosts", callback_data=f"ghost_yes_{result['ghost_rc_db_id']}"),
+                InlineKeyboardButton("✅ No, all showed up", callback_data=f"ghost_no_{result['ghost_rc_db_id']}")
+            )
+            await bot.send_message(cid, f"👻 Did anyone ghost '{rc.title}'?", reply_markup=ghost_markup)
+
+        updated_rollcalls = manager.get_rollcalls(cid)
+        if updated_rollcalls and not manager.get_shh_mode(cid):
+            lines = [f"⚠️ Rollcall #{ended_number} ended. IDs updated:"]
+            for entry in result["renumbered"]:
+                lines.append(f"  #{entry['old']} '{entry['title']}' → #{entry['new']}")
+            await bot.send_message(cid, "\n".join(lines))
+            for idx, rollcall in enumerate(updated_rollcalls):
+                new_id = idx + 1
+                text = _build_panel_text(rollcall, new_id)
+                panel_markup = await get_status_keyboard(new_id, web_url=_group_web_url(cid))
+                sent = await bot.send_message(cid, text, reply_markup=panel_markup)
+                _panel_msg_ids[(cid, new_id)] = sent.message_id
+                _persist_panel_msg_id(rollcall, sent.message_id)
+
+
+async def _cb_end_cancel(call, cid: int, rc_number: int, rc) -> None:
+    """btn_endcancel_{rc_number} — dismiss the end-confirmation, back to panel."""
+    await bot.answer_callback_query(call.id, "Cancelled")
+    text = _build_panel_text(rc, rc_number)
+    markup = await get_status_keyboard(rc_number, web_url=_group_web_url(cid))
+    try:
+        await bot.edit_message_text(text, cid, call.message.message_id, reply_markup=markup)
+    except Exception as e:
+        if "message is not modified" not in str(e).lower():
+            logging.warning("Endcancel edit failed (chat=%s msg=%s): %s", cid, call.message.message_id, e)
+
+
 async def callback_handler(call):
     try:
         raw_data = call.data or ""
@@ -774,119 +892,17 @@ async def callback_handler(call):
 
         # ── Show end confirmation ─────────────────────────────────────────────
         if action == "end":
-            member = await bot.get_chat_member(cid, call.from_user.id)
-            admin_mode = manager.get_admin_rights(cid)
-            if admin_mode and member.status not in ["administrator", "creator"]:
-                await bot.answer_callback_query(call.id, "⛔ Only admins can end rollcalls", show_alert=True)
-                return
-            await bot.answer_callback_query(call.id)
-            markup = await get_end_confirm_keyboard(rc_number)
-            # Auto-started rollcalls + /src with no args can leave rc.title empty
-            # or "<Empty>". Show a sensible label instead of "''" in the prompt.
-            if rc.title and rc.title != "<Empty>":
-                rc_label = f"'{rc.title}'"
-            else:
-                rc_label = "this rollcall"
-            try:
-                await bot.edit_message_text(
-                    f"Are you sure you want to end {rc_label} (#{rc_number})?",
-                    cid, call.message.message_id, reply_markup=markup,
-                )
-            except Exception as e:
-                if "message is not modified" not in str(e).lower():
-                    logging.warning("End-confirm edit failed (chat=%s msg=%s): %s", cid, call.message.message_id, e)
+            await _cb_end_prompt(call, cid, rc_number, rc)
             return
 
         # ── Confirm end rollcall ──────────────────────────────────────────────
         if action == "endconfirm":
-            admin_mode = manager.get_admin_rights(cid)
-            if admin_mode:
-                member = await bot.get_chat_member(cid, call.from_user.id)
-                if member.status not in ["administrator", "creator"]:
-                    await bot.answer_callback_query(call.id, "⛔ Only admins can end rollcalls", show_alert=True)
-                    return
-
-            async with manager.get_erc_lock(cid):
-                rc = manager.get_rollcall(cid, rc_number - 1)
-                if rc is None:
-                    await bot.answer_callback_query(call.id, "Rollcall already ended.")
-                    return
-
-                ended_by = call.from_user.first_name or call.from_user.username or "someone"
-                ended_number = rc_number
-
-                # Capture finish text before the service removes the rollcall.
-                try:
-                    final_text = rc.finishList().replace("__RCID__", str(rc_number))
-                    final_text = f"{final_text}\n\n🎉 Ended by {ended_by}"
-                except Exception:
-                    logging.exception(f"Failed to build finish list for rollcall #{rc_number}")
-                    final_text = f"Rollcall #{rc_number} ended by {ended_by}."
-
-                result = await rollcalls_svc.end_rollcall(
-                    cid, rc_number - 1,
-                    call.from_user.id, ended_by,
-                    getattr(call.from_user, "username", None),
-                )
-
-                await bot.answer_callback_query(call.id, "Rollcall ended")
-
-                # Replace the "Are you sure?" prompt in-place with the finish list.
-                try:
-                    await bot.edit_message_text(
-                        final_text, cid, call.message.message_id, reply_markup=None,
-                    )
-                except Exception:
-                    logging.exception(f"Failed to edit end-confirm message for chat {cid}")
-                    try:
-                        await bot.edit_message_reply_markup(cid, call.message.message_id, reply_markup=None)
-                    except Exception:
-                        pass
-                    try:
-                        await bot.send_message(cid, final_text)
-                    except Exception:
-                        logging.exception(f"Failed to send finish list for chat {cid}")
-
-                # Update panel IDs
-                _panel_msg_ids.pop((cid, ended_number), None)
-                for entry in sorted(result["renumbered"], key=lambda x: x["old"]):
-                    old_key = (cid, entry["old"])
-                    if old_key in _panel_msg_ids:
-                        _panel_msg_ids[(cid, entry["new"])] = _panel_msg_ids.pop(old_key)
-
-                if result["ghost_eligible"]:
-                    ghost_markup = InlineKeyboardMarkup(row_width=2)
-                    ghost_markup.add(
-                        InlineKeyboardButton("👻 Yes, select ghosts", callback_data=f"ghost_yes_{result['ghost_rc_db_id']}"),
-                        InlineKeyboardButton("✅ No, all showed up", callback_data=f"ghost_no_{result['ghost_rc_db_id']}")
-                    )
-                    await bot.send_message(cid, f"👻 Did anyone ghost '{rc.title}'?", reply_markup=ghost_markup)
-
-                updated_rollcalls = manager.get_rollcalls(cid)
-                if updated_rollcalls and not manager.get_shh_mode(cid):
-                    lines = [f"⚠️ Rollcall #{ended_number} ended. IDs updated:"]
-                    for entry in result["renumbered"]:
-                        lines.append(f"  #{entry['old']} '{entry['title']}' → #{entry['new']}")
-                    await bot.send_message(cid, "\n".join(lines))
-                    for idx, rollcall in enumerate(updated_rollcalls):
-                        new_id = idx + 1
-                        text = _build_panel_text(rollcall, new_id)
-                        panel_markup = await get_status_keyboard(new_id, web_url=_group_web_url(cid))
-                        sent = await bot.send_message(cid, text, reply_markup=panel_markup)
-                        _panel_msg_ids[(cid, new_id)] = sent.message_id
-                        _persist_panel_msg_id(rollcall, sent.message_id)
+            await _cb_end_confirm(call, cid, rc_number, rc)
             return
 
         # ── Cancel end rollcall ───────────────────────────────────────────────
         if action == "endcancel":
-            await bot.answer_callback_query(call.id, "Cancelled")
-            text = _build_panel_text(rc, rc_number)
-            markup = await get_status_keyboard(rc_number, web_url=_group_web_url(cid))
-            try:
-                await bot.edit_message_text(text, cid, call.message.message_id, reply_markup=markup)
-            except Exception as e:
-                if "message is not modified" not in str(e).lower():
-                    logging.warning("Endcancel edit failed (chat=%s msg=%s): %s", cid, call.message.message_id, e)
+            await _cb_end_cancel(call, cid, rc_number, rc)
             return
 
         await bot.answer_callback_query(call.id, "Unknown action")

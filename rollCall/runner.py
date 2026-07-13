@@ -398,12 +398,17 @@ async def memory_prune_loop(interval_seconds: int = 600):
     from bot_state import (
         _rate_limits, _buzz_cooldowns, _pending_deletes, _pending_overrides,
         _pending_proxy_add, _pending_reconf, _pending_subsidy_input,
-        _pending_payment_input, _prune_pending, _panel_msg_ids,
+        _pending_payment_input, _prune_pending, _panel_msg_ids, _sched_selection,
     )
     from services import presence as presence_svc
 
     RATE_LIMIT_AGE = 300   # individual vote rate-limit window is 2s; 5 min is well past stale
     BUZZ_COOLDOWN_AGE = 300  # /buzz cooldown is 30s; 5 min flushes any straggler
+    # _sched_selection entries are bare sets with no timestamp (unlike the
+    # _pending_* dicts), so they can't use _prune_pending. An abandoned
+    # /schedule_template multi-select panel leaves its entry forever — bound
+    # growth with a blunt size guard instead of per-entry aging.
+    SCHED_SELECTION_MAX = 500
 
     while True:
         try:
@@ -422,6 +427,9 @@ async def memory_prune_loop(interval_seconds: int = 600):
             _prune_pending(_pending_reconf)
             _prune_pending(_pending_subsidy_input)
             _prune_pending(_pending_payment_input)
+
+            if len(_sched_selection) > SCHED_SELECTION_MAX:
+                _sched_selection.clear()
 
             # Per-chat state — clean entries for chats whose rollcalls are
             # all gone, or panel ids past the current rollcall count.

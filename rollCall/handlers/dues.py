@@ -34,6 +34,7 @@ import db as _db
 from bot_state import (
     bot, reply_error, _log_task_exc, send_md_fallback, _esc_md,
     safe_edit_markup, safe_edit_text, _pending_subsidy_input, _prune_pending,
+    is_chat_admin,
 )
 from exceptions import (
     duesGameAlreadyClosed, duesNothingToClose,
@@ -110,14 +111,12 @@ async def _settle_admin_ok(call) -> bool:
     """Shared admin gate for every /settle_dues inline button — financial
     writes, same pattern as the penalty panel / collector picker."""
     cid = call.message.chat.id
-    if manager.get_admin_rights(cid):
-        member = await bot.get_chat_member(cid, call.from_user.id)
-        if member.status not in ("administrator", "creator"):
-            await bot.answer_callback_query(
-                call.id, "⛔ Only admins can settle dues", show_alert=True
-            )
-            return False
-    return True
+    if await is_chat_admin(cid, call.from_user.id):
+        return True
+    await bot.answer_callback_query(
+        call.id, "⛔ Only admins can settle dues", show_alert=True
+    )
+    return False
 
 
 async def _send_remaining_unsettled_nudge(cid: int) -> None:
@@ -626,13 +625,11 @@ async def pick_collector_callback(call):
     try:
         cid = call.message.chat.id
         # Financial write — same admin gate as the penalty panel.
-        if manager.get_admin_rights(cid):
-            member = await bot.get_chat_member(cid, call.from_user.id)
-            if member.status not in ("administrator", "creator"):
-                await bot.answer_callback_query(
-                    call.id, "⛔ Only admins can set the collector", show_alert=True
-                )
-                return
+        if not await is_chat_admin(cid, call.from_user.id):
+            await bot.answer_callback_query(
+                call.id, "⛔ Only admins can set the collector", show_alert=True
+            )
+            return
 
         _, rc_idx_s, uid_s = call.data.split("_")
         rc_idx, uid = int(rc_idx_s), int(uid_s)

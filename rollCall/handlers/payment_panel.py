@@ -35,7 +35,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import db
 from bot_state import (
     bot, reply_error, safe_edit_text, safe_edit_markup, send_md_fallback,
-    _esc_md, _pending_payment_input, _prune_pending,
+    _esc_md, _pending_payment_input, _prune_pending, is_chat_admin,
 )
 from rollcall_manager import manager
 from services import dues as dues_svc
@@ -122,14 +122,12 @@ async def send_payment_panel(chat_id: int) -> None:
 async def _payment_admin_ok(call) -> bool:
     """Financial write — same admin gate as the penalty panel / settle_dues cards."""
     cid = call.message.chat.id
-    if manager.get_admin_rights(cid):
-        member = await bot.get_chat_member(cid, call.from_user.id)
-        if member.status not in ("administrator", "creator"):
-            await bot.answer_callback_query(
-                call.id, "⛔ Only admins can mark payments", show_alert=True
-            )
-            return False
-    return True
+    if await is_chat_admin(cid, call.from_user.id):
+        return True
+    await bot.answer_callback_query(
+        call.id, "⛔ Only admins can mark payments", show_alert=True
+    )
+    return False
 
 
 async def _refresh_list(cid: int, mid: int, session: "_PaymentSession") -> None:

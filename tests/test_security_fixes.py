@@ -49,7 +49,7 @@ class TestPenaltyPanelAdminGate(unittest.IsolatedAsyncioTestCase):
         from handlers import penalty_panel
         mgr = MagicMock()
         mgr.get_admin_rights.return_value = True
-        with patch("handlers.penalty_panel.manager", mgr):
+        with patch("bot_state.manager", mgr):
             await penalty_panel.penalty_panel_callback(_call("pen_t:1:ditch"))
         # Rejected with an alert; no session lookup, no writes
         args, kwargs = self.bot_state.bot.answer_callback_query.call_args
@@ -62,7 +62,7 @@ class TestPenaltyPanelAdminGate(unittest.IsolatedAsyncioTestCase):
             return_value=_member("administrator"))
         mgr = MagicMock()
         mgr.get_admin_rights.return_value = True
-        with patch("handlers.penalty_panel.manager", mgr):
+        with patch("bot_state.manager", mgr):
             # No session registered → passes the gate, then "panel expired"
             await penalty_panel.penalty_panel_callback(_call("pen_t:1:ditch"))
         args, _ = self.bot_state.bot.answer_callback_query.call_args
@@ -72,7 +72,7 @@ class TestPenaltyPanelAdminGate(unittest.IsolatedAsyncioTestCase):
         from handlers import penalty_panel
         mgr = MagicMock()
         mgr.get_admin_rights.return_value = False   # chat runs without admin mode
-        with patch("handlers.penalty_panel.manager", mgr):
+        with patch("bot_state.manager", mgr):
             await penalty_panel.penalty_panel_callback(_call("pen_t:1:ditch"))
         # Gate skipped → falls through to "panel expired" (no session)
         args, _ = self.bot_state.bot.answer_callback_query.call_args

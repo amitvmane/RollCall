@@ -34,7 +34,7 @@ from db import (
 )
 from bot_state import (
     bot, reply_error, safe_edit_text, safe_edit_markup,
-    send_md_fallback, _esc_md,
+    send_md_fallback, _esc_md, is_chat_admin,
 )
 from rollcall_manager import manager
 from services import dues as dues_svc
@@ -221,13 +221,11 @@ async def penalty_panel_callback(call):
         # Penalties are financial writes — gate on admin status (same pattern
         # as the end-rollcall button in lifecycle.py). Respects the chat's
         # admin-mode setting like every dues command does.
-        if manager.get_admin_rights(cid):
-            member = await bot.get_chat_member(cid, call.from_user.id)
-            if member.status not in ("administrator", "creator"):
-                await bot.answer_callback_query(
-                    call.id, "⛔ Only admins can mark penalties", show_alert=True
-                )
-                return
+        if not await is_chat_admin(cid, call.from_user.id):
+            await bot.answer_callback_query(
+                call.id, "⛔ Only admins can mark penalties", show_alert=True
+            )
+            return
 
         session = _sessions.get((cid, mid))
         if session is None:

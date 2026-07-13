@@ -18,6 +18,7 @@ from exceptions import (
     duesGameAlreadyClosed, duesNothingToClose,
 )
 from models import RollCall, User
+from rollcall_manager import manager
 # Re-exported for backward compat — all existing `from bot_state import
 # _esc_md` call sites keep working. The actual implementation lives in
 # utils/text.py (dependency-free) so the services layer can use it without
@@ -337,6 +338,20 @@ def format_mention_with_name(user: User) -> str:
             return f"@{user.username} ({user.name})"
         return f"[{user.name}](tg://user?id={user.user_id})"
     return user.name
+
+
+async def is_chat_admin(cid: int, uid: int) -> bool:
+    """True if the chat's admin-mode setting is off, or uid is a Telegram
+    chat administrator/creator. Shared gate for financial-write inline
+    callbacks (settle_dues, penalty panel, payment panel, pick_collector) —
+    each call site keeps its own alert message/return value on failure.
+
+    Distinct from functions.py's admin_rights(message, manager), which
+    takes a message object (used at command entry points, not callbacks)."""
+    if manager.get_admin_rights(cid):
+        member = await bot.get_chat_member(cid, uid)
+        return member.status in ("administrator", "creator")
+    return True
 
 
 def format_mention_with_name_md(user: User) -> str:

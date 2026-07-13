@@ -700,15 +700,13 @@ async def rotate_collector(message):
 
         arg = args[0].lower()
         if arg in ("on", "true", "1", "enable"):
-            _db.update_chat_settings(cid, collector_rotation=1)
-            await bot.send_message(
-                cid,
-                "🔄 Collector rotation ON — each /settle_dues without a staged "
-                "collector auto-assigns the next IN member in turn.",
-            )
+            async with manager.get_chat_write_lock(cid):
+                result = dues_svc.set_collector_rotation(cid, enabled=True)
+            await bot.send_message(cid, result["announcement"])
         elif arg in ("off", "false", "0", "disable"):
-            _db.update_chat_settings(cid, collector_rotation=0)
-            await bot.send_message(cid, "🔄 Collector rotation OFF.")
+            async with manager.get_chat_write_lock(cid):
+                result = dues_svc.set_collector_rotation(cid, enabled=False)
+            await bot.send_message(cid, result["announcement"])
         else:
             raise incorrectParameter("Usage: /rotate_collector on · /rotate_collector off")
     except Exception as e:

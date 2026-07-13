@@ -1093,6 +1093,19 @@ def set_collector(
     }
 
 
+def set_collector_rotation(chat_id: int, enabled: bool) -> dict:
+    """Toggle round-robin collector auto-assignment at /settle_dues."""
+    db.update_chat_settings(chat_id, collector_rotation=1 if enabled else 0)
+    if enabled:
+        announcement = (
+            "🔄 Collector rotation ON — each /settle_dues without a staged "
+            "collector auto-assigns the next IN member in turn."
+        )
+    else:
+        announcement = "🔄 Collector rotation OFF."
+    return {"enabled": enabled, "announcement": announcement}
+
+
 def mark_paid(
     chat_id: int,
     token: str,

@@ -1197,6 +1197,27 @@ class TestSetCollector(unittest.TestCase):
                 set_collector(1, "Guest", paid_ground=False, admin_uid=99, admin_name="Admin")
 
 
+class TestSetCollectorRotation(unittest.TestCase):
+
+    def test_enable_writes_flag_1(self):
+        from services.dues import set_collector_rotation
+        update_mock = MagicMock()
+        with patch("services.dues.db.update_chat_settings", update_mock):
+            r = set_collector_rotation(1, enabled=True)
+        update_mock.assert_called_once_with(1, collector_rotation=1)
+        self.assertTrue(r["enabled"])
+        self.assertIn("ON", r["announcement"])
+
+    def test_disable_writes_flag_0(self):
+        from services.dues import set_collector_rotation
+        update_mock = MagicMock()
+        with patch("services.dues.db.update_chat_settings", update_mock):
+            r = set_collector_rotation(1, enabled=False)
+        update_mock.assert_called_once_with(1, collector_rotation=0)
+        self.assertFalse(r["enabled"])
+        self.assertIn("OFF", r["announcement"])
+
+
 # ── Add adhoc ─────────────────────────────────────────────────────────────────
 
 class TestAddAdhoc(unittest.TestCase):

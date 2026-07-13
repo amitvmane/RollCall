@@ -24,7 +24,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Path, Query, status
 
 import db as _db
-from api.identity import verify_identity_token
+from api.identity import require_identity
 from api.schemas.dues import (
     DuesAddAdhocRequest,
     DuesCancelGameRequest,
@@ -69,13 +69,9 @@ def _resolve_chat(group_token: str) -> dict:
 
 
 def _require_identity(id_token: str) -> int:
-    user_id = verify_identity_token(id_token)
-    if not user_id or user_id <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Verify with Telegram to use dues features.",
-        )
-    return user_id
+    return require_identity(
+        id_token, detail="Verify with Telegram to use dues features."
+    )
 
 
 def _require_admin(chat_id: int, id_token: str) -> int:

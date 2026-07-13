@@ -109,3 +109,20 @@ def verify_identity_token(token: Optional[str]) -> Optional[int]:
     if exp < int(time.time()):
         return None
     return user_id
+
+
+def require_identity(
+    id_token: Optional[str],
+    detail: str = "Verify with Telegram to use this feature.",
+) -> int:
+    """verify_identity_token, raising HTTP 401 instead of returning None.
+
+    Was duplicated identically (module-local _require_identity) in
+    api/routes/dues.py and api/routes/portal.py; each site's own 401
+    message is preserved via the detail param.
+    """
+    from fastapi import HTTPException, status
+    user_id = verify_identity_token(id_token)
+    if not user_id or user_id <= 0:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail)
+    return user_id

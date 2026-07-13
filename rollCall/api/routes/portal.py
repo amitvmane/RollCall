@@ -8,11 +8,11 @@ derived from its signature server-side. A raw numeric tg_user_id is NOT
 accepted — trusting one would let anyone read any user's attendance history.
 Rate-limited by the shared middleware.
 """
-from fastapi import APIRouter, HTTPException, Path, Query, status
+from fastapi import APIRouter, Path, Query
 
 import db as _db
 from rollcall_manager import manager
-from api.identity import verify_identity_token
+from api.identity import require_identity
 from api.schemas.portal import (
     PortalGroupHistoryResponse,
     PortalGroupsResponse,
@@ -27,13 +27,9 @@ router = APIRouter()
 
 def _require_identity(id_token: str) -> int:
     """Resolve a signed identity token to a verified user id, or 401."""
-    user_id = verify_identity_token(id_token)
-    if user_id is None or user_id <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Verify with Telegram to view your portal.",
-        )
-    return user_id
+    return require_identity(
+        id_token, detail="Verify with Telegram to view your portal."
+    )
 
 
 @router.get(

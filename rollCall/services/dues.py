@@ -471,8 +471,10 @@ async def close_game(
             chat_id, _active_rc_idx, admin_uid, admin_name
         )
 
-    # ── Write closure row ────────────────────────────────────────────────────
-    closure_id = db.create_game_closure(
+    # ── Collect all writes, then commit them in ONE transaction ──────────────
+    # A game must never end up "closed" (game_closures row present) with some
+    # of its dues/fund rows missing — see db.write_game_closure_batch.
+    closure_kwargs = dict(
         chat_id=chat_id,
         rollcall_id=rc_db_id,
         title=title,
@@ -490,7 +492,9 @@ async def close_game(
         collector_upi=collector_upi,
     )
 
-    # ── Write per-member share entries ───────────────────────────────────────
+    dues_entries: list[dict] = []
+
+    # Per-member share entries
     for m in in_members:
         uid = m["user_id"]
         name = m["member_name"]
@@ -499,10 +503,11 @@ async def close_game(
 
         if uid is not None:
             # Real user — keyed by user_id
-            db.add_dues_entry(
-                chat_id, rc_db_id, uid, name,
-                "share", per_head, None, admin_uid, admin_name,
-            )
+            dues_entries.append(dict(
+                chat_id=chat_id, rollcall_id=rc_db_id, user_id=uid, member_name=name,
+                entry_type="share", amount=per_head, memo=None,
+                created_by_uid=admin_uid, created_by_name=admin_name,
+            ))
         else:
             # All proxies — name-keyed (user_id=None).
             # Owned proxy: memo references the responsible owner so the group
@@ -512,31 +517,38 @@ async def close_game(
                 memo = f"owner:{owner_id}:{owner_name or ''}"
             else:
                 memo = None
-            db.add_dues_entry(
-                chat_id, rc_db_id, None, name,
-                "share", per_head, memo, admin_uid, admin_name,
-            )
+            dues_entries.append(dict(
+                chat_id=chat_id, rollcall_id=rc_db_id, user_id=None, member_name=name,
+                entry_type="share", amount=per_head, memo=memo,
+                created_by_uid=admin_uid, created_by_name=admin_name,
+            ))
 
-    # ── Collector reimbursement (if they fronted ground cost) ────────────────
+    # Collector reimbursement (if they fronted ground cost)
     if collector_paid_ground and collector_uid:
         # Collector fronted ground_cost; credit them so net = per_head − ground_cost
-        db.add_dues_entry(
-            chat_id, rc_db_id, collector_uid, collector_name or "Collector",
-            "reimbursement", -ground_cost,
-            f"fronted ground cost ₹{ground_cost}", admin_uid, admin_name,
-        )
+        dues_entries.append(dict(
+            chat_id=chat_id, rollcall_id=rc_db_id, user_id=collector_uid,
+            member_name=collector_name or "Collector",
+            entry_type="reimbursement", amount=-ground_cost,
+            memo=f"fronted ground cost ₹{ground_cost}",
+            created_by_uid=admin_uid, created_by_name=admin_name,
+        ))
 
-    # ── Fund transactions ────────────────────────────────────────────────────
+    fund_transactions: list[dict] = []
     if subsidy > 0:
-        db.add_fund_transaction(
-            chat_id, rc_db_id, "subsidy", -subsidy,
-            f"subsidy for '{title}'", admin_uid, admin_name,
-        )
+        fund_transactions.append(dict(
+            chat_id=chat_id, rollcall_id=rc_db_id, txn_type="subsidy", amount=-subsidy,
+            description=f"subsidy for '{title}'",
+            created_by_uid=admin_uid, created_by_name=admin_name,
+        ))
     if remainder > 0:
-        db.add_fund_transaction(
-            chat_id, rc_db_id, "rounding", remainder,
-            f"rounding remainder from '{title}'", admin_uid, admin_name,
-        )
+        fund_transactions.append(dict(
+            chat_id=chat_id, rollcall_id=rc_db_id, txn_type="rounding", amount=remainder,
+            description=f"rounding remainder from '{title}'",
+            created_by_uid=admin_uid, created_by_name=admin_name,
+        ))
+
+    closure_id = db.write_game_closure_batch(closure_kwargs, dues_entries, fund_transactions)
 
     db.log_admin_action(chat_id, admin_uid, admin_name, "close_game", target_name=title)
 

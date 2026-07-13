@@ -5362,6 +5362,88 @@ def create_game_closure(
             release_connection(conn)
 
 
+def write_game_closure_batch(
+    closure: Dict,
+    dues_entries: List[Dict],
+    fund_transactions: List[Dict],
+) -> int:
+    """Atomically write a game's financial close: the closure row, every
+    member share/reimbursement dues_entries row, and every fund_transactions
+    row, in ONE transaction/commit. A failure at any point rolls back
+    everything — a game is never left "closed" (game_closures row present,
+    blocking re-close via the UNIQUE(rollcall_id) constraint) with some or
+    all of its dues rows missing.
+
+    closure: dict with the same fields as create_game_closure's params
+      (chat_id, rollcall_id, title, ground_cost, in_count, subsidy, per_head,
+      rounding_step, remainder, closed_by_uid, closed_by_name, and optional
+      collector_uid/collector_name/collector_paid_ground/collector_upi).
+    dues_entries: list of dicts, each with add_dues_entry's params (chat_id,
+      rollcall_id, user_id, member_name, entry_type, amount, memo,
+      created_by_uid, created_by_name).
+    fund_transactions: list of dicts, each with add_fund_transaction's params
+      (chat_id, rollcall_id, txn_type, amount, description, created_by_uid,
+      created_by_name).
+
+    All rows share one created_at timestamp (computed once) — they represent
+    a single atomic financial event. Returns the new game_closures.id.
+    """
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        ph = "%s" if db_type == "postgresql" else "?"
+        now = _dues_now()
+
+        cursor.execute(
+            f"INSERT INTO game_closures (chat_id, rollcall_id, title, ground_cost, in_count,"
+            f" subsidy, per_head, rounding_step, remainder, collector_uid, collector_name,"
+            f" collector_paid_ground, collector_upi, closed_by_uid, closed_by_name, created_at)"
+            f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+            (closure["chat_id"], closure["rollcall_id"], closure["title"], closure["ground_cost"],
+             closure["in_count"], closure["subsidy"], closure["per_head"], closure["rounding_step"],
+             closure["remainder"], closure.get("collector_uid"), closure.get("collector_name"),
+             closure.get("collector_paid_ground", 0), closure.get("collector_upi"),
+             closure["closed_by_uid"], closure["closed_by_name"], now),
+        )
+        if db_type == "postgresql":
+            cursor.execute("SELECT lastval()")
+        else:
+            cursor.execute("SELECT last_insert_rowid()")
+        closure_id = cursor.fetchone()[0]
+
+        for e in dues_entries:
+            cursor.execute(
+                f"INSERT INTO dues_entries (chat_id, rollcall_id, user_id, member_name,"
+                f" entry_type, amount, memo, created_by_uid, created_by_name, created_at)"
+                f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+                (e["chat_id"], e["rollcall_id"], e["user_id"], e["member_name"],
+                 e["entry_type"], e["amount"], e.get("memo"), e["created_by_uid"],
+                 e["created_by_name"], now),
+            )
+
+        for t in fund_transactions:
+            cursor.execute(
+                f"INSERT INTO fund_transactions (chat_id, rollcall_id, txn_type, amount,"
+                f" description, created_by_uid, created_by_name, created_at)"
+                f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+                (t["chat_id"], t["rollcall_id"], t["txn_type"], t["amount"],
+                 t["description"], t["created_by_uid"], t["created_by_name"], now),
+            )
+
+        conn.commit()
+        return closure_id
+    except Exception:
+        logging.exception("write_game_closure_batch failed")
+        conn.rollback()
+        raise
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if db_type == "postgresql":
+            release_connection(conn)
+
+
 def get_game_closure(rollcall_id: int) -> Optional[Dict]:
     """Return the closure row for a rollcall, or None if not financially closed."""
     conn = get_connection()

@@ -350,6 +350,7 @@ _CLOSE_GAME_DB_DEFAULTS = dict(
     get_game_closure=MagicMock(return_value=None),   # not yet closed
     get_fund_balance=MagicMock(return_value=0),
     create_game_closure=MagicMock(return_value=1),
+    write_game_closure_batch=MagicMock(return_value=1),
     add_dues_entry=MagicMock(),
     add_fund_transaction=MagicMock(),
     log_admin_action=MagicMock(),
@@ -383,10 +384,10 @@ class TestCloseGameActivePath(unittest.IsolatedAsyncioTestCase):
         rc = _make_rc(title="Sunday Game", in_list=[alice], event_fee="600", rc_id=77)
         mgr = _make_manager([rc])
 
-        add_dues_entry = MagicMock()
+        write_batch = MagicMock(return_value=1)
         mock_end = AsyncMock(return_value=_end_result())
 
-        with _patch_close(add_dues_entry=add_dues_entry), \
+        with _patch_close(write_game_closure_batch=write_batch), \
              patch("services.dues.manager", mgr), \
              patch("services.rollcalls.end_rollcall", mock_end):
             result = await close_game(1, subsidy=0, admin_uid=1, admin_name="Admin")
@@ -394,10 +395,11 @@ class TestCloseGameActivePath(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["in_count"], 1)
         self.assertEqual(result["per_head"], 600)   # 600/1 → step 10 → 600
         self.assertEqual(result["remainder"], 0)
-        add_dues_entry.assert_called_once()
-        call_args = add_dues_entry.call_args
-        self.assertEqual(call_args.args[2], 101)    # user_id
-        self.assertEqual(call_args.args[5], 600)    # amount
+        write_batch.assert_called_once()
+        dues_entries = write_batch.call_args.args[1]
+        self.assertEqual(len(dues_entries), 1)
+        self.assertEqual(dues_entries[0]["user_id"], 101)
+        self.assertEqual(dues_entries[0]["amount"], 600)
 
     async def test_result_upi_vpa_prefers_collector_over_group(self):
         """result['upi_vpa'] must resolve the same way as the announcement text
@@ -444,21 +446,22 @@ class TestCloseGameActivePath(unittest.IsolatedAsyncioTestCase):
         rc = _make_rc(in_list=users, event_fee="600", rc_id=88)
         mgr = _make_manager([rc])
 
-        add_dues_entry = MagicMock()
-        add_fund_transaction = MagicMock()
+        write_batch = MagicMock(return_value=1)
         mock_end = AsyncMock(return_value=_end_result())
 
-        with _patch_close(add_dues_entry=add_dues_entry, add_fund_transaction=add_fund_transaction), \
+        with _patch_close(write_game_closure_batch=write_batch), \
              patch("services.dues.manager", mgr), \
              patch("services.rollcalls.end_rollcall", mock_end):
             result = await close_game(1, subsidy=0, admin_uid=1, admin_name="Admin")
 
         self.assertEqual(result["per_head"], 90)
         self.assertEqual(result["remainder"], 30)
-        self.assertEqual(add_dues_entry.call_count, 7)
-        add_fund_transaction.assert_called_once()
-        fund_call = add_fund_transaction.call_args
-        self.assertEqual(fund_call.args[3], 30)   # amount = remainder
+        write_batch.assert_called_once()
+        dues_entries = write_batch.call_args.args[1]
+        fund_transactions = write_batch.call_args.args[2]
+        self.assertEqual(len(dues_entries), 7)
+        self.assertEqual(len(fund_transactions), 1)
+        self.assertEqual(fund_transactions[0]["amount"], 30)   # amount = remainder
 
     async def test_no_event_fee_raises_without_ending_rollcall(self):
         """Validation failure must not side-effect: rollcall must NOT be ended."""
@@ -523,18 +526,19 @@ class TestCloseGameEndedPath(unittest.IsolatedAsyncioTestCase):
                   "collector_uid": None, "collector_name": None,
                   "collector_paid_ground": 0}
         in_users = [{"user_id": 101, "first_name": "Alice", "proxy_name": None}]
-        add_dues_entry = MagicMock()
+        write_batch = MagicMock(return_value=1)
 
         with _patch_close(
             get_latest_closeable_rollcall=MagicMock(return_value=rc_row),
             get_rollcall_in_users=MagicMock(return_value=in_users),
-            add_dues_entry=add_dues_entry,
+            write_game_closure_batch=write_batch,
         ), patch("services.dues.manager", mgr):
             result = await close_game(1, subsidy=0, admin_uid=1, admin_name="Admin")
 
         self.assertEqual(result["rollcall_id"], 55)
         self.assertEqual(result["per_head"], 600)
-        add_dues_entry.assert_called_once()
+        write_batch.assert_called_once()
+        self.assertEqual(len(write_batch.call_args.args[1]), 1)
 
     async def test_nothing_to_close_raises(self):
         from exceptions import duesNothingToClose
@@ -559,19 +563,20 @@ class TestCloseGameTargetRollcallId(unittest.IsolatedAsyncioTestCase):
                        "collector_uid": None, "collector_name": None,
                        "collector_paid_ground": 0, "collector_upi": None}
         in_users = [{"user_id": 101, "first_name": "Alice", "proxy_name": None}]
-        add_dues_entry = MagicMock()
+        write_batch = MagicMock(return_value=1)
 
         with _patch_close(
             get_rollcall=MagicMock(return_value=target_row),
             get_rollcall_in_users=MagicMock(return_value=in_users),
-            add_dues_entry=add_dues_entry,
+            write_game_closure_batch=write_batch,
         ), patch("services.dues.manager", mgr):
             result = await close_game(1, subsidy=0, admin_uid=1, admin_name="Admin",
                                       target_rollcall_id=42)
 
         self.assertEqual(result["rollcall_id"], 42)
         self.assertEqual(result["title"], "Older Game")
-        add_dues_entry.assert_called_once()
+        write_batch.assert_called_once()
+        self.assertEqual(len(write_batch.call_args.args[1]), 1)
 
     async def test_target_rollcall_id_wrong_chat_raises(self):
         from exceptions import duesNothingToClose
@@ -666,24 +671,24 @@ class TestCloseGameProxyAttribution(unittest.IsolatedAsyncioTestCase):
             proxy_owners={"Bob Friend": 202},
         )
         mgr = _make_manager([rc])
-        add_dues_entry = MagicMock()
+        write_batch = MagicMock(return_value=1)
         mock_end = AsyncMock(return_value=_end_result())
 
-        with _patch_close(add_dues_entry=add_dues_entry), \
+        with _patch_close(write_game_closure_batch=write_batch), \
              patch("services.dues.manager", mgr), \
              patch("services.rollcalls.end_rollcall", mock_end):
             await close_game(1, subsidy=0, admin_uid=1, admin_name="Admin")
 
-        calls = add_dues_entry.call_args_list
-        self.assertEqual(len(calls), 2)
+        entries = write_batch.call_args.args[1]
+        self.assertEqual(len(entries), 2)
         # Proxy entry: user_id=None (name-keyed), owner reference in memo
-        proxy_call = next(c for c in calls if c.args[3] == "Bob Friend")
-        self.assertIsNone(proxy_call.args[2])                    # user_id=None
-        memo = proxy_call.args[6] or ""
-        self.assertIn("owner:", memo)                            # owner reference present
+        proxy_entry = next(e for e in entries if e["member_name"] == "Bob Friend")
+        self.assertIsNone(proxy_entry["user_id"])                 # user_id=None
+        memo = proxy_entry["memo"] or ""
+        self.assertIn("owner:", memo)                             # owner reference present
         # Real user entry: user_id=101, no memo
-        real_call = next(c for c in calls if c.args[2] == 101)
-        self.assertIsNone(real_call.args[6])
+        real_entry = next(e for e in entries if e["user_id"] == 101)
+        self.assertIsNone(real_entry["memo"])
 
     async def test_unowned_proxy_is_name_keyed(self):
         """Unowned proxy → user_id=None, name-keyed entry."""
@@ -692,18 +697,18 @@ class TestCloseGameProxyAttribution(unittest.IsolatedAsyncioTestCase):
         proxy_guest = _make_proxy_user("Walk-in Guest")
         rc = _make_rc(in_list=[proxy_guest], event_fee="600", rc_id=77, proxy_owners={})
         mgr = _make_manager([rc])
-        add_dues_entry = MagicMock()
+        write_batch = MagicMock(return_value=1)
         mock_end = AsyncMock(return_value=_end_result())
 
-        with _patch_close(add_dues_entry=add_dues_entry), \
+        with _patch_close(write_game_closure_batch=write_batch), \
              patch("services.dues.manager", mgr), \
              patch("services.rollcalls.end_rollcall", mock_end):
             await close_game(1, subsidy=0, admin_uid=1, admin_name="Admin")
 
-        calls = add_dues_entry.call_args_list
-        self.assertEqual(len(calls), 1)
-        self.assertIsNone(calls[0].args[2])
-        self.assertEqual(calls[0].args[3], "Walk-in Guest")
+        entries = write_batch.call_args.args[1]
+        self.assertEqual(len(entries), 1)
+        self.assertIsNone(entries[0]["user_id"])
+        self.assertEqual(entries[0]["member_name"], "Walk-in Guest")
 
     async def test_collector_paid_ground_gets_reimbursement(self):
         """When collector_paid_ground, a reimbursement credit is written."""
@@ -715,19 +720,19 @@ class TestCloseGameProxyAttribution(unittest.IsolatedAsyncioTestCase):
             collector_uid=202, collector_name="Ravi", collector_paid_ground=1,
         )
         mgr = _make_manager([rc])
-        add_dues_entry = MagicMock()
+        write_batch = MagicMock(return_value=1)
         mock_end = AsyncMock(return_value=_end_result())
 
-        with _patch_close(add_dues_entry=add_dues_entry), \
+        with _patch_close(write_game_closure_batch=write_batch), \
              patch("services.dues.manager", mgr), \
              patch("services.rollcalls.end_rollcall", mock_end):
             await close_game(1, subsidy=0, admin_uid=1, admin_name="Admin")
 
-        calls = add_dues_entry.call_args_list
-        self.assertEqual(len(calls), 2)   # share + reimbursement
-        reimb = next(c for c in calls if c.args[4] == "reimbursement")
-        self.assertEqual(reimb.args[2], 202)
-        self.assertEqual(reimb.args[5], -600)
+        entries = write_batch.call_args.args[1]
+        self.assertEqual(len(entries), 2)   # share + reimbursement
+        reimb = next(e for e in entries if e["entry_type"] == "reimbursement")
+        self.assertEqual(reimb["user_id"], 202)
+        self.assertEqual(reimb["amount"], -600)
 
     async def test_subsidy_writes_fund_txn(self):
         """When subsidy > 0, a 'subsidy' fund transaction is written."""
@@ -736,19 +741,19 @@ class TestCloseGameProxyAttribution(unittest.IsolatedAsyncioTestCase):
         alice = _make_user("Alice", user_id=101)
         rc = _make_rc(in_list=[alice], event_fee="600", rc_id=77)
         mgr = _make_manager([rc])
-        add_fund_transaction = MagicMock()
+        write_batch = MagicMock(return_value=1)
         mock_end = AsyncMock(return_value=_end_result())
 
         with _patch_close(
             get_fund_balance=MagicMock(return_value=100),
-            add_fund_transaction=add_fund_transaction,
+            write_game_closure_batch=write_batch,
         ), patch("services.dues.manager", mgr), \
            patch("services.rollcalls.end_rollcall", mock_end):
             result = await close_game(1, subsidy=100, admin_uid=1, admin_name="Admin")
 
-        fund_calls = add_fund_transaction.call_args_list
-        subsidy_txn = next(c for c in fund_calls if c.args[2] == "subsidy")
-        self.assertEqual(subsidy_txn.args[3], -100)
+        fund_transactions = write_batch.call_args.args[2]
+        subsidy_txn = next(t for t in fund_transactions if t["txn_type"] == "subsidy")
+        self.assertEqual(subsidy_txn["amount"], -100)
         self.assertEqual(result["per_head"], 500)   # (600-100)/1, step=10
 
 

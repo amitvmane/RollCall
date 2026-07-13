@@ -70,6 +70,39 @@ def test_double_close_raises():
         _close(rc_id)  # UNIQUE(rollcall_id) violated
 
 
+def test_write_game_closure_batch_is_atomic():
+    """A failure partway through the batch (here: a dues_entries row that
+    violates member_name's NOT NULL constraint) must roll back EVERYTHING,
+    including the closure row already inserted earlier in the same
+    transaction — a game must never end up "closed" with missing dues rows.
+    """
+    rc_id = _mk_rollcall(title="Atomic Test Game")
+    closure = dict(
+        chat_id=CHAT, rollcall_id=rc_id, title="Atomic Test Game",
+        ground_cost=600, in_count=2, subsidy=0, per_head=300,
+        rounding_step=10, remainder=0, closed_by_uid=1, closed_by_name="Admin",
+    )
+    dues_entries = [
+        dict(chat_id=CHAT, rollcall_id=rc_id, user_id=101, member_name="Alice",
+             entry_type="share", amount=300, memo=None,
+             created_by_uid=1, created_by_name="Admin"),
+        # Second row is invalid — member_name is NOT NULL. This must abort
+        # the whole transaction, not just this one insert.
+        dict(chat_id=CHAT, rollcall_id=rc_id, user_id=102, member_name=None,
+             entry_type="share", amount=300, memo=None,
+             created_by_uid=1, created_by_name="Admin"),
+    ]
+
+    with pytest.raises(Exception):
+        db.write_game_closure_batch(closure, dues_entries, [])
+
+    # Rollback proof: neither the closure row nor the first (valid) dues
+    # entry may have survived.
+    assert db.get_game_closure(rc_id) is None
+    balance = db.get_dues_balance(CHAT, user_id=101)
+    assert balance == 0
+
+
 def test_update_game_closure_collector():
     rc_id = _mk_rollcall()
     _close(rc_id)

@@ -44,6 +44,7 @@ from functions import admin_rights
 from rollcall_manager import manager
 from services import dues as dues_svc
 from services import rollcalls as rollcalls_svc
+from utils.text import parse_rc_suffix as _parse_rc_suffix
 from handlers.lifecycle import _post_end_cleanup
 
 
@@ -67,17 +68,9 @@ def _parse_args(text: str) -> list[str]:
     return text.split(" ")[1:]
 
 
-def _parse_rc_suffix(args: list[str]) -> tuple[int, list[str]]:
-    """Pop optional ::N suffix and return (0-based rc_index, remaining args)."""
-    if args and "::" in args[-1]:
-        try:
-            idx = int(args[-1].replace("::", "")) - 1
-            if idx < 0:
-                raise ValueError
-            return idx, args[:-1]
-        except (ValueError, TypeError):
-            raise incorrectParameter("The rollcall number must be a positive integer (e.g. ::2).")
-    return 0, args
+# _parse_rc_suffix moved to utils.text.parse_rc_suffix (shared with
+# handlers/admin.py and handlers/lists.py) — re-imported under the old name
+# below so the rest of this file's call sites are unchanged.
 
 
 # ── /settle_dues ─────────────────────────────────────────────────────────────

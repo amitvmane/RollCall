@@ -17,6 +17,7 @@ from functions import admin_rights, roll_call_not_started
 from models import User
 from rollcall_manager import manager
 from services import admin as admin_svc
+from utils.text import parse_rc_suffix
 
 
 _AUDIT_PER_PAGE = 15
@@ -114,17 +115,11 @@ async def delete_user(message):
         msg = message.text
         cid = message.chat.id
         arr = msg.split(" ")
-        rc_number = 0
-
-        if len(arr) > 1 and "::" in arr[-1]:
-            try:
-                rc_number = int(arr[-1].replace("::", "")) - 1
-                del arr[-1]
-            except Exception:
-                raise incorrectParameter("The rollcall number must be a positive integer")
-
+        had_suffix = len(arr) > 1 and "::" in arr[-1]
+        rc_number, arr = parse_rc_suffix(arr)
+        if had_suffix:
             rollcalls = manager.get_rollcalls(cid)
-            if rc_number < 0 or len(rollcalls) < rc_number + 1:
+            if len(rollcalls) < rc_number + 1:
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         name = " ".join(arr[1:])
@@ -184,14 +179,7 @@ async def set_status_override(message):
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
 
         parts = message.text.strip().split()
-        rc_number = 0
-
-        if len(parts) > 1 and "::" in parts[-1]:
-            try:
-                rc_number = int(parts[-1].replace("::", "")) - 1
-                parts = parts[:-1]
-            except Exception:
-                raise incorrectParameter("The rollcall number must be a positive integer")
+        rc_number, parts = parse_rc_suffix(parts)
 
         if len(parts) < 3:
             await bot.send_message(

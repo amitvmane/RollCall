@@ -18,6 +18,7 @@ from db import (
     upsert_chat_member,
 )
 from services import lists as lists_svc
+from utils.text import parse_rc_suffix
 from datetime import datetime
 
 
@@ -29,18 +30,12 @@ async def whos_in(message):
             raise rollCallNotStarted("Roll call is not active")
 
         cid = message.chat.id
-        rc_number = 0
         pmts = message.text.split(" ")[1:]
-
-        if len(pmts) > 0 and "::" in pmts[-1]:
-            try:
-                rc_number = int(pmts[-1].replace("::", "")) - 1
-                del pmts[-1]
-            except Exception:
-                raise incorrectParameter("The rollcall number must be a positive integer")
-
+        had_suffix = bool(pmts) and "::" in pmts[-1]
+        rc_number, pmts = parse_rc_suffix(pmts)
+        if had_suffix:
             rollcalls = manager.get_rollcalls(cid)
-            if rc_number < 0 or len(rollcalls) < rc_number + 1:
+            if len(rollcalls) < rc_number + 1:
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         rc = manager.get_rollcall(cid, rc_number)
@@ -59,18 +54,12 @@ async def whos_out(message):
             raise rollCallNotStarted("Roll call is not active")
 
         cid = message.chat.id
-        rc_number = 0
         pmts = message.text.split(" ")[1:]
-
-        if len(pmts) > 0 and "::" in pmts[-1]:
-            try:
-                rc_number = int(pmts[-1].replace("::", "")) - 1
-                del pmts[-1]
-            except Exception:
-                raise incorrectParameter("The rollcall number must be a positive integer")
-
+        had_suffix = bool(pmts) and "::" in pmts[-1]
+        rc_number, pmts = parse_rc_suffix(pmts)
+        if had_suffix:
             rollcalls = manager.get_rollcalls(cid)
-            if rc_number < 0 or len(rollcalls) < rc_number + 1:
+            if len(rollcalls) < rc_number + 1:
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         rc = manager.get_rollcall(cid, rc_number)
@@ -89,18 +78,12 @@ async def whos_maybe(message):
             raise rollCallNotStarted("Roll call is not active")
 
         cid = message.chat.id
-        rc_number = 0
         pmts = message.text.split(" ")[1:]
-
-        if len(pmts) > 0 and "::" in pmts[-1]:
-            try:
-                rc_number = int(pmts[-1].replace("::", "")) - 1
-                del pmts[-1]
-            except Exception:
-                raise incorrectParameter("The rollcall number must be a positive integer")
-
+        had_suffix = bool(pmts) and "::" in pmts[-1]
+        rc_number, pmts = parse_rc_suffix(pmts)
+        if had_suffix:
             rollcalls = manager.get_rollcalls(cid)
-            if rc_number < 0 or len(rollcalls) < rc_number + 1:
+            if len(rollcalls) < rc_number + 1:
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         rc = manager.get_rollcall(cid, rc_number)
@@ -119,18 +102,12 @@ async def whos_waiting(message):
             raise rollCallNotStarted("Roll call is not active")
 
         cid = message.chat.id
-        rc_number = 0
         pmts = message.text.split(" ")[1:]
-
-        if len(pmts) > 0 and "::" in pmts[-1]:
-            try:
-                rc_number = int(pmts[-1].replace("::", "")) - 1
-                del pmts[-1]
-            except Exception:
-                raise incorrectParameter("The rollcall number must be a positive integer")
-
+        had_suffix = bool(pmts) and "::" in pmts[-1]
+        rc_number, pmts = parse_rc_suffix(pmts)
+        if had_suffix:
             rollcalls = manager.get_rollcalls(cid)
-            if rc_number < 0 or len(rollcalls) < rc_number + 1:
+            if len(rollcalls) < rc_number + 1:
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         rc = manager.get_rollcall(cid, rc_number)

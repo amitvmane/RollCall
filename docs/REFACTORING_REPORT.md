@@ -1,11 +1,12 @@
 # RollCall Refactoring Report
 
 **Generated:** 2026-07-13 at commit `751bdff`.
-**Priority 1 (R1-R5) and Priority 2 (R6-R11) all executed 2026-07-13** —
-see each item's Status line for commit hashes. R8 is step-1-only by
-design (step 2 deferred). R9 (db.py boilerplate migration) was
-intentionally NOT started — explicitly flagged multi-session/optional in
-its own entry. Priority 3 (R12-R18) is untouched.
+**Priority 1 (R1-R5), Priority 2 (R6-R11), and Priority 3 R12-R17 all
+executed 2026-07-13** — see each item's Status line for commit hashes.
+R8 is step-1-only by design (step 2 deferred). R9 (db.py boilerplate
+migration) was intentionally NOT started — explicitly flagged
+multi-session/optional in its own entry. R18 needs a user decision
+before any action (see its own entry) — not started.
 **Purpose:** Self-contained backlog of code-quality issues and enhancements, written so any
 session (including a smaller/cheaper model) can execute items one at a time without
 re-exploring the codebase. Every claim below was verified against the code at the commit
@@ -273,6 +274,12 @@ commit — no logic changed, pure mechanical split.
 # Priority 3 — hygiene / polish
 
 ## R12. `datetime.utcnow()` deprecation (Python 3.12 warnings)
+**Status: DONE — commit `15e78ac`.** All 10 db.py occurrences replaced
+with `_utcnow_naive()`; services/dues.py and handlers/dues.py's 2 sites
+switched to `datetime.now(UTC)`. `pytest tests/ | grep -c "utcnow.*deprecated"`
+confirmed 0. One remaining occurrence lives in a test file
+(integration_tests/test_dues_scenario.py) — out of scope, not one of the
+3 files this item flagged.
 - **Files:** `rollCall/db.py` (10 occurrences — includes several via the
   `__import__('datetime')` anti-pattern around lines 4932–4988 and 6135),
   `rollCall/services/dues.py:660`, `rollCall/handlers/dues.py:1407`.
@@ -287,6 +294,13 @@ commit — no logic changed, pure mechanical split.
   drops to 0 (currently ~12 warnings).
 
 ## R13. config.py: no startup validation of critical env vars
+**Status: DONE — commit `d6b7ab2`.** Empty TELEGRAM_TOKEN/API_KEY and
+unrecognized DATABASE_URL schemes now raise ValueError at import time.
+Token check is emptiness-only (no format re-check — telebot's own
+validate_token already enforces that downstream). Manually verified both
+checks actually raise on bad input; both suites (which replace
+sys.modules["config"] wholesale) and smoke_test.py (real import) all
+stayed green.
 - **Files:** `rollCall/config.py` (~line 20 TELEGRAM_TOKEN, ~29 DATABASE_URL).
 - **Fix shape:** Fail fast with clear messages: empty/None TELEGRAM_TOKEN → raise
   ValueError("TELEGRAM_TOKEN / API_KEY not set"); DATABASE_URL not starting with
@@ -298,6 +312,12 @@ commit — no logic changed, pure mechanical split.
 - **Verify:** both suites + smoke test.
 
 ## R14. CI lint job: no pip cache, inline flake8 config
+**Status: DONE — commit `b14f4bf`.** Added `.flake8` at repo root (same
+flags as before); lint job now caches pip like the other jobs. Verified
+locally that `flake8 rollCall/` (config-file-driven) reports the
+identical count (372) as the old explicit-flags invocation. Confirmed
+via CI run `29236178608` — lint job completed in 8s with the cache step
+present.
 - **Files:** `.github/workflows/ci.yml` (lint job ~lines 55–62 has no cache step;
   flake8 args inline in yaml).
 - **Fix shape:** Add the same `actions/cache` step the test job uses; move flake8
@@ -307,6 +327,11 @@ commit — no logic changed, pure mechanical split.
 - **Verify:** push → `gh run watch <id> --exit-status` green; lint job time should drop.
 
 ## R15. Three web.py endpoints return bare `dict` with no response_model
+**Status: DONE — commit `4d512ea`.** Found `ScheduledRollcallItem`/
+`ScheduledRollcallsResponse` already existed unused in schemas/web.py —
+just wired up. Added 2 new schemas (`WebEndRollcallResponse`,
+`ScheduledRollcallCreateResponse`). Field names match prior dict keys
+exactly; `tests/test_web_routes.py` (57 tests) + both suites green.
 - **Files:** `rollCall/api/routes/web.py:302`, `:349`, `:404` (`-> dict` signatures;
   neighbors correctly use `response_model=`).
 - **Fix shape:** Add matching pydantic schemas to `rollCall/api/schemas/web.py`, set
@@ -316,6 +341,15 @@ commit — no logic changed, pure mechanical split.
 - **Verify:** `tests/test_web_routes.py` green.
 
 ## R16. Silent `except Exception: pass` sites lack justification
+**Status: DONE — commit `fd7e70e`.** Found 12 sites total (not just the
+2 representative ones cited). 11 were genuinely best-effort (top-level
+handler "alert failed, nothing more to do" pattern ×8, cosmetic
+already-succeeded-elsewhere edits ×3) — added a one-line comment each.
+1 (templates.py's `_send_schedules` panel edit) had zero logging and
+swallowed real failures indiscriminately — converted to match the
+"message is not modified" filter-then-log pattern used everywhere else
+in this codebase. No control flow changed; verified via full suite +
+smoke test.
 - **Files:** `rollCall/handlers/dues.py:667` and `:673`,
   `rollCall/handlers/payment_panel.py:228` (representative — grep
   `except Exception:\n\s*pass` handlers/ for the full list).
@@ -326,6 +360,12 @@ commit — no logic changed, pure mechanical split.
 - **Verify:** `tests/` green.
 
 ## R17. tests/conftest.py db_mock has no spec (silent drift)
+**Status: DONE — commit `f10f193`.** New `tests/test_conftest_drift.py`,
+exactly as prescribed (regex-extract real db.py function names + regex-
+extract configured db_mock attrs from conftest.py source, diff them).
+Verified it actually catches drift: temporarily misspelled a mock
+attribute, confirmed the new test failed with the exact bad name
+reported, restored it.
 - **Files:** `tests/conftest.py:39` — `db_mock = MagicMock()`; ~30 attributes configured
   vs 151 real db functions. A renamed/removed db function keeps "working" in unit tests.
 - **Fix shape:** CAUTION — `MagicMock(spec=...)` requires importing real db.py, which the

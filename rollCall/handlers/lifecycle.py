@@ -551,6 +551,120 @@ async def show_panel(message):
 # ── btn_* callback handler ────────────────────────────────────────────────────
 
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("btn_"))
+async def _cb_vote(call, cid: int, rc_number: int, action: str) -> None:
+    """btn_{in,out,maybe}_{rc_number} — vote dispatch, ghost reconfirmation
+    gate, waitlist/promotion announcements, and panel refresh."""
+    if _is_rate_limited(cid, call.from_user.id):
+        await bot.answer_callback_query(call.id, "You're voting too fast — please wait a moment.")
+        return
+    _username = call.from_user.username or None
+    if not _username:
+        asyncio.create_task(warn_no_username(cid, call.from_user.first_name)).add_done_callback(_log_task_exc)
+    _first_name = _get_display_name(call.from_user)
+
+    # Ghost reconfirmation check for IN votes (uses service helper)
+    if action == "in":
+        from bot_state import _pending_reconf
+        reconf = voting_svc.check_ghost_reconfirmation_needed(cid, call.from_user.id, rc_number - 1)
+        if reconf["needed"]:
+            if (cid, call.from_user.id) in _pending_reconf:
+                await bot.answer_callback_query(call.id, "You already have a pending confirmation — please use the earlier buttons.")
+                return
+            _pending_reconf[(cid, call.from_user.id)] = {
+                'rc_number': rc_number - 1,
+                'comment': '',
+                '_ts': datetime.now().timestamp(),
+            }
+            ghost_markup = InlineKeyboardMarkup(row_width=2)
+            ghost_markup.add(
+                InlineKeyboardButton("✅ Yes, I'll be there!", callback_data=f"reconf_in_{rc_number - 1}_{call.from_user.id}"),
+                InlineKeyboardButton("❌ I'm out", callback_data=f"reconf_out_{rc_number - 1}_{call.from_user.id}"),
+            )
+            _user_obj = User(_first_name, _username, call.from_user.id, [])
+            await bot.send_message(
+                cid,
+                f"👻 *Warning:* {format_mention_with_name_md(_user_obj)}, you've ghosted *{reconf['ghost_count']}* session(s) before.\n"
+                f"⚠️ Absent Limit: *{reconf['absent_limit']}*\n\n"
+                f"Are you committing to be at *{_esc_md(reconf['rollcall_title'])}*?",
+                parse_mode="Markdown",
+                reply_markup=ghost_markup
+            )
+            return
+
+    try:
+        if action == "in":
+            svc_result = await voting_svc.vote_in(cid, call.from_user.id, _first_name, _username, rc_number=rc_number - 1)
+        elif action == "out":
+            svc_result = await voting_svc.vote_out(cid, call.from_user.id, _first_name, _username, rc_number=rc_number - 1)
+        else:
+            svc_result = await voting_svc.vote_maybe(cid, call.from_user.id, _first_name, _username, rc_number=rc_number - 1)
+    except alreadyInList as e:
+        await bot.answer_callback_query(call.id, str(e) or "You're already in this status!")
+        return
+
+    # Re-fetch rc after service mutation for panel update
+    rc = manager.get_rollcall(cid, rc_number - 1)
+    user_d = svc_result["user"]
+    user_id_v = user_d["user_id"]
+    user_name_v = user_d["name"]
+    user_uname_v = user_d.get("username")
+
+    if svc_result["action"] == "waitlisted":
+        await bot.answer_callback_query(call.id, "Event max limit reached, added to waitlist")
+        if not manager.get_shh_mode(cid):
+            if isinstance(user_id_v, int):
+                _u = User(user_name_v, user_uname_v, user_id_v, [])
+                await bot.send_message(
+                    cid,
+                    f"{format_mention_with_name_md(_u)} → WAITING for '{_esc_md(rc.title)}' (#{rc_number})",
+                    parse_mode="Markdown",
+                )
+            else:
+                await bot.send_message(cid, f"{user_name_v} → WAITING for '{rc.title}' (#{rc_number})")
+    else:
+        await bot.answer_callback_query(call.id, "Status updated")
+        if not manager.get_shh_mode(cid):
+            label = {"in": "IN", "out": "OUT", "maybe": "MAYBE"}[action]
+            if isinstance(user_id_v, int):
+                _u = User(user_name_v, user_uname_v, user_id_v, [])
+                await bot.send_message(
+                    cid,
+                    f"{format_mention_with_name_md(_u)} → {label} for '{_esc_md(rc.title)}' (#{rc_number})",
+                    parse_mode="Markdown",
+                )
+            else:
+                await bot.send_message(cid, f"{user_name_v} → {label} for '{rc.title}' (#{rc_number})")
+
+    promoted = svc_result.get("promoted")
+    if promoted and action in ("out", "maybe"):
+        p_id = promoted["user_id"]
+        p_name = promoted["name"]
+        p_uname = promoted.get("username")
+        if not manager.get_shh_mode(cid):
+            if isinstance(p_id, int):
+                _p = User(p_name, p_uname, p_id, [])
+                await bot.send_message(
+                    cid,
+                    f"{format_mention_with_name_md(_p)} → IN (from WAITING) for '{_esc_md(rc.title)}' (#{rc_number})",
+                    parse_mode="Markdown",
+                )
+            else:
+                await bot.send_message(cid, f"{p_name} → IN (from WAITING) for '{rc.title}' (#{rc_number})")
+        if isinstance(p_id, int):
+            asyncio.create_task(_dm_promoted_real_user(p_id, rc.title, rc_number)).add_done_callback(_log_task_exc)
+        _p_obj = User(p_name, p_uname, p_id, [])
+        await notify_proxy_owner_wait_to_in(rc, _p_obj, cid, rc.title, rc_number)
+
+    text = _build_panel_text(rc, rc_number)
+    markup = await get_status_keyboard(rc_number, web_url=_group_web_url(cid))
+    try:
+        await bot.edit_message_text(text, cid, call.message.message_id, reply_markup=markup)
+        _panel_msg_ids[(cid, rc_number)] = call.message.message_id
+    except Exception as e:
+        if "message is not modified" not in str(e).lower():
+            logging.warning("Panel edit failed after vote (chat=%s msg=%s): %s", cid, call.message.message_id, e)
+
+
 async def callback_handler(call):
     try:
         raw_data = call.data or ""
@@ -578,115 +692,7 @@ async def callback_handler(call):
 
         # ── IN / OUT / MAYBE ──────────────────────────────────────────────────
         if action in ("in", "out", "maybe"):
-            if _is_rate_limited(cid, call.from_user.id):
-                await bot.answer_callback_query(call.id, "You're voting too fast — please wait a moment.")
-                return
-            _username = call.from_user.username or None
-            if not _username:
-                asyncio.create_task(warn_no_username(cid, call.from_user.first_name)).add_done_callback(_log_task_exc)
-            _first_name = _get_display_name(call.from_user)
-
-            # Ghost reconfirmation check for IN votes (uses service helper)
-            if action == "in":
-                from bot_state import _pending_reconf
-                reconf = voting_svc.check_ghost_reconfirmation_needed(cid, call.from_user.id, rc_number - 1)
-                if reconf["needed"]:
-                    if (cid, call.from_user.id) in _pending_reconf:
-                        await bot.answer_callback_query(call.id, "You already have a pending confirmation — please use the earlier buttons.")
-                        return
-                    _pending_reconf[(cid, call.from_user.id)] = {
-                        'rc_number': rc_number - 1,
-                        'comment': '',
-                        '_ts': datetime.now().timestamp(),
-                    }
-                    ghost_markup = InlineKeyboardMarkup(row_width=2)
-                    ghost_markup.add(
-                        InlineKeyboardButton("✅ Yes, I'll be there!", callback_data=f"reconf_in_{rc_number - 1}_{call.from_user.id}"),
-                        InlineKeyboardButton("❌ I'm out", callback_data=f"reconf_out_{rc_number - 1}_{call.from_user.id}"),
-                    )
-                    _user_obj = User(_first_name, _username, call.from_user.id, [])
-                    await bot.send_message(
-                        cid,
-                        f"👻 *Warning:* {format_mention_with_name_md(_user_obj)}, you've ghosted *{reconf['ghost_count']}* session(s) before.\n"
-                        f"⚠️ Absent Limit: *{reconf['absent_limit']}*\n\n"
-                        f"Are you committing to be at *{_esc_md(reconf['rollcall_title'])}*?",
-                        parse_mode="Markdown",
-                        reply_markup=ghost_markup
-                    )
-                    return
-
-            try:
-                if action == "in":
-                    svc_result = await voting_svc.vote_in(cid, call.from_user.id, _first_name, _username, rc_number=rc_number - 1)
-                elif action == "out":
-                    svc_result = await voting_svc.vote_out(cid, call.from_user.id, _first_name, _username, rc_number=rc_number - 1)
-                else:
-                    svc_result = await voting_svc.vote_maybe(cid, call.from_user.id, _first_name, _username, rc_number=rc_number - 1)
-            except alreadyInList as e:
-                await bot.answer_callback_query(call.id, str(e) or "You're already in this status!")
-                return
-
-            # Re-fetch rc after service mutation for panel update
-            rc = manager.get_rollcall(cid, rc_number - 1)
-            user_d = svc_result["user"]
-            user_id_v = user_d["user_id"]
-            user_name_v = user_d["name"]
-            user_uname_v = user_d.get("username")
-
-            if svc_result["action"] == "waitlisted":
-                await bot.answer_callback_query(call.id, "Event max limit reached, added to waitlist")
-                if not manager.get_shh_mode(cid):
-                    if isinstance(user_id_v, int):
-                        _u = User(user_name_v, user_uname_v, user_id_v, [])
-                        await bot.send_message(
-                            cid,
-                            f"{format_mention_with_name_md(_u)} → WAITING for '{_esc_md(rc.title)}' (#{rc_number})",
-                            parse_mode="Markdown",
-                        )
-                    else:
-                        await bot.send_message(cid, f"{user_name_v} → WAITING for '{rc.title}' (#{rc_number})")
-            else:
-                await bot.answer_callback_query(call.id, "Status updated")
-                if not manager.get_shh_mode(cid):
-                    label = {"in": "IN", "out": "OUT", "maybe": "MAYBE"}[action]
-                    if isinstance(user_id_v, int):
-                        _u = User(user_name_v, user_uname_v, user_id_v, [])
-                        await bot.send_message(
-                            cid,
-                            f"{format_mention_with_name_md(_u)} → {label} for '{_esc_md(rc.title)}' (#{rc_number})",
-                            parse_mode="Markdown",
-                        )
-                    else:
-                        await bot.send_message(cid, f"{user_name_v} → {label} for '{rc.title}' (#{rc_number})")
-
-            promoted = svc_result.get("promoted")
-            if promoted and action in ("out", "maybe"):
-                p_id = promoted["user_id"]
-                p_name = promoted["name"]
-                p_uname = promoted.get("username")
-                if not manager.get_shh_mode(cid):
-                    if isinstance(p_id, int):
-                        _p = User(p_name, p_uname, p_id, [])
-                        await bot.send_message(
-                            cid,
-                            f"{format_mention_with_name_md(_p)} → IN (from WAITING) for '{_esc_md(rc.title)}' (#{rc_number})",
-                            parse_mode="Markdown",
-                        )
-                    else:
-                        await bot.send_message(cid, f"{p_name} → IN (from WAITING) for '{rc.title}' (#{rc_number})")
-                if isinstance(p_id, int):
-                    asyncio.create_task(_dm_promoted_real_user(p_id, rc.title, rc_number)).add_done_callback(_log_task_exc)
-                _p_obj = User(p_name, p_uname, p_id, [])
-                await notify_proxy_owner_wait_to_in(rc, _p_obj, cid, rc.title, rc_number)
-
-            text = _build_panel_text(rc, rc_number)
-            markup = await get_status_keyboard(rc_number, web_url=_group_web_url(cid))
-            try:
-                await bot.edit_message_text(text, cid, call.message.message_id, reply_markup=markup)
-                _panel_msg_ids[(cid, rc_number)] = call.message.message_id
-            except Exception as e:
-                if "message is not modified" not in str(e).lower():
-                    logging.warning("Panel edit failed after vote (chat=%s msg=%s): %s", cid, call.message.message_id, e)
+            await _cb_vote(call, cid, rc_number, action)
             return
 
         # ── Lists submenu ─────────────────────────────────────────────────────

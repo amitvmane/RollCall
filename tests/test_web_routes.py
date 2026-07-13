@@ -503,7 +503,7 @@ class TestWebEndRollcall(unittest.TestCase):
         import api.routes.web as _web_mod
         with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
              patch.object(_web_mod._db, "is_web_admin", return_value=False), \
-             patch("api.routes.web.verify_identity_token", return_value=77):
+             patch("api.identity.verify_identity_token", return_value=77):
             resp = _client().post("/api/v1/web/group/grp123/end-rollcall",
                                   json={"id_token": "tok", "rollcall_num": 1})
         self.assertEqual(resp.status_code, 403)
@@ -511,7 +511,7 @@ class TestWebEndRollcall(unittest.TestCase):
     def test_invalid_id_token_returns_401(self):
         import api.routes.web as _web_mod
         with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
-             patch("api.routes.web.verify_identity_token", return_value=None):
+             patch("api.identity.verify_identity_token", return_value=None):
             resp = _client().post("/api/v1/web/group/grp123/end-rollcall",
                                   json={"id_token": "bad", "rollcall_num": 1})
         self.assertEqual(resp.status_code, 401)
@@ -529,7 +529,7 @@ class TestWebEndRollcall(unittest.TestCase):
         }
         with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
              patch.object(_web_mod._db, "is_web_admin", return_value=True), \
-             patch("api.routes.web.verify_identity_token", return_value=99), \
+             patch("api.identity.verify_identity_token", return_value=99), \
              patch("services.rollcalls.end_rollcall", new_callable=AsyncMock, return_value=end_result), \
              patch("api.telegram_mirror.mirror_panel_to_telegram", new_callable=AsyncMock):
             resp = _client().post("/api/v1/web/group/grp123/end-rollcall",

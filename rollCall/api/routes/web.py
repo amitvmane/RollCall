@@ -23,7 +23,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 import db as _db
-from api.identity import verify_identity_token
+from api.identity import require_identity, verify_identity_token
 from api.telegram_mirror import mirror_panel_to_telegram as _mirror_panel_to_telegram, send_vote_notification as _send_vote_notification, send_event_notification as _send_event_notification
 from services import web as web_svc
 from services import stats as stats_svc
@@ -220,9 +220,7 @@ async def update_group_settings(
     chat = _db.get_chat_by_group_web_token(group_token)
     if not chat:
         raise HTTPException(status_code=404, detail="Invalid group token")
-    actor_user_id = verify_identity_token(body.id_token)
-    if not actor_user_id:
-        raise HTTPException(status_code=401, detail="Verify with Telegram first.")
+    actor_user_id = require_identity(body.id_token, detail="Verify with Telegram first.")
     chat_id = int(chat["chat_id"])
     if not _db.is_web_admin(chat_id, actor_user_id):
         raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
@@ -261,12 +259,9 @@ async def web_start_rollcall(
 
     # Resolve the actor from the signed identity token — never from a
     # client-supplied user id — before checking web-admin rights.
-    actor_user_id = verify_identity_token(body.id_token)
-    if not actor_user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Verify with Telegram before starting a rollcall.",
-        )
+    actor_user_id = require_identity(
+        body.id_token, detail="Verify with Telegram before starting a rollcall."
+    )
 
     chat_id = int(chat["chat_id"])
     if not _db.is_web_admin(chat_id, actor_user_id):
@@ -309,12 +304,9 @@ async def web_end_rollcall(
     if not chat:
         raise HTTPException(status_code=404, detail="Invalid group token")
 
-    actor_user_id = verify_identity_token(body.id_token)
-    if not actor_user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Verify with Telegram before ending a rollcall.",
-        )
+    actor_user_id = require_identity(
+        body.id_token, detail="Verify with Telegram before ending a rollcall."
+    )
 
     chat_id = int(chat["chat_id"])
     if not _db.is_web_admin(chat_id, actor_user_id):
@@ -357,9 +349,7 @@ async def create_scheduled_rollcall(
     chat = _db.get_chat_by_group_web_token(group_token)
     if not chat:
         raise HTTPException(status_code=404, detail="Invalid group token")
-    actor_user_id = verify_identity_token(body.id_token)
-    if not actor_user_id:
-        raise HTTPException(status_code=401, detail="Verify with Telegram first.")
+    actor_user_id = require_identity(body.id_token, detail="Verify with Telegram first.")
     chat_id = int(chat["chat_id"])
     if not _db.is_web_admin(chat_id, actor_user_id):
         raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
@@ -412,9 +402,7 @@ async def list_scheduled_rollcalls(
     chat = _db.get_chat_by_group_web_token(group_token)
     if not chat:
         raise HTTPException(status_code=404, detail="Invalid group token")
-    actor_user_id = verify_identity_token(id_token) if id_token else None
-    if not actor_user_id:
-        raise HTTPException(status_code=401, detail="Verify with Telegram first.")
+    actor_user_id = require_identity(id_token, detail="Verify with Telegram first.")
     chat_id = int(chat["chat_id"])
     if not _db.is_web_admin(chat_id, actor_user_id):
         raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
@@ -445,9 +433,7 @@ async def delete_scheduled_rollcall(
     chat = _db.get_chat_by_group_web_token(group_token)
     if not chat:
         raise HTTPException(status_code=404, detail="Invalid group token")
-    actor_user_id = verify_identity_token(id_token) if id_token else None
-    if not actor_user_id:
-        raise HTTPException(status_code=401, detail="Verify with Telegram first.")
+    actor_user_id = require_identity(id_token, detail="Verify with Telegram first.")
     chat_id = int(chat["chat_id"])
     if not _db.is_web_admin(chat_id, actor_user_id):
         raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
@@ -497,9 +483,7 @@ async def issue_weblogin(
     if not chat:
         raise HTTPException(status_code=404, detail="Invalid group token")
 
-    actor_user_id = verify_identity_token(body.id_token)
-    if not actor_user_id:
-        raise HTTPException(status_code=401, detail="Verify with Telegram first.")
+    actor_user_id = require_identity(body.id_token, detail="Verify with Telegram first.")
 
     chat_id = int(chat["chat_id"])
     if not _db.is_web_admin(chat_id, actor_user_id):

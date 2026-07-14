@@ -201,6 +201,17 @@ def create_app() -> FastAPI:
     async def _join_redirect(token: str):
         return RedirectResponse(url=f"/web/group/{token}", status_code=302)
 
+    # Browsers request /favicon.ico by default (bookmarks, old tabs, curl
+    # users); the HTML <link rel="icon"> tags don't cover that path.
+    _favicon = Path(__file__).parent / "web" / "logo.svg"
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def _favicon_fallback():
+        from fastapi.responses import FileResponse
+        if _favicon.is_file():
+            return FileResponse(str(_favicon), media_type="image/svg+xml")
+        return RedirectResponse(url="/web/logo.svg", status_code=302)
+
     # Serve shared design tokens (CSS vars + dark-mode init script) consumed
     # by all 5 web surfaces at /shared/
     _shared_dir = Path(__file__).parent / "shared"

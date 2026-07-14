@@ -1649,22 +1649,15 @@ def update_chat_group_name(chat_id: int, name: str) -> None:
 
 def get_chat_by_group_web_token(token: str) -> Optional[Dict]:
     """Look up a chat by its permanent group web token."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        cursor.execute(f"SELECT * FROM chats WHERE group_web_token = {ph}", (token,))
-        row = cursor.fetchone()
-        return dict(row) if row else None
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(f"SELECT * FROM chats WHERE group_web_token = {ph}", (token,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
     except Exception as e:
         logging.error(f"Error in get_chat_by_group_web_token: {e}")
         return None
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 _VALID_CHAT_FIELDS = {
@@ -1682,176 +1675,135 @@ def update_chat_settings(chat_id: int, **kwargs) -> bool:
     for key in kwargs:
         if key not in _VALID_CHAT_FIELDS:
             raise ValueError(f"update_chat_settings: invalid field '{key}'")
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
+        with _cursor(commit=True) as cursor:
 
-        # Build UPDATE query dynamically
-        fields = []
-        values = []
+            # Build UPDATE query dynamically
+            fields = []
+            values = []
 
-        for key, value in kwargs.items():
-            fields.append(f"{key} = %s" if db_type == 'postgresql' else f"{key} = ?")
-            # Convert boolean to int for SQLite
-            if db_type == 'sqlite' and isinstance(value, bool):
-                value = 1 if value else 0
-            values.append(value)
+            for key, value in kwargs.items():
+                fields.append(f"{key} = %s" if db_type == 'postgresql' else f"{key} = ?")
+                # Convert boolean to int for SQLite
+                if db_type == 'sqlite' and isinstance(value, bool):
+                    value = 1 if value else 0
+                values.append(value)
         
-        if not fields:
+            if not fields:
+                return True
+        
+            values.append(chat_id)
+            query = f"UPDATE chats SET {', '.join(fields)} WHERE chat_id = {'%s' if db_type == 'postgresql' else '?'}"
+        
+            cursor.execute(query, values)
+            logging.info(f"Updated chat settings for {chat_id}: {kwargs}")
             return True
-        
-        values.append(chat_id)
-        query = f"UPDATE chats SET {', '.join(fields)} WHERE chat_id = {'%s' if db_type == 'postgresql' else '?'}"
-        
-        cursor.execute(query, values)
-        conn.commit()
-        logging.info(f"Updated chat settings for {chat_id}: {kwargs}")
-        return True
     except Exception as e:
-        conn.rollback()
         logging.error(f"Error updating chat settings: {e}")
         return False
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 def create_rollcall(chat_id: int, title: str, timezone: str = 'Asia/Kolkata', web_token: Optional[str] = None) -> int:
     """Create a new rollcall and return its ID"""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
+        with _cursor(commit=True) as cursor:
 
-        # Ensure chat exists
-        get_or_create_chat(chat_id)
+            # Ensure chat exists
+            get_or_create_chat(chat_id)
 
-        if db_type == 'postgresql':
-            cursor.execute(
-                """INSERT INTO rollcalls (chat_id, title, timezone, web_token)
-                   VALUES (%s, %s, %s, %s) RETURNING id""",
-                (chat_id, title, timezone, web_token)
-            )
-            rollcall_id = cursor.fetchone()[0]
-        else:
-            cursor.execute(
-                """INSERT INTO rollcalls (chat_id, title, timezone, web_token)
-                   VALUES (?, ?, ?, ?)""",
-                (chat_id, title, timezone, web_token)
-            )
-            rollcall_id = cursor.lastrowid
+            if db_type == 'postgresql':
+                cursor.execute(
+                    """INSERT INTO rollcalls (chat_id, title, timezone, web_token)
+                       VALUES (%s, %s, %s, %s) RETURNING id""",
+                    (chat_id, title, timezone, web_token)
+                )
+                rollcall_id = cursor.fetchone()[0]
+            else:
+                cursor.execute(
+                    """INSERT INTO rollcalls (chat_id, title, timezone, web_token)
+                       VALUES (?, ?, ?, ?)""",
+                    (chat_id, title, timezone, web_token)
+                )
+                rollcall_id = cursor.lastrowid
         
-        conn.commit()
-        logging.info(f"Created rollcall {rollcall_id} for chat {chat_id}: {title}")
-        return rollcall_id
+            logging.info(f"Created rollcall {rollcall_id} for chat {chat_id}: {title}")
+            return rollcall_id
     except Exception as e:
-        conn.rollback()
         logging.error(f"Error creating rollcall: {e}")
         raise
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 def ensure_rollcall_stats(rollcall_id: int) -> None:
     """
     Ensure a rollcall_stats row exists for this rollcall.
     Called once at rollcall creation so increment_rollcall_stat never fails silently.
     """
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        if db_type == 'postgresql':
-            cursor.execute(
-                """
-                INSERT INTO rollcall_stats (rollcall_id, total_in, total_out, total_maybe)
-                VALUES (%s, 0, 0, 0)
-                ON CONFLICT (rollcall_id) DO NOTHING
-                """,
-                (rollcall_id,),
-            )
-        else:
-            cursor.execute(
-                """
-                INSERT OR IGNORE INTO rollcall_stats (rollcall_id, total_in, total_out, total_maybe)
-                VALUES (?, 0, 0, 0)
-                """,
-                (rollcall_id,),
-            )
-        conn.commit()
-        logging.info(f"Ensured rollcall_stats row for rollcall {rollcall_id}")
+        with _cursor(commit=True) as cursor:
+            if db_type == 'postgresql':
+                cursor.execute(
+                    """
+                    INSERT INTO rollcall_stats (rollcall_id, total_in, total_out, total_maybe)
+                    VALUES (%s, 0, 0, 0)
+                    ON CONFLICT (rollcall_id) DO NOTHING
+                    """,
+                    (rollcall_id,),
+                )
+            else:
+                cursor.execute(
+                    """
+                    INSERT OR IGNORE INTO rollcall_stats (rollcall_id, total_in, total_out, total_maybe)
+                    VALUES (?, 0, 0, 0)
+                    """,
+                    (rollcall_id,),
+                )
+            logging.info(f"Ensured rollcall_stats row for rollcall {rollcall_id}")
     except Exception as e:
-        conn.rollback()
         logging.error(f"Error ensuring rollcall_stats: {e}")
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def get_rollcall(rollcall_id: int) -> Optional[Dict]:
     """Get rollcall by ID"""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
+        with _cursor() as cursor:
         
-        if db_type == 'postgresql':
-            cursor.execute(
-                "SELECT * FROM rollcalls WHERE id = %s",
-                (rollcall_id,)
-            )
-        else:
-            cursor.execute(
-                "SELECT * FROM rollcalls WHERE id = ?",
-                (rollcall_id,)
-            )
+            if db_type == 'postgresql':
+                cursor.execute(
+                    "SELECT * FROM rollcalls WHERE id = %s",
+                    (rollcall_id,)
+                )
+            else:
+                cursor.execute(
+                    "SELECT * FROM rollcalls WHERE id = ?",
+                    (rollcall_id,)
+                )
         
-        row = cursor.fetchone()
+            row = cursor.fetchone()
         
-        if row:
-            return dict(row)
-        return None
+            if row:
+                return dict(row)
+            return None
     except Exception as e:
         logging.error(f"Error getting rollcall: {e}")
         return None
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 def get_rollcall_by_web_token(token: str) -> Optional[Dict]:
     """Get an active rollcall by its magic-link web_token."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        if db_type == 'postgresql':
-            cursor.execute(
-                "SELECT * FROM rollcalls WHERE web_token = %s AND is_active = TRUE",
-                (token,)
-            )
-        else:
-            cursor.execute(
-                "SELECT * FROM rollcalls WHERE web_token = ? AND is_active = 1",
-                (token,)
-            )
-        row = cursor.fetchone()
-        return dict(row) if row else None
+        with _cursor() as cursor:
+            if db_type == 'postgresql':
+                cursor.execute(
+                    "SELECT * FROM rollcalls WHERE web_token = %s AND is_active = TRUE",
+                    (token,)
+                )
+            else:
+                cursor.execute(
+                    "SELECT * FROM rollcalls WHERE web_token = ? AND is_active = 1",
+                    (token,)
+                )
+            row = cursor.fetchone()
+            return dict(row) if row else None
     except Exception as e:
         logging.error(f"Error looking up rollcall by web_token: {e}")
         return None
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 _VALID_ROLLCALL_FIELDS = {
@@ -1868,75 +1820,59 @@ def update_rollcall(rollcall_id: int, **kwargs) -> bool:
     for key in kwargs:
         if key not in _VALID_ROLLCALL_FIELDS:
             raise ValueError(f"update_rollcall: invalid field '{key}'")
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
+        with _cursor(commit=True) as cursor:
 
-        # Build UPDATE query dynamically
-        fields = []
-        values = []
+            # Build UPDATE query dynamically
+            fields = []
+            values = []
 
-        for key, value in kwargs.items():
-            fields.append(f"{key} = %s" if db_type == 'postgresql' else f"{key} = ?")
-            values.append(value)
+            for key, value in kwargs.items():
+                fields.append(f"{key} = %s" if db_type == 'postgresql' else f"{key} = ?")
+                values.append(value)
         
-        if not fields:
+            if not fields:
+                return True
+        
+            values.append(rollcall_id)
+            query = f"UPDATE rollcalls SET {', '.join(fields)} WHERE id = {'%s' if db_type == 'postgresql' else '?'}"
+        
+            cursor.execute(query, values)
+            logging.info(f"Updated rollcall {rollcall_id}: {kwargs}")
             return True
-        
-        values.append(rollcall_id)
-        query = f"UPDATE rollcalls SET {', '.join(fields)} WHERE id = {'%s' if db_type == 'postgresql' else '?'}"
-        
-        cursor.execute(query, values)
-        conn.commit()
-        logging.info(f"Updated rollcall {rollcall_id}: {kwargs}")
-        return True
     except Exception as e:
-        conn.rollback()
         logging.error(f"Error updating rollcall: {e}")
         return False
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 def get_active_rollcalls(chat_id: int) -> List[Dict]:
     """Get all active rollcalls for a chat"""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
+        with _cursor() as cursor:
         
-        if db_type == 'postgresql':
-            cursor.execute(
-                """SELECT * FROM rollcalls 
-                   WHERE chat_id = %s AND is_active = TRUE
-                   ORDER BY created_at ASC""",
-                (chat_id,)
-            )
-        else:
-            cursor.execute(
-                """SELECT * FROM rollcalls 
-                   WHERE chat_id = ? AND is_active = 1
-                   ORDER BY created_at ASC""",
-                (chat_id,)
-            )
+            if db_type == 'postgresql':
+                cursor.execute(
+                    """SELECT * FROM rollcalls 
+                       WHERE chat_id = %s AND is_active = TRUE
+                       ORDER BY created_at ASC""",
+                    (chat_id,)
+                )
+            else:
+                cursor.execute(
+                    """SELECT * FROM rollcalls 
+                       WHERE chat_id = ? AND is_active = 1
+                       ORDER BY created_at ASC""",
+                    (chat_id,)
+                )
         
-        rows = cursor.fetchall()
-        result = []
-        for row in rows:
-            result.append(dict(row))
+            rows = cursor.fetchall()
+            result = []
+            for row in rows:
+                result.append(dict(row))
         
-        return result
+            return result
     except Exception as e:
         logging.error(f"Error getting active rollcalls: {e}")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 def create_or_update_template(
     chatid: int,
@@ -1955,91 +1891,82 @@ def create_or_update_template(
     Create or update a template for a chat.
     Uniqueness is (chatid, name).
     """
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        if db_type == "postgresql":
-            cursor.execute(
-                """
-                INSERT INTO templates
-                    (chatid, name, title, inlistlimit, location, eventfee,
-                     offsetdays, offsethours, offsetminutes,event_day, event_time)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (chatid, name) DO UPDATE SET
-                    title = EXCLUDED.title,
-                    inlistlimit = EXCLUDED.inlistlimit,
-                    location = EXCLUDED.location,
-                    eventfee = EXCLUDED.eventfee,
-                    offsetdays = EXCLUDED.offsetdays,
-                    offsethours = EXCLUDED.offsethours,
-                    offsetminutes = EXCLUDED.offsetminutes,
-                    event_day = EXCLUDED.event_day,
-                    event_time = EXCLUDED.event_time
-                """,
-                (
-                    chatid,
-                    name,
-                    title,
-                    inlistlimit,
-                    location,
-                    eventfee,
-                    offsetdays,
-                    offsethours,
-                    offsetminutes,
-                    event_day, 
-                    event_time
-                ),
-            )
-        else:
-            # SQLite: preserve existing schedule columns (INSERT OR REPLACE would reset them to NULL)
-            cursor.execute(
-                "SELECT id, schedule_day, schedule_time, schedule_enabled, last_scheduled_date, recurrence_type "
-                "FROM templates WHERE chatid = ? AND name = ?",
-                (chatid, name)
-            )
-            existing_row = cursor.fetchone()
-            if existing_row:
-                existing_row = dict(existing_row)
-                row_id        = existing_row['id']
-                sched_day     = existing_row['schedule_day']
-                sched_time    = existing_row['schedule_time']
-                sched_enabled = existing_row['schedule_enabled']
-                sched_last    = existing_row['last_scheduled_date']
-                sched_recur   = existing_row['recurrence_type'] or 'weekly'
-            else:
-                row_id = sched_day = sched_time = sched_last = None
-                sched_enabled = 0
-                sched_recur = 'weekly'
-            cursor.execute(
-                """
-                INSERT OR REPLACE INTO templates
-                (
-                    id, chatid, name, title, inlistlimit, location, eventfee,
-                    offsetdays, offsethours, offsetminutes, event_day, event_time,
-                    schedule_day, schedule_time, schedule_enabled, last_scheduled_date, recurrence_type
+        with _cursor(commit=True) as cursor:
+            if db_type == "postgresql":
+                cursor.execute(
+                    """
+                    INSERT INTO templates
+                        (chatid, name, title, inlistlimit, location, eventfee,
+                         offsetdays, offsethours, offsetminutes,event_day, event_time)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (chatid, name) DO UPDATE SET
+                        title = EXCLUDED.title,
+                        inlistlimit = EXCLUDED.inlistlimit,
+                        location = EXCLUDED.location,
+                        eventfee = EXCLUDED.eventfee,
+                        offsetdays = EXCLUDED.offsetdays,
+                        offsethours = EXCLUDED.offsethours,
+                        offsetminutes = EXCLUDED.offsetminutes,
+                        event_day = EXCLUDED.event_day,
+                        event_time = EXCLUDED.event_time
+                    """,
+                    (
+                        chatid,
+                        name,
+                        title,
+                        inlistlimit,
+                        location,
+                        eventfee,
+                        offsetdays,
+                        offsethours,
+                        offsetminutes,
+                        event_day, 
+                        event_time
+                    ),
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    row_id,
-                    chatid, name, title, inlistlimit, location, eventfee,
-                    offsetdays, offsethours, offsetminutes, event_day, event_time,
-                    sched_day, sched_time, sched_enabled, sched_last, sched_recur
-                ),
-            )
+            else:
+                # SQLite: preserve existing schedule columns (INSERT OR REPLACE would reset them to NULL)
+                cursor.execute(
+                    "SELECT id, schedule_day, schedule_time, schedule_enabled, last_scheduled_date, recurrence_type "
+                    "FROM templates WHERE chatid = ? AND name = ?",
+                    (chatid, name)
+                )
+                existing_row = cursor.fetchone()
+                if existing_row:
+                    existing_row = dict(existing_row)
+                    row_id        = existing_row['id']
+                    sched_day     = existing_row['schedule_day']
+                    sched_time    = existing_row['schedule_time']
+                    sched_enabled = existing_row['schedule_enabled']
+                    sched_last    = existing_row['last_scheduled_date']
+                    sched_recur   = existing_row['recurrence_type'] or 'weekly'
+                else:
+                    row_id = sched_day = sched_time = sched_last = None
+                    sched_enabled = 0
+                    sched_recur = 'weekly'
+                cursor.execute(
+                    """
+                    INSERT OR REPLACE INTO templates
+                    (
+                        id, chatid, name, title, inlistlimit, location, eventfee,
+                        offsetdays, offsethours, offsetminutes, event_day, event_time,
+                        schedule_day, schedule_time, schedule_enabled, last_scheduled_date, recurrence_type
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        row_id,
+                        chatid, name, title, inlistlimit, location, eventfee,
+                        offsetdays, offsethours, offsetminutes, event_day, event_time,
+                        sched_day, sched_time, sched_enabled, sched_last, sched_recur
+                    ),
+                )
         
-        conn.commit()
-        return True
+            return True
     except Exception as e:
-        conn.rollback()
         logging.error(f"Error creating/updating template: {e}")
         return False
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def clear_rollcall_reminder(rollcall_id: int) -> bool:
@@ -2079,40 +2006,31 @@ def clear_rollcall_reminder(rollcall_id: int) -> bool:
 
 def end_rollcall(rollcall_id: int) -> bool:
     """Mark a rollcall as ended"""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
+        with _cursor(commit=True) as cursor:
         
-        if db_type == 'postgresql':
-            cursor.execute(
-                """UPDATE rollcalls SET
-                   is_active = FALSE,
-                   ended_at = CURRENT_TIMESTAMP
-                   WHERE id = %s""",
-                (rollcall_id,)
-            )
-        else:
-            cursor.execute(
-                """UPDATE rollcalls SET
-                   is_active = 0,
-                   ended_at = CURRENT_TIMESTAMP
-                   WHERE id = ?""",
-                (rollcall_id,)
-            )
+            if db_type == 'postgresql':
+                cursor.execute(
+                    """UPDATE rollcalls SET
+                       is_active = FALSE,
+                       ended_at = CURRENT_TIMESTAMP
+                       WHERE id = %s""",
+                    (rollcall_id,)
+                )
+            else:
+                cursor.execute(
+                    """UPDATE rollcalls SET
+                       is_active = 0,
+                       ended_at = CURRENT_TIMESTAMP
+                       WHERE id = ?""",
+                    (rollcall_id,)
+                )
         
-        conn.commit()
-        logging.info(f"Ended rollcall {rollcall_id}")
-        return True
+            logging.info(f"Ended rollcall {rollcall_id}")
+            return True
     except Exception as e:
-        conn.rollback()
         logging.error(f"Error ending rollcall: {e}")
         return False
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def get_all_chat_ids() -> List[int]:
@@ -2161,94 +2079,85 @@ def add_or_update_user(rollcall_id: int, user_id: int, first_name: str, username
     if status not in _VALID_STATUSES:
         logging.error(f"add_or_update_user: invalid status '{status}' for user {user_id}")
         return False
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
 
-        # Fetch existing positions and current status
-        cursor.execute(
-            f"SELECT in_pos, out_pos, wait_pos, status FROM users WHERE rollcall_id = {ph} AND user_id = {ph}",
-            (rollcall_id, user_id)
-        )
-        existing = cursor.fetchone()
+            # Fetch existing positions and current status
+            cursor.execute(
+                f"SELECT in_pos, out_pos, wait_pos, status FROM users WHERE rollcall_id = {ph} AND user_id = {ph}",
+                (rollcall_id, user_id)
+            )
+            existing = cursor.fetchone()
 
-        if existing:
-            existing = dict(existing)
-            prev_status = existing['status']
-            in_pos   = existing['in_pos']
-            out_pos  = existing['out_pos']
-            wait_pos = existing['wait_pos']
-            # Reset the position of any bucket the user is leaving so re-entry
-            # later assigns a fresh position at the END of that bucket. This
-            # ensures fair FIFO ordering — in particular, a user promoted
-            # WAITLIST→IN who later returns to the waitlist goes to the back.
-            if prev_status == 'in' and status != 'in':
-                in_pos = None
-            if prev_status == 'out' and status != 'out':
-                out_pos = None
-            if prev_status == 'waitlist' and status != 'waitlist':
-                wait_pos = None
-            # Assign NEW position when entering a bucket for the first time
-            # (or re-entering after having left). Use the same cursor so the
-            # MAX query and the INSERT share a connection and avoid a TOCTOU race.
-            if status == 'in' and in_pos is None:
-                in_pos = _next_pos_with_cursor(cursor, rollcall_id, 'in')
-            elif status == 'out' and out_pos is None:
-                out_pos = _next_pos_with_cursor(cursor, rollcall_id, 'out')
-            elif status == 'waitlist' and wait_pos is None:
-                wait_pos = _next_pos_with_cursor(cursor, rollcall_id, 'waitlist')
-        else:
-            # Brand new user
-            in_pos = out_pos = wait_pos = None
-            if status == 'in':
-                in_pos = _next_pos_with_cursor(cursor, rollcall_id, 'in')
-            elif status == 'out':
-                out_pos = _next_pos_with_cursor(cursor, rollcall_id, 'out')
-            elif status == 'waitlist':
-                wait_pos = _next_pos_with_cursor(cursor, rollcall_id, 'waitlist')
+            if existing:
+                existing = dict(existing)
+                prev_status = existing['status']
+                in_pos   = existing['in_pos']
+                out_pos  = existing['out_pos']
+                wait_pos = existing['wait_pos']
+                # Reset the position of any bucket the user is leaving so re-entry
+                # later assigns a fresh position at the END of that bucket. This
+                # ensures fair FIFO ordering — in particular, a user promoted
+                # WAITLIST→IN who later returns to the waitlist goes to the back.
+                if prev_status == 'in' and status != 'in':
+                    in_pos = None
+                if prev_status == 'out' and status != 'out':
+                    out_pos = None
+                if prev_status == 'waitlist' and status != 'waitlist':
+                    wait_pos = None
+                # Assign NEW position when entering a bucket for the first time
+                # (or re-entering after having left). Use the same cursor so the
+                # MAX query and the INSERT share a connection and avoid a TOCTOU race.
+                if status == 'in' and in_pos is None:
+                    in_pos = _next_pos_with_cursor(cursor, rollcall_id, 'in')
+                elif status == 'out' and out_pos is None:
+                    out_pos = _next_pos_with_cursor(cursor, rollcall_id, 'out')
+                elif status == 'waitlist' and wait_pos is None:
+                    wait_pos = _next_pos_with_cursor(cursor, rollcall_id, 'waitlist')
+            else:
+                # Brand new user
+                in_pos = out_pos = wait_pos = None
+                if status == 'in':
+                    in_pos = _next_pos_with_cursor(cursor, rollcall_id, 'in')
+                elif status == 'out':
+                    out_pos = _next_pos_with_cursor(cursor, rollcall_id, 'out')
+                elif status == 'waitlist':
+                    wait_pos = _next_pos_with_cursor(cursor, rollcall_id, 'waitlist')
 
-        if db_type == 'postgresql':
-            cursor.execute("""
-                INSERT INTO users (rollcall_id, user_id, first_name, username, status, comment, in_pos, out_pos, wait_pos)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (rollcall_id, user_id) DO UPDATE SET
-                    first_name = EXCLUDED.first_name,
-                    username   = EXCLUDED.username,
-                    status     = EXCLUDED.status,
-                    comment    = EXCLUDED.comment,
-                    in_pos     = EXCLUDED.in_pos,
-                    out_pos    = EXCLUDED.out_pos,
-                    wait_pos   = EXCLUDED.wait_pos,
-                    updated_at = CURRENT_TIMESTAMP
-            """, (rollcall_id, user_id, first_name, username, status, comment, in_pos, out_pos, wait_pos))
-        else:
-            cursor.execute("""
-                INSERT INTO users (rollcall_id, user_id, first_name, username, status, comment, in_pos, out_pos, wait_pos)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(rollcall_id, user_id) DO UPDATE SET
-                    first_name = excluded.first_name,
-                    username   = excluded.username,
-                    status     = excluded.status,
-                    comment    = excluded.comment,
-                    in_pos     = excluded.in_pos,
-                    out_pos    = excluded.out_pos,
-                    wait_pos   = excluded.wait_pos,
-                    updated_at = CURRENT_TIMESTAMP
-            """, (rollcall_id, user_id, first_name, username, status, comment, in_pos, out_pos, wait_pos))
+            if db_type == 'postgresql':
+                cursor.execute("""
+                    INSERT INTO users (rollcall_id, user_id, first_name, username, status, comment, in_pos, out_pos, wait_pos)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (rollcall_id, user_id) DO UPDATE SET
+                        first_name = EXCLUDED.first_name,
+                        username   = EXCLUDED.username,
+                        status     = EXCLUDED.status,
+                        comment    = EXCLUDED.comment,
+                        in_pos     = EXCLUDED.in_pos,
+                        out_pos    = EXCLUDED.out_pos,
+                        wait_pos   = EXCLUDED.wait_pos,
+                        updated_at = CURRENT_TIMESTAMP
+                """, (rollcall_id, user_id, first_name, username, status, comment, in_pos, out_pos, wait_pos))
+            else:
+                cursor.execute("""
+                    INSERT INTO users (rollcall_id, user_id, first_name, username, status, comment, in_pos, out_pos, wait_pos)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(rollcall_id, user_id) DO UPDATE SET
+                        first_name = excluded.first_name,
+                        username   = excluded.username,
+                        status     = excluded.status,
+                        comment    = excluded.comment,
+                        in_pos     = excluded.in_pos,
+                        out_pos    = excluded.out_pos,
+                        wait_pos   = excluded.wait_pos,
+                        updated_at = CURRENT_TIMESTAMP
+                """, (rollcall_id, user_id, first_name, username, status, comment, in_pos, out_pos, wait_pos))
 
-        conn.commit()
-        return True
+            return True
     except Exception as e:
-        conn.rollback()
         logging.error(f"Error add/update user: {e}")
         raise
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def add_or_update_proxy_user(rollcall_id: int, name: str, status: str, comment: str = '', proxy_owner_id: Optional[int] = None) -> bool:
@@ -2256,92 +2165,83 @@ def add_or_update_proxy_user(rollcall_id: int, name: str, status: str, comment: 
     if status not in _VALID_STATUSES:
         logging.error(f"add_or_update_proxy_user: invalid status '{status}' for proxy '{name}'")
         return False
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
 
-        # Fetch existing positions and current status
-        cursor.execute(
-            f"SELECT in_pos, out_pos, wait_pos, status FROM proxy_users WHERE rollcall_id = {ph} AND name = {ph}",
-            (rollcall_id, name)
-        )
-        existing = cursor.fetchone()
+            # Fetch existing positions and current status
+            cursor.execute(
+                f"SELECT in_pos, out_pos, wait_pos, status FROM proxy_users WHERE rollcall_id = {ph} AND name = {ph}",
+                (rollcall_id, name)
+            )
+            existing = cursor.fetchone()
 
-        if existing:
-            existing = dict(existing)
-            prev_status = existing['status']
-            in_pos   = existing['in_pos']
-            out_pos  = existing['out_pos']
-            wait_pos = existing['wait_pos']
-            # Reset the position of any bucket the proxy is leaving so re-entry
-            # later assigns a fresh position at the END of that bucket. This
-            # ensures fair FIFO ordering — in particular, a proxy promoted
-            # WAITLIST→IN who later returns to the waitlist goes to the back.
-            if prev_status == 'in' and status != 'in':
-                in_pos = None
-            if prev_status == 'out' and status != 'out':
-                out_pos = None
-            if prev_status == 'waitlist' and status != 'waitlist':
-                wait_pos = None
-            # Assign NEW position when entering a bucket for the first time
-            # (or re-entering after having left). Use the same cursor so the
-            # MAX query and the INSERT share a connection and avoid a TOCTOU race.
-            if status == 'in' and in_pos is None:
-                in_pos = _next_pos_with_cursor(cursor, rollcall_id, 'in')
-            elif status == 'out' and out_pos is None:
-                out_pos = _next_pos_with_cursor(cursor, rollcall_id, 'out')
-            elif status == 'waitlist' and wait_pos is None:
-                wait_pos = _next_pos_with_cursor(cursor, rollcall_id, 'waitlist')
-        else:
-            # Brand new proxy
-            in_pos = out_pos = wait_pos = None
-            if status == 'in':
-                in_pos = _next_pos_with_cursor(cursor, rollcall_id, 'in')
-            elif status == 'out':
-                out_pos = _next_pos_with_cursor(cursor, rollcall_id, 'out')
-            elif status == 'waitlist':
-                wait_pos = _next_pos_with_cursor(cursor, rollcall_id, 'waitlist')
+            if existing:
+                existing = dict(existing)
+                prev_status = existing['status']
+                in_pos   = existing['in_pos']
+                out_pos  = existing['out_pos']
+                wait_pos = existing['wait_pos']
+                # Reset the position of any bucket the proxy is leaving so re-entry
+                # later assigns a fresh position at the END of that bucket. This
+                # ensures fair FIFO ordering — in particular, a proxy promoted
+                # WAITLIST→IN who later returns to the waitlist goes to the back.
+                if prev_status == 'in' and status != 'in':
+                    in_pos = None
+                if prev_status == 'out' and status != 'out':
+                    out_pos = None
+                if prev_status == 'waitlist' and status != 'waitlist':
+                    wait_pos = None
+                # Assign NEW position when entering a bucket for the first time
+                # (or re-entering after having left). Use the same cursor so the
+                # MAX query and the INSERT share a connection and avoid a TOCTOU race.
+                if status == 'in' and in_pos is None:
+                    in_pos = _next_pos_with_cursor(cursor, rollcall_id, 'in')
+                elif status == 'out' and out_pos is None:
+                    out_pos = _next_pos_with_cursor(cursor, rollcall_id, 'out')
+                elif status == 'waitlist' and wait_pos is None:
+                    wait_pos = _next_pos_with_cursor(cursor, rollcall_id, 'waitlist')
+            else:
+                # Brand new proxy
+                in_pos = out_pos = wait_pos = None
+                if status == 'in':
+                    in_pos = _next_pos_with_cursor(cursor, rollcall_id, 'in')
+                elif status == 'out':
+                    out_pos = _next_pos_with_cursor(cursor, rollcall_id, 'out')
+                elif status == 'waitlist':
+                    wait_pos = _next_pos_with_cursor(cursor, rollcall_id, 'waitlist')
 
-        if db_type == 'postgresql':
-            cursor.execute("""
-                INSERT INTO proxy_users (rollcall_id, name, status, comment, proxy_owner_id, in_pos, out_pos, wait_pos, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                ON CONFLICT (rollcall_id, name) DO UPDATE SET
-                    status         = EXCLUDED.status,
-                    comment        = EXCLUDED.comment,
-                    proxy_owner_id = EXCLUDED.proxy_owner_id,
-                    in_pos         = EXCLUDED.in_pos,
-                    out_pos        = EXCLUDED.out_pos,
-                    wait_pos       = EXCLUDED.wait_pos,
-                    updated_at     = CURRENT_TIMESTAMP
-            """, (rollcall_id, name, status, comment, proxy_owner_id, in_pos, out_pos, wait_pos))
-        else:
-            cursor.execute("""
-                INSERT INTO proxy_users (rollcall_id, name, status, comment, proxy_owner_id, in_pos, out_pos, wait_pos, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(rollcall_id, name) DO UPDATE SET
-                    status         = excluded.status,
-                    comment        = excluded.comment,
-                    proxy_owner_id = excluded.proxy_owner_id,
-                    in_pos         = excluded.in_pos,
-                    out_pos        = excluded.out_pos,
-                    wait_pos       = excluded.wait_pos,
-                    updated_at     = excluded.updated_at
-            """, (rollcall_id, name, status, comment, proxy_owner_id, in_pos, out_pos, wait_pos))
+            if db_type == 'postgresql':
+                cursor.execute("""
+                    INSERT INTO proxy_users (rollcall_id, name, status, comment, proxy_owner_id, in_pos, out_pos, wait_pos, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (rollcall_id, name) DO UPDATE SET
+                        status         = EXCLUDED.status,
+                        comment        = EXCLUDED.comment,
+                        proxy_owner_id = EXCLUDED.proxy_owner_id,
+                        in_pos         = EXCLUDED.in_pos,
+                        out_pos        = EXCLUDED.out_pos,
+                        wait_pos       = EXCLUDED.wait_pos,
+                        updated_at     = CURRENT_TIMESTAMP
+                """, (rollcall_id, name, status, comment, proxy_owner_id, in_pos, out_pos, wait_pos))
+            else:
+                cursor.execute("""
+                    INSERT INTO proxy_users (rollcall_id, name, status, comment, proxy_owner_id, in_pos, out_pos, wait_pos, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(rollcall_id, name) DO UPDATE SET
+                        status         = excluded.status,
+                        comment        = excluded.comment,
+                        proxy_owner_id = excluded.proxy_owner_id,
+                        in_pos         = excluded.in_pos,
+                        out_pos        = excluded.out_pos,
+                        wait_pos       = excluded.wait_pos,
+                        updated_at     = excluded.updated_at
+                """, (rollcall_id, name, status, comment, proxy_owner_id, in_pos, out_pos, wait_pos))
 
-        conn.commit()
-        return True
+            return True
     except Exception as e:
-        conn.rollback()
         logging.error(f"Error adding/updating proxy user: {e}")
         return False
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 def get_all_users(rollcall_id: int):
     """
@@ -2351,274 +2251,208 @@ def get_all_users(rollcall_id: int):
     - Within IN/OUT/WAITLIST, ordered by their per-state position.
     - For MAYBE (no positions), fall back to created_at.
     """
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        if db_type == "postgresql":
-            cursor.execute(
-                """
-                SELECT id, rollcall_id, user_id, first_name, username,
-                       status, comment, in_pos, out_pos, wait_pos,
-                       created_at, updated_at
-                FROM users WHERE rollcall_id = %s
-                ORDER BY
-                    CASE status
-                        WHEN 'in'       THEN 1
-                        WHEN 'out'      THEN 2
-                        WHEN 'maybe'    THEN 3
-                        WHEN 'waitlist' THEN 4
-                        ELSE 5
-                    END,
-                    CASE status
-                        WHEN 'in'       THEN COALESCE(in_pos, 0)
-                        WHEN 'out'      THEN COALESCE(out_pos, 0)
-                        WHEN 'waitlist' THEN COALESCE(wait_pos, 0)
-                        ELSE 0
-                    END,
-                    created_at ASC
-                """,
-                (rollcall_id,),
-            )
-        else:
-            cursor.execute(
-                """
-                SELECT id, rollcall_id, user_id, first_name, username,
-                       status, comment, in_pos, out_pos, wait_pos,
-                       created_at, updated_at
-                FROM users WHERE rollcall_id = ?
-                ORDER BY
-                    CASE status
-                        WHEN 'in'       THEN 1
-                        WHEN 'out'      THEN 2
-                        WHEN 'maybe'    THEN 3
-                        WHEN 'waitlist' THEN 4
-                        ELSE 5
-                    END,
-                    CASE status
-                        WHEN 'in'       THEN COALESCE(in_pos, 0)
-                        WHEN 'out'      THEN COALESCE(out_pos, 0)
-                        WHEN 'waitlist' THEN COALESCE(wait_pos, 0)
-                        ELSE 0
-                    END,
-                    created_at ASC
-                """,
-                (rollcall_id,),
-            )
-        rows = cursor.fetchall()
-        return [dict(r) for r in rows]
+        with _cursor() as cursor:
+            if db_type == "postgresql":
+                cursor.execute(
+                    """
+                    SELECT id, rollcall_id, user_id, first_name, username,
+                           status, comment, in_pos, out_pos, wait_pos,
+                           created_at, updated_at
+                    FROM users WHERE rollcall_id = %s
+                    ORDER BY
+                        CASE status
+                            WHEN 'in'       THEN 1
+                            WHEN 'out'      THEN 2
+                            WHEN 'maybe'    THEN 3
+                            WHEN 'waitlist' THEN 4
+                            ELSE 5
+                        END,
+                        CASE status
+                            WHEN 'in'       THEN COALESCE(in_pos, 0)
+                            WHEN 'out'      THEN COALESCE(out_pos, 0)
+                            WHEN 'waitlist' THEN COALESCE(wait_pos, 0)
+                            ELSE 0
+                        END,
+                        created_at ASC
+                    """,
+                    (rollcall_id,),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT id, rollcall_id, user_id, first_name, username,
+                           status, comment, in_pos, out_pos, wait_pos,
+                           created_at, updated_at
+                    FROM users WHERE rollcall_id = ?
+                    ORDER BY
+                        CASE status
+                            WHEN 'in'       THEN 1
+                            WHEN 'out'      THEN 2
+                            WHEN 'maybe'    THEN 3
+                            WHEN 'waitlist' THEN 4
+                            ELSE 5
+                        END,
+                        CASE status
+                            WHEN 'in'       THEN COALESCE(in_pos, 0)
+                            WHEN 'out'      THEN COALESCE(out_pos, 0)
+                            WHEN 'waitlist' THEN COALESCE(wait_pos, 0)
+                            ELSE 0
+                        END,
+                        created_at ASC
+                    """,
+                    (rollcall_id,),
+                )
+            rows = cursor.fetchall()
+            return [dict(r) for r in rows]
     except Exception as e:
         logging.error(f"Error getting all users: {e}")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def get_proxy_users_by_status(rollcall_id: int, status: str) -> List[Dict]:
     """Get proxy users by status ordered by position"""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        if db_type == 'postgresql':
-            cursor.execute(
-                """
-                SELECT * FROM proxy_users
-                WHERE rollcall_id = %s AND status = %s
-                ORDER BY
-                    CASE status
-                        WHEN 'in'       THEN COALESCE(in_pos, 0)
-                        WHEN 'out'      THEN COALESCE(out_pos, 0)
-                        WHEN 'waitlist' THEN COALESCE(wait_pos, 0)
-                        ELSE 0
-                    END ASC,
-                    created_at ASC
-                """,
-                (rollcall_id, status)
-            )
-        else:
-            cursor.execute(
-                """
-                SELECT * FROM proxy_users
-                WHERE rollcall_id = ? AND status = ?
-                ORDER BY
-                    CASE status
-                        WHEN 'in'       THEN COALESCE(in_pos, 0)
-                        WHEN 'out'      THEN COALESCE(out_pos, 0)
-                        WHEN 'waitlist' THEN COALESCE(wait_pos, 0)
-                        ELSE 0
-                    END ASC,
-                    created_at ASC
-                """,
-                (rollcall_id, status)
-            )
-        rows = cursor.fetchall()
-        return [dict(row) for row in rows]
+        with _cursor() as cursor:
+            if db_type == 'postgresql':
+                cursor.execute(
+                    """
+                    SELECT * FROM proxy_users
+                    WHERE rollcall_id = %s AND status = %s
+                    ORDER BY
+                        CASE status
+                            WHEN 'in'       THEN COALESCE(in_pos, 0)
+                            WHEN 'out'      THEN COALESCE(out_pos, 0)
+                            WHEN 'waitlist' THEN COALESCE(wait_pos, 0)
+                            ELSE 0
+                        END ASC,
+                        created_at ASC
+                    """,
+                    (rollcall_id, status)
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT * FROM proxy_users
+                    WHERE rollcall_id = ? AND status = ?
+                    ORDER BY
+                        CASE status
+                            WHEN 'in'       THEN COALESCE(in_pos, 0)
+                            WHEN 'out'      THEN COALESCE(out_pos, 0)
+                            WHEN 'waitlist' THEN COALESCE(wait_pos, 0)
+                            ELSE 0
+                        END ASC,
+                        created_at ASC
+                    """,
+                    (rollcall_id, status)
+                )
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
     except Exception as e:
         logging.error(f"Error getting proxy users: {e}")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def delete_template(chatid: int, name: str) -> bool:
     """
     Delete a template for a chat by name.
     """
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        if db_type == "postgresql":
-            cursor.execute(
-                "DELETE FROM templates WHERE chatid = %s AND name = %s",
-                (chatid, name),
-            )
-        else:
-            cursor.execute(
-                "DELETE FROM templates WHERE chatid = ? AND name = ?",
-                (chatid, name),
-            )
-        conn.commit()
-        return cursor.rowcount > 0
+        with _cursor(commit=True) as cursor:
+            if db_type == "postgresql":
+                cursor.execute(
+                    "DELETE FROM templates WHERE chatid = %s AND name = %s",
+                    (chatid, name),
+                )
+            else:
+                cursor.execute(
+                    "DELETE FROM templates WHERE chatid = ? AND name = ?",
+                    (chatid, name),
+                )
+            return cursor.rowcount > 0
     except Exception as e:
-        conn.rollback()
         logging.error(f"Error deleting template: {e}")
         return False
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def set_template_schedule(chatid: int, name: str, schedule_day: str, schedule_time: str, recurrence_type: str = 'weekly') -> bool:
     """Set schedule day/time and enable auto-start for a template."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        enabled = True if db_type == "postgresql" else 1
-        cursor.execute(
-            f"UPDATE templates SET schedule_day = {ph}, schedule_time = {ph}, "
-            f"schedule_enabled = {ph}, last_scheduled_date = NULL, recurrence_type = {ph} "
-            f"WHERE chatid = {ph} AND name = {ph}",
-            (schedule_day, schedule_time, enabled, recurrence_type, chatid, name),
-        )
-        conn.commit()
-        return cursor.rowcount > 0
+        with _cursor(commit=True) as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            enabled = True if db_type == "postgresql" else 1
+            cursor.execute(
+                f"UPDATE templates SET schedule_day = {ph}, schedule_time = {ph}, "
+                f"schedule_enabled = {ph}, last_scheduled_date = NULL, recurrence_type = {ph} "
+                f"WHERE chatid = {ph} AND name = {ph}",
+                (schedule_day, schedule_time, enabled, recurrence_type, chatid, name),
+            )
+            return cursor.rowcount > 0
     except Exception as e:
-        conn.rollback()
         logging.error(f"Error setting template schedule: {e}")
         return False
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def disable_template_schedule(chatid: int, name: str) -> bool:
     """Disable auto-start scheduling for a template."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        disabled = False if db_type == "postgresql" else 0
-        cursor.execute(
-            f"UPDATE templates SET schedule_enabled = {ph} WHERE chatid = {ph} AND name = {ph}",
-            (disabled, chatid, name),
-        )
-        conn.commit()
-        return cursor.rowcount > 0
+        with _cursor(commit=True) as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            disabled = False if db_type == "postgresql" else 0
+            cursor.execute(
+                f"UPDATE templates SET schedule_enabled = {ph} WHERE chatid = {ph} AND name = {ph}",
+                (disabled, chatid, name),
+            )
+            return cursor.rowcount > 0
     except Exception as e:
-        conn.rollback()
         logging.error(f"Error disabling template schedule: {e}")
         return False
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def enable_template_schedule(chatid: int, name: str) -> bool:
     """Re-enable scheduling for a template using its previously saved schedule parameters."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        enabled = True if db_type == "postgresql" else 1
-        cursor.execute(
-            f"UPDATE templates SET schedule_enabled = {ph} WHERE chatid = {ph} AND name = {ph}",
-            (enabled, chatid, name),
-        )
-        conn.commit()
-        return cursor.rowcount > 0
+        with _cursor(commit=True) as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            enabled = True if db_type == "postgresql" else 1
+            cursor.execute(
+                f"UPDATE templates SET schedule_enabled = {ph} WHERE chatid = {ph} AND name = {ph}",
+                (enabled, chatid, name),
+            )
+            return cursor.rowcount > 0
     except Exception as e:
-        conn.rollback()
         logging.error(f"Error enabling template schedule: {e}")
         return False
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def update_template_last_scheduled_date(chatid: int, name: str, date_str: str) -> bool:
     """Record the date (YYYY-MM-DD) when a template was last auto-started."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        cursor.execute(
-            f"UPDATE templates SET last_scheduled_date = {ph} WHERE chatid = {ph} AND name = {ph}",
-            (date_str, chatid, name),
-        )
-        conn.commit()
-        return cursor.rowcount > 0
+        with _cursor(commit=True) as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            cursor.execute(
+                f"UPDATE templates SET last_scheduled_date = {ph} WHERE chatid = {ph} AND name = {ph}",
+                (date_str, chatid, name),
+            )
+            return cursor.rowcount > 0
     except Exception as e:
-        conn.rollback()
         logging.error(f"Error updating last_scheduled_date: {e}")
         return False
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def get_all_scheduled_templates() -> List[Dict]:
     """Return all templates with schedule_enabled=True across all chats."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        if db_type == "postgresql":
-            cursor.execute("SELECT * FROM templates WHERE schedule_enabled = TRUE")
-        else:
-            cursor.execute("SELECT * FROM templates WHERE schedule_enabled = 1")
-        rows = cursor.fetchall()
-        return [dict(r) for r in rows]
+        with _cursor() as cursor:
+            if db_type == "postgresql":
+                cursor.execute("SELECT * FROM templates WHERE schedule_enabled = TRUE")
+            else:
+                cursor.execute("SELECT * FROM templates WHERE schedule_enabled = 1")
+            rows = cursor.fetchall()
+            return [dict(r) for r in rows]
     except Exception as e:
         logging.error(f"Error fetching scheduled templates: {e}")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def delete_user_by_name(rollcall_id: int, name: str) -> bool:
@@ -2626,105 +2460,87 @@ def delete_user_by_name(rollcall_id: int, name: str) -> bool:
     Matches @username uniquely; first_name is only used when it identifies
     exactly one user (otherwise we refuse to delete to avoid wiping the
     wrong account when two real users share a first name)."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
 
-        # Try proxy_users FIRST (named proxy should be removed before real user)
-        cursor.execute(
-            f"DELETE FROM proxy_users WHERE rollcall_id = {ph} AND name = {ph}",
-            (rollcall_id, name)
-        )
-        rows_deleted = cursor.rowcount
-
-        # When a proxy is deleted, also purge their ghost_records row so they
-        # no longer appear on the /absent_stats leaderboard.
-        if rows_deleted > 0:
+            # Try proxy_users FIRST (named proxy should be removed before real user)
             cursor.execute(
-                f"""DELETE FROM ghost_records
-                    WHERE proxy_name = {ph}
-                    AND chat_id = (SELECT chat_id FROM rollcalls WHERE id = {ph})""",
-                (name, rollcall_id)
-            )
-
-        # Only try real users if no proxy was deleted
-        if rows_deleted == 0:
-            clean_name = name.lstrip('@')
-
-            # Username is unique within a rollcall, so try it first.
-            cursor.execute(
-                f"DELETE FROM users WHERE rollcall_id = {ph} AND username = {ph}",
-                (rollcall_id, clean_name)
+                f"DELETE FROM proxy_users WHERE rollcall_id = {ph} AND name = {ph}",
+                (rollcall_id, name)
             )
             rows_deleted = cursor.rowcount
 
-            if rows_deleted == 0:
-                # Fall back to first_name — but only when it uniquely identifies one user.
+            # When a proxy is deleted, also purge their ghost_records row so they
+            # no longer appear on the /absent_stats leaderboard.
+            if rows_deleted > 0:
                 cursor.execute(
-                    f"SELECT user_id FROM users WHERE rollcall_id = {ph} AND first_name = {ph}",
+                    f"""DELETE FROM ghost_records
+                        WHERE proxy_name = {ph}
+                        AND chat_id = (SELECT chat_id FROM rollcalls WHERE id = {ph})""",
+                    (name, rollcall_id)
+                )
+
+            # Only try real users if no proxy was deleted
+            if rows_deleted == 0:
+                clean_name = name.lstrip('@')
+
+                # Username is unique within a rollcall, so try it first.
+                cursor.execute(
+                    f"DELETE FROM users WHERE rollcall_id = {ph} AND username = {ph}",
                     (rollcall_id, clean_name)
                 )
-                matches = cursor.fetchall()
-                if len(matches) == 1:
-                    uid = matches[0][0] if not isinstance(matches[0], dict) else matches[0]['user_id']
-                    cursor.execute(
-                        f"DELETE FROM users WHERE rollcall_id = {ph} AND user_id = {ph}",
-                        (rollcall_id, uid)
-                    )
-                    rows_deleted = cursor.rowcount
-                elif len(matches) > 1:
-                    logging.warning(
-                        f"delete_user_by_name: '{clean_name}' matches {len(matches)} users in rollcall {rollcall_id}; refusing to delete"
-                    )
+                rows_deleted = cursor.rowcount
 
-        conn.commit()
-        return rows_deleted > 0
+                if rows_deleted == 0:
+                    # Fall back to first_name — but only when it uniquely identifies one user.
+                    cursor.execute(
+                        f"SELECT user_id FROM users WHERE rollcall_id = {ph} AND first_name = {ph}",
+                        (rollcall_id, clean_name)
+                    )
+                    matches = cursor.fetchall()
+                    if len(matches) == 1:
+                        uid = matches[0][0] if not isinstance(matches[0], dict) else matches[0]['user_id']
+                        cursor.execute(
+                            f"DELETE FROM users WHERE rollcall_id = {ph} AND user_id = {ph}",
+                            (rollcall_id, uid)
+                        )
+                        rows_deleted = cursor.rowcount
+                    elif len(matches) > 1:
+                        logging.warning(
+                            f"delete_user_by_name: '{clean_name}' matches {len(matches)} users in rollcall {rollcall_id}; refusing to delete"
+                        )
+
+            return rows_deleted > 0
 
     except Exception as e:
-        conn.rollback()
         logging.error(f"Error deleting user: {e}")
         return False
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def delete_user_by_id(rollcall_id: int, user_id) -> bool:
     """Delete a real user (int user_id) or proxy user (str user_id) by exact id.
     Used by /set_status which knows the precise user from the in-memory cache."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        rows_deleted = 0
-        if isinstance(user_id, int):
-            cursor.execute(
-                f"DELETE FROM users WHERE rollcall_id = {ph} AND user_id = {ph}",
-                (rollcall_id, user_id)
-            )
-            rows_deleted = cursor.rowcount
-        else:
-            cursor.execute(
-                f"DELETE FROM proxy_users WHERE rollcall_id = {ph} AND name = {ph}",
-                (rollcall_id, str(user_id))
-            )
-            rows_deleted = cursor.rowcount
-        conn.commit()
-        return rows_deleted > 0
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            rows_deleted = 0
+            if isinstance(user_id, int):
+                cursor.execute(
+                    f"DELETE FROM users WHERE rollcall_id = {ph} AND user_id = {ph}",
+                    (rollcall_id, user_id)
+                )
+                rows_deleted = cursor.rowcount
+            else:
+                cursor.execute(
+                    f"DELETE FROM proxy_users WHERE rollcall_id = {ph} AND name = {ph}",
+                    (rollcall_id, str(user_id))
+                )
+                rows_deleted = cursor.rowcount
+            return rows_deleted > 0
     except Exception as e:
-        conn.rollback()
         logging.error(f"Error deleting user by id: {e}")
         return False
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 def close_db():
     """Close database connections"""
@@ -2742,101 +2558,80 @@ def increment_user_stat(chat_id: int, user_id: int, field: str) -> None:
     """Increment a single numeric field in user_stats."""
     if field not in VALID_USER_STAT_FIELDS:
         raise ValueError(f"Invalid stat field: {field}")
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        if db_type == 'postgresql':
-            cursor.execute(
-                """
-                INSERT INTO user_stats (chat_id, user_id, {field})
-                VALUES (%s, %s, 1)
-                ON CONFLICT (chat_id, user_id) DO UPDATE
-                SET {field} = user_stats.{field} + 1,
-                    updated_at = CURRENT_TIMESTAMP
-                """.format(field=field),
-                (chat_id, user_id),
-            )
-        else:
-            cursor.execute(
-                f"""
-                INSERT OR IGNORE INTO user_stats (chat_id, user_id)
-                VALUES (?, ?)
-                """,
-                (chat_id, user_id),
-            )
-            cursor.execute(
-                f"""
-                UPDATE user_stats
-                SET {field} = {field} + 1,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE chat_id = ? AND user_id = ?
-                """,
-                (chat_id, user_id),
-            )
-        conn.commit()
+        with _cursor(commit=True) as cursor:
+            if db_type == 'postgresql':
+                cursor.execute(
+                    """
+                    INSERT INTO user_stats (chat_id, user_id, {field})
+                    VALUES (%s, %s, 1)
+                    ON CONFLICT (chat_id, user_id) DO UPDATE
+                    SET {field} = user_stats.{field} + 1,
+                        updated_at = CURRENT_TIMESTAMP
+                    """.format(field=field),
+                    (chat_id, user_id),
+                )
+            else:
+                cursor.execute(
+                    f"""
+                    INSERT OR IGNORE INTO user_stats (chat_id, user_id)
+                    VALUES (?, ?)
+                    """,
+                    (chat_id, user_id),
+                )
+                cursor.execute(
+                    f"""
+                    UPDATE user_stats
+                    SET {field} = {field} + 1,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE chat_id = ? AND user_id = ?
+                    """,
+                    (chat_id, user_id),
+                )
     except Exception as e:
-        conn.rollback()
         logging.error(f"Error incrementing user stat {field}: {e}")
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 def increment_rollcall_stat(rollcall_id: int, field: str) -> None:
     """Increment a single numeric field in rollcall_stats."""
     if field not in VALID_ROLLCALL_STAT_FIELDS:
         raise ValueError(f"Invalid rollcall stat field: {field}")
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        if db_type == 'postgresql':
-            cursor.execute(
-                """
-                INSERT INTO rollcall_stats (rollcall_id, {field})
-                VALUES (%s, 1)
-                ON CONFLICT (rollcall_id) DO UPDATE
-                SET {field} = rollcall_stats.{field} + 1,
-                    updated_at = CURRENT_TIMESTAMP
-                """.format(field=field),
-                (rollcall_id,),
-            )
-        else:
-            cursor.execute(
-                f"""
-                INSERT OR IGNORE INTO rollcall_stats (rollcall_id)
-                VALUES (?)
-                """,
-                (rollcall_id,),
-            )
-            cursor.execute(
-                f"""
-                UPDATE rollcall_stats
-                SET {field} = {field} + 1,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE rollcall_id = ?
-                """,
-                (rollcall_id,),
-            )
-        conn.commit()
+        with _cursor(commit=True) as cursor:
+            if db_type == 'postgresql':
+                cursor.execute(
+                    """
+                    INSERT INTO rollcall_stats (rollcall_id, {field})
+                    VALUES (%s, 1)
+                    ON CONFLICT (rollcall_id) DO UPDATE
+                    SET {field} = rollcall_stats.{field} + 1,
+                        updated_at = CURRENT_TIMESTAMP
+                    """.format(field=field),
+                    (rollcall_id,),
+                )
+            else:
+                cursor.execute(
+                    f"""
+                    INSERT OR IGNORE INTO rollcall_stats (rollcall_id)
+                    VALUES (?)
+                    """,
+                    (rollcall_id,),
+                )
+                cursor.execute(
+                    f"""
+                    UPDATE rollcall_stats
+                    SET {field} = {field} + 1,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE rollcall_id = ?
+                    """,
+                    (rollcall_id,),
+                )
     except Exception as e:
-        conn.rollback()
         logging.error(f"Error incrementing rollcall stat {field}: {e}")
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def get_next_position(rollcall_id: int, status: str) -> int:
     """Return next position index across both users and proxy_users tables."""
-    conn = get_connection()
-    cursor = None
-    try:
-        cursor = conn.cursor()
+    with _cursor() as cursor:
         if status == 'in':
             col = 'in_pos'
         elif status == 'out':
@@ -2861,11 +2656,6 @@ def get_next_position(rollcall_id: int, status: str) -> int:
         max_proxy = int(cursor.fetchone()[0] or 0)
 
         return max(max_real, max_proxy) + 1
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 
@@ -2873,33 +2663,26 @@ def get_templates(chatid: int) -> List[Dict]:
     """
     Get all templates for a chat.
     """
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        if db_type == "postgresql":
-            cursor.execute(
-                "SELECT * FROM templates WHERE chatid = %s ORDER BY name ASC",
-                (chatid,),
-            )
-        else:
-            cursor.execute(
-                "SELECT * FROM templates WHERE chatid = ? ORDER BY name ASC",
-                (chatid,),
-            )
-        rows = cursor.fetchall()
-        if db_type == "postgresql":
-            return [dict(r) for r in rows]
-        else:
-            return [dict(r) for r in rows]
+        with _cursor() as cursor:
+            if db_type == "postgresql":
+                cursor.execute(
+                    "SELECT * FROM templates WHERE chatid = %s ORDER BY name ASC",
+                    (chatid,),
+                )
+            else:
+                cursor.execute(
+                    "SELECT * FROM templates WHERE chatid = ? ORDER BY name ASC",
+                    (chatid,),
+                )
+            rows = cursor.fetchall()
+            if db_type == "postgresql":
+                return [dict(r) for r in rows]
+            else:
+                return [dict(r) for r in rows]
     except Exception as e:
         logging.error(f"Error getting templates: {e}")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 def db_ping():
     """Lightweight database connectivity check."""
@@ -2929,35 +2712,28 @@ def get_template(chatid: int, name: str) -> Optional[Dict]:
     """
     Get a single template for a chat by name.
     """
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        if db_type == "postgresql":
-            cursor.execute(
-                "SELECT * FROM templates WHERE chatid = %s AND name = %s",
-                (chatid, name),
-            )
-        else:
-            cursor.execute(
-                "SELECT * FROM templates WHERE chatid = ? AND name = ?",
-                (chatid, name),
-            )
-        row = cursor.fetchone()
-        if row:
+        with _cursor() as cursor:
             if db_type == "postgresql":
-                return dict(row)
+                cursor.execute(
+                    "SELECT * FROM templates WHERE chatid = %s AND name = %s",
+                    (chatid, name),
+                )
             else:
-                return dict(row)
-        return None
+                cursor.execute(
+                    "SELECT * FROM templates WHERE chatid = ? AND name = ?",
+                    (chatid, name),
+                )
+            row = cursor.fetchone()
+            if row:
+                if db_type == "postgresql":
+                    return dict(row)
+                else:
+                    return dict(row)
+            return None
     except Exception as e:
         logging.error(f"Error getting template: {e}")
         return None
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 # ---------------------------------------------------------------------------
@@ -2966,48 +2742,34 @@ def get_template(chatid: int, name: str) -> Optional[Dict]:
 
 def get_ghost_count(chat_id: int, user_id: int) -> int:
     """Return the ghost count for a user in a chat (0 if no record)."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        cursor.execute(
-            f"SELECT ghost_count FROM ghost_records WHERE chat_id = {ph} AND user_id = {ph}",
-            (chat_id, user_id)
-        )
-        row = cursor.fetchone()
-        return row[0] if row else 0
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"SELECT ghost_count FROM ghost_records WHERE chat_id = {ph} AND user_id = {ph}",
+                (chat_id, user_id)
+            )
+            row = cursor.fetchone()
+            return row[0] if row else 0
     except Exception as e:
         logging.error(f"Error getting ghost count: {e}")
         return 0
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def get_ghost_count_by_proxy_name(chat_id: int, proxy_name: str) -> int:
     """Return the ghost count for a proxy user in a chat (0 if no record)."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        cursor.execute(
-            f"SELECT ghost_count FROM ghost_records WHERE chat_id = {ph} AND proxy_name = {ph}",
-            (chat_id, proxy_name)
-        )
-        row = cursor.fetchone()
-        return row[0] if row else 0
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"SELECT ghost_count FROM ghost_records WHERE chat_id = {ph} AND proxy_name = {ph}",
+                (chat_id, proxy_name)
+            )
+            row = cursor.fetchone()
+            return row[0] if row else 0
     except Exception as e:
         logging.error(f"Error getting ghost count by proxy name: {e}")
         return 0
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def increment_ghost_count(chat_id: int, user_id: int, user_name: str, proxy_name: str = None) -> bool:
@@ -3015,75 +2777,66 @@ def increment_ghost_count(chat_id: int, user_id: int, user_name: str, proxy_name
     
     For proxy users (added via /sif), pass user_id=-1 and the proxy_name.
     """
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        if db_type == 'postgresql':
-            if proxy_name:
-                cursor.execute(
-                    """INSERT INTO ghost_records (chat_id, user_id, proxy_name, user_name, ghost_count, last_ghosted_at)
-                       VALUES (%s, %s, %s, %s, 1, CURRENT_TIMESTAMP)
-                       ON CONFLICT (chat_id, proxy_name) WHERE proxy_name IS NOT NULL DO UPDATE
-                       SET ghost_count = ghost_records.ghost_count + 1,
-                           user_name = EXCLUDED.user_name,
-                           last_ghosted_at = CURRENT_TIMESTAMP""",
-                    (chat_id, user_id, proxy_name, user_name)
-                )
-            else:
-                cursor.execute(
-                    """INSERT INTO ghost_records (chat_id, user_id, user_name, ghost_count, last_ghosted_at)
-                       VALUES (%s, %s, %s, 1, CURRENT_TIMESTAMP)
-                       ON CONFLICT (chat_id, user_id) WHERE proxy_name IS NULL DO UPDATE
-                       SET ghost_count = ghost_records.ghost_count + 1,
-                           user_name = EXCLUDED.user_name,
-                           last_ghosted_at = CURRENT_TIMESTAMP""",
-                    (chat_id, user_id, user_name)
-                )
-        else:
-            # SQLite: For proxy users, look up by proxy_name; for real users, look up by user_id
-            if proxy_name:
-                cursor.execute(
-                    "SELECT id, ghost_count FROM ghost_records WHERE chat_id = ? AND proxy_name = ?",
-                    (chat_id, proxy_name)
-                )
-            else:
-                cursor.execute(
-                    "SELECT id, ghost_count FROM ghost_records WHERE chat_id = ? AND user_id = ?",
-                    (chat_id, user_id)
-                )
-            existing = cursor.fetchone()
-            if existing:
+        with _cursor(commit=True) as cursor:
+            if db_type == 'postgresql':
                 if proxy_name:
                     cursor.execute(
-                        """UPDATE ghost_records SET ghost_count = ghost_count + 1, user_name = ?, last_ghosted_at = CURRENT_TIMESTAMP
-                           WHERE chat_id = ? AND proxy_name = ?""",
-                        (user_name, chat_id, proxy_name)
+                        """INSERT INTO ghost_records (chat_id, user_id, proxy_name, user_name, ghost_count, last_ghosted_at)
+                           VALUES (%s, %s, %s, %s, 1, CURRENT_TIMESTAMP)
+                           ON CONFLICT (chat_id, proxy_name) WHERE proxy_name IS NOT NULL DO UPDATE
+                           SET ghost_count = ghost_records.ghost_count + 1,
+                               user_name = EXCLUDED.user_name,
+                               last_ghosted_at = CURRENT_TIMESTAMP""",
+                        (chat_id, user_id, proxy_name, user_name)
                     )
                 else:
                     cursor.execute(
-                        """UPDATE ghost_records SET ghost_count = ghost_count + 1, user_name = ?, last_ghosted_at = CURRENT_TIMESTAMP
-                           WHERE chat_id = ? AND user_id = ?""",
-                        (user_name, chat_id, user_id)
+                        """INSERT INTO ghost_records (chat_id, user_id, user_name, ghost_count, last_ghosted_at)
+                           VALUES (%s, %s, %s, 1, CURRENT_TIMESTAMP)
+                           ON CONFLICT (chat_id, user_id) WHERE proxy_name IS NULL DO UPDATE
+                           SET ghost_count = ghost_records.ghost_count + 1,
+                               user_name = EXCLUDED.user_name,
+                               last_ghosted_at = CURRENT_TIMESTAMP""",
+                        (chat_id, user_id, user_name)
                     )
             else:
-                cursor.execute(
-                    """INSERT INTO ghost_records (chat_id, user_id, proxy_name, user_name, ghost_count, last_ghosted_at)
-                       VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP)""",
-                    (chat_id, user_id, proxy_name, user_name)
-                )
-        conn.commit()
-        logging.info(f"Incremented ghost count for user {user_id}/{proxy_name} in chat {chat_id}")
-        return True
+                # SQLite: For proxy users, look up by proxy_name; for real users, look up by user_id
+                if proxy_name:
+                    cursor.execute(
+                        "SELECT id, ghost_count FROM ghost_records WHERE chat_id = ? AND proxy_name = ?",
+                        (chat_id, proxy_name)
+                    )
+                else:
+                    cursor.execute(
+                        "SELECT id, ghost_count FROM ghost_records WHERE chat_id = ? AND user_id = ?",
+                        (chat_id, user_id)
+                    )
+                existing = cursor.fetchone()
+                if existing:
+                    if proxy_name:
+                        cursor.execute(
+                            """UPDATE ghost_records SET ghost_count = ghost_count + 1, user_name = ?, last_ghosted_at = CURRENT_TIMESTAMP
+                               WHERE chat_id = ? AND proxy_name = ?""",
+                            (user_name, chat_id, proxy_name)
+                        )
+                    else:
+                        cursor.execute(
+                            """UPDATE ghost_records SET ghost_count = ghost_count + 1, user_name = ?, last_ghosted_at = CURRENT_TIMESTAMP
+                               WHERE chat_id = ? AND user_id = ?""",
+                            (user_name, chat_id, user_id)
+                        )
+                else:
+                    cursor.execute(
+                        """INSERT INTO ghost_records (chat_id, user_id, proxy_name, user_name, ghost_count, last_ghosted_at)
+                           VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP)""",
+                        (chat_id, user_id, proxy_name, user_name)
+                    )
+            logging.info(f"Incremented ghost count for user {user_id}/{proxy_name} in chat {chat_id}")
+            return True
     except Exception as e:
-        conn.rollback()
         logging.error(f"Error incrementing ghost count: {e}")
         return False
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def reset_ghost_count(chat_id: int, user_id: int, proxy_name: str = None) -> bool:
@@ -3091,33 +2844,24 @@ def reset_ghost_count(chat_id: int, user_id: int, proxy_name: str = None) -> boo
 
     For proxy users, pass user_id=-1 and the proxy_name.
     """
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        if proxy_name:
-            cursor.execute(
-                f"UPDATE ghost_records SET ghost_count = 0, last_ghosted_at = NULL WHERE chat_id = {ph} AND proxy_name = {ph}",
-                (chat_id, proxy_name)
-            )
-        else:
-            cursor.execute(
-                f"UPDATE ghost_records SET ghost_count = 0, last_ghosted_at = NULL WHERE chat_id = {ph} AND user_id = {ph}",
-                (chat_id, user_id)
-            )
-        conn.commit()
-        logging.info(f"Reset ghost count for user {user_id}/{proxy_name} in chat {chat_id}")
-        return True
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            if proxy_name:
+                cursor.execute(
+                    f"UPDATE ghost_records SET ghost_count = 0, last_ghosted_at = NULL WHERE chat_id = {ph} AND proxy_name = {ph}",
+                    (chat_id, proxy_name)
+                )
+            else:
+                cursor.execute(
+                    f"UPDATE ghost_records SET ghost_count = 0, last_ghosted_at = NULL WHERE chat_id = {ph} AND user_id = {ph}",
+                    (chat_id, user_id)
+                )
+            logging.info(f"Reset ghost count for user {user_id}/{proxy_name} in chat {chat_id}")
+            return True
     except Exception as e:
-        conn.rollback()
         logging.error(f"Error resetting ghost count: {e}")
         return False
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def decrement_ghost_count(chat_id: int, user_id: int, proxy_name: str = None) -> bool:
@@ -3128,106 +2872,74 @@ def decrement_ghost_count(chat_id: int, user_id: int, proxy_name: str = None) ->
     negative; when it lands at 0, last_ghosted_at is cleared too so the
     leaderboard and reconf threshold treat them as fresh.
     """
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        sql = (
-            "UPDATE ghost_records SET "
-            "ghost_count = CASE WHEN ghost_count > 0 THEN ghost_count - 1 ELSE 0 END, "
-            "last_ghosted_at = CASE WHEN ghost_count > 1 THEN last_ghosted_at ELSE NULL END "
-            f"WHERE chat_id = {ph} AND "
-        )
-        if proxy_name:
-            cursor.execute(sql + f"proxy_name = {ph}", (chat_id, proxy_name))
-        else:
-            cursor.execute(sql + f"user_id = {ph}", (chat_id, user_id))
-        conn.commit()
-        return True
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            sql = (
+                "UPDATE ghost_records SET "
+                "ghost_count = CASE WHEN ghost_count > 0 THEN ghost_count - 1 ELSE 0 END, "
+                "last_ghosted_at = CASE WHEN ghost_count > 1 THEN last_ghosted_at ELSE NULL END "
+                f"WHERE chat_id = {ph} AND "
+            )
+            if proxy_name:
+                cursor.execute(sql + f"proxy_name = {ph}", (chat_id, proxy_name))
+            else:
+                cursor.execute(sql + f"user_id = {ph}", (chat_id, user_id))
+            return True
     except Exception as e:
-        conn.rollback()
         logging.error(f"Error decrementing ghost count: {e}")
         return False
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def get_ghost_leaderboard(chat_id: int) -> List[Dict]:
     """Return all users with ghost_count > 0 for a chat, sorted descending."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        cursor.execute(
-            f"""SELECT user_id, proxy_name, user_name, ghost_count, last_ghosted_at
-                FROM ghost_records
-                WHERE chat_id = {ph} AND ghost_count > 0
-                ORDER BY ghost_count DESC, last_ghosted_at DESC""",
-            (chat_id,)
-        )
-        return [dict(row) for row in cursor.fetchall()]
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"""SELECT user_id, proxy_name, user_name, ghost_count, last_ghosted_at
+                    FROM ghost_records
+                    WHERE chat_id = {ph} AND ghost_count > 0
+                    ORDER BY ghost_count DESC, last_ghosted_at DESC""",
+                (chat_id,)
+            )
+            return [dict(row) for row in cursor.fetchall()]
     except Exception as e:
         logging.error(f"Error getting ghost leaderboard: {e}")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def get_user_ghost_count_by_name(chat_id: int, user_name: str) -> Optional[Dict]:
     """Find a ghost record by user_name or proxy_name for a chat (for admin /clear_absent by name)."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        cursor.execute(
-            f"SELECT user_id, proxy_name, user_name, ghost_count FROM ghost_records WHERE chat_id = {ph} AND (user_name = {ph} OR proxy_name = {ph})",
-            (chat_id, user_name, user_name)
-        )
-        row = cursor.fetchone()
-        return dict(row) if row else None
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"SELECT user_id, proxy_name, user_name, ghost_count FROM ghost_records WHERE chat_id = {ph} AND (user_name = {ph} OR proxy_name = {ph})",
+                (chat_id, user_name, user_name)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
     except Exception as e:
         logging.error(f"Error looking up ghost record by name: {e}")
         return None
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def mark_rollcall_absent_done(rollcall_id: int) -> bool:
     """Mark a rollcall's absent selection as completed."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        val = True if db_type == 'postgresql' else 1
-        cursor.execute(
-            f"UPDATE rollcalls SET absent_marked = {ph} WHERE id = {ph}",
-            (val, rollcall_id)
-        )
-        conn.commit()
-        logging.info(f"Marked rollcall {rollcall_id} absent_marked=True")
-        return True
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            val = True if db_type == 'postgresql' else 1
+            cursor.execute(
+                f"UPDATE rollcalls SET absent_marked = {ph} WHERE id = {ph}",
+                (val, rollcall_id)
+            )
+            logging.info(f"Marked rollcall {rollcall_id} absent_marked=True")
+            return True
     except Exception as e:
-        conn.rollback()
         logging.error(f"Error marking rollcall absent done: {e}")
         return False
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def get_unprocessed_rollcalls(chat_id: int, days: int = 30) -> List[Dict]:
@@ -3238,74 +2950,58 @@ def get_unprocessed_rollcalls(chat_id: int, days: int = 30) -> List[Dict]:
       - ended_at within the last `days` days
       - had at least one user with status='in'
     """
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        if db_type == 'postgresql':
-            cursor.execute(
-                """SELECT r.id, r.title, r.ended_at
-                   FROM rollcalls r
-                   WHERE r.chat_id = %s
-                     AND r.is_active = FALSE
-                     AND r.absent_marked = FALSE
-                     AND r.ended_at >= NOW() - (%s * INTERVAL '1 day')
-                     AND EXISTS (
-                         SELECT 1 FROM users u
-                         WHERE u.rollcall_id = r.id AND u.status = 'in'
-                     )
-                   ORDER BY r.ended_at DESC""",
-                (chat_id, days)
-            )
-        else:
-            cursor.execute(
-                """SELECT r.id, r.title, r.ended_at
-                   FROM rollcalls r
-                   WHERE r.chat_id = ?
-                     AND r.is_active = 0
-                     AND r.absent_marked = 0
-                     AND r.ended_at >= datetime('now', ? || ' days')
-                     AND EXISTS (
-                         SELECT 1 FROM users u
-                         WHERE u.rollcall_id = r.id AND u.status = 'in'
-                     )
-                   ORDER BY r.ended_at DESC""",
-                (chat_id, f'-{days}')
-            )
-        return [dict(row) for row in cursor.fetchall()]
+        with _cursor() as cursor:
+            if db_type == 'postgresql':
+                cursor.execute(
+                    """SELECT r.id, r.title, r.ended_at
+                       FROM rollcalls r
+                       WHERE r.chat_id = %s
+                         AND r.is_active = FALSE
+                         AND r.absent_marked = FALSE
+                         AND r.ended_at >= NOW() - (%s * INTERVAL '1 day')
+                         AND EXISTS (
+                             SELECT 1 FROM users u
+                             WHERE u.rollcall_id = r.id AND u.status = 'in'
+                         )
+                       ORDER BY r.ended_at DESC""",
+                    (chat_id, days)
+                )
+            else:
+                cursor.execute(
+                    """SELECT r.id, r.title, r.ended_at
+                       FROM rollcalls r
+                       WHERE r.chat_id = ?
+                         AND r.is_active = 0
+                         AND r.absent_marked = 0
+                         AND r.ended_at >= datetime('now', ? || ' days')
+                         AND EXISTS (
+                             SELECT 1 FROM users u
+                             WHERE u.rollcall_id = r.id AND u.status = 'in'
+                         )
+                       ORDER BY r.ended_at DESC""",
+                    (chat_id, f'-{days}')
+                )
+            return [dict(row) for row in cursor.fetchall()]
     except Exception as e:
         logging.error(f"Error getting unprocessed rollcalls: {e}")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def add_ghost_event(rollcall_id: int, chat_id: int, user_id: int = None, user_name: str = None, proxy_name: str = None) -> bool:
     """Record an individual ghost event for audit trail."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        cursor.execute(
-            f"""INSERT INTO ghost_events (rollcall_id, chat_id, user_id, proxy_name, user_name)
-                VALUES ({ph}, {ph}, {ph}, {ph}, {ph})""",
-            (rollcall_id, chat_id, user_id, proxy_name, user_name)
-        )
-        conn.commit()
-        return True
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"""INSERT INTO ghost_events (rollcall_id, chat_id, user_id, proxy_name, user_name)
+                    VALUES ({ph}, {ph}, {ph}, {ph}, {ph})""",
+                (rollcall_id, chat_id, user_id, proxy_name, user_name)
+            )
+            return True
     except Exception as e:
-        conn.rollback()
         logging.error(f"Error adding ghost event: {e}")
         return False
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def get_rollcall_in_users(rollcall_id: int) -> List[Dict]:
@@ -3314,173 +3010,133 @@ def get_rollcall_in_users(rollcall_id: int) -> List[Dict]:
     Real users (signed in via /in or the panel) have an integer ``user_id``.
     Proxy users (added via /sif) have ``user_id=None`` and a ``proxy_name`` key.
     """
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
 
-        # Real Telegram users
-        cursor.execute(
-            f"""SELECT user_id, first_name, username
-                FROM users
-                WHERE rollcall_id = {ph} AND status = 'in'
-                ORDER BY in_pos ASC""",
-            (rollcall_id,)
-        )
-        real_rows = [dict(row) for row in cursor.fetchall()]
+            # Real Telegram users
+            cursor.execute(
+                f"""SELECT user_id, first_name, username
+                    FROM users
+                    WHERE rollcall_id = {ph} AND status = 'in'
+                    ORDER BY in_pos ASC""",
+                (rollcall_id,)
+            )
+            real_rows = [dict(row) for row in cursor.fetchall()]
 
-        # Proxy users added via /sif (no Telegram user_id)
-        cursor.execute(
-            f"""SELECT name, proxy_owner_id
-                FROM proxy_users
-                WHERE rollcall_id = {ph} AND status = 'in'
-                ORDER BY in_pos ASC""",
-            (rollcall_id,)
-        )
-        proxy_rows = [
-            {'user_id': None, 'first_name': row['name'], 'username': None,
-             'proxy_name': row['name'], 'proxy_owner_id': row['proxy_owner_id']}
-            for row in cursor.fetchall()
-        ]
+            # Proxy users added via /sif (no Telegram user_id)
+            cursor.execute(
+                f"""SELECT name, proxy_owner_id
+                    FROM proxy_users
+                    WHERE rollcall_id = {ph} AND status = 'in'
+                    ORDER BY in_pos ASC""",
+                (rollcall_id,)
+            )
+            proxy_rows = [
+                {'user_id': None, 'first_name': row['name'], 'username': None,
+                 'proxy_name': row['name'], 'proxy_owner_id': row['proxy_owner_id']}
+                for row in cursor.fetchall()
+            ]
 
-        return real_rows + proxy_rows
+            return real_rows + proxy_rows
     except Exception as e:
         logging.error(f"Error getting rollcall IN users: {e}")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 # Ghost selection persistence: save/load selections to DB
 def save_ghost_selections(chat_id: int, rc_db_id: int, selected_ids: set) -> bool:
     """Save ghost selections to database for crash recovery"""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == 'postgresql' else "?"
-        ts = "NOW()" if db_type == 'postgresql' else "CURRENT_TIMESTAMP"
+        with _cursor(commit=True) as cursor:
+            ph = "%s" if db_type == 'postgresql' else "?"
+            ts = "NOW()" if db_type == 'postgresql' else "CURRENT_TIMESTAMP"
         
-        # Upsert selections
-        cursor.execute(
-            f"""INSERT INTO ghost_selections (chat_id, rc_db_id, selected_ids, updated_at)
-               VALUES ({ph}, {ph}, {ph}, {ts})
-               ON CONFLICT (chat_id, rc_db_id) 
-               DO UPDATE SET selected_ids = {ph}, updated_at = {ts}""",
-            (chat_id, rc_db_id, json.dumps(list(selected_ids)), json.dumps(list(selected_ids)))
-        )
-        conn.commit()
-        return True
+            # Upsert selections
+            cursor.execute(
+                f"""INSERT INTO ghost_selections (chat_id, rc_db_id, selected_ids, updated_at)
+                   VALUES ({ph}, {ph}, {ph}, {ts})
+                   ON CONFLICT (chat_id, rc_db_id) 
+                   DO UPDATE SET selected_ids = {ph}, updated_at = {ts}""",
+                (chat_id, rc_db_id, json.dumps(list(selected_ids)), json.dumps(list(selected_ids)))
+            )
+            return True
     except Exception as e:
         logging.error(f"Error saving ghost selections: {e}")
-        conn.rollback()
         return False
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def load_ghost_selections(chat_id: int, rc_db_id: int) -> Optional[set]:
     """Load ghost selections from database for crash recovery"""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == 'postgresql' else "?"
+        with _cursor() as cursor:
+            ph = "%s" if db_type == 'postgresql' else "?"
         
-        cursor.execute(
-            f"""SELECT selected_ids FROM ghost_selections 
-               WHERE chat_id = {ph} AND rc_db_id = {ph}""",
-            (chat_id, rc_db_id)
-        )
-        row = cursor.fetchone()
-        if row and row['selected_ids']:
-            return set(json.loads(row['selected_ids']))
-        return None
+            cursor.execute(
+                f"""SELECT selected_ids FROM ghost_selections 
+                   WHERE chat_id = {ph} AND rc_db_id = {ph}""",
+                (chat_id, rc_db_id)
+            )
+            row = cursor.fetchone()
+            if row and row['selected_ids']:
+                return set(json.loads(row['selected_ids']))
+            return None
     except Exception as e:
         logging.error(f"Error loading ghost selections: {e}")
         return None
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def create_ghost_selections_table() -> None:
     """Create ghost_selections table if not exists"""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        if db_type == 'postgresql':
-            cursor.execute("""CREATE TABLE IF NOT EXISTS ghost_selections (
-                chat_id BIGINT NOT NULL,
-                rc_db_id INTEGER NOT NULL,
-                selected_ids JSONB DEFAULT '[]',
-                updated_at TIMESTAMP DEFAULT NOW(),
-                PRIMARY KEY (chat_id, rc_db_id)
-            )""")
-        else:
-            cursor.execute("""CREATE TABLE IF NOT EXISTS ghost_selections (
-                chat_id INTEGER NOT NULL,
-                rc_db_id INTEGER NOT NULL,
-                selected_ids TEXT DEFAULT '[]',
-                updated_at TIMESTAMP,
-                PRIMARY KEY (chat_id, rc_db_id)
-            )""")
-        conn.commit()
+        with _cursor(commit=True) as cursor:
+            if db_type == 'postgresql':
+                cursor.execute("""CREATE TABLE IF NOT EXISTS ghost_selections (
+                    chat_id BIGINT NOT NULL,
+                    rc_db_id INTEGER NOT NULL,
+                    selected_ids JSONB DEFAULT '[]',
+                    updated_at TIMESTAMP DEFAULT NOW(),
+                    PRIMARY KEY (chat_id, rc_db_id)
+                )""")
+            else:
+                cursor.execute("""CREATE TABLE IF NOT EXISTS ghost_selections (
+                    chat_id INTEGER NOT NULL,
+                    rc_db_id INTEGER NOT NULL,
+                    selected_ids TEXT DEFAULT '[]',
+                    updated_at TIMESTAMP,
+                    PRIMARY KEY (chat_id, rc_db_id)
+                )""")
     except Exception as e:
         logging.error(f"Error creating ghost_selections table: {e}")
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def update_streak_on_checkin(chat_id: int, user_id: int) -> None:
     """Increment current_streak by 1 for a user at rollcall end; update best_streak if exceeded."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        if db_type == 'postgresql':
-            cursor.execute(f"""
-                INSERT INTO user_stats (chat_id, user_id, current_streak, best_streak)
-                VALUES ({ph}, {ph}, 1, 1)
-                ON CONFLICT (chat_id, user_id) DO UPDATE SET
-                    current_streak = user_stats.current_streak + 1,
-                    best_streak    = GREATEST(user_stats.best_streak, user_stats.current_streak + 1),
-                    updated_at     = CURRENT_TIMESTAMP
-            """, (chat_id, user_id))
-        else:
-            cursor.execute(f"""
-                INSERT OR IGNORE INTO user_stats (chat_id, user_id) VALUES ({ph}, {ph})
-            """, (chat_id, user_id))
-            cursor.execute(f"""
-                UPDATE user_stats
-                SET current_streak = current_streak + 1,
-                    best_streak    = MAX(best_streak, current_streak + 1),
-                    updated_at     = CURRENT_TIMESTAMP
-                WHERE chat_id = {ph} AND user_id = {ph}
-            """, (chat_id, user_id))
-        conn.commit()
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            if db_type == 'postgresql':
+                cursor.execute(f"""
+                    INSERT INTO user_stats (chat_id, user_id, current_streak, best_streak)
+                    VALUES ({ph}, {ph}, 1, 1)
+                    ON CONFLICT (chat_id, user_id) DO UPDATE SET
+                        current_streak = user_stats.current_streak + 1,
+                        best_streak    = GREATEST(user_stats.best_streak, user_stats.current_streak + 1),
+                        updated_at     = CURRENT_TIMESTAMP
+                """, (chat_id, user_id))
+            else:
+                cursor.execute(f"""
+                    INSERT OR IGNORE INTO user_stats (chat_id, user_id) VALUES ({ph}, {ph})
+                """, (chat_id, user_id))
+                cursor.execute(f"""
+                    UPDATE user_stats
+                    SET current_streak = current_streak + 1,
+                        best_streak    = MAX(best_streak, current_streak + 1),
+                        updated_at     = CURRENT_TIMESTAMP
+                    WHERE chat_id = {ph} AND user_id = {ph}
+                """, (chat_id, user_id))
     except Exception as e:
-        conn.rollback()
         logging.error(f"Error updating streak on checkin: {e}")
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def reset_user_streak(chat_id: int, user_id: int) -> None:
@@ -3581,64 +3237,50 @@ def reset_proxy_streak(chat_id: int, proxy_name: str) -> None:
 
 def get_user_streaks(chat_id: int, user_id: int) -> Dict:
     """Return {current_streak, best_streak} for a real user, 0s if no stats row."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        cursor.execute(f"""
-            SELECT current_streak, best_streak
-            FROM user_stats WHERE chat_id = {ph} AND user_id = {ph}
-        """, (chat_id, user_id))
-        row = cursor.fetchone()
-        if row is None:
-            return {'current_streak': 0, 'best_streak': 0}
-        if isinstance(row, dict):
-            return {
-                'current_streak': int(row.get('current_streak') or 0),
-                'best_streak':    int(row.get('best_streak') or 0),
-            }
-        return {'current_streak': int(row[0] or 0), 'best_streak': int(row[1] or 0)}
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(f"""
+                SELECT current_streak, best_streak
+                FROM user_stats WHERE chat_id = {ph} AND user_id = {ph}
+            """, (chat_id, user_id))
+            row = cursor.fetchone()
+            if row is None:
+                return {'current_streak': 0, 'best_streak': 0}
+            if isinstance(row, dict):
+                return {
+                    'current_streak': int(row.get('current_streak') or 0),
+                    'best_streak':    int(row.get('best_streak') or 0),
+                }
+            return {'current_streak': int(row[0] or 0), 'best_streak': int(row[1] or 0)}
     except Exception as e:
         logging.error(f"Error fetching user streaks: {e}")
         return {'current_streak': 0, 'best_streak': 0}
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def get_proxy_streaks(chat_id: int, proxy_name: str) -> Dict:
     """Return {current_streak, best_streak} for a proxy. Both default to 0
     if the proxy has no proxy_stats row yet (i.e. hasn't been through an
     /erc since proxy_stats was introduced)."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        cursor.execute(f"""
-            SELECT current_streak, best_streak
-            FROM proxy_stats WHERE chat_id = {ph} AND proxy_name = {ph}
-        """, (chat_id, proxy_name))
-        row = cursor.fetchone()
-        if row is None:
-            return {'current_streak': 0, 'best_streak': 0}
-        if isinstance(row, dict):
-            return {
-                'current_streak': int(row.get('current_streak') or 0),
-                'best_streak':    int(row.get('best_streak') or 0),
-            }
-        return {'current_streak': int(row[0] or 0), 'best_streak': int(row[1] or 0)}
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(f"""
+                SELECT current_streak, best_streak
+                FROM proxy_stats WHERE chat_id = {ph} AND proxy_name = {ph}
+            """, (chat_id, proxy_name))
+            row = cursor.fetchone()
+            if row is None:
+                return {'current_streak': 0, 'best_streak': 0}
+            if isinstance(row, dict):
+                return {
+                    'current_streak': int(row.get('current_streak') or 0),
+                    'best_streak':    int(row.get('best_streak') or 0),
+                }
+            return {'current_streak': int(row[0] or 0), 'best_streak': int(row[1] or 0)}
     except Exception as e:
         logging.error(f"Error fetching proxy streaks: {e}")
         return {'current_streak': 0, 'best_streak': 0}
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def get_chat_ended_rollcall_count(chat_id: int) -> int:
@@ -3649,30 +3291,23 @@ def get_chat_ended_rollcall_count(chat_id: int) -> int:
     they participated in. That's the only way "voting %" means engagement
     rather than "100% trivially because they voted at least once."
     """
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        active_false = 'FALSE' if db_type == 'postgresql' else '0'
-        cursor.execute(
-            f"SELECT COUNT(*) FROM rollcalls WHERE chat_id = {ph} AND is_active = {active_false}",
-            (chat_id,),
-        )
-        row = cursor.fetchone()
-        if row is None:
-            return 0
-        if isinstance(row, dict):
-            return int(next(iter(row.values())) or 0)
-        return int(row[0] or 0)
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            active_false = 'FALSE' if db_type == 'postgresql' else '0'
+            cursor.execute(
+                f"SELECT COUNT(*) FROM rollcalls WHERE chat_id = {ph} AND is_active = {active_false}",
+                (chat_id,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return 0
+            if isinstance(row, dict):
+                return int(next(iter(row.values())) or 0)
+            return int(row[0] or 0)
     except Exception as e:
         logging.error(f"Error counting ended rollcalls: {e}")
         return 0
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def get_user_attendance_count(chat_id: int, user_id: int) -> int:
@@ -3681,32 +3316,25 @@ def get_user_attendance_count(chat_id: int, user_id: int) -> int:
     user_stats.total_in counts every IN VOTE (which inflates if a user flips
     IN→OUT→IN within one session), so it must not be used for attendance %.
     """
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        active_false = 'FALSE' if db_type == 'postgresql' else '0'
-        cursor.execute(f"""
-            SELECT COUNT(*) FROM users u
-            JOIN rollcalls r ON u.rollcall_id = r.id
-            WHERE r.chat_id = {ph} AND u.user_id = {ph}
-              AND u.status = 'in' AND r.is_active = {active_false}
-        """, (chat_id, user_id))
-        row = cursor.fetchone()
-        if row is None:
-            return 0
-        if isinstance(row, dict):
-            return int(next(iter(row.values())) or 0)
-        return int(row[0] or 0)
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            active_false = 'FALSE' if db_type == 'postgresql' else '0'
+            cursor.execute(f"""
+                SELECT COUNT(*) FROM users u
+                JOIN rollcalls r ON u.rollcall_id = r.id
+                WHERE r.chat_id = {ph} AND u.user_id = {ph}
+                  AND u.status = 'in' AND r.is_active = {active_false}
+            """, (chat_id, user_id))
+            row = cursor.fetchone()
+            if row is None:
+                return 0
+            if isinstance(row, dict):
+                return int(next(iter(row.values())) or 0)
+            return int(row[0] or 0)
     except Exception as e:
         logging.error(f"Error counting attendance: {e}")
         return 0
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def get_leaderboard_by_attendance(chat_id: int, limit: int = 10) -> List[Dict]:
@@ -3721,160 +3349,146 @@ def get_leaderboard_by_attendance(chat_id: int, limit: int = 10) -> List[Dict]:
     breakdown — proxy rows count per-session, real-user rows count per-vote
     via user_stats).
     """
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        active_false = 'FALSE' if db_type == 'postgresql' else '0'
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            active_false = 'FALSE' if db_type == 'postgresql' else '0'
 
-        # Real users — same query as before
-        cursor.execute(f"""
-            SELECT us.user_id,
-                   COALESCE(att.attended, 0) AS attended,
-                   COALESCE(us.total_rollcalls, 0) AS total_rc,
-                   COALESCE(us.total_in, 0) AS total_in,
-                   COALESCE(us.total_out, 0) AS total_out,
-                   COALESCE(us.total_maybe, 0) AS total_maybe
-            FROM user_stats us
-            LEFT JOIN (
-                SELECT u.user_id, COUNT(*) AS attended
-                FROM users u
-                JOIN rollcalls r ON u.rollcall_id = r.id
-                WHERE r.chat_id = {ph} AND u.status = 'in' AND r.is_active = {active_false}
-                GROUP BY u.user_id
-            ) att ON att.user_id = us.user_id
-            WHERE us.chat_id = {ph}
-        """, (chat_id, chat_id))
-        real_rows = cursor.fetchall()
-
-        # Proxies — derived entirely from proxy_users because they have no
-        # user_stats counter row. Per-row metrics: attended = COUNT where
-        # status='in', total_rc = COUNT (any status), in/out/maybe = COUNT
-        # of each. proxy_users is UNIQUE(rollcall_id, name) so each row
-        # counts at most once per rollcall.
-        cursor.execute(f"""
-            SELECT pu.name,
-                   SUM(CASE WHEN pu.status = 'in'    THEN 1 ELSE 0 END) AS attended,
-                   COUNT(*) AS total_rc,
-                   SUM(CASE WHEN pu.status = 'in'    THEN 1 ELSE 0 END) AS total_in,
-                   SUM(CASE WHEN pu.status = 'out'   THEN 1 ELSE 0 END) AS total_out,
-                   SUM(CASE WHEN pu.status = 'maybe' THEN 1 ELSE 0 END) AS total_maybe
-            FROM proxy_users pu
-            JOIN rollcalls r ON pu.rollcall_id = r.id
-            WHERE r.chat_id = {ph} AND r.is_active = {active_false}
-            GROUP BY pu.name
-        """, (chat_id,))
-        proxy_rows = cursor.fetchall()
-
-        # Real-user display names — latest first_name/username per user_id
-        # from ended rollcalls. Filtered by is_active so we don't pull
-        # display data from in-progress sessions.
-        name_map = {}
-        if real_rows:
-            uids = [
-                (r['user_id'] if isinstance(r, dict) else r[0])
-                for r in real_rows
-            ]
-            placeholders = ",".join([ph] * len(uids))
-            if db_type == 'postgresql':
-                cursor.execute(f"""
-                    SELECT DISTINCT ON (u.user_id) u.user_id, u.first_name, u.username
+            # Real users — same query as before
+            cursor.execute(f"""
+                SELECT us.user_id,
+                       COALESCE(att.attended, 0) AS attended,
+                       COALESCE(us.total_rollcalls, 0) AS total_rc,
+                       COALESCE(us.total_in, 0) AS total_in,
+                       COALESCE(us.total_out, 0) AS total_out,
+                       COALESCE(us.total_maybe, 0) AS total_maybe
+                FROM user_stats us
+                LEFT JOIN (
+                    SELECT u.user_id, COUNT(*) AS attended
                     FROM users u
                     JOIN rollcalls r ON u.rollcall_id = r.id
-                    WHERE r.chat_id = {ph} AND r.is_active = {active_false}
-                      AND u.user_id IN ({placeholders})
-                    ORDER BY u.user_id, u.updated_at DESC
-                """, (chat_id, *uids))
-            else:
-                cursor.execute(f"""
-                    SELECT u.user_id, u.first_name, u.username
-                    FROM users u
-                    JOIN rollcalls r ON u.rollcall_id = r.id
-                    WHERE r.chat_id = {ph} AND r.is_active = {active_false}
-                      AND u.user_id IN ({placeholders})
-                    ORDER BY u.user_id, u.updated_at ASC
-                """, (chat_id, *uids))
-            for ur in cursor.fetchall():
-                if isinstance(ur, dict):
-                    name_map[ur['user_id']] = (ur.get('first_name'), ur.get('username'))
+                    WHERE r.chat_id = {ph} AND u.status = 'in' AND r.is_active = {active_false}
+                    GROUP BY u.user_id
+                ) att ON att.user_id = us.user_id
+                WHERE us.chat_id = {ph}
+            """, (chat_id, chat_id))
+            real_rows = cursor.fetchall()
+
+            # Proxies — derived entirely from proxy_users because they have no
+            # user_stats counter row. Per-row metrics: attended = COUNT where
+            # status='in', total_rc = COUNT (any status), in/out/maybe = COUNT
+            # of each. proxy_users is UNIQUE(rollcall_id, name) so each row
+            # counts at most once per rollcall.
+            cursor.execute(f"""
+                SELECT pu.name,
+                       SUM(CASE WHEN pu.status = 'in'    THEN 1 ELSE 0 END) AS attended,
+                       COUNT(*) AS total_rc,
+                       SUM(CASE WHEN pu.status = 'in'    THEN 1 ELSE 0 END) AS total_in,
+                       SUM(CASE WHEN pu.status = 'out'   THEN 1 ELSE 0 END) AS total_out,
+                       SUM(CASE WHEN pu.status = 'maybe' THEN 1 ELSE 0 END) AS total_maybe
+                FROM proxy_users pu
+                JOIN rollcalls r ON pu.rollcall_id = r.id
+                WHERE r.chat_id = {ph} AND r.is_active = {active_false}
+                GROUP BY pu.name
+            """, (chat_id,))
+            proxy_rows = cursor.fetchall()
+
+            # Real-user display names — latest first_name/username per user_id
+            # from ended rollcalls. Filtered by is_active so we don't pull
+            # display data from in-progress sessions.
+            name_map = {}
+            if real_rows:
+                uids = [
+                    (r['user_id'] if isinstance(r, dict) else r[0])
+                    for r in real_rows
+                ]
+                placeholders = ",".join([ph] * len(uids))
+                if db_type == 'postgresql':
+                    cursor.execute(f"""
+                        SELECT DISTINCT ON (u.user_id) u.user_id, u.first_name, u.username
+                        FROM users u
+                        JOIN rollcalls r ON u.rollcall_id = r.id
+                        WHERE r.chat_id = {ph} AND r.is_active = {active_false}
+                          AND u.user_id IN ({placeholders})
+                        ORDER BY u.user_id, u.updated_at DESC
+                    """, (chat_id, *uids))
                 else:
-                    name_map[ur[0]] = (ur[1], ur[2])
+                    cursor.execute(f"""
+                        SELECT u.user_id, u.first_name, u.username
+                        FROM users u
+                        JOIN rollcalls r ON u.rollcall_id = r.id
+                        WHERE r.chat_id = {ph} AND r.is_active = {active_false}
+                          AND u.user_id IN ({placeholders})
+                        ORDER BY u.user_id, u.updated_at ASC
+                    """, (chat_id, *uids))
+                for ur in cursor.fetchall():
+                    if isinstance(ur, dict):
+                        name_map[ur['user_id']] = (ur.get('first_name'), ur.get('username'))
+                    else:
+                        name_map[ur[0]] = (ur[1], ur[2])
 
-        # Materialize unified rows
-        unified = []
-        for r in real_rows:
-            uid = r['user_id'] if isinstance(r, dict) else r[0]
-            first_name, username = name_map.get(uid, (None, None))
-            unified.append({
-                'kind':            'real',
-                'user_id':         uid,
-                'proxy_name':      None,
-                'display_name':    first_name or username or f"User {uid}",
-                'username':        username,
-                'attended':        int((r['attended']    if isinstance(r, dict) else r[1]) or 0),
-                'total_rollcalls': int((r['total_rc']    if isinstance(r, dict) else r[2]) or 0),
-                'total_in':        int((r['total_in']    if isinstance(r, dict) else r[3]) or 0),
-                'total_out':       int((r['total_out']   if isinstance(r, dict) else r[4]) or 0),
-                'total_maybe':     int((r['total_maybe'] if isinstance(r, dict) else r[5]) or 0),
-            })
-        for r in proxy_rows:
-            name = r['name'] if isinstance(r, dict) else r[0]
-            unified.append({
-                'kind':            'proxy',
-                'user_id':         None,
-                'proxy_name':      name,
-                'display_name':    name,
-                'username':        None,
-                'attended':        int((r['attended']    if isinstance(r, dict) else r[1]) or 0),
-                'total_rollcalls': int((r['total_rc']    if isinstance(r, dict) else r[2]) or 0),
-                'total_in':        int((r['total_in']    if isinstance(r, dict) else r[3]) or 0),
-                'total_out':       int((r['total_out']   if isinstance(r, dict) else r[4]) or 0),
-                'total_maybe':     int((r['total_maybe'] if isinstance(r, dict) else r[5]) or 0),
-            })
+            # Materialize unified rows
+            unified = []
+            for r in real_rows:
+                uid = r['user_id'] if isinstance(r, dict) else r[0]
+                first_name, username = name_map.get(uid, (None, None))
+                unified.append({
+                    'kind':            'real',
+                    'user_id':         uid,
+                    'proxy_name':      None,
+                    'display_name':    first_name or username or f"User {uid}",
+                    'username':        username,
+                    'attended':        int((r['attended']    if isinstance(r, dict) else r[1]) or 0),
+                    'total_rollcalls': int((r['total_rc']    if isinstance(r, dict) else r[2]) or 0),
+                    'total_in':        int((r['total_in']    if isinstance(r, dict) else r[3]) or 0),
+                    'total_out':       int((r['total_out']   if isinstance(r, dict) else r[4]) or 0),
+                    'total_maybe':     int((r['total_maybe'] if isinstance(r, dict) else r[5]) or 0),
+                })
+            for r in proxy_rows:
+                name = r['name'] if isinstance(r, dict) else r[0]
+                unified.append({
+                    'kind':            'proxy',
+                    'user_id':         None,
+                    'proxy_name':      name,
+                    'display_name':    name,
+                    'username':        None,
+                    'attended':        int((r['attended']    if isinstance(r, dict) else r[1]) or 0),
+                    'total_rollcalls': int((r['total_rc']    if isinstance(r, dict) else r[2]) or 0),
+                    'total_in':        int((r['total_in']    if isinstance(r, dict) else r[3]) or 0),
+                    'total_out':       int((r['total_out']   if isinstance(r, dict) else r[4]) or 0),
+                    'total_maybe':     int((r['total_maybe'] if isinstance(r, dict) else r[5]) or 0),
+                })
 
-        # Sort by attended DESC, total_rollcalls ASC (rewards consistency),
-        # then deterministic tiebreak by display_name ASC.
-        unified.sort(key=lambda x: (-x['attended'], x['total_rollcalls'], x['display_name'] or ''))
-        return unified[:limit]
+            # Sort by attended DESC, total_rollcalls ASC (rewards consistency),
+            # then deterministic tiebreak by display_name ASC.
+            unified.sort(key=lambda x: (-x['attended'], x['total_rollcalls'], x['display_name'] or ''))
+            return unified[:limit]
     except Exception as e:
         logging.error(f"Error fetching attendance leaderboard: {e}")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def get_proxy_attendance_count(chat_id: int, proxy_name: str) -> int:
     """Same idea as get_user_attendance_count, but for proxy users."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        active_false = 'FALSE' if db_type == 'postgresql' else '0'
-        cursor.execute(f"""
-            SELECT COUNT(*) FROM proxy_users pu
-            JOIN rollcalls r ON pu.rollcall_id = r.id
-            WHERE r.chat_id = {ph} AND pu.name = {ph}
-              AND pu.status = 'in' AND r.is_active = {active_false}
-        """, (chat_id, proxy_name))
-        row = cursor.fetchone()
-        if row is None:
-            return 0
-        if isinstance(row, dict):
-            return int(next(iter(row.values())) or 0)
-        return int(row[0] or 0)
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            active_false = 'FALSE' if db_type == 'postgresql' else '0'
+            cursor.execute(f"""
+                SELECT COUNT(*) FROM proxy_users pu
+                JOIN rollcalls r ON pu.rollcall_id = r.id
+                WHERE r.chat_id = {ph} AND pu.name = {ph}
+                  AND pu.status = 'in' AND r.is_active = {active_false}
+            """, (chat_id, proxy_name))
+            row = cursor.fetchone()
+            if row is None:
+                return 0
+            if isinstance(row, dict):
+                return int(next(iter(row.values())) or 0)
+            return int(row[0] or 0)
     except Exception as e:
         logging.error(f"Error counting proxy attendance: {e}")
         return 0
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def get_proxy_stats(chat_id: int, proxy_name: str) -> Dict:
@@ -3883,47 +3497,40 @@ def get_proxy_stats(chat_id: int, proxy_name: str) -> Dict:
     For proxies the per-status breakdown is per-rollcall (proxy_users is
     UNIQUE(rollcall_id, name) so each row = one final status per session)
     — not per-vote like the real-user total_in counter."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        active_false = 'FALSE' if db_type == 'postgresql' else '0'
-        cursor.execute(f"""
-            SELECT COUNT(*) AS total_rc,
-                   SUM(CASE WHEN pu.status = 'in'    THEN 1 ELSE 0 END) AS total_in,
-                   SUM(CASE WHEN pu.status = 'out'   THEN 1 ELSE 0 END) AS total_out,
-                   SUM(CASE WHEN pu.status = 'maybe' THEN 1 ELSE 0 END) AS total_maybe
-            FROM proxy_users pu
-            JOIN rollcalls r ON pu.rollcall_id = r.id
-            WHERE r.chat_id = {ph} AND pu.name = {ph} AND r.is_active = {active_false}
-        """, (chat_id, proxy_name))
-        row = cursor.fetchone()
-        if row is None:
-            return {'total_rollcalls': 0, 'attended': 0, 'total_in': 0, 'total_out': 0, 'total_maybe': 0}
-        if isinstance(row, dict):
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            active_false = 'FALSE' if db_type == 'postgresql' else '0'
+            cursor.execute(f"""
+                SELECT COUNT(*) AS total_rc,
+                       SUM(CASE WHEN pu.status = 'in'    THEN 1 ELSE 0 END) AS total_in,
+                       SUM(CASE WHEN pu.status = 'out'   THEN 1 ELSE 0 END) AS total_out,
+                       SUM(CASE WHEN pu.status = 'maybe' THEN 1 ELSE 0 END) AS total_maybe
+                FROM proxy_users pu
+                JOIN rollcalls r ON pu.rollcall_id = r.id
+                WHERE r.chat_id = {ph} AND pu.name = {ph} AND r.is_active = {active_false}
+            """, (chat_id, proxy_name))
+            row = cursor.fetchone()
+            if row is None:
+                return {'total_rollcalls': 0, 'attended': 0, 'total_in': 0, 'total_out': 0, 'total_maybe': 0}
+            if isinstance(row, dict):
+                return {
+                    'total_rollcalls': int(row.get('total_rc') or 0),
+                    'attended':        int(row.get('total_in') or 0),
+                    'total_in':        int(row.get('total_in') or 0),
+                    'total_out':       int(row.get('total_out') or 0),
+                    'total_maybe':     int(row.get('total_maybe') or 0),
+                }
             return {
-                'total_rollcalls': int(row.get('total_rc') or 0),
-                'attended':        int(row.get('total_in') or 0),
-                'total_in':        int(row.get('total_in') or 0),
-                'total_out':       int(row.get('total_out') or 0),
-                'total_maybe':     int(row.get('total_maybe') or 0),
+                'total_rollcalls': int(row[0] or 0),
+                'attended':        int(row[1] or 0),
+                'total_in':        int(row[1] or 0),
+                'total_out':       int(row[2] or 0),
+                'total_maybe':     int(row[3] or 0),
             }
-        return {
-            'total_rollcalls': int(row[0] or 0),
-            'attended':        int(row[1] or 0),
-            'total_in':        int(row[1] or 0),
-            'total_out':       int(row[2] or 0),
-            'total_maybe':     int(row[3] or 0),
-        }
     except Exception as e:
         logging.error(f"Error fetching proxy stats: {e}")
         return {'total_rollcalls': 0, 'attended': 0, 'total_in': 0, 'total_out': 0, 'total_maybe': 0}
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def get_group_attendance_totals(chat_id: int) -> Dict:
@@ -4095,190 +3702,148 @@ def get_bot_attendance_totals() -> Dict:
 def find_proxy_in_chat(chat_id: int, name: str) -> bool:
     """Return True if a proxy named `name` exists in any rollcall of this chat.
     Used by resolve_user_for_stats to fall through to proxy lookup."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        cursor.execute(f"""
-            SELECT 1 FROM proxy_users pu
-            JOIN rollcalls r ON pu.rollcall_id = r.id
-            WHERE r.chat_id = {ph} AND pu.name = {ph}
-            LIMIT 1
-        """, (chat_id, name))
-        return cursor.fetchone() is not None
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(f"""
+                SELECT 1 FROM proxy_users pu
+                JOIN rollcalls r ON pu.rollcall_id = r.id
+                WHERE r.chat_id = {ph} AND pu.name = {ph}
+                LIMIT 1
+            """, (chat_id, name))
+            return cursor.fetchone() is not None
     except Exception as e:
         logging.error(f"Error finding proxy in chat: {e}")
         return False
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def find_user_by_username_for_stats(chat_id: int, username: str) -> Optional[Dict]:
     """Look up a real user by @username in this chat's ENDED rollcalls (for
     /stats <@user> resolution). Restricting to ended rollcalls keeps
     in-progress sessions from shadowing real history."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        active_false = 'FALSE' if db_type == 'postgresql' else '0'
-        cursor.execute(f"""
-            SELECT DISTINCT u.user_id, u.first_name FROM users u
-            JOIN rollcalls r ON u.rollcall_id = r.id
-            WHERE r.chat_id = {ph} AND u.username = {ph}
-              AND r.is_active = {active_false}
-            ORDER BY u.user_id LIMIT 1
-        """, (chat_id, username))
-        row = cursor.fetchone()
-        return dict(row) if row else None
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            active_false = 'FALSE' if db_type == 'postgresql' else '0'
+            cursor.execute(f"""
+                SELECT DISTINCT u.user_id, u.first_name FROM users u
+                JOIN rollcalls r ON u.rollcall_id = r.id
+                WHERE r.chat_id = {ph} AND u.username = {ph}
+                  AND r.is_active = {active_false}
+                ORDER BY u.user_id LIMIT 1
+            """, (chat_id, username))
+            row = cursor.fetchone()
+            return dict(row) if row else None
     except Exception as e:
         logging.error(f"Error finding user by username for stats: {e}")
         return None
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def find_users_by_name_for_stats(chat_id: int, name: str) -> List[Dict]:
     """Look up real users by display name in this chat's ENDED rollcalls
     (for /stats <name> resolution). May return multiple rows if several
     users share the name — caller decides how to handle ambiguity."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        active_false = 'FALSE' if db_type == 'postgresql' else '0'
-        cursor.execute(f"""
-            SELECT u.user_id, MAX(u.first_name) AS first_name,
-                   MAX(u.updated_at) AS latest_seen
-            FROM users u
-            JOIN rollcalls r ON u.rollcall_id = r.id
-            WHERE r.chat_id = {ph} AND u.first_name = {ph}
-              AND r.is_active = {active_false}
-            GROUP BY u.user_id
-            ORDER BY latest_seen DESC
-        """, (chat_id, name))
-        return [dict(r) for r in cursor.fetchall()]
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            active_false = 'FALSE' if db_type == 'postgresql' else '0'
+            cursor.execute(f"""
+                SELECT u.user_id, MAX(u.first_name) AS first_name,
+                       MAX(u.updated_at) AS latest_seen
+                FROM users u
+                JOIN rollcalls r ON u.rollcall_id = r.id
+                WHERE r.chat_id = {ph} AND u.first_name = {ph}
+                  AND r.is_active = {active_false}
+                GROUP BY u.user_id
+                ORDER BY latest_seen DESC
+            """, (chat_id, name))
+            return [dict(r) for r in cursor.fetchall()]
     except Exception as e:
         logging.error(f"Error finding users by name for stats: {e}")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def get_user_stats_row(chat_id: int, user_id: int) -> Optional[Dict]:
     """Raw user_stats row (vote totals, streaks) for personal_stats."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        cursor.execute(f"""
-            SELECT total_in, total_out, total_maybe, total_rollcalls,
-                   total_waiting_to_in, best_streak, current_streak
-            FROM user_stats WHERE chat_id = {ph} AND user_id = {ph}
-        """, (chat_id, user_id))
-        row = cursor.fetchone()
-        return dict(row) if row else None
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(f"""
+                SELECT total_in, total_out, total_maybe, total_rollcalls,
+                       total_waiting_to_in, best_streak, current_streak
+                FROM user_stats WHERE chat_id = {ph} AND user_id = {ph}
+            """, (chat_id, user_id))
+            row = cursor.fetchone()
+            return dict(row) if row else None
     except Exception as e:
         logging.error(f"Error fetching user_stats row: {e}")
         return None
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def get_rollcall_history(chat_id: int, limit: int = 10, offset: int = 0) -> List[Dict]:
     """Return ended rollcalls for a chat with participant counts, supporting pagination."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        if db_type == 'postgresql':
-            cursor.execute(f"""
-                SELECT r.id, r.title, r.ended_at,
-                    (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'in') +
-                    (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND p.status = 'in') AS in_count,
-                    (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'out') +
-                    (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND p.status = 'out') AS out_count,
-                    (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'maybe') +
-                    (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND p.status = 'maybe') AS maybe_count,
-                    (SELECT COUNT(*) FROM ghost_events g WHERE g.rollcall_id = r.id) AS ghost_count
-                FROM rollcalls r
-                WHERE r.chat_id = {ph} AND r.is_active = FALSE
-                ORDER BY r.ended_at DESC
-                LIMIT {ph} OFFSET {ph}
-            """, (chat_id, limit, offset))
-        else:
-            cursor.execute(f"""
-                SELECT r.id, r.title, r.ended_at,
-                    (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'in') +
-                    (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND p.status = 'in') AS in_count,
-                    (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'out') +
-                    (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND p.status = 'out') AS out_count,
-                    (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'maybe') +
-                    (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND p.status = 'maybe') AS maybe_count,
-                    (SELECT COUNT(*) FROM ghost_events g WHERE g.rollcall_id = r.id) AS ghost_count
-                FROM rollcalls r
-                WHERE r.chat_id = {ph} AND r.is_active = 0
-                ORDER BY r.ended_at DESC
-                LIMIT {ph} OFFSET {ph}
-            """, (chat_id, limit, offset))
-        return [dict(row) for row in cursor.fetchall()]
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            if db_type == 'postgresql':
+                cursor.execute(f"""
+                    SELECT r.id, r.title, r.ended_at,
+                        (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'in') +
+                        (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND p.status = 'in') AS in_count,
+                        (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'out') +
+                        (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND p.status = 'out') AS out_count,
+                        (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'maybe') +
+                        (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND p.status = 'maybe') AS maybe_count,
+                        (SELECT COUNT(*) FROM ghost_events g WHERE g.rollcall_id = r.id) AS ghost_count
+                    FROM rollcalls r
+                    WHERE r.chat_id = {ph} AND r.is_active = FALSE
+                    ORDER BY r.ended_at DESC
+                    LIMIT {ph} OFFSET {ph}
+                """, (chat_id, limit, offset))
+            else:
+                cursor.execute(f"""
+                    SELECT r.id, r.title, r.ended_at,
+                        (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'in') +
+                        (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND p.status = 'in') AS in_count,
+                        (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'out') +
+                        (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND p.status = 'out') AS out_count,
+                        (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'maybe') +
+                        (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND p.status = 'maybe') AS maybe_count,
+                        (SELECT COUNT(*) FROM ghost_events g WHERE g.rollcall_id = r.id) AS ghost_count
+                    FROM rollcalls r
+                    WHERE r.chat_id = {ph} AND r.is_active = 0
+                    ORDER BY r.ended_at DESC
+                    LIMIT {ph} OFFSET {ph}
+                """, (chat_id, limit, offset))
+            return [dict(row) for row in cursor.fetchall()]
     except Exception as e:
         logging.error(f"Error getting rollcall history: {e}")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def get_user_session_history(chat_id: int, user_id: int, limit: int = 15) -> List[Dict]:
     """Return recent ended rollcalls with the user's status for each (NULL = did not vote)."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        active_false = 'FALSE' if db_type == 'postgresql' else '0'
-        cancel_false = 'FALSE' if db_type == 'postgresql' else '0'
-        cursor.execute(f"""
-            SELECT r.id, r.title, r.ended_at,
-                   CASE WHEN COALESCE(r.is_cancelled, {cancel_false}) != {cancel_false}
-                        THEN 'cancelled'
-                        ELSE COALESCE(u.status, 'miss')
-                   END AS status
-            FROM rollcalls r
-            LEFT JOIN users u ON u.rollcall_id = r.id AND u.user_id = {ph}
-            WHERE r.chat_id = {ph} AND r.is_active = {active_false}
-            ORDER BY r.ended_at DESC
-            LIMIT {ph}
-        """, (user_id, chat_id, limit))
-        return [dict(row) for row in cursor.fetchall()]
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            active_false = 'FALSE' if db_type == 'postgresql' else '0'
+            cancel_false = 'FALSE' if db_type == 'postgresql' else '0'
+            cursor.execute(f"""
+                SELECT r.id, r.title, r.ended_at,
+                       CASE WHEN COALESCE(r.is_cancelled, {cancel_false}) != {cancel_false}
+                            THEN 'cancelled'
+                            ELSE COALESCE(u.status, 'miss')
+                       END AS status
+                FROM rollcalls r
+                LEFT JOIN users u ON u.rollcall_id = r.id AND u.user_id = {ph}
+                WHERE r.chat_id = {ph} AND r.is_active = {active_false}
+                ORDER BY r.ended_at DESC
+                LIMIT {ph}
+            """, (user_id, chat_id, limit))
+            return [dict(row) for row in cursor.fetchall()]
     except Exception as e:
         logging.error("Error getting user session history: %s", e)
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def get_user_voted_chats(tg_user_id: int) -> List[Dict]:
@@ -4288,136 +3853,115 @@ def get_user_voted_chats(tg_user_id: int) -> List[Dict]:
     sessions_attended, total_sessions, total_voted, current_streak,
     best_streak, ghost_count.
     """
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        active_false = 'FALSE' if db_type == 'postgresql' else '0'
-        cancel_false = 'FALSE' if db_type == 'postgresql' else '0'
-        cursor.execute(f"""
-            SELECT
-                us.chat_id,
-                c.group_name,
-                COALESCE(c.timezone, 'Asia/Kolkata') AS timezone,
-                c.group_web_token,
-                COALESCE(us.current_streak, 0)    AS current_streak,
-                COALESCE(us.best_streak, 0)        AS best_streak,
-                COALESCE(us.total_rollcalls, 0)    AS total_voted,
-                (SELECT COUNT(*) FROM users u2
-                 JOIN rollcalls r2 ON u2.rollcall_id = r2.id
-                 WHERE r2.chat_id = us.chat_id AND u2.user_id = us.user_id
-                   AND u2.status = 'in' AND r2.is_active = {active_false}
-                   AND COALESCE(r2.is_cancelled, {cancel_false}) = {cancel_false}
-                ) AS sessions_attended,
-                (SELECT COUNT(*) FROM rollcalls r3
-                 WHERE r3.chat_id = us.chat_id AND r3.is_active = {active_false}
-                 AND COALESCE(r3.is_cancelled, {cancel_false}) = {cancel_false}
-                ) AS total_sessions,
-                COALESCE((SELECT gr.ghost_count FROM ghost_records gr
-                 WHERE gr.chat_id = us.chat_id AND gr.user_id = us.user_id
-                   AND gr.proxy_name IS NULL LIMIT 1), 0) AS ghost_count
-            FROM user_stats us
-            JOIN chats c ON c.chat_id = us.chat_id
-            WHERE us.user_id = {ph}
-            ORDER BY sessions_attended DESC
-        """, (tg_user_id,))
-        return [dict(row) for row in cursor.fetchall()]
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            active_false = 'FALSE' if db_type == 'postgresql' else '0'
+            cancel_false = 'FALSE' if db_type == 'postgresql' else '0'
+            cursor.execute(f"""
+                SELECT
+                    us.chat_id,
+                    c.group_name,
+                    COALESCE(c.timezone, 'Asia/Kolkata') AS timezone,
+                    c.group_web_token,
+                    COALESCE(us.current_streak, 0)    AS current_streak,
+                    COALESCE(us.best_streak, 0)        AS best_streak,
+                    COALESCE(us.total_rollcalls, 0)    AS total_voted,
+                    (SELECT COUNT(*) FROM users u2
+                     JOIN rollcalls r2 ON u2.rollcall_id = r2.id
+                     WHERE r2.chat_id = us.chat_id AND u2.user_id = us.user_id
+                       AND u2.status = 'in' AND r2.is_active = {active_false}
+                       AND COALESCE(r2.is_cancelled, {cancel_false}) = {cancel_false}
+                    ) AS sessions_attended,
+                    (SELECT COUNT(*) FROM rollcalls r3
+                     WHERE r3.chat_id = us.chat_id AND r3.is_active = {active_false}
+                     AND COALESCE(r3.is_cancelled, {cancel_false}) = {cancel_false}
+                    ) AS total_sessions,
+                    COALESCE((SELECT gr.ghost_count FROM ghost_records gr
+                     WHERE gr.chat_id = us.chat_id AND gr.user_id = us.user_id
+                       AND gr.proxy_name IS NULL LIMIT 1), 0) AS ghost_count
+                FROM user_stats us
+                JOIN chats c ON c.chat_id = us.chat_id
+                WHERE us.user_id = {ph}
+                ORDER BY sessions_attended DESC
+            """, (tg_user_id,))
+            return [dict(row) for row in cursor.fetchall()]
     except Exception as e:
         logging.error("Error in get_user_voted_chats: %s", e)
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def get_user_rank_in_chat(chat_id: int, user_id: int) -> Optional[int]:
     """Return 1-based leaderboard rank for user in this chat (by final-IN count)."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        active_false = 'FALSE' if db_type == 'postgresql' else '0'
-        cancel_false = 'FALSE' if db_type == 'postgresql' else '0'
-        cursor.execute(f"""
-            SELECT COUNT(*) + 1 AS rank FROM (
-                SELECT u.user_id, COUNT(*) AS attended
-                FROM users u
-                JOIN rollcalls r ON u.rollcall_id = r.id
-                WHERE r.chat_id = {ph} AND u.status = 'in'
-                  AND r.is_active = {active_false}
-                  AND COALESCE(r.is_cancelled, {cancel_false}) = {cancel_false}
-                  AND u.user_id IS NOT NULL
-                GROUP BY u.user_id
-            ) sub
-            WHERE sub.attended > (
-                SELECT COUNT(*) FROM users u2
-                JOIN rollcalls r2 ON u2.rollcall_id = r2.id
-                WHERE r2.chat_id = {ph} AND u2.user_id = {ph}
-                  AND u2.status = 'in' AND r2.is_active = {active_false}
-                  AND COALESCE(r2.is_cancelled, {cancel_false}) = {cancel_false}
-            )
-        """, (chat_id, chat_id, user_id))
-        row = cursor.fetchone()
-        if row is None:
-            return None
-        val = row[0] if not isinstance(row, dict) else row.get('rank', 1)
-        return int(val) if val is not None else None
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            active_false = 'FALSE' if db_type == 'postgresql' else '0'
+            cancel_false = 'FALSE' if db_type == 'postgresql' else '0'
+            cursor.execute(f"""
+                SELECT COUNT(*) + 1 AS rank FROM (
+                    SELECT u.user_id, COUNT(*) AS attended
+                    FROM users u
+                    JOIN rollcalls r ON u.rollcall_id = r.id
+                    WHERE r.chat_id = {ph} AND u.status = 'in'
+                      AND r.is_active = {active_false}
+                      AND COALESCE(r.is_cancelled, {cancel_false}) = {cancel_false}
+                      AND u.user_id IS NOT NULL
+                    GROUP BY u.user_id
+                ) sub
+                WHERE sub.attended > (
+                    SELECT COUNT(*) FROM users u2
+                    JOIN rollcalls r2 ON u2.rollcall_id = r2.id
+                    WHERE r2.chat_id = {ph} AND u2.user_id = {ph}
+                      AND u2.status = 'in' AND r2.is_active = {active_false}
+                      AND COALESCE(r2.is_cancelled, {cancel_false}) = {cancel_false}
+                )
+            """, (chat_id, chat_id, user_id))
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            val = row[0] if not isinstance(row, dict) else row.get('rank', 1)
+            return int(val) if val is not None else None
     except Exception as e:
         logging.error("Error in get_user_rank_in_chat: %s", e)
         return None
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def get_user_upcoming_scheduled_rollcalls(tg_user_id: int, limit: int = 10) -> List[Dict]:
     """Return upcoming (unfired) scheduled rollcalls from all groups the user has voted in."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        if db_type == 'postgresql':
-            cursor.execute(f"""
-                SELECT sr.id, sr.chat_id, sr.title, sr.scheduled_at,
-                       c.group_name, c.group_web_token
-                FROM scheduled_rollcalls sr
-                JOIN chats c ON c.chat_id = sr.chat_id
-                WHERE sr.is_fired = FALSE
-                  AND sr.chat_id IN (
-                      SELECT chat_id FROM user_stats WHERE user_id = {ph}
-                  )
-                ORDER BY sr.scheduled_at ASC
-                LIMIT {ph}
-            """, (tg_user_id, limit))
-        else:
-            cursor.execute(f"""
-                SELECT sr.id, sr.chat_id, sr.title, sr.scheduled_at,
-                       c.group_name, c.group_web_token
-                FROM scheduled_rollcalls sr
-                JOIN chats c ON c.chat_id = sr.chat_id
-                WHERE sr.is_fired = 0
-                  AND sr.chat_id IN (
-                      SELECT chat_id FROM user_stats WHERE user_id = {ph}
-                  )
-                ORDER BY sr.scheduled_at ASC
-                LIMIT {ph}
-            """, (tg_user_id, limit))
-        return [dict(row) for row in cursor.fetchall()]
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            if db_type == 'postgresql':
+                cursor.execute(f"""
+                    SELECT sr.id, sr.chat_id, sr.title, sr.scheduled_at,
+                           c.group_name, c.group_web_token
+                    FROM scheduled_rollcalls sr
+                    JOIN chats c ON c.chat_id = sr.chat_id
+                    WHERE sr.is_fired = FALSE
+                      AND sr.chat_id IN (
+                          SELECT chat_id FROM user_stats WHERE user_id = {ph}
+                      )
+                    ORDER BY sr.scheduled_at ASC
+                    LIMIT {ph}
+                """, (tg_user_id, limit))
+            else:
+                cursor.execute(f"""
+                    SELECT sr.id, sr.chat_id, sr.title, sr.scheduled_at,
+                           c.group_name, c.group_web_token
+                    FROM scheduled_rollcalls sr
+                    JOIN chats c ON c.chat_id = sr.chat_id
+                    WHERE sr.is_fired = 0
+                      AND sr.chat_id IN (
+                          SELECT chat_id FROM user_stats WHERE user_id = {ph}
+                      )
+                    ORDER BY sr.scheduled_at ASC
+                    LIMIT {ph}
+                """, (tg_user_id, limit))
+            return [dict(row) for row in cursor.fetchall()]
     except Exception as e:
         logging.error("Error in get_user_upcoming_scheduled_rollcalls: %s", e)
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def log_admin_action(
@@ -4459,48 +4003,34 @@ def log_admin_action(
 
 def get_admin_audit_log(chat_id: int, limit: int = 15, offset: int = 0) -> List[Dict]:
     """Return admin/command actions for a chat with pagination support."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        cursor.execute(
-            f"SELECT id, admin_name, action_type, target_name, rollcall_id, details, created_at "
-            f"FROM admin_actions WHERE chat_id = {ph} ORDER BY created_at DESC LIMIT {ph} OFFSET {ph}",
-            (chat_id, limit, offset),
-        )
-        return [dict(row) for row in cursor.fetchall()]
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"SELECT id, admin_name, action_type, target_name, rollcall_id, details, created_at "
+                f"FROM admin_actions WHERE chat_id = {ph} ORDER BY created_at DESC LIMIT {ph} OFFSET {ph}",
+                (chat_id, limit, offset),
+            )
+            return [dict(row) for row in cursor.fetchall()]
     except Exception as e:
         logging.error(f"Error fetching admin audit log: {e}")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def count_admin_audit_log(chat_id: int) -> int:
     """Return total number of recorded actions for a chat."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        cursor.execute(
-            f"SELECT COUNT(*) FROM admin_actions WHERE chat_id = {ph}",
-            (chat_id,),
-        )
-        row = cursor.fetchone()
-        return row[0] if row else 0
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"SELECT COUNT(*) FROM admin_actions WHERE chat_id = {ph}",
+                (chat_id,),
+            )
+            row = cursor.fetchone()
+            return row[0] if row else 0
     except Exception as e:
         logging.error(f"Error counting admin audit log: {e}")
         return 0
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def upsert_chat_member(chat_id: int, user_id: int, first_name: str, username: str = None) -> None:
@@ -4509,62 +4039,46 @@ def upsert_chat_member(chat_id: int, user_id: int, first_name: str, username: st
     Called every time a real Telegram user votes so that display names stay
     fresh and the member is (re-)marked active.
     """
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        now = _utcnow_naive()
-        if db_type == 'postgresql':
-            cursor.execute(f"""
-                INSERT INTO chat_members (chat_id, user_id, first_name, username, is_active, last_seen)
-                VALUES ({ph}, {ph}, {ph}, {ph}, TRUE, {ph})
-                ON CONFLICT (chat_id, user_id) DO UPDATE SET
-                    first_name = EXCLUDED.first_name,
-                    username   = EXCLUDED.username,
-                    is_active  = TRUE,
-                    last_seen  = EXCLUDED.last_seen
-            """, (chat_id, user_id, first_name, username, now))
-        else:
-            cursor.execute(f"""
-                INSERT INTO chat_members (chat_id, user_id, first_name, username, is_active, last_seen)
-                VALUES ({ph}, {ph}, {ph}, {ph}, 1, {ph})
-                ON CONFLICT (chat_id, user_id) DO UPDATE SET
-                    first_name = excluded.first_name,
-                    username   = excluded.username,
-                    is_active  = 1,
-                    last_seen  = excluded.last_seen
-            """, (chat_id, user_id, first_name, username, now))
-        conn.commit()
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            now = _utcnow_naive()
+            if db_type == 'postgresql':
+                cursor.execute(f"""
+                    INSERT INTO chat_members (chat_id, user_id, first_name, username, is_active, last_seen)
+                    VALUES ({ph}, {ph}, {ph}, {ph}, TRUE, {ph})
+                    ON CONFLICT (chat_id, user_id) DO UPDATE SET
+                        first_name = EXCLUDED.first_name,
+                        username   = EXCLUDED.username,
+                        is_active  = TRUE,
+                        last_seen  = EXCLUDED.last_seen
+                """, (chat_id, user_id, first_name, username, now))
+            else:
+                cursor.execute(f"""
+                    INSERT INTO chat_members (chat_id, user_id, first_name, username, is_active, last_seen)
+                    VALUES ({ph}, {ph}, {ph}, {ph}, 1, {ph})
+                    ON CONFLICT (chat_id, user_id) DO UPDATE SET
+                        first_name = excluded.first_name,
+                        username   = excluded.username,
+                        is_active  = 1,
+                        last_seen  = excluded.last_seen
+                """, (chat_id, user_id, first_name, username, now))
     except Exception as e:
         logging.error(f"Error upserting chat member: {e}")
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def mark_member_inactive(chat_id: int, user_id: int) -> None:
     """Mark a member as no longer in the group (left or kicked)."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        active_val = False if db_type == 'postgresql' else 0
-        cursor.execute(f"""
-            UPDATE chat_members SET is_active = {ph}
-            WHERE chat_id = {ph} AND user_id = {ph}
-        """, (active_val, chat_id, user_id))
-        conn.commit()
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            active_val = False if db_type == 'postgresql' else 0
+            cursor.execute(f"""
+                UPDATE chat_members SET is_active = {ph}
+                WHERE chat_id = {ph} AND user_id = {ph}
+            """, (active_val, chat_id, user_id))
     except Exception as e:
         logging.error(f"Error marking member inactive: {e}")
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def get_active_members(chat_id: int) -> List[Dict]:
@@ -4573,27 +4087,20 @@ def get_active_members(chat_id: int) -> List[Dict]:
     These are real Telegram users (not proxy users) who have voted at least
     once and have not been detected as having left the group.
     """
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        active_val = True if db_type == 'postgresql' else 1
-        cursor.execute(f"""
-            SELECT user_id, first_name, username
-            FROM chat_members
-            WHERE chat_id = {ph} AND is_active = {ph}
-            ORDER BY last_seen DESC
-        """, (chat_id, active_val))
-        return [dict(row) for row in cursor.fetchall()]
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            active_val = True if db_type == 'postgresql' else 1
+            cursor.execute(f"""
+                SELECT user_id, first_name, username
+                FROM chat_members
+                WHERE chat_id = {ph} AND is_active = {ph}
+                ORDER BY last_seen DESC
+            """, (chat_id, active_val))
+            return [dict(row) for row in cursor.fetchall()]
     except Exception as e:
         logging.error(f"Error getting active members: {e}")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def get_member_display_info(chat_id: int, user_id: int) -> Optional[Dict]:
@@ -4602,29 +4109,22 @@ def get_member_display_info(chat_id: int, user_id: int) -> Optional[Dict]:
     Used by the web voting layer to enforce the canonical Telegram display name
     and username so that name conflicts are resolved the same way as in-bot voting.
     """
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        cursor.execute(
-            f"SELECT first_name, username FROM chat_members WHERE chat_id = {ph} AND user_id = {ph}",
-            (chat_id, user_id),
-        )
-        row = cursor.fetchone()
-        if not row:
-            return None
-        if isinstance(row, dict):
-            return {'first_name': row['first_name'], 'username': row.get('username')}
-        return {'first_name': row[0], 'username': row[1]}
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"SELECT first_name, username FROM chat_members WHERE chat_id = {ph} AND user_id = {ph}",
+                (chat_id, user_id),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            if isinstance(row, dict):
+                return {'first_name': row['first_name'], 'username': row.get('username')}
+            return {'first_name': row[0], 'username': row[1]}
     except Exception as e:
         logging.error(f"Error getting member display info: {e}")
         return None
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 # ────────────────────────────────────────────────────────────────────────
@@ -4659,26 +4159,17 @@ def insert_api_token(
 ) -> None:
     """Persist an issued token's hash, scopes, and metadata. The plaintext
     must NOT be passed here — it's the caller's responsibility to hash."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        cursor.execute(f"""
-            INSERT INTO api_tokens (token_hash, chat_id, issued_by_user_id,
-                                    scopes, label, expires_at)
-            VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph})
-        """, (token_hash, chat_id, issued_by_user_id, scopes, label, expires_at))
-        conn.commit()
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(f"""
+                INSERT INTO api_tokens (token_hash, chat_id, issued_by_user_id,
+                                        scopes, label, expires_at)
+                VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph})
+            """, (token_hash, chat_id, issued_by_user_id, scopes, label, expires_at))
     except Exception as e:
-        conn.rollback()
         logging.exception("insert_api_token: failed to persist token for chat %s: %s", chat_id, e)
         raise
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def lookup_api_token(token_hash: str) -> Optional[Dict]:
@@ -4688,414 +4179,310 @@ def lookup_api_token(token_hash: str) -> Optional[Dict]:
 
     Also bumps `last_used_at` as a side effect when a hit is returned, so
     operators can audit token activity via the same row."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        cursor.execute(f"""
-            SELECT chat_id, issued_by_user_id, scopes, label,
-                   created_at, expires_at, last_used_at, revoked_at
-            FROM api_tokens
-            WHERE token_hash = {ph}
-        """, (token_hash,))
-        row = cursor.fetchone()
-        if row is None:
-            return None
-
-        d = dict(row)
-        # Revoked or expired tokens act as non-existent for auth purposes.
-        if d.get("revoked_at") is not None:
-            return None
-        expires_at = d.get("expires_at")
-        if expires_at is not None:
-            # PG returns datetime; SQLite returns string. Coerce to compare.
-            from datetime import datetime, timezone
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
-            try:
-                if isinstance(expires_at, str):
-                    # SQLite stores datetimes as strings (datetime.__str__ gives
-                    # "YYYY-MM-DD HH:MM:SS.ffffff"). Try all plausible formats.
-                    parsed = None
-                    for fmt in (
-                        "%Y-%m-%d %H:%M:%S.%f",
-                        "%Y-%m-%d %H:%M:%S",
-                        "%Y-%m-%dT%H:%M:%SZ",
-                        "%Y-%m-%dT%H:%M:%S",
-                        "%Y-%m-%dT%H:%M:%S.%fZ",
-                        "%Y-%m-%dT%H:%M:%S.%f",
-                    ):
-                        try:
-                            parsed = datetime.strptime(expires_at, fmt).replace(tzinfo=None)
-                            break
-                        except ValueError:
-                            continue
-                    # Unparseable expiry → treat as expired (safe default).
-                    if parsed is None:
-                        return None
-                else:
-                    parsed = expires_at
-                if parsed is not None and parsed < now:
-                    return None
-            except Exception:
-                logging.exception("api_token expiry parse failed; treating as expired")
-                return None
-
-        # Bump last_used_at. Best-effort — don't fail the lookup if it fails.
-        try:
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
             cursor.execute(f"""
-                UPDATE api_tokens SET last_used_at = CURRENT_TIMESTAMP
+                SELECT chat_id, issued_by_user_id, scopes, label,
+                       created_at, expires_at, last_used_at, revoked_at
+                FROM api_tokens
                 WHERE token_hash = {ph}
             """, (token_hash,))
-            conn.commit()
-        except Exception:
-            logging.exception("api_token last_used_at update failed")
+            row = cursor.fetchone()
+            if row is None:
+                return None
 
-        d["scopes"] = [s.strip() for s in (d.get("scopes") or "").split(",") if s.strip()]
-        return d
+            d = dict(row)
+            # Revoked or expired tokens act as non-existent for auth purposes.
+            if d.get("revoked_at") is not None:
+                return None
+            expires_at = d.get("expires_at")
+            if expires_at is not None:
+                # PG returns datetime; SQLite returns string. Coerce to compare.
+                from datetime import datetime, timezone
+                now = datetime.now(timezone.utc).replace(tzinfo=None)
+                try:
+                    if isinstance(expires_at, str):
+                        # SQLite stores datetimes as strings (datetime.__str__ gives
+                        # "YYYY-MM-DD HH:MM:SS.ffffff"). Try all plausible formats.
+                        parsed = None
+                        for fmt in (
+                            "%Y-%m-%d %H:%M:%S.%f",
+                            "%Y-%m-%d %H:%M:%S",
+                            "%Y-%m-%dT%H:%M:%SZ",
+                            "%Y-%m-%dT%H:%M:%S",
+                            "%Y-%m-%dT%H:%M:%S.%fZ",
+                            "%Y-%m-%dT%H:%M:%S.%f",
+                        ):
+                            try:
+                                parsed = datetime.strptime(expires_at, fmt).replace(tzinfo=None)
+                                break
+                            except ValueError:
+                                continue
+                        # Unparseable expiry → treat as expired (safe default).
+                        if parsed is None:
+                            return None
+                    else:
+                        parsed = expires_at
+                    if parsed is not None and parsed < now:
+                        return None
+                except Exception:
+                    logging.exception("api_token expiry parse failed; treating as expired")
+                    return None
+
+            # Bump last_used_at. Best-effort — don't fail the lookup if it fails.
+            try:
+                cursor.execute(f"""
+                    UPDATE api_tokens SET last_used_at = CURRENT_TIMESTAMP
+                    WHERE token_hash = {ph}
+                """, (token_hash,))
+            except Exception:
+                logging.exception("api_token last_used_at update failed")
+
+            d["scopes"] = [s.strip() for s in (d.get("scopes") or "").split(",") if s.strip()]
+            return d
     except Exception:
         logging.exception("lookup_api_token failed")
         return None
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def list_api_tokens(chat_id: int) -> List[Dict]:
     """List all tokens issued for a chat (active + revoked + expired).
     Useful for the admin token-management surface. token_hash is included
     so revocation by hash works."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        cursor.execute(f"""
-            SELECT token_hash, issued_by_user_id, scopes, label,
-                   created_at, expires_at, last_used_at, revoked_at
-            FROM api_tokens
-            WHERE chat_id = {ph}
-            ORDER BY created_at DESC
-        """, (chat_id,))
-        return [dict(row) for row in cursor.fetchall()]
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(f"""
+                SELECT token_hash, issued_by_user_id, scopes, label,
+                       created_at, expires_at, last_used_at, revoked_at
+                FROM api_tokens
+                WHERE chat_id = {ph}
+                ORDER BY created_at DESC
+            """, (chat_id,))
+            return [dict(row) for row in cursor.fetchall()]
     except Exception:
         logging.exception("list_api_tokens failed")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def revoke_api_token(token_hash: str) -> bool:
     """Mark a token as revoked (sets revoked_at). Returns True if a row
     was modified, False if no such token (or already revoked)."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        cursor.execute(f"""
-            UPDATE api_tokens
-            SET revoked_at = CURRENT_TIMESTAMP
-            WHERE token_hash = {ph} AND revoked_at IS NULL
-        """, (token_hash,))
-        affected = cursor.rowcount
-        conn.commit()
-        return bool(affected)
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(f"""
+                UPDATE api_tokens
+                SET revoked_at = CURRENT_TIMESTAMP
+                WHERE token_hash = {ph} AND revoked_at IS NULL
+            """, (token_hash,))
+            affected = cursor.rowcount
+            return bool(affected)
     except Exception:
         logging.exception("revoke_api_token failed")
         return False
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 # ── Web presence / view-count helpers ────────────────────────────────────────
 
 def increment_group_view_count(group_token: str) -> int:
     """Upsert a view-count row for group_token and return the new total."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        if db_type == 'postgresql':
-            cursor.execute(f"""
-                INSERT INTO web_view_stats (group_token, view_count, last_viewed_at)
-                VALUES ({ph}, 1, CURRENT_TIMESTAMP)
-                ON CONFLICT (group_token)
-                DO UPDATE SET view_count = web_view_stats.view_count + 1,
-                              last_viewed_at = CURRENT_TIMESTAMP
-                RETURNING view_count
-            """, (group_token,))
-            row = cursor.fetchone()
-            count = int(row[0] if row else 1)
-        else:
-            cursor.execute(f"""
-                INSERT INTO web_view_stats (group_token, view_count, last_viewed_at)
-                VALUES ({ph}, 1, CURRENT_TIMESTAMP)
-                ON CONFLICT (group_token)
-                DO UPDATE SET view_count = view_count + 1,
-                              last_viewed_at = CURRENT_TIMESTAMP
-            """, (group_token,))
-            cursor.execute(f"SELECT view_count FROM web_view_stats WHERE group_token = {ph}", (group_token,))
-            row = cursor.fetchone()
-            count = int(row[0] if row else 1)
-        conn.commit()
-        return count
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            if db_type == 'postgresql':
+                cursor.execute(f"""
+                    INSERT INTO web_view_stats (group_token, view_count, last_viewed_at)
+                    VALUES ({ph}, 1, CURRENT_TIMESTAMP)
+                    ON CONFLICT (group_token)
+                    DO UPDATE SET view_count = web_view_stats.view_count + 1,
+                                  last_viewed_at = CURRENT_TIMESTAMP
+                    RETURNING view_count
+                """, (group_token,))
+                row = cursor.fetchone()
+                count = int(row[0] if row else 1)
+            else:
+                cursor.execute(f"""
+                    INSERT INTO web_view_stats (group_token, view_count, last_viewed_at)
+                    VALUES ({ph}, 1, CURRENT_TIMESTAMP)
+                    ON CONFLICT (group_token)
+                    DO UPDATE SET view_count = view_count + 1,
+                                  last_viewed_at = CURRENT_TIMESTAMP
+                """, (group_token,))
+                cursor.execute(f"SELECT view_count FROM web_view_stats WHERE group_token = {ph}", (group_token,))
+                row = cursor.fetchone()
+                count = int(row[0] if row else 1)
+            return count
     except Exception:
         logging.exception("increment_group_view_count failed")
         return 0
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def get_group_view_count(group_token: str) -> int:
     """Return the total view count for group_token (0 if none recorded yet)."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        cursor.execute(
-            f"SELECT view_count FROM web_view_stats WHERE group_token = {ph}",
-            (group_token,),
-        )
-        row = cursor.fetchone()
-        return int(row[0] if row else 0)
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"SELECT view_count FROM web_view_stats WHERE group_token = {ph}",
+                (group_token,),
+            )
+            row = cursor.fetchone()
+            return int(row[0] if row else 0)
     except Exception:
         logging.exception("get_group_view_count failed")
         return 0
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def get_system_config(key: str) -> Optional[str]:
     """Return a value from system_config, or None if not set."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        cursor.execute(f"SELECT value FROM system_config WHERE key = {ph}", (key,))
-        row = cursor.fetchone()
-        if row is None:
-            return None
-        return row[0] if not isinstance(row, dict) else row['value']
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(f"SELECT value FROM system_config WHERE key = {ph}", (key,))
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            return row[0] if not isinstance(row, dict) else row['value']
     except Exception:
         logging.exception("get_system_config failed for key=%s", key)
         return None
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def set_system_config(key: str, value: str) -> None:
     """Upsert a key/value pair in system_config."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        if db_type == 'postgresql':
-            cursor.execute(f"""
-                INSERT INTO system_config (key, value, updated_at)
-                VALUES ({ph}, {ph}, CURRENT_TIMESTAMP)
-                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
-            """, (key, value))
-        else:
-            cursor.execute(f"""
-                INSERT OR REPLACE INTO system_config (key, value, updated_at)
-                VALUES ({ph}, {ph}, CURRENT_TIMESTAMP)
-            """, (key, value))
-        conn.commit()
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            if db_type == 'postgresql':
+                cursor.execute(f"""
+                    INSERT INTO system_config (key, value, updated_at)
+                    VALUES ({ph}, {ph}, CURRENT_TIMESTAMP)
+                    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
+                """, (key, value))
+            else:
+                cursor.execute(f"""
+                    INSERT OR REPLACE INTO system_config (key, value, updated_at)
+                    VALUES ({ph}, {ph}, CURRENT_TIMESTAMP)
+                """, (key, value))
     except Exception:
-        conn.rollback()
         logging.exception("set_system_config failed for key=%s", key)
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def save_push_subscription(group_token: str, endpoint: str, p256dh: str, auth: str, tg_user_id: Optional[int] = None) -> None:
     """Upsert a push subscription for a group. Re-activates if previously unsubscribed."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        if db_type == 'postgresql':
-            cursor.execute(f"""
-                INSERT INTO push_subscriptions (group_token, endpoint, p256dh, auth, active, tg_user_id)
-                VALUES ({ph}, {ph}, {ph}, {ph}, TRUE, {ph})
-                ON CONFLICT (endpoint) DO UPDATE SET
-                    group_token = EXCLUDED.group_token,
-                    p256dh      = EXCLUDED.p256dh,
-                    auth        = EXCLUDED.auth,
-                    active      = TRUE,
-                    tg_user_id  = COALESCE(EXCLUDED.tg_user_id, push_subscriptions.tg_user_id),
-                    created_at  = CURRENT_TIMESTAMP
-            """, (group_token, endpoint, p256dh, auth, tg_user_id))
-        else:
-            cursor.execute(f"""
-                INSERT OR REPLACE INTO push_subscriptions (group_token, endpoint, p256dh, auth, active, tg_user_id)
-                VALUES ({ph}, {ph}, {ph}, {ph}, 1, {ph})
-            """, (group_token, endpoint, p256dh, auth, tg_user_id))
-        conn.commit()
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            if db_type == 'postgresql':
+                cursor.execute(f"""
+                    INSERT INTO push_subscriptions (group_token, endpoint, p256dh, auth, active, tg_user_id)
+                    VALUES ({ph}, {ph}, {ph}, {ph}, TRUE, {ph})
+                    ON CONFLICT (endpoint) DO UPDATE SET
+                        group_token = EXCLUDED.group_token,
+                        p256dh      = EXCLUDED.p256dh,
+                        auth        = EXCLUDED.auth,
+                        active      = TRUE,
+                        tg_user_id  = COALESCE(EXCLUDED.tg_user_id, push_subscriptions.tg_user_id),
+                        created_at  = CURRENT_TIMESTAMP
+                """, (group_token, endpoint, p256dh, auth, tg_user_id))
+            else:
+                cursor.execute(f"""
+                    INSERT OR REPLACE INTO push_subscriptions (group_token, endpoint, p256dh, auth, active, tg_user_id)
+                    VALUES ({ph}, {ph}, {ph}, {ph}, 1, {ph})
+                """, (group_token, endpoint, p256dh, auth, tg_user_id))
     except Exception:
-        conn.rollback()
         logging.exception("save_push_subscription failed")
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def get_push_subscriptions(group_token: str) -> List[Dict]:
     """Return all active push subscriptions for a group."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        active_val = 'TRUE' if db_type == 'postgresql' else '1'
-        cursor.execute(
-            f"SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE group_token = {ph} AND active = {active_val}",
-            (group_token,)
-        )
-        rows = cursor.fetchall()
-        result = []
-        for row in rows:
-            if isinstance(row, dict):
-                result.append({'endpoint': row['endpoint'], 'p256dh': row['p256dh'], 'auth': row['auth']})
-            else:
-                result.append({'endpoint': row[0], 'p256dh': row[1], 'auth': row[2]})
-        return result
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            active_val = 'TRUE' if db_type == 'postgresql' else '1'
+            cursor.execute(
+                f"SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE group_token = {ph} AND active = {active_val}",
+                (group_token,)
+            )
+            rows = cursor.fetchall()
+            result = []
+            for row in rows:
+                if isinstance(row, dict):
+                    result.append({'endpoint': row['endpoint'], 'p256dh': row['p256dh'], 'auth': row['auth']})
+                else:
+                    result.append({'endpoint': row[0], 'p256dh': row[1], 'auth': row[2]})
+            return result
     except Exception:
         logging.exception("get_push_subscriptions failed")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def delete_push_subscription(endpoint: str) -> None:
     """Mark a push subscription inactive (expired or unsubscribed)."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        cursor.execute(
-            f"UPDATE push_subscriptions SET active = {'FALSE' if db_type == 'postgresql' else '0'} WHERE endpoint = {ph}",
-            (endpoint,)
-        )
-        conn.commit()
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"UPDATE push_subscriptions SET active = {'FALSE' if db_type == 'postgresql' else '0'} WHERE endpoint = {ph}",
+                (endpoint,)
+            )
     except Exception:
-        conn.rollback()
         logging.exception("delete_push_subscription failed")
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def create_web_verify_token(code: str, expires_at: "datetime") -> None:
     """Store a new one-time verification code."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        cursor.execute(
-            f"INSERT INTO web_verify_tokens (code, expires_at) VALUES ({ph}, {ph})",
-            (code, expires_at.isoformat()),
-        )
-        conn.commit()
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"INSERT INTO web_verify_tokens (code, expires_at) VALUES ({ph}, {ph})",
+                (code, expires_at.isoformat()),
+            )
     except Exception:
-        conn.rollback()
         logging.exception("create_web_verify_token failed")
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def mark_web_verify_token(code: str, tg_user_id: int, tg_name: str, tg_username: Optional[str] = None) -> bool:
     """Bot calls this once the user opens the deep link. Returns True if code was found and unmarked."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        now = _utcnow_naive().isoformat()
-        cursor.execute(
-            f"UPDATE web_verify_tokens SET tg_user_id={ph}, tg_name={ph}, tg_username={ph} "
-            f"WHERE code={ph} AND tg_user_id IS NULL AND used_at IS NULL AND expires_at > {ph}",
-            (tg_user_id, tg_name, tg_username, code, now),
-        )
-        updated = cursor.rowcount > 0
-        conn.commit()
-        return updated
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            now = _utcnow_naive().isoformat()
+            cursor.execute(
+                f"UPDATE web_verify_tokens SET tg_user_id={ph}, tg_name={ph}, tg_username={ph} "
+                f"WHERE code={ph} AND tg_user_id IS NULL AND used_at IS NULL AND expires_at > {ph}",
+                (tg_user_id, tg_name, tg_username, code, now),
+            )
+            updated = cursor.rowcount > 0
+            return updated
     except Exception:
-        conn.rollback()
         logging.exception("mark_web_verify_token failed")
         return False
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def get_web_verify_token(code: str) -> Optional[Dict]:
     """Return the token row if it exists and is not expired, else None."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        now = _utcnow_naive().isoformat()
-        cursor.execute(
-            f"SELECT code, tg_user_id, tg_name, tg_username, used_at FROM web_verify_tokens "
-            f"WHERE code={ph} AND expires_at > {ph}",
-            (code, now),
-        )
-        row = cursor.fetchone()
-        if row is None:
-            return None
-        if isinstance(row, dict):
-            return dict(row)
-        return {'code': row[0], 'tg_user_id': row[1], 'tg_name': row[2], 'tg_username': row[3], 'used_at': row[4]}
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            now = _utcnow_naive().isoformat()
+            cursor.execute(
+                f"SELECT code, tg_user_id, tg_name, tg_username, used_at FROM web_verify_tokens "
+                f"WHERE code={ph} AND expires_at > {ph}",
+                (code, now),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            if isinstance(row, dict):
+                return dict(row)
+            return {'code': row[0], 'tg_user_id': row[1], 'tg_name': row[2], 'tg_username': row[3], 'used_at': row[4]}
     except Exception:
         logging.exception("get_web_verify_token failed")
         return None
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def consume_web_verify_token(code: str) -> Optional[Dict]:
@@ -5138,53 +4525,37 @@ def consume_web_verify_token(code: str) -> Optional[Dict]:
 
 def set_web_admin(chat_id: int, tg_user_id: int, tg_name: str) -> None:
     """Upsert a web admin for a chat (called when admin runs /weblink)."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        if db_type == 'postgresql':
-            cursor.execute(
-                f"INSERT INTO web_admins (chat_id, tg_user_id, tg_name) VALUES ({ph},{ph},{ph}) "
-                f"ON CONFLICT (chat_id, tg_user_id) DO UPDATE SET tg_name = EXCLUDED.tg_name, added_at = NOW()",
-                (chat_id, tg_user_id, tg_name),
-            )
-        else:
-            cursor.execute(
-                f"INSERT OR REPLACE INTO web_admins (chat_id, tg_user_id, tg_name) VALUES ({ph},{ph},{ph})",
-                (chat_id, tg_user_id, tg_name),
-            )
-        conn.commit()
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            if db_type == 'postgresql':
+                cursor.execute(
+                    f"INSERT INTO web_admins (chat_id, tg_user_id, tg_name) VALUES ({ph},{ph},{ph}) "
+                    f"ON CONFLICT (chat_id, tg_user_id) DO UPDATE SET tg_name = EXCLUDED.tg_name, added_at = NOW()",
+                    (chat_id, tg_user_id, tg_name),
+                )
+            else:
+                cursor.execute(
+                    f"INSERT OR REPLACE INTO web_admins (chat_id, tg_user_id, tg_name) VALUES ({ph},{ph},{ph})",
+                    (chat_id, tg_user_id, tg_name),
+                )
     except Exception:
-        conn.rollback()
         logging.exception("set_web_admin failed")
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def is_web_admin(chat_id: int, tg_user_id: int) -> bool:
     """Return True if the user is a cached web admin for this chat."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        cursor.execute(
-            f"SELECT 1 FROM web_admins WHERE chat_id={ph} AND tg_user_id={ph}",
-            (chat_id, tg_user_id),
-        )
-        return cursor.fetchone() is not None
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"SELECT 1 FROM web_admins WHERE chat_id={ph} AND tg_user_id={ph}",
+                (chat_id, tg_user_id),
+            )
+            return cursor.fetchone() is not None
     except Exception:
         logging.exception("is_web_admin failed")
         return False
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def get_response_time_leaderboard(chat_id: int, limit: int = 10) -> List[Dict]:
@@ -5196,76 +4567,69 @@ def get_response_time_leaderboard(chat_id: int, limit: int = 10) -> List[Dict]:
     Only ended rollcalls with positive response times are included.
     Ordered fastest-first.
     """
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        if db_type == 'postgresql':
-            cursor.execute(f"""
-                SELECT
-                    u.user_id,
-                    u.first_name AS display_name,
-                    u.username,
-                    AVG(EXTRACT(EPOCH FROM (u.created_at - r.created_at)))::bigint AS avg_seconds,
-                    MIN(EXTRACT(EPOCH FROM (u.created_at - r.created_at)))::bigint AS best_seconds,
-                    COUNT(*)::int AS rollcall_count
-                FROM users u
-                JOIN rollcalls r ON u.rollcall_id = r.id
-                WHERE r.chat_id = {ph}
-                  AND r.ended_at IS NOT NULL
-                  AND u.created_at > r.created_at
-                GROUP BY u.user_id, u.first_name, u.username
-                HAVING COUNT(*) >= 1
-                ORDER BY avg_seconds ASC
-                LIMIT {ph}
-            """, (chat_id, limit))
-        else:
-            cursor.execute(f"""
-                SELECT
-                    u.user_id,
-                    u.first_name AS display_name,
-                    u.username,
-                    CAST(AVG((julianday(u.created_at) - julianday(r.created_at)) * 86400) AS INTEGER) AS avg_seconds,
-                    CAST(MIN((julianday(u.created_at) - julianday(r.created_at)) * 86400) AS INTEGER) AS best_seconds,
-                    COUNT(*) AS rollcall_count
-                FROM users u
-                JOIN rollcalls r ON u.rollcall_id = r.id
-                WHERE r.chat_id = {ph}
-                  AND r.ended_at IS NOT NULL
-                  AND u.created_at > r.created_at
-                GROUP BY u.user_id, u.first_name, u.username
-                HAVING COUNT(*) >= 1
-                ORDER BY avg_seconds ASC
-                LIMIT {ph}
-            """, (chat_id, limit))
-        rows = cursor.fetchall()
-        result = []
-        for row in rows:
-            if isinstance(row, dict):
-                r = row
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            if db_type == 'postgresql':
+                cursor.execute(f"""
+                    SELECT
+                        u.user_id,
+                        u.first_name AS display_name,
+                        u.username,
+                        AVG(EXTRACT(EPOCH FROM (u.created_at - r.created_at)))::bigint AS avg_seconds,
+                        MIN(EXTRACT(EPOCH FROM (u.created_at - r.created_at)))::bigint AS best_seconds,
+                        COUNT(*)::int AS rollcall_count
+                    FROM users u
+                    JOIN rollcalls r ON u.rollcall_id = r.id
+                    WHERE r.chat_id = {ph}
+                      AND r.ended_at IS NOT NULL
+                      AND u.created_at > r.created_at
+                    GROUP BY u.user_id, u.first_name, u.username
+                    HAVING COUNT(*) >= 1
+                    ORDER BY avg_seconds ASC
+                    LIMIT {ph}
+                """, (chat_id, limit))
             else:
-                r = {
-                    'user_id': row[0], 'display_name': row[1], 'username': row[2],
-                    'avg_seconds': row[3], 'best_seconds': row[4], 'rollcall_count': row[5],
-                }
-            result.append({
-                'user_id': int(r['user_id']),
-                'display_name': r['display_name'] or '',
-                'username': r['username'] or '',
-                'avg_response_seconds': int(r['avg_seconds'] or 0),
-                'best_response_seconds': int(r['best_seconds'] or 0),
-                'rollcall_count': int(r['rollcall_count'] or 0),
-            })
-        return result
+                cursor.execute(f"""
+                    SELECT
+                        u.user_id,
+                        u.first_name AS display_name,
+                        u.username,
+                        CAST(AVG((julianday(u.created_at) - julianday(r.created_at)) * 86400) AS INTEGER) AS avg_seconds,
+                        CAST(MIN((julianday(u.created_at) - julianday(r.created_at)) * 86400) AS INTEGER) AS best_seconds,
+                        COUNT(*) AS rollcall_count
+                    FROM users u
+                    JOIN rollcalls r ON u.rollcall_id = r.id
+                    WHERE r.chat_id = {ph}
+                      AND r.ended_at IS NOT NULL
+                      AND u.created_at > r.created_at
+                    GROUP BY u.user_id, u.first_name, u.username
+                    HAVING COUNT(*) >= 1
+                    ORDER BY avg_seconds ASC
+                    LIMIT {ph}
+                """, (chat_id, limit))
+            rows = cursor.fetchall()
+            result = []
+            for row in rows:
+                if isinstance(row, dict):
+                    r = row
+                else:
+                    r = {
+                        'user_id': row[0], 'display_name': row[1], 'username': row[2],
+                        'avg_seconds': row[3], 'best_seconds': row[4], 'rollcall_count': row[5],
+                    }
+                result.append({
+                    'user_id': int(r['user_id']),
+                    'display_name': r['display_name'] or '',
+                    'username': r['username'] or '',
+                    'avg_response_seconds': int(r['avg_seconds'] or 0),
+                    'best_response_seconds': int(r['best_seconds'] or 0),
+                    'rollcall_count': int(r['rollcall_count'] or 0),
+                })
+            return result
     except Exception:
         logging.exception("get_response_time_leaderboard failed")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 # ── Scheduled rollcalls ────────────────────────────────────────────────────────
@@ -5308,119 +4672,87 @@ def create_scheduled_rollcall(
 
 def get_pending_scheduled_rollcalls() -> List[Dict]:
     """Return all unfired scheduled rollcalls whose fire time has passed (UTC)."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        now = _utcnow_naive().strftime("%Y-%m-%dT%H:%M:%SZ")
-        if db_type == "postgresql":
-            cursor.execute(
-                "SELECT * FROM scheduled_rollcalls WHERE is_fired = FALSE AND scheduled_at <= %s ORDER BY scheduled_at",
-                (now,),
-            )
-        else:
-            cursor.execute(
-                "SELECT * FROM scheduled_rollcalls WHERE is_fired = 0 AND scheduled_at <= ? ORDER BY scheduled_at",
-                (now,),
-            )
-        rows = cursor.fetchall()
-        return [dict(r) for r in rows]
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            now = _utcnow_naive().strftime("%Y-%m-%dT%H:%M:%SZ")
+            if db_type == "postgresql":
+                cursor.execute(
+                    "SELECT * FROM scheduled_rollcalls WHERE is_fired = FALSE AND scheduled_at <= %s ORDER BY scheduled_at",
+                    (now,),
+                )
+            else:
+                cursor.execute(
+                    "SELECT * FROM scheduled_rollcalls WHERE is_fired = 0 AND scheduled_at <= ? ORDER BY scheduled_at",
+                    (now,),
+                )
+            rows = cursor.fetchall()
+            return [dict(r) for r in rows]
     except Exception:
         logging.exception("get_pending_scheduled_rollcalls failed")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def get_upcoming_scheduled_rollcalls(chat_id: int) -> List[Dict]:
     """Return unfired future scheduled rollcalls for a chat, sorted by fire time."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        if db_type == "postgresql":
-            cursor.execute(
-                "SELECT * FROM scheduled_rollcalls WHERE chat_id = %s AND is_fired = FALSE ORDER BY scheduled_at",
-                (chat_id,),
-            )
-        else:
-            cursor.execute(
-                "SELECT * FROM scheduled_rollcalls WHERE chat_id = ? AND is_fired = 0 ORDER BY scheduled_at",
-                (chat_id,),
-            )
-        rows = cursor.fetchall()
-        return [dict(r) for r in rows]
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            if db_type == "postgresql":
+                cursor.execute(
+                    "SELECT * FROM scheduled_rollcalls WHERE chat_id = %s AND is_fired = FALSE ORDER BY scheduled_at",
+                    (chat_id,),
+                )
+            else:
+                cursor.execute(
+                    "SELECT * FROM scheduled_rollcalls WHERE chat_id = ? AND is_fired = 0 ORDER BY scheduled_at",
+                    (chat_id,),
+                )
+            rows = cursor.fetchall()
+            return [dict(r) for r in rows]
     except Exception:
         logging.exception("get_upcoming_scheduled_rollcalls failed")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def mark_scheduled_rollcall_fired(row_id: int) -> None:
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        now = _utcnow_naive().strftime("%Y-%m-%dT%H:%M:%SZ")
-        if db_type == "postgresql":
-            cursor.execute(
-                "UPDATE scheduled_rollcalls SET is_fired = TRUE, fired_at = %s WHERE id = %s",
-                (now, row_id),
-            )
-        else:
-            cursor.execute(
-                "UPDATE scheduled_rollcalls SET is_fired = 1, fired_at = ? WHERE id = ?",
-                (now, row_id),
-            )
-        conn.commit()
+        with _cursor(commit=True) as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            now = _utcnow_naive().strftime("%Y-%m-%dT%H:%M:%SZ")
+            if db_type == "postgresql":
+                cursor.execute(
+                    "UPDATE scheduled_rollcalls SET is_fired = TRUE, fired_at = %s WHERE id = %s",
+                    (now, row_id),
+                )
+            else:
+                cursor.execute(
+                    "UPDATE scheduled_rollcalls SET is_fired = 1, fired_at = ? WHERE id = ?",
+                    (now, row_id),
+                )
     except Exception:
         logging.exception("mark_scheduled_rollcall_fired failed")
-        conn.rollback()
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def delete_scheduled_rollcall(row_id: int, chat_id: int) -> bool:
     """Delete an unfired scheduled rollcall. Returns True if a row was deleted."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        if db_type == "postgresql":
-            cursor.execute(
-                "DELETE FROM scheduled_rollcalls WHERE id = %s AND chat_id = %s AND is_fired = FALSE",
-                (row_id, chat_id),
-            )
-        else:
-            cursor.execute(
-                "DELETE FROM scheduled_rollcalls WHERE id = ? AND chat_id = ? AND is_fired = 0",
-                (row_id, chat_id),
-            )
-        deleted = cursor.rowcount > 0
-        conn.commit()
-        return deleted
+        with _cursor(commit=True) as cursor:
+            if db_type == "postgresql":
+                cursor.execute(
+                    "DELETE FROM scheduled_rollcalls WHERE id = %s AND chat_id = %s AND is_fired = FALSE",
+                    (row_id, chat_id),
+                )
+            else:
+                cursor.execute(
+                    "DELETE FROM scheduled_rollcalls WHERE id = ? AND chat_id = ? AND is_fired = 0",
+                    (row_id, chat_id),
+                )
+            deleted = cursor.rowcount > 0
+            return deleted
     except Exception:
         logging.exception("delete_scheduled_rollcall failed")
-        conn.rollback()
         return False
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 # ── Dues & Treasury ──────────────────────────────────────────────────────────
@@ -5957,53 +5289,44 @@ def upsert_penalty_tier(
     If is_ditch=True, clears the is_ditch flag from all other tiers for this
     chat first (only one ditch tier per group).
     """
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        now = _utcnow_naive().isoformat()
-        clean_name = name.strip().lower()
-        ditch_int = 1 if is_ditch else 0
+        with _cursor(commit=True) as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            now = _utcnow_naive().isoformat()
+            clean_name = name.strip().lower()
+            ditch_int = 1 if is_ditch else 0
 
-        if is_ditch:
-            cursor.execute(
-                f"UPDATE penalty_tiers SET is_ditch = 0 WHERE chat_id = {ph} AND name != {ph}",
-                (chat_id, clean_name),
-            )
+            if is_ditch:
+                cursor.execute(
+                    f"UPDATE penalty_tiers SET is_ditch = 0 WHERE chat_id = {ph} AND name != {ph}",
+                    (chat_id, clean_name),
+                )
 
-        if db_type == "postgresql":
-            cursor.execute(
-                f"INSERT INTO penalty_tiers"
-                f" (chat_id, name, amount, description, late_minutes_threshold, is_ditch, created_at)"
-                f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph})"
-                f" ON CONFLICT (chat_id, name) DO UPDATE SET"
-                f"  amount=EXCLUDED.amount,"
-                f"  description=EXCLUDED.description,"
-                f"  late_minutes_threshold=EXCLUDED.late_minutes_threshold,"
-                f"  is_ditch=EXCLUDED.is_ditch",
-                (chat_id, clean_name, amount, description,
-                 late_minutes_threshold, ditch_int, now),
-            )
-        else:
-            cursor.execute(
-                f"INSERT OR REPLACE INTO penalty_tiers"
-                f" (chat_id, name, amount, description, late_minutes_threshold, is_ditch, created_at)"
-                f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph})",
-                (chat_id, clean_name, amount, description,
-                 late_minutes_threshold, ditch_int, now),
-            )
-        conn.commit()
-        return True
+            if db_type == "postgresql":
+                cursor.execute(
+                    f"INSERT INTO penalty_tiers"
+                    f" (chat_id, name, amount, description, late_minutes_threshold, is_ditch, created_at)"
+                    f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph})"
+                    f" ON CONFLICT (chat_id, name) DO UPDATE SET"
+                    f"  amount=EXCLUDED.amount,"
+                    f"  description=EXCLUDED.description,"
+                    f"  late_minutes_threshold=EXCLUDED.late_minutes_threshold,"
+                    f"  is_ditch=EXCLUDED.is_ditch",
+                    (chat_id, clean_name, amount, description,
+                     late_minutes_threshold, ditch_int, now),
+                )
+            else:
+                cursor.execute(
+                    f"INSERT OR REPLACE INTO penalty_tiers"
+                    f" (chat_id, name, amount, description, late_minutes_threshold, is_ditch, created_at)"
+                    f" VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+                    (chat_id, clean_name, amount, description,
+                     late_minutes_threshold, ditch_int, now),
+                )
+            return True
     except Exception:
         logging.exception("upsert_penalty_tier failed")
-        conn.rollback()
         return False
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def get_unsettled_rollcalls(chat_id: int, limit: int = 10) -> List[Dict]:
@@ -6011,77 +5334,56 @@ def get_unsettled_rollcalls(chat_id: int, limit: int = 10) -> List[Dict]:
     first. Same query as get_latest_closeable_rollcall minus the LIMIT 1 — used
     by /settle_dues so an admin can reach an older unsettled game, not just the
     latest one."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        active_false = "FALSE" if db_type == "postgresql" else "0"
-        cursor.execute(
-            f"""SELECT r.* FROM rollcalls r
-                LEFT JOIN game_closures gc ON gc.rollcall_id = r.id
-                WHERE r.chat_id = {ph}
-                  AND r.is_active = {active_false}
-                  AND COALESCE(r.is_cancelled, {active_false}) = {active_false}
-                  AND gc.id IS NULL
-                ORDER BY r.ended_at IS NULL ASC, r.ended_at DESC, r.id DESC LIMIT {ph}""",
-            (chat_id, limit),
-        )
-        rows = cursor.fetchall()
-        return [dict(row) for row in rows]
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            active_false = "FALSE" if db_type == "postgresql" else "0"
+            cursor.execute(
+                f"""SELECT r.* FROM rollcalls r
+                    LEFT JOIN game_closures gc ON gc.rollcall_id = r.id
+                    WHERE r.chat_id = {ph}
+                      AND r.is_active = {active_false}
+                      AND COALESCE(r.is_cancelled, {active_false}) = {active_false}
+                      AND gc.id IS NULL
+                    ORDER BY r.ended_at IS NULL ASC, r.ended_at DESC, r.id DESC LIMIT {ph}""",
+                (chat_id, limit),
+            )
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
     except Exception:
         logging.exception("get_unsettled_rollcalls failed")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def get_penalty_tiers(chat_id: int) -> List[Dict]:
     """Return all penalty tiers for a chat, ordered by amount ascending."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        cursor.execute(
-            f"SELECT * FROM penalty_tiers WHERE chat_id = {ph} ORDER BY amount ASC",
-            (chat_id,),
-        )
-        return [dict(row) for row in cursor.fetchall()]
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            cursor.execute(
+                f"SELECT * FROM penalty_tiers WHERE chat_id = {ph} ORDER BY amount ASC",
+                (chat_id,),
+            )
+            return [dict(row) for row in cursor.fetchall()]
     except Exception:
         logging.exception("get_penalty_tiers failed")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def get_penalty_tier(chat_id: int, name: str) -> Optional[Dict]:
     """Return a single penalty tier by name (case-insensitive)."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        cursor.execute(
-            f"SELECT * FROM penalty_tiers WHERE chat_id = {ph} AND name = {ph}",
-            (chat_id, name.strip().lower()),
-        )
-        row = cursor.fetchone()
-        return dict(row) if row else None
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            cursor.execute(
+                f"SELECT * FROM penalty_tiers WHERE chat_id = {ph} AND name = {ph}",
+                (chat_id, name.strip().lower()),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
     except Exception:
         logging.exception("get_penalty_tier failed")
         return None
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def get_tier_for_minutes(chat_id: int, minutes: int) -> Optional[Dict]:
@@ -6109,27 +5411,18 @@ def get_ditch_tier(chat_id: int) -> Optional[Dict]:
 
 def delete_penalty_tier(chat_id: int, name: str) -> bool:
     """Delete a penalty tier by name. Returns True if a row was deleted."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        cursor.execute(
-            f"DELETE FROM penalty_tiers WHERE chat_id = {ph} AND name = {ph}",
-            (chat_id, name.strip().lower()),
-        )
-        deleted = cursor.rowcount > 0
-        conn.commit()
-        return deleted
+        with _cursor(commit=True) as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            cursor.execute(
+                f"DELETE FROM penalty_tiers WHERE chat_id = {ph} AND name = {ph}",
+                (chat_id, name.strip().lower()),
+            )
+            deleted = cursor.rowcount > 0
+            return deleted
     except Exception:
         logging.exception("delete_penalty_tier failed")
-        conn.rollback()
         return False
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 # ── web_direct_login_tokens helpers ──────────────────────────────────────────
@@ -6144,27 +5437,18 @@ def create_web_direct_login_token(
     expires_at: "datetime",
 ) -> None:
     """Store a single-use admin-issued web login token."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        cursor.execute(
-            f"INSERT INTO web_direct_login_tokens "
-            f"(token, chat_id, tg_user_id, tg_name, created_by_uid, created_by_name, expires_at) "
-            f"VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (token, chat_id, tg_user_id, tg_name, created_by_uid, created_by_name, expires_at.isoformat()),
-        )
-        conn.commit()
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"INSERT INTO web_direct_login_tokens "
+                f"(token, chat_id, tg_user_id, tg_name, created_by_uid, created_by_name, expires_at) "
+                f"VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+                (token, chat_id, tg_user_id, tg_name, created_by_uid, created_by_name, expires_at.isoformat()),
+            )
     except Exception:
-        conn.rollback()
         logging.exception("create_web_direct_login_token failed")
         raise
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
 
 
 def consume_web_direct_login_token(token: str) -> Optional[Dict]:
@@ -6209,30 +5493,23 @@ def consume_web_direct_login_token(token: str) -> Optional[Dict]:
 
 def get_latest_ended_rollcall(chat_id: int) -> Optional[Dict]:
     """Most recent ended, not-cancelled rollcall — full row (for /repeat)."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        active_false = "FALSE" if db_type == "postgresql" else "0"
-        cursor.execute(
-            f"""SELECT * FROM rollcalls
-                WHERE chat_id = {ph}
-                  AND is_active = {active_false}
-                  AND COALESCE(is_cancelled, {active_false}) = {active_false}
-                ORDER BY ended_at IS NULL ASC, ended_at DESC, id DESC LIMIT 1""",
-            (chat_id,),
-        )
-        row = cursor.fetchone()
-        return dict(row) if row else None
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            active_false = "FALSE" if db_type == "postgresql" else "0"
+            cursor.execute(
+                f"""SELECT * FROM rollcalls
+                    WHERE chat_id = {ph}
+                      AND is_active = {active_false}
+                      AND COALESCE(is_cancelled, {active_false}) = {active_false}
+                    ORDER BY ended_at IS NULL ASC, ended_at DESC, id DESC LIMIT 1""",
+                (chat_id,),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
     except Exception:
         logging.exception("get_latest_ended_rollcall failed")
         return None
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def get_rollcalls_between(chat_id: int, start_utc: str, end_utc: str) -> List[Dict]:
@@ -6241,34 +5518,27 @@ def get_rollcalls_between(chat_id: int, start_utc: str, end_utc: str) -> List[Di
     start_utc/end_utc are 'YYYY-MM-DD HH:MM:SS' strings compared against
     ended_at (CURRENT_TIMESTAMP, UTC in both dialects).
     """
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        active_false = "FALSE" if db_type == "postgresql" else "0"
-        cursor.execute(
-            f"""SELECT r.id, r.title, r.ended_at,
-                (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'in') +
-                (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND p.status = 'in') AS in_count
-                FROM rollcalls r
-                WHERE r.chat_id = {ph}
-                  AND r.is_active = {active_false}
-                  AND COALESCE(r.is_cancelled, {active_false}) = {active_false}
-                  AND r.ended_at IS NOT NULL
-                  AND r.ended_at >= {ph} AND r.ended_at < {ph}
-                ORDER BY r.ended_at DESC""",
-            (chat_id, start_utc, end_utc),
-        )
-        return [dict(row) for row in cursor.fetchall()]
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            active_false = "FALSE" if db_type == "postgresql" else "0"
+            cursor.execute(
+                f"""SELECT r.id, r.title, r.ended_at,
+                    (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'in') +
+                    (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND p.status = 'in') AS in_count
+                    FROM rollcalls r
+                    WHERE r.chat_id = {ph}
+                      AND r.is_active = {active_false}
+                      AND COALESCE(r.is_cancelled, {active_false}) = {active_false}
+                      AND r.ended_at IS NOT NULL
+                      AND r.ended_at >= {ph} AND r.ended_at < {ph}
+                    ORDER BY r.ended_at DESC""",
+                (chat_id, start_utc, end_utc),
+            )
+            return [dict(row) for row in cursor.fetchall()]
     except Exception:
         logging.exception("get_rollcalls_between failed")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def get_attendance_between(chat_id: int, start_utc: str, end_utc: str) -> List[Dict]:
@@ -6277,67 +5547,53 @@ def get_attendance_between(chat_id: int, start_utc: str, end_utc: str) -> List[D
     Returns [{'name': ..., 'attended': N}] combining real users and proxies,
     ordered most-attended first.
     """
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        active_false = "FALSE" if db_type == "postgresql" else "0"
-        window = (
-            f"r.chat_id = {ph} AND r.is_active = {active_false} "
-            f"AND COALESCE(r.is_cancelled, {active_false}) = {active_false} "
-            f"AND r.ended_at IS NOT NULL AND r.ended_at >= {ph} AND r.ended_at < {ph}"
-        )
-        cursor.execute(
-            f"""SELECT name, SUM(cnt) AS attended FROM (
-                    SELECT u.first_name AS name, COUNT(*) AS cnt
-                    FROM users u JOIN rollcalls r ON r.id = u.rollcall_id
-                    WHERE {window} AND u.status = 'in'
-                    GROUP BY u.first_name
-                    UNION ALL
-                    SELECT p.name AS name, COUNT(*) AS cnt
-                    FROM proxy_users p JOIN rollcalls r ON r.id = p.rollcall_id
-                    WHERE {window} AND p.status = 'in'
-                    GROUP BY p.name
-                ) t
-                WHERE name IS NOT NULL
-                GROUP BY name ORDER BY attended DESC""",
-            (chat_id, start_utc, end_utc, chat_id, start_utc, end_utc),
-        )
-        return [dict(row) for row in cursor.fetchall()]
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            active_false = "FALSE" if db_type == "postgresql" else "0"
+            window = (
+                f"r.chat_id = {ph} AND r.is_active = {active_false} "
+                f"AND COALESCE(r.is_cancelled, {active_false}) = {active_false} "
+                f"AND r.ended_at IS NOT NULL AND r.ended_at >= {ph} AND r.ended_at < {ph}"
+            )
+            cursor.execute(
+                f"""SELECT name, SUM(cnt) AS attended FROM (
+                        SELECT u.first_name AS name, COUNT(*) AS cnt
+                        FROM users u JOIN rollcalls r ON r.id = u.rollcall_id
+                        WHERE {window} AND u.status = 'in'
+                        GROUP BY u.first_name
+                        UNION ALL
+                        SELECT p.name AS name, COUNT(*) AS cnt
+                        FROM proxy_users p JOIN rollcalls r ON r.id = p.rollcall_id
+                        WHERE {window} AND p.status = 'in'
+                        GROUP BY p.name
+                    ) t
+                    WHERE name IS NOT NULL
+                    GROUP BY name ORDER BY attended DESC""",
+                (chat_id, start_utc, end_utc, chat_id, start_utc, end_utc),
+            )
+            return [dict(row) for row in cursor.fetchall()]
     except Exception:
         logging.exception("get_attendance_between failed")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def get_fund_transactions_between(chat_id: int, start_utc: str, end_utc: str) -> List[Dict]:
     """Fund transactions in a UTC window (for the monthly statement)."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        cursor.execute(
-            f"""SELECT txn_type, amount, description, created_at
-                FROM fund_transactions
-                WHERE chat_id = {ph} AND created_at >= {ph} AND created_at < {ph}
-                ORDER BY created_at""",
-            (chat_id, start_utc, end_utc),
-        )
-        return [dict(row) for row in cursor.fetchall()]
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            cursor.execute(
+                f"""SELECT txn_type, amount, description, created_at
+                    FROM fund_transactions
+                    WHERE chat_id = {ph} AND created_at >= {ph} AND created_at < {ph}
+                    ORDER BY created_at""",
+                (chat_id, start_utc, end_utc),
+            )
+            return [dict(row) for row in cursor.fetchall()]
     except Exception:
         logging.exception("get_fund_transactions_between failed")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def get_idle_chats(cutoff_utc: str) -> List[Dict]:
@@ -6346,122 +5602,87 @@ def get_idle_chats(cutoff_utc: str) -> List[Dict]:
     Returns [{'chat_id', 'last_rc_at', 'last_idle_nudge', 'group_name'}].
     Only group chats (negative ids) — private chats can't hold rollcall games.
     """
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        cursor.execute(
-            f"""SELECT c.chat_id, c.group_name, c.last_idle_nudge,
-                       MAX(r.created_at) AS last_rc_at
-                FROM chats c
-                JOIN rollcalls r ON r.chat_id = c.chat_id
-                WHERE c.chat_id < 0
-                  AND EXISTS (SELECT 1 FROM templates t WHERE t.chatid = c.chat_id)
-                GROUP BY c.chat_id, c.group_name, c.last_idle_nudge
-                HAVING MAX(r.created_at) < {ph}""",
-            (cutoff_utc,),
-        )
-        return [dict(row) for row in cursor.fetchall()]
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            cursor.execute(
+                f"""SELECT c.chat_id, c.group_name, c.last_idle_nudge,
+                           MAX(r.created_at) AS last_rc_at
+                    FROM chats c
+                    JOIN rollcalls r ON r.chat_id = c.chat_id
+                    WHERE c.chat_id < 0
+                      AND EXISTS (SELECT 1 FROM templates t WHERE t.chatid = c.chat_id)
+                    GROUP BY c.chat_id, c.group_name, c.last_idle_nudge
+                    HAVING MAX(r.created_at) < {ph}""",
+                (cutoff_utc,),
+            )
+            return [dict(row) for row in cursor.fetchall()]
     except Exception:
         logging.exception("get_idle_chats failed")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def get_last_admin_actor(chat_id: int) -> Optional[Dict]:
     """Most recent admin actor for a chat from the audit log — {'admin_id', 'admin_name'}."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        cursor.execute(
-            f"""SELECT admin_id, admin_name FROM admin_actions
-                WHERE chat_id = {ph} ORDER BY id DESC LIMIT 1""",
-            (chat_id,),
-        )
-        row = cursor.fetchone()
-        return dict(row) if row else None
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            cursor.execute(
+                f"""SELECT admin_id, admin_name FROM admin_actions
+                    WHERE chat_id = {ph} ORDER BY id DESC LIMIT 1""",
+                (chat_id,),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
     except Exception:
         logging.exception("get_last_admin_actor failed")
         return None
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def get_all_chat_ids_with_dues() -> List[int]:
     """Chat ids where dues is enabled and the weekly auto-nudge is on."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        true_val = "TRUE" if db_type == "postgresql" else "1"
-        cursor.execute(
-            f"""SELECT chat_id FROM chats
-                WHERE dues_enabled = {true_val} AND dues_weekly_nudge = 1"""
-        )
-        return [row["chat_id"] if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
+        with _cursor() as cursor:
+            true_val = "TRUE" if db_type == "postgresql" else "1"
+            cursor.execute(
+                f"""SELECT chat_id FROM chats
+                    WHERE dues_enabled = {true_val} AND dues_weekly_nudge = 1"""
+            )
+            return [row["chat_id"] if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
     except Exception:
         logging.exception("get_all_chat_ids_with_dues failed")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def get_all_chat_ids_with_dues_report() -> List[int]:
     """Chat ids where dues is enabled and weekly dues report is on."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        true_val = "TRUE" if db_type == "postgresql" else "1"
-        cursor.execute(
-            f"""SELECT chat_id FROM chats
-                WHERE dues_enabled = {true_val} AND dues_report_enabled = 1"""
-        )
-        return [row["chat_id"] if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
+        with _cursor() as cursor:
+            true_val = "TRUE" if db_type == "postgresql" else "1"
+            cursor.execute(
+                f"""SELECT chat_id FROM chats
+                    WHERE dues_enabled = {true_val} AND dues_report_enabled = 1"""
+            )
+            return [row["chat_id"] if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
     except Exception:
         logging.exception("get_all_chat_ids_with_dues_report failed")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 def get_active_group_chat_ids(since_utc: str) -> List[int]:
     """Group chats with at least one rollcall created since the given UTC timestamp."""
-    conn = get_connection()
-    cursor = None
     try:
-        cursor = conn.cursor()
-        ph = "%s" if db_type == "postgresql" else "?"
-        cursor.execute(
-            f"""SELECT DISTINCT chat_id FROM rollcalls
-                WHERE chat_id < 0 AND created_at >= {ph}""",
-            (since_utc,),
-        )
-        return [row["chat_id"] if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            cursor.execute(
+                f"""SELECT DISTINCT chat_id FROM rollcalls
+                    WHERE chat_id < 0 AND created_at >= {ph}""",
+                (since_utc,),
+            )
+            return [row["chat_id"] if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
     except Exception:
         logging.exception("get_active_group_chat_ids failed")
         return []
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == "postgresql":
-            release_connection(conn)
 
 
 # Initialize database on import

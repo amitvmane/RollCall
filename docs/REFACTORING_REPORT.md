@@ -1,11 +1,12 @@
 # RollCall Refactoring Report
 
 **Generated:** 2026-07-13 at commit `751bdff`.
-**All 18 items resolved as of 2026-07-13** — see each item's Status line
-for commit hashes. R8 is step-1-only by design (step 2 deferred, still
-open). R9 (db.py boilerplate migration) was intentionally NOT started —
-explicitly flagged multi-session/optional in its own entry, still open
-if picked up later. Everything else (R1-R7, R10-R18) is DONE.
+**ALL 18 items DONE as of 2026-07-14** — see each item's Status line for
+commit hashes. Only intentional residue: R8's 3 optional-identity web.py
+sites (anonymous access by design — do not convert) and R9's 12
+nonstandard db.py functions (individual-judgment shapes — convert only
+if touching them anyway). This report is now a historical record; no
+open work remains.
 **Purpose:** Self-contained backlog of code-quality issues and enhancements, written so any
 session (including a smaller/cheaper model) can execute items one at a time without
 re-exploring the codebase. Every claim below was verified against the code at the commit
@@ -195,10 +196,14 @@ inherits the shared function's rejection of `::0`.
 - **Verify:** `tests/` green (list/dues suffix tests exist: grep `::` in tests/).
 
 ## R8. `_require_identity` duplicated across API route modules
-**Status: STEP 1 DONE — commit `7b2dd36`.** Added `identity.require_identity`;
-dues.py/portal.py delegate to it. Step 2 (web.py's inline sites) still
-NOT done — several are optional-identity paths, needs a dedicated
-needs-care pass, not attempted.
+**Status: DONE — step 1 commit `7b2dd36`, step 2 commit `9f3c860`.**
+Step 2: per-site read of all 11 web.py call sites. 7 strict sites
+(verify → 401) converted to `require_identity`, each keeping its own 401
+message. 3 optional-identity sites deliberately left on
+`verify_identity_token` — anonymous access is a feature there:
+`get_web_group_stats` (identity only personalises), `web_admin_status`
+(returns is_admin=False, never raises), `vote_web` (name-only proxy
+voting). Do NOT convert those 3.
 - **Files:** `rollCall/api/routes/dues.py:71` and `rollCall/api/routes/portal.py:28` —
   identical helper (verify_identity_token → 401 on failure); `rollCall/api/routes/web.py`
   additionally calls `verify_identity_token` inline ~8–12 times with per-site null
@@ -214,6 +219,20 @@ needs-care pass, not attempted.
   `tests/test_portal.py` green.
 
 ## R9. db.py: 151 functions × identical connection boilerplate
+**Status: DONE — batch 1 commit `f7c9082` (Dues & Treasury, 22 fns),
+batch 2 commit `349c485` (100 fns, rest of file).** Added
+`@contextmanager _cursor(commit=False)`; 122 standard-shape functions
+migrated via a strict pattern-matching transform (skips anything
+nonstandard), each keeping its own except clause/error convention.
+db.py: 6468 → 5689 lines. 12 nonstandard functions deliberately left
+on manual boilerplate (multi-commit bodies, nested try in handler, raw
+conn passed to _migrate_schema, no-finally shapes): create_tables,
+get_or_create_chat, update_chat_group_name, clear_rollcall_reminder,
+get_all_chat_ids, db_ping, reset_user_streak,
+update_proxy_streak_on_checkin, reset_proxy_streak,
+consume_web_verify_token, create_scheduled_rollcall,
+consume_web_direct_login_token — safe to leave indefinitely; convert
+individually only if touching them anyway.
 - **Files:** `rollCall/db.py` (6,426 lines; ~150 repetitions of
   get_connection/cursor/try/except/finally/release_connection).
 - **Problem:** Pure boilerplate mass; plus three coexisting error conventions (mutators

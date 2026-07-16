@@ -708,8 +708,20 @@ COMMANDS = [
         "details": (
             "Turns on the Dues & Treasury feature for this group. All dues commands "
             "(/settle_dues, /my_dues, /fund, etc.) are blocked until this is run.\n\n"
-            "Configure settings first: /set_upi, /set_penalties, /set_round_step.\n"
+            "Seeds default penalty tiers and opens the guided setup card "
+            "(/dues_setup) so UPI and rounding get configured up front.\n"
             "Existing ledger data is preserved if re-enabled after /disable_dues."
+        ),
+    },
+    {
+        "name": "dues_setup", "aliases": [], "scope": "admin", "category": "Dues & Fund",
+        "args": "", "sample": "/dues_setup",
+        "summary": "Show the dues setup status card",
+        "details": (
+            "Live checklist of the group's Dues & Treasury configuration: group UPI, "
+            "treasury UPI, penalty tiers, and rounding step. '💳 Set UPI now' lets you "
+            "reply with the VPA instead of typing /set_upi; '🔄 Re-check' re-renders "
+            "the card as items turn green. Opens automatically after /enable_dues."
         ),
     },
     {

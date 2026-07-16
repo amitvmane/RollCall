@@ -748,6 +748,107 @@ class TestPickCollectorNonIn(unittest.IsolatedAsyncioTestCase):
         self.assertIn("all known members", text)
 
 
+class TestDuesSetupCard(unittest.IsolatedAsyncioTestCase):
+    """Guided /enable_dues setup: live status card + reply-to-set-UPI flow
+    (flow-audit #2 — the critical miss is a group left with no UPI)."""
+
+    def setUp(self):
+        import bot_state
+        import handlers.dues as dues_handlers
+        self.bot_state = bot_state
+        self.dues_handlers = dues_handlers
+        sent = MagicMock()
+        sent.message_id = 321
+        bot_state.bot.send_message = AsyncMock(return_value=sent)
+        bot_state.bot.answer_callback_query = AsyncMock()
+        dues_handlers._pending_upi_input.clear()
+
+    def _patch_settings(self, upi=None, treasury=None, tiers=()):
+        settings = {"upi_vpa": upi, "treasury_upi": treasury,
+                    "dues_round_step": 10, "dues_self_paid_mode": "auto"}
+        return (
+            patch("handlers.dues.dues_svc.get_dues_settings", return_value=settings),
+            patch("handlers.dues._db.get_penalty_tiers", return_value=list(tiers)),
+        )
+
+    async def test_card_flags_missing_upi_with_set_button(self):
+        import telebot.types as tt
+        from handlers.dues import _dues_setup_card
+        tt.InlineKeyboardButton.reset_mock()
+        p1, p2 = self._patch_settings(upi=None, tiers=[{"name": "late", "amount": 50}])
+        with p1, p2:
+            text, _ = _dues_setup_card(100)
+        self.assertIn("not set", text)
+        datas = [c.kwargs.get("callback_data") for c in tt.InlineKeyboardButton.call_args_list]
+        self.assertIn("dues_setup_upi", datas)
+
+    async def test_card_all_green_hides_set_button(self):
+        import telebot.types as tt
+        from handlers.dues import _dues_setup_card
+        tt.InlineKeyboardButton.reset_mock()
+        p1, p2 = self._patch_settings(upi="grp@bank", tiers=[{"name": "late", "amount": 50}])
+        with p1, p2:
+            text, _ = _dues_setup_card(100)
+        self.assertIn("grp@bank", text)
+        self.assertIn("All set", text)
+        datas = [c.kwargs.get("callback_data") for c in tt.InlineKeyboardButton.call_args_list]
+        self.assertNotIn("dues_setup_upi", datas)
+        self.assertIn("dues_setup_check", datas)
+
+    async def test_enable_dues_sends_setup_card(self):
+        from handlers.dues import enable_dues
+        mgr = _make_lock_manager()
+        p1, p2 = self._patch_settings(upi=None, tiers=[])
+        with _admin_ok(), patch("handlers.dues.manager", mgr), \
+             patch("handlers.dues._db.update_chat_settings"), \
+             patch("handlers.dues.dues_svc.seed_default_penalty_tiers"), \
+             p1, p2:
+            await enable_dues(_msg("/enable_dues"))
+        texts = [c[0][1] for c in self.bot_state.bot.send_message.call_args_list]
+        self.assertEqual(len(texts), 2)
+        self.assertIn("enabled", texts[0])
+        self.assertIn("setup", texts[1])
+
+    async def test_upi_reply_sets_and_refreshes_card(self):
+        from handlers.dues import dues_setup_upi_reply, _pending_upi_input
+        _pending_upi_input[(100, 1)] = {"card_mid": 321, "_ts": 0}
+        svc_result = {"announcement": "💳 UPI set: new@bank"}
+        p1, p2 = self._patch_settings(upi="new@bank", tiers=[])
+        with patch("handlers.dues.dues_svc.set_upi", return_value=svc_result) as svc, \
+             patch("handlers.dues.send_md_fallback", new=AsyncMock()), \
+             patch("handlers.dues.safe_edit_text", new=AsyncMock()) as edit_text, \
+             patch("handlers.dues.safe_edit_markup", new=AsyncMock()), \
+             p1, p2:
+            await dues_setup_upi_reply(_msg("new@bank"))
+        svc.assert_called_once()
+        self.assertEqual(svc.call_args[0][1], "new@bank")
+        self.assertNotIn((100, 1), _pending_upi_input)
+        edit_text.assert_awaited_once()  # card refreshed in place
+
+    async def test_invalid_upi_keeps_pending_for_retry(self):
+        from exceptions import incorrectParameter
+        from handlers.dues import dues_setup_upi_reply, _pending_upi_input
+        _pending_upi_input[(100, 1)] = {"card_mid": 321, "_ts": 0}
+        with patch("handlers.dues.dues_svc.set_upi",
+                   side_effect=incorrectParameter("bad VPA")), \
+             patch("handlers.dues.reply_error", new=AsyncMock()) as err:
+            await dues_setup_upi_reply(_msg("not-a@"))
+        err.assert_awaited_once()
+        self.assertIn((100, 1), _pending_upi_input)
+
+    async def test_set_upi_button_is_admin_gated(self):
+        from handlers.dues import dues_setup_upi_callback, _pending_upi_input
+        call = MagicMock()
+        call.data = "dues_setup_upi"
+        call.message.chat.id = 100
+        call.from_user.id = 7
+        with patch("handlers.dues.is_chat_admin", new=AsyncMock(return_value=False)):
+            await dues_setup_upi_callback(call)
+        self.assertEqual(_pending_upi_input, {})
+        alert = self.bot_state.bot.answer_callback_query.call_args
+        self.assertIn("admins", alert[0][1].lower())
+
+
 class TestBeginSettlementHandoff(unittest.IsolatedAsyncioTestCase):
     """When the penalty panel can't open (no tiers / nobody to mark), the
     guided settle flow must continue to the confirm card, not dead-end."""

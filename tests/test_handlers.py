@@ -1340,6 +1340,21 @@ class TestOnNewChatMembers(HandlerTestBase):
         self.assertIn("RollCall", sent)
         self.assertIn("/help", sent)
 
+    async def test_onboarding_separates_member_and_admin_paths(self):
+        """Flow-audit #2: the welcome must give members the vote one-liner and
+        the adder (an admin) an ordered setup checklist."""
+        msg = self._make_join_message(bot_id=999, include_bot=True)
+        msg.from_user.first_name = "Amit"
+        me = MagicMock(); me.id = 999
+        with patch('handlers.core.manager', self.manager), \
+             patch.object(self.bot_state.bot, 'get_me', new=AsyncMock(return_value=me)):
+            await self.on_new_chat_members(msg)
+        sent = self._sent_text()
+        self.assertIn("Members", sent)
+        self.assertIn("Amit", sent)          # setup section addressed to the adder
+        self.assertIn("/src", sent)
+        self.assertIn("enable", sent)        # dues setup step present
+
     async def test_no_message_when_other_user_added(self):
         msg = self._make_join_message(bot_id=999, include_bot=False)
         me = MagicMock(); me.id = 999

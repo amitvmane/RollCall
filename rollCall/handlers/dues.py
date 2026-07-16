@@ -1428,6 +1428,44 @@ async def set_round_step(message):
 
 # ── /enable_dues / /disable_dues ─────────────────────────────────────────────
 
+# Guided setup after /enable_dues: a live status card instead of a plain-text
+# command dump — the critical miss it prevents is a group with no UPI set,
+# which would leave every /settle_dues close without a payment address/QR.
+
+_pending_upi_input: dict[tuple[int, int], dict] = {}
+
+
+def _dues_setup_card(cid: int):
+    """(text, markup) for the setup-status card. Re-rendered by the Re-check
+    button so the admin can watch items turn green as they configure."""
+    s = dues_svc.get_dues_settings(cid)
+    tiers = _db.get_penalty_tiers(cid)
+    upi, t_upi = s["upi_vpa"], s["treasury_upi"]
+
+    lines = ["💰 *Dues & Treasury — setup*", ""]
+    lines.append(f"✅ Group UPI: `{_esc_md(upi)}`" if upi
+                 else "⚠️ Group UPI: *not set* — payment QRs need this")
+    lines.append(f"✅ Treasury UPI: `{_esc_md(t_upi)}`" if t_upi
+                 else "◻ Treasury UPI: optional (penalties/fund) — falls back to group UPI")
+    lines.append(f"✅ Penalty tiers: {len(tiers)} defined (see `/penalties`)" if tiers
+                 else "⚠️ Penalty tiers: none — `/add_penalty <name> <amount>`")
+    lines.append(f"✅ Rounding: ₹{s['dues_round_step']} per-head steps (`/set_round_step`)")
+    lines.append("")
+    if upi:
+        lines.append("All set — `/src` starts a game, `/settle_dues` closes the books after.")
+    else:
+        lines.append("Tap the button below and reply with your UPI to finish setup.")
+
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    markup = InlineKeyboardMarkup(row_width=2)
+    buttons = []
+    if not upi:
+        buttons.append(InlineKeyboardButton("💳 Set UPI now", callback_data="dues_setup_upi"))
+    buttons.append(InlineKeyboardButton("🔄 Re-check", callback_data="dues_setup_check"))
+    markup.add(*buttons)
+    return "\n".join(lines), markup
+
+
 @bot.message_handler(func=lambda m: _cmd(m.text) == "/enable_dues")
 async def enable_dues(message):
     try:
@@ -1442,14 +1480,95 @@ async def enable_dues(message):
             "Default penalty tiers seeded (edit with `/add_penalty` / `/remove_penalty`):\n"
             "• *late\\_short* ₹50 — under 15 min late\n"
             "• *late\\_long* ₹100 — 15+ min late\n"
-            "• *ditch* ₹200 — no-show / absent\n\n"
-            "Other setup commands:\n"
-            "• `/set_upi vpa@bank` — fallback UPI for game fees\n"
-            "• `/set_treasury_upi vpa@bank` — UPI for penalties/fund (can differ per game)\n"
-            "• `/set_round_step step` — per-head rounding (default: ₹10)\n\n"
-            "Use `/settle_dues` after a game to split the ground fee.",
+            "• *ditch* ₹200 — no-show / absent",
             parse_mode="Markdown",
         )
+        text, markup = _dues_setup_card(cid)
+        await bot.send_message(cid, text, parse_mode="Markdown", reply_markup=markup)
+    except Exception as e:
+        await reply_error(message, e)
+
+
+@bot.message_handler(func=lambda m: _cmd(m.text) == "/dues_setup")
+async def dues_setup(message):
+    """Re-open the setup-status card anytime (also linked from /enable_dues)."""
+    try:
+        if await admin_rights(message, manager) is False:
+            raise insufficientPermissions("Admin only: /dues_setup")
+        cid = message.chat.id
+        _require_dues_enabled(cid)
+        text, markup = _dues_setup_card(cid)
+        await bot.send_message(cid, text, parse_mode="Markdown", reply_markup=markup)
+    except Exception as e:
+        await reply_error(message, e)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "dues_setup_check")
+async def dues_setup_check_callback(call):
+    try:
+        cid = call.message.chat.id
+        await bot.answer_callback_query(call.id)
+        text, markup = _dues_setup_card(cid)
+        await safe_edit_text(cid, call.message.message_id, text, parse_mode="Markdown")
+        await safe_edit_markup(cid, call.message.message_id, markup)
+    except Exception as exc:
+        logging.exception("dues_setup_check_callback error")
+        await reply_error(call.message, exc)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "dues_setup_upi")
+async def dues_setup_upi_callback(call):
+    try:
+        cid = call.message.chat.id
+        if not await is_chat_admin(cid, call.from_user.id):
+            await bot.answer_callback_query(
+                call.id, "⛔ Only admins can set the UPI", show_alert=True
+            )
+            return
+        _prune_pending(_pending_upi_input)
+        _pending_upi_input[(cid, call.from_user.id)] = {
+            "card_mid": call.message.message_id,
+            "_ts": datetime.now().timestamp(),
+        }
+        await bot.answer_callback_query(call.id)
+        await bot.send_message(
+            cid, "✏️ Reply with the group UPI id (e.g. `name@okbank`).",
+            parse_mode="Markdown",
+        )
+    except Exception as exc:
+        logging.exception("dues_setup_upi_callback error")
+        await reply_error(call.message, exc)
+
+
+@bot.message_handler(func=lambda m: (
+    m.from_user is not None
+    and m.text is not None
+    and not m.text.startswith("/")
+    and (m.chat.id, m.from_user.id) in _pending_upi_input
+    and "@" in m.text
+))
+async def dues_setup_upi_reply(message):
+    try:
+        cid = message.chat.id
+        uid = message.from_user.id
+        pending = _pending_upi_input.get((cid, uid))
+        if not pending:
+            return
+        try:
+            result = dues_svc.set_upi(
+                cid, message.text.strip(),
+                uid, message.from_user.first_name or message.from_user.username or "Admin",
+            )
+        except incorrectParameter as bad:
+            # Invalid VPA — keep the pending slot so the next reply retries.
+            await reply_error(message, bad)
+            return
+        _pending_upi_input.pop((cid, uid), None)
+        await send_md_fallback(cid, result["announcement"])
+        # Refresh the setup card so the UPI line flips to green in place.
+        text, markup = _dues_setup_card(cid)
+        await safe_edit_text(cid, pending["card_mid"], text, parse_mode="Markdown")
+        await safe_edit_markup(cid, pending["card_mid"], markup)
     except Exception as e:
         await reply_error(message, e)
 

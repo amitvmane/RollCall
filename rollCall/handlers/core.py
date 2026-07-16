@@ -170,16 +170,21 @@ async def on_new_chat_members(message):
             return
         cid = message.chat.id
         manager.get_chat(cid)
+        # message.from_user is whoever added the bot — almost always a group
+        # admin, so the setup checklist is addressed to them by name while
+        # members get the one-liner they actually need.
+        adder = getattr(message.from_user, "first_name", None) or "Admins"
         await bot.send_message(
             cid,
             "👋 Hi! I'm *RollCall* — attendance for your group, made simple.\n\n"
-            "Quick start:\n"
-            "• /src — Start a rollcall\n"
-            "• /in /out /maybe — Vote attendance\n"
-            "• /erc — End & finalize\n"
-            "• /weblink — Get a permanent web voting link\n"
-            "• /help — See all commands\n\n"
-            "Run /help at any time, or /help admin for admin commands.",
+            "*Members* — voting is all you need:\n"
+            "• /in /out /maybe, or just tap the buttons on a rollcall panel\n\n"
+            f"*{_esc_md(adder)}, setting the group up?* In order:\n"
+            "1. /src — start your first rollcall (end it with /erc)\n"
+            "2. /set\\_template + /schedule\\_template — auto-start your weekly game\n"
+            "3. /enable\\_dues — cost splitting & penalties (guided setup)\n"
+            "4. /weblink — permanent web voting link for the group\n\n"
+            "Run /help at any time, or /help admin for the full admin list.",
             parse_mode="Markdown",
             reply_markup=_onboarding_keyboard(cid),
         )

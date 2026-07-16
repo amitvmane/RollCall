@@ -7,6 +7,7 @@ Two access modes:
 
 Framework-agnostic.
 """
+import hashlib
 import logging
 from typing import Optional
 
@@ -14,6 +15,13 @@ import db
 from exceptions import incorrectParameter, parameterMissing
 from rollcall_manager import manager
 from services import proxy as proxy_svc
+
+
+def hash_login_token(token: str) -> str:
+    """SHA-256 hex of a /mytoken login code — the only form ever stored.
+    Shared by the bot handler that issues codes and the API route that
+    redeems them."""
+    return hashlib.sha256(token.encode()).hexdigest()
 
 
 def _ensure_web_token(rc) -> str:

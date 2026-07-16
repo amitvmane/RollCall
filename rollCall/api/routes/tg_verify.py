@@ -33,6 +33,7 @@ from fastapi import APIRouter, HTTPException, Path, Request, status
 import db as _db
 from bot_state import _telegram_status
 from api.schemas.tg_verify import (
+    MemberTokenLoginRequest,
     TgLoginConfigResponse,
     TgLoginRequest,
     TgVerifyStartResponse,
@@ -232,5 +233,49 @@ async def tg_login(body: TgLoginRequest, request: Request) -> TgVerifyStatusResp
         user_id=body.id,
         name=name,
         username=body.username,
+        id_token=id_token,
+    )
+
+
+# ── Persistent member login code (/mytoken) ──────────────────────────────────
+
+@router.post(
+    "/auth/member-token",
+    response_model=TgVerifyStatusResponse,
+    summary="Redeem a persistent /mytoken login code for an identity token",
+)
+async def member_token_login(body: MemberTokenLoginRequest, request: Request) -> TgVerifyStatusResponse:
+    """Fully Telegram-independent login: the code was DM'd once by /mytoken
+    and stored hashed; redeeming it maps to the tg_user_id and mints the same
+    signed id_token as the deep-link / Login Widget flows. Reusable until the
+    owner replaces or revokes it."""
+    _check_verify_rate(request)
+
+    token = body.token.strip()
+    if not token or len(token) > 128:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid login code")
+
+    from services.web import hash_login_token
+    row = _db.get_member_login_token_by_hash(hash_login_token(token))
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid login code")
+
+    user_id = int(row["user_id"])
+    _db.touch_member_login_token(user_id)
+
+    from api.identity import issue_identity_token, IdentityError
+    try:
+        id_token = issue_identity_token(user_id)
+    except IdentityError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Identity signing not configured on the server",
+        )
+
+    return TgVerifyStatusResponse(
+        verified=True,
+        user_id=user_id,
+        name=row.get("first_name"),
+        username=row.get("username"),
         id_token=id_token,
     )

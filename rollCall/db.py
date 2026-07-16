@@ -1278,6 +1278,34 @@ def _run_migrations(conn, cursor):
     except Exception:
         conn.rollback()  # column already exists — safe to ignore
 
+    # member_login_tokens — persistent personal login codes (/mytoken).
+    # One active code per user, stored as a SHA-256 hash: redeeming it on the
+    # web maps to the tg_user_id and mints the same signed id_token the
+    # deep-link / Login Widget flows issue. Telegram-independent self-serve.
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS member_login_tokens (
+                user_id      INTEGER PRIMARY KEY,
+                token_hash   TEXT NOT NULL UNIQUE,
+                first_name   TEXT DEFAULT NULL,
+                username     TEXT DEFAULT NULL,
+                created_at   TEXT DEFAULT (datetime('now')),
+                last_used_at TEXT DEFAULT NULL
+            )
+        """ if db_type != 'postgresql' else """
+            CREATE TABLE IF NOT EXISTS member_login_tokens (
+                user_id      BIGINT PRIMARY KEY,
+                token_hash   TEXT NOT NULL UNIQUE,
+                first_name   TEXT DEFAULT NULL,
+                username     TEXT DEFAULT NULL,
+                created_at   TIMESTAMPTZ DEFAULT NOW(),
+                last_used_at TIMESTAMPTZ DEFAULT NULL
+            )
+        """)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+
     # scheduled_rollcalls — one-shot web-scheduled rollcalls (fire at a specific datetime)
     if db_type == 'postgresql':
         try:
@@ -4521,6 +4549,85 @@ def consume_web_verify_token(code: str) -> Optional[Dict]:
             cursor.close()
         if db_type == 'postgresql':
             release_connection(conn)
+
+
+def upsert_member_login_token(user_id: int, token_hash: str,
+                              first_name: Optional[str] = None,
+                              username: Optional[str] = None) -> bool:
+    """Store (or replace) a user's persistent login code hash — /mytoken
+    reissues by overwriting, so exactly one code is active per user."""
+    try:
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            if db_type == 'postgresql':
+                cursor.execute(
+                    f"INSERT INTO member_login_tokens (user_id, token_hash, first_name, username) "
+                    f"VALUES ({ph},{ph},{ph},{ph}) "
+                    f"ON CONFLICT (user_id) DO UPDATE SET token_hash = EXCLUDED.token_hash, "
+                    f"first_name = EXCLUDED.first_name, username = EXCLUDED.username, "
+                    f"created_at = NOW(), last_used_at = NULL",
+                    (user_id, token_hash, first_name, username),
+                )
+            else:
+                cursor.execute(
+                    f"INSERT OR REPLACE INTO member_login_tokens "
+                    f"(user_id, token_hash, first_name, username) VALUES ({ph},{ph},{ph},{ph})",
+                    (user_id, token_hash, first_name, username),
+                )
+        return True
+    except Exception:
+        logging.exception("upsert_member_login_token failed")
+        return False
+
+
+def get_member_login_token_by_hash(token_hash: str) -> Optional[Dict]:
+    """Look up a login-code hash. Returns {user_id, first_name, username} or None."""
+    try:
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"SELECT user_id, first_name, username FROM member_login_tokens "
+                f"WHERE token_hash = {ph}",
+                (token_hash,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            if isinstance(row, dict):
+                return {'user_id': row['user_id'], 'first_name': row['first_name'],
+                        'username': row['username']}
+            return {'user_id': row[0], 'first_name': row[1], 'username': row[2]}
+    except Exception:
+        logging.exception("get_member_login_token_by_hash failed")
+        return None
+
+
+def touch_member_login_token(user_id: int) -> None:
+    """Stamp last_used_at on a successful code redemption."""
+    try:
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"UPDATE member_login_tokens SET last_used_at = {ph} WHERE user_id = {ph}",
+                (_utcnow_naive().isoformat(), user_id),
+            )
+    except Exception:
+        logging.exception("touch_member_login_token failed")
+
+
+def delete_member_login_token(user_id: int) -> bool:
+    """Revoke a user's login code (/mytoken off). True if one existed."""
+    try:
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"DELETE FROM member_login_tokens WHERE user_id = {ph}",
+                (user_id,),
+            )
+            return cursor.rowcount > 0
+    except Exception:
+        logging.exception("delete_member_login_token failed")
+        return False
 
 
 def set_web_admin(chat_id: int, tg_user_id: int, tg_name: str) -> None:

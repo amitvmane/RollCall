@@ -150,6 +150,19 @@ COMMANDS = [
             "Requires WEB_BASE_URL to be configured on the server."
         ),
     },
+    {
+        "name": "mytoken", "aliases": [], "scope": "user", "category": "Settings",
+        "args": "[off]", "sample": "/mytoken",
+        "summary": "Get your personal web login code (DM)",
+        "details": (
+            "DMs you a persistent personal login code for the web portal — enter it "
+            "under “Login with code” to verify your identity without Telegram (works "
+            "even when Telegram is down).\n\n"
+            "One active code per account: running /mytoken again replaces the old "
+            "code, /mytoken off revokes it. Keep the code private — anyone who has "
+            "it can act as you on the web."
+        ),
+    },
 
     # ──────────────────────────── ADMIN ─────────────────────────────
     {

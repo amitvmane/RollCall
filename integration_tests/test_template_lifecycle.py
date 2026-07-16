@@ -230,7 +230,19 @@ class TestAutoCloseLifecycle(IntegrationBase):
         texts = self.sent_texts()
         self.assertFalse(any("penalty marking" in t.lower() for t in texts), texts)
         self.assertFalse(any("did anyone ghost" in t.lower() for t in texts), texts)
-        self.assertTrue(any("settle_dues" in t.lower() for t in texts), texts)
+        # The nudge is now the persistent pinned card with a Settle-now button
+        # (was a plain "run /settle_dues" text line).
+        self.assertTrue(any("dues to settle" in t.lower() for t in texts), texts)
+        nudge_call = next(
+            c for c in get_mock_bot().send_message.call_args_list
+            if "dues to settle" in str(c[0][1]).lower()
+        )
+        markup = nudge_call.kwargs.get("reply_markup")
+        self.assertIsNotNone(markup)
+        self.assertTrue(any(
+            getattr(b, "callback_data", "").startswith("settle_now:")
+            for b in markup.keyboard
+        ), "settle nudge should carry a Settle-now button")
 
     async def test_auto_close_full_ghost_selection_flow(self):
         """Auto-close → ghost_yes → select → ghost_done → counts incremented."""

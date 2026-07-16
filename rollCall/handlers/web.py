@@ -1,14 +1,17 @@
 """
-Web voting handler — /weblink and /weblogin commands.
+Web voting handler — /weblink, /weblogin, and /mytoken commands.
 
 /weblink — shares the permanent group URL for bookmarking.
 /weblogin name — admin issues a single-use login URL for a member who can't
   use the Telegram verify flow (e.g. Telegram is down).
+/mytoken [off] — DMs the member their persistent personal login code for the
+  web (self-serve, Telegram-independent once saved).
 
 Requires WEB_BASE_URL env var.
 """
 import logging
 import os
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -172,5 +175,75 @@ async def weblogin_cmd(message):
             "[weblogin_cmd] admin=%s issued weblogin for user=%s chat=%s expires=%s",
             admin_uid, tg_user_id, cid, expiry_str,
         )
+    except Exception as e:
+        await reply_error(message, e)
+
+
+# ── /mytoken — persistent personal login code ────────────────────────────────
+
+from services.web import hash_login_token  # shared with the redeem API route
+
+
+@bot.message_handler(func=lambda m: m.text.split()[0].split("@")[0].lower() == "/mytoken")
+async def mytoken_cmd(message):
+    """Self-serve persistent login code, DM-only so it never lands in group
+    history. Re-running replaces the previous code; '/mytoken off' revokes."""
+    cid = message.chat.id
+    try:
+        user = message.from_user
+        if user is None:
+            return
+
+        base = _web_base_url()
+        if not base:
+            await bot.send_message(
+                cid,
+                "Web voting is not configured. Set WEB_BASE_URL on the server to enable it."
+            )
+            return
+
+        args = message.text.split()[1:]
+        if args and args[0].lower() in ("off", "revoke"):
+            existed = _db.delete_member_login_token(user.id)
+            await bot.send_message(
+                cid,
+                "🔓 Your login code has been revoked." if existed
+                else "You don't have a login code to revoke.",
+            )
+            return
+
+        token = secrets.token_urlsafe(12)
+        ok = _db.upsert_member_login_token(
+            user.id, hash_login_token(token),
+            first_name=user.first_name, username=user.username,
+        )
+        if not ok:
+            raise incorrectParameter("Could not create a login code — try again.")
+
+        dm_text = (
+            "🔑 *Your personal web login code*\n\n"
+            f"`{token}`\n\n"
+            f"Use it at {base} → “Login with code” to see your groups and vote "
+            "without Telegram.\n\n"
+            "⚠️ Anyone with this code can act as you — keep it private.\n"
+            "Run /mytoken again to replace it, or /mytoken off to revoke."
+        )
+        try:
+            await bot.send_message(user.id, dm_text, parse_mode="Markdown")
+        except Exception:
+            # Bot can't DM users who never opened a private chat with it. The
+            # code was already replaced above, which is fine — the old one
+            # stops working and the retry issues a fresh one.
+            if message.chat.type != "private":
+                await bot.send_message(
+                    cid,
+                    f"📪 I couldn't DM you, {_esc_md(user.first_name or 'there')} — "
+                    "open a private chat with me (tap my name → Start) and run /mytoken again.",
+                    parse_mode="Markdown",
+                )
+            return
+
+        if message.chat.type != "private":
+            await bot.send_message(cid, "📬 Sent you a DM with your personal login code.")
     except Exception as e:
         await reply_error(message, e)

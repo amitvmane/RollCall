@@ -25,6 +25,11 @@ class TgLoginRequest(BaseModel):
     photo_url: Optional[str] = None
 
 
+class MemberTokenLoginRequest(BaseModel):
+    """Persistent personal login code issued by /mytoken."""
+    token: str
+
+
 class TgVerifyStatusResponse(BaseModel):
     verified: bool
     user_id: Optional[int] = None

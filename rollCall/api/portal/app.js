@@ -127,17 +127,41 @@ window.onTelegramAuth=async function(user){
   try{
     const res=await apiFetch("/auth/tg-login",{method:"POST",body:JSON.stringify(user)});
     if(!res.verified)throw new Error("Verification failed");
-    if(_pollTimer){clearInterval(_pollTimer);_pollTimer=null;}
-    localStorage.removeItem(LS_VERIFY_CODE);
-    _userId=res.user_id;_userName=res.name;_idToken=res.id_token||null;
-    localStorage.setItem(LS_TG_USER_ID,String(_userId));
-    localStorage.setItem(LS_TG_NAME,_userName);
-    if(_idToken)localStorage.setItem(LS_ID_TOKEN,_idToken);
-    showApp();
+    _adoptIdentity(res);
   }catch(e){
     toast("Login failed: "+e.message);
   }
 };
+
+// ── Personal login code (/mytoken — fully Telegram-independent) ──────────────
+
+window.doMemberCodeLogin=async function(){
+  const inp=$id("member-code-input");
+  const code=(inp?.value||"").trim();
+  if(!code){toast("Enter your login code (get one with /mytoken in Telegram).");return;}
+  const btn=$id("member-code-btn");
+  if(btn){btn.disabled=true;btn.textContent="…";}
+  try{
+    const res=await apiFetch("/auth/member-token",{method:"POST",body:JSON.stringify({token:code})});
+    if(!res.verified)throw new Error("Verification failed");
+    if(inp)inp.value="";
+    _adoptIdentity(res);
+  }catch(e){
+    toast("Login failed: "+(e.message||"invalid code"));
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent="Login";}
+  }
+};
+
+function _adoptIdentity(res){
+  if(_pollTimer){clearInterval(_pollTimer);_pollTimer=null;}
+  localStorage.removeItem(LS_VERIFY_CODE);
+  _userId=res.user_id;_userName=res.name||"";_idToken=res.id_token||null;
+  localStorage.setItem(LS_TG_USER_ID,String(_userId));
+  localStorage.setItem(LS_TG_NAME,_userName);
+  if(_idToken)localStorage.setItem(LS_ID_TOKEN,_idToken);
+  showApp();
+}
 
 function showApp(){
   $id("verify-screen").style.display="none";

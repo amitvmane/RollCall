@@ -30,6 +30,12 @@
       <p class="sub" style="font-size:.8rem;text-align:center">No Telegram app on this device? Log in with your Telegram account directly:</p>
       <div id="tg-login-widget" style="display:flex;justify-content:center;margin-top:8px"></div>
     </div>
+    <div class="login-divider"><span>or</span></div>
+    <p class="sub" style="font-size:.8rem;text-align:center">Have a login code from the bot? (Get one anytime with <b>/mytoken</b> — works even when Telegram is down.)</p>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <input id="member-code-input" type="password" autocomplete="off" placeholder="Login code" style="flex:1;min-width:0;padding:10px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg);color:var(--text);font-size:.9rem"/>
+      <button class="btn btn-primary" id="member-code-btn" style="padding:10px 16px;white-space:nowrap" onclick="doMemberCodeLogin()">Login</button>
+    </div>
   </div>
 </div>
 
@@ -105,6 +111,7 @@
     <p>Scheduled rollcalls that haven't started yet appear at the top so you can plan ahead.</p>
     <h3>Identity</h3>
     <p>Use <b>Unlink</b> to detach your Telegram identity from this browser. You can re-verify any time with the <b>Verify with Telegram</b> button (opens the Telegram app), or use the <b>Log in with Telegram</b> widget — it works in any browser with just your Telegram account, no app needed.</p>
+    <p>There's also a <b>login code</b>: send <code>/mytoken</code> to the bot once and it DMs you a personal code you can enter here — the only method that works even when Telegram itself is down. Keep the code private; <code>/mytoken off</code> revokes it.</p>
     <p style="margin-top:14px">Need the bot commands? Run <code>/help</code> in any group.</p>
   </div>
 </div>

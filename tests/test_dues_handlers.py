@@ -540,5 +540,190 @@ class TestMyDuesPaymentRouting(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("💳", text)
 
 
+class TestSettleNudge(unittest.IsolatedAsyncioTestCase):
+    """Persistent settle nudge: pinned Settle-now message after a dues-enabled
+    game ends, cleared (unpin + de-button) once the game is settled."""
+
+    def setUp(self):
+        import bot_state
+        import handlers.dues as dues_handlers
+        self.bot_state = bot_state
+        self.dues_handlers = dues_handlers
+        sent = MagicMock()
+        sent.message_id = 777
+        bot_state.bot.send_message = AsyncMock(return_value=sent)
+        bot_state.bot.pin_chat_message = AsyncMock()
+        bot_state.bot.unpin_chat_message = AsyncMock()
+        bot_state.bot.answer_callback_query = AsyncMock()
+        dues_handlers._settle_nudge_msgs.clear()
+
+    def _sent_text(self, idx=0):
+        return self.bot_state.bot.send_message.call_args_list[idx][0][1]
+
+    async def test_nudge_has_settle_button_and_pins(self):
+        import telebot.types as tt
+        from handlers.dues import send_settle_nudge, _settle_nudge_msgs
+        tt.InlineKeyboardButton.reset_mock()
+        with patch("handlers.dues.dues_svc.list_unsettled_games",
+                   return_value={"games": [{"id": 42}]}):
+            await send_settle_nudge(100, 42, "Sunday Game")
+        self.assertEqual(
+            tt.InlineKeyboardButton.call_args.kwargs["callback_data"], "settle_now:42")
+        self.bot_state.bot.pin_chat_message.assert_awaited_once_with(
+            100, 777, disable_notification=True)
+        self.assertEqual(_settle_nudge_msgs[(100, 42)], 777)
+        self.assertIn("Sunday Game", self._sent_text())
+
+    async def test_nudge_warns_when_games_stack_up(self):
+        from handlers.dues import send_settle_nudge
+        with patch("handlers.dues.dues_svc.list_unsettled_games",
+                   return_value={"games": [{"id": 41}, {"id": 42}, {"id": 43}]}):
+            await send_settle_nudge(100, 43)
+        self.assertIn("3 games", self._sent_text())
+
+    async def test_nudge_survives_missing_pin_rights(self):
+        from handlers.dues import send_settle_nudge, _settle_nudge_msgs
+        self.bot_state.bot.pin_chat_message = AsyncMock(side_effect=Exception("no rights"))
+        with patch("handlers.dues.dues_svc.list_unsettled_games",
+                   return_value={"games": [{"id": 42}]}):
+            await send_settle_nudge(100, 42)
+        # Message still sent and tracked even though the pin failed
+        self.assertEqual(_settle_nudge_msgs[(100, 42)], 777)
+
+    async def test_clear_unpins_and_removes_button(self):
+        from handlers.dues import _clear_settle_nudge, _settle_nudge_msgs
+        _settle_nudge_msgs[(100, 42)] = 777
+        with patch("handlers.dues.safe_edit_markup", new=AsyncMock()) as edit:
+            await _clear_settle_nudge(100, 42)
+        self.bot_state.bot.unpin_chat_message.assert_awaited_once_with(100, 777)
+        edit.assert_awaited_once()
+        self.assertNotIn((100, 42), _settle_nudge_msgs)
+
+    async def test_clear_is_noop_without_tracked_nudge(self):
+        from handlers.dues import _clear_settle_nudge
+        await _clear_settle_nudge(100, 999)
+        self.bot_state.bot.unpin_chat_message.assert_not_awaited()
+
+    async def test_settle_now_button_opens_settlement(self):
+        from handlers.dues import settle_now_callback
+        call = MagicMock()
+        call.data = "settle_now:42"
+        call.message.chat.id = 100
+        call.message.message_id = 777
+        with patch("handlers.dues._settle_admin_ok", new=AsyncMock(return_value=True)), \
+             patch("handlers.dues._db.get_game_closure", return_value=None), \
+             patch("handlers.dues._db.get_rollcall", return_value={"title": "Sunday"}), \
+             patch("handlers.dues._begin_settlement", new=AsyncMock()) as begin:
+            await settle_now_callback(call)
+        begin.assert_awaited_once_with(100, 42, "Sunday")
+
+    async def test_settle_now_button_already_settled(self):
+        from handlers.dues import settle_now_callback, _settle_nudge_msgs
+        _settle_nudge_msgs[(100, 42)] = 777
+        call = MagicMock()
+        call.data = "settle_now:42"
+        call.message.chat.id = 100
+        call.message.message_id = 777
+        with patch("handlers.dues._settle_admin_ok", new=AsyncMock(return_value=True)), \
+             patch("handlers.dues._db.get_game_closure", return_value={"id": 1}), \
+             patch("handlers.dues.safe_edit_markup", new=AsyncMock()), \
+             patch("handlers.dues._begin_settlement", new=AsyncMock()) as begin:
+            await settle_now_callback(call)
+        begin.assert_not_awaited()
+        self.assertIn("Already settled", self._sent_text())
+        self.assertNotIn((100, 42), _settle_nudge_msgs)
+
+    async def test_settle_now_button_admin_gated(self):
+        from handlers.dues import settle_now_callback
+        call = MagicMock()
+        call.data = "settle_now:42"
+        call.message.chat.id = 100
+        with patch("handlers.dues._settle_admin_ok", new=AsyncMock(return_value=False)), \
+             patch("handlers.dues._begin_settlement", new=AsyncMock()) as begin:
+            await settle_now_callback(call)
+        begin.assert_not_awaited()
+
+
+class TestPostEndSettleNudge(unittest.IsolatedAsyncioTestCase):
+    """_post_end_cleanup routes to the persistent nudge for dues-enabled
+    chats, and the settle-initiated paths suppress it via settle_nudge=False."""
+
+    def setUp(self):
+        import bot_state
+        self.bot_state = bot_state
+        bot_state.bot.send_message = AsyncMock()
+
+    def _run_cleanup(self, settle_nudge=None):
+        from handlers.lifecycle import _post_end_cleanup
+        result = {"renumbered": [], "badges": [], "rc_db_id": 42, "ghost_eligible": False}
+        kwargs = {} if settle_nudge is None else {"settle_nudge": settle_nudge}
+        mgr = MagicMock()
+        mgr.get_shh_mode.return_value = True
+        mgr.get_rollcalls.return_value = []
+        return _post_end_cleanup, result, mgr, kwargs
+
+    async def test_dues_enabled_sends_persistent_nudge(self):
+        cleanup, result, mgr, kwargs = self._run_cleanup()
+        with patch("handlers.lifecycle.manager", mgr), \
+             patch("handlers.lifecycle.db.get_or_create_chat",
+                   return_value={"dues_enabled": 1}), \
+             patch("handlers.dues.send_settle_nudge", new=AsyncMock()) as nudge:
+            await cleanup(100, 1, result, rc_title="Sunday", **kwargs)
+        nudge.assert_awaited_once_with(100, 42, "Sunday")
+
+    async def test_settle_flow_suppresses_nudge(self):
+        cleanup, result, mgr, kwargs = self._run_cleanup(settle_nudge=False)
+        with patch("handlers.lifecycle.manager", mgr), \
+             patch("handlers.lifecycle.db.get_or_create_chat",
+                   return_value={"dues_enabled": 1}), \
+             patch("handlers.dues.send_settle_nudge", new=AsyncMock()) as nudge:
+            await cleanup(100, 1, result, rc_title="Sunday", **kwargs)
+        nudge.assert_not_awaited()
+
+
+class TestAutoStartUnsettledWarning(unittest.IsolatedAsyncioTestCase):
+    """Scheduled-template auto-fire warns when earlier games sit unsettled."""
+
+    def _load_real_module(self):
+        import importlib.util
+        module_path = os.path.join(
+            os.path.dirname(__file__), "..", "rollCall", "check_reminders.py")
+        spec = importlib.util.spec_from_file_location("_real_check_reminders_dues", module_path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    async def test_warns_with_picker_when_unsettled_games_exist(self):
+        mod = self._load_real_module()
+        games = [{"id": 41, "title": "Last Sunday", "ended_at": "2026-07-12"}]
+        with patch("db.get_or_create_chat", return_value={"dues_enabled": 1}), \
+             patch("db.get_unsettled_rollcalls", return_value=games), \
+             patch("handlers.dues._send_unsettled_picker", new=AsyncMock()) as picker:
+            await mod._warn_unsettled_dues(100)
+        picker.assert_awaited_once()
+        intro = picker.call_args[0][2]
+        self.assertIn("unsettled dues", intro)
+
+    async def test_silent_when_dues_disabled(self):
+        mod = self._load_real_module()
+        with patch("db.get_or_create_chat", return_value={"dues_enabled": 0}), \
+             patch("handlers.dues._send_unsettled_picker", new=AsyncMock()) as picker:
+            await mod._warn_unsettled_dues(100)
+        picker.assert_not_awaited()
+
+    async def test_silent_when_nothing_unsettled(self):
+        mod = self._load_real_module()
+        with patch("db.get_or_create_chat", return_value={"dues_enabled": 1}), \
+             patch("db.get_unsettled_rollcalls", return_value=[]), \
+             patch("handlers.dues._send_unsettled_picker", new=AsyncMock()) as picker:
+            await mod._warn_unsettled_dues(100)
+        picker.assert_not_awaited()
+
+    async def test_warning_failure_never_propagates(self):
+        mod = self._load_real_module()
+        with patch("db.get_or_create_chat", side_effect=Exception("db down")):
+            await mod._warn_unsettled_dues(100)  # must not raise
+
+
 if __name__ == "__main__":
     unittest.main()

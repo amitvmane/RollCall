@@ -128,6 +128,7 @@ def main() -> int:
             "set_my_commands", "set_webhook", "remove_webhook",
             "infinity_polling", "process_new_updates", "close_session",
             "message_handler", "callback_query_handler", "setup_middleware",
+            "pin_chat_message", "unpin_chat_message",
         ]
         missing = [m for m in required if not hasattr(bot_state.bot, m)]
         if missing:

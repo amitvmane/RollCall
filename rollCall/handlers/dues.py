@@ -100,6 +100,46 @@ async def _send_unsettled_picker(cid: int, games: list, intro: str) -> None:
     await bot.send_message(cid, intro, reply_markup=markup)
 
 
+# (cid, rollcall_id) → message_id of the pinned settle nudge, so it can be
+# unpinned and de-buttoned once the game is actually settled. In-memory only:
+# after a restart a stale pin just stays until an admin unpins it by hand —
+# harmless, and the nudge's button still works (it re-reads DB state).
+_settle_nudge_msgs: dict[tuple[int, int], int] = {}
+
+
+async def send_settle_nudge(cid: int, rollcall_id: int, title: str = "") -> None:
+    """Persistent 'books still open' nudge after a dues-enabled game ends:
+    a Settle-now button plus a best-effort silent pin, so the reminder can't
+    scroll away like the old one-line text did."""
+    total = len(dues_svc.list_unsettled_games(cid)["games"])
+    lines = ["💰 Game over — dues to settle." if not title
+             else f"💰 *{_esc_md(title)}* is over — dues to settle."]
+    if total > 1:
+        lines.append(f"⚠️ {total} games are now waiting to be settled.")
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(InlineKeyboardButton("💰 Settle now", callback_data=f"settle_now:{rollcall_id}"))
+    sent = await bot.send_message(cid, "\n".join(lines), parse_mode="Markdown", reply_markup=markup)
+    _settle_nudge_msgs[(cid, rollcall_id)] = sent.message_id
+    try:
+        await bot.pin_chat_message(cid, sent.message_id, disable_notification=True)
+    except Exception:
+        pass  # bot lacks pin rights — the button message alone still stands out
+
+
+async def _clear_settle_nudge(cid: int, rollcall_id: int) -> None:
+    """Unpin and de-button the nudge once its game is settled (best-effort)."""
+    mid = _settle_nudge_msgs.pop((cid, rollcall_id), None)
+    if mid is None:
+        return
+    try:
+        await bot.unpin_chat_message(cid, mid)
+    except Exception:
+        pass
+    from telebot.types import InlineKeyboardMarkup
+    await safe_edit_markup(cid, mid, InlineKeyboardMarkup())
+
+
 async def _settle_admin_ok(call) -> bool:
     """Shared admin gate for every /settle_dues inline button — financial
     writes, same pattern as the penalty panel / collector picker."""
@@ -125,6 +165,8 @@ async def _send_remaining_unsettled_nudge(cid: int) -> None:
 async def _finish_settle_dues(cid: int, result: dict, rc_idx_fallback: int = 0) -> None:
     """Shared post-close side effects: announcement, QR, receipt, post-end
     cleanup, and a nudge listing any games still unsettled."""
+    await _clear_settle_nudge(cid, result.get("rollcall_id"))
+
     # Always post announcement — financial record
     await send_md_fallback(cid, result["announcement"])
 
@@ -147,6 +189,7 @@ async def _finish_settle_dues(cid: int, result: dict, rc_idx_fallback: int = 0) 
             end_res.get("rc_number_ended_1based", rc_idx_fallback + 1),
             end_res,
             rc_title=result.get("title", ""),
+            settle_nudge=False,
         )
 
     await _send_remaining_unsettled_nudge(cid)
@@ -169,6 +212,30 @@ async def _show_empty_game_card(cid: int, rollcall_id: int, title: str) -> None:
     )
 
 
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("settle_now:"))
+async def settle_now_callback(call):
+    """Settle-now button on the persistent post-end nudge — same entry as a
+    bare /settle_dues, but pre-scoped to the game the nudge was posted for."""
+    try:
+        cid = call.message.chat.id
+        if not await _settle_admin_ok(call):
+            return
+        rollcall_id = int(call.data.split(":", 1)[1])
+        await bot.answer_callback_query(call.id)
+        if _db.get_game_closure(rollcall_id):
+            # Someone settled it while the nudge sat pinned.
+            await _clear_settle_nudge(cid, rollcall_id)
+            from telebot.types import InlineKeyboardMarkup
+            await safe_edit_markup(cid, call.message.message_id, InlineKeyboardMarkup())
+            await bot.send_message(cid, "✅ Already settled — books are closed for this game.")
+            return
+        row = _db.get_rollcall(rollcall_id) or {}
+        await _begin_settlement(cid, rollcall_id, row.get("title") or "<Empty>")
+    except Exception as exc:
+        logging.exception("settle_now_callback error")
+        await reply_error(call.message, exc)
+
+
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("settle_empty:"))
 async def settle_empty_callback(call):
     try:
@@ -185,6 +252,7 @@ async def settle_empty_callback(call):
                 call.from_user.first_name or call.from_user.username or "Admin",
             )
 
+        await _clear_settle_nudge(cid, rollcall_id)
         await safe_edit_text(cid, call.message.message_id, result["announcement"], parse_mode="Markdown")
         from telebot.types import InlineKeyboardMarkup
         await safe_edit_markup(cid, call.message.message_id, InlineKeyboardMarkup())
@@ -396,6 +464,7 @@ async def settle_dues(message):
                     )
                 await _post_end_cleanup(
                     cid, end_result["rc_number_ended_1based"], end_result, rc_title=title,
+                    settle_nudge=False,
                 )
                 await _begin_settlement(cid, end_result["rc_db_id"], title)
                 return

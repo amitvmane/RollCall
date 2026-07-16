@@ -350,6 +350,29 @@ async def resume_reminder_loops():
     )
 
 
+async def _warn_unsettled_dues(chat_id: int):
+    """Dues hygiene for scheduled templates: warn when a schedule fires on
+    top of earlier games whose books were never closed — otherwise unsettled
+    games silently stack up week after week. Best-effort: must never block
+    the last_scheduled_date stamp in the caller."""
+    try:
+        import db as _db
+        if not _db.get_or_create_chat(chat_id).get("dues_enabled"):
+            return
+        unsettled = _db.get_unsettled_rollcalls(chat_id)
+        if not unsettled:
+            return
+        from handlers.dues import _send_unsettled_picker
+        n = len(unsettled)
+        await _send_unsettled_picker(
+            chat_id, unsettled,
+            f"⚠️ {n} earlier game{'s have' if n != 1 else ' has'} unsettled dues "
+            "— settle before this new one piles on:",
+        )
+    except Exception:
+        logging.exception(f"[scheduler] unsettled-dues warning failed for chat {chat_id}")
+
+
 async def _auto_start_from_template(chat_id: int, tmpl: dict):
     """Create a rollcall from a scheduled template and announce it to the group."""
     from rollcall_manager import manager
@@ -425,6 +448,8 @@ async def _auto_start_from_template(chat_id: int, tmpl: dict):
             logging.exception(
                 f"[scheduler] Failed to announce auto-started rollcall '{title}' for chat {chat_id}"
             )
+
+    await _warn_unsettled_dues(chat_id)
 
     logging.info(
         f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "

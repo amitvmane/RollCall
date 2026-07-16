@@ -41,11 +41,14 @@ def _build_panel_text(rc, rc_number: int) -> str:
     return rc.allList().replace("__RCID__", str(rc_number))
 
 
-async def _post_end_cleanup(cid: int, ended_number: int, result: dict, rc_title: str = "") -> None:
+async def _post_end_cleanup(cid: int, ended_number: int, result: dict, rc_title: str = "",
+                            settle_nudge: bool = True) -> None:
     """Panel-ID cleanup, ghost prompt, and renumber announcements after a rollcall ends.
 
     Called by /erc and /settle_dues (whenever /settle_dues ends an active rollcall).
     `ended_number` is 1-based. `result` is the dict from rollcalls_svc.end_rollcall.
+    `settle_nudge=False` skips the pinned settle reminder — used by the
+    /settle_dues paths, where settlement is already in progress or done.
     """
     _panel_msg_ids.pop((cid, ended_number), None)
     for entry in sorted(result["renumbered"], key=lambda x: x["old"]):
@@ -71,11 +74,14 @@ async def _post_end_cleanup(cid: int, ended_number: int, result: dict, rc_title:
         # Ghost/penalty marking now happens as part of /settle_dues (right
         # before the financial close), not immediately here — attendance
         # ending and money-settling used to drift apart across two separate
-        # moments/admins. Just a discoverability nudge; no penalty panel.
-        await bot.send_message(
-            cid,
-            "💰 Dues enabled — run /settle_dues to mark penalties and close the books for this game.",
-        )
+        # moments/admins. Persistent nudge (pinned + Settle-now button); the
+        # penalty panel itself opens from the settle flow.
+        if settle_nudge:
+            from handlers.dues import send_settle_nudge
+            try:
+                await send_settle_nudge(cid, rc_db_id, rc_title)
+            except Exception:
+                logging.exception("Failed to send settle nudge")
     elif ghost_eligible:
         ghost_markup = InlineKeyboardMarkup(row_width=2)
         ghost_markup.add(

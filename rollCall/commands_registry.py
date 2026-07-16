@@ -567,9 +567,10 @@ COMMANDS = [
         "summary": "Pick the collector from a button panel",
         "details": (
             "Shows the active rollcall's IN members as inline buttons — tap one to "
-            "make them the collector. Only real Telegram users are shown (proxies "
-            "can't receive payments). Same effect as /set_collector, one tap instead "
-            "of typing a name."
+            "make them the collector. '👥 Someone not playing…' switches the panel "
+            "to every known member (e.g. a non-playing venue owner). Only real "
+            "Telegram users are shown (proxies can't receive payments). Same effect "
+            "as /set_collector, one tap instead of typing a name."
         ),
     },
     {

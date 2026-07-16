@@ -662,9 +662,10 @@ async def pick_collector(message):
         rc = rollcalls[rc_idx]
         real_in = [u for u in rc.inList if isinstance(u.user_id, int) and u.user_id > 0]
         if not real_in:
-            raise incorrectParameter(
-                "No real (Telegram) users are IN yet — proxies can't be collectors."
-            )
+            # Nobody real IN yet — jump straight to the all-members panel so a
+            # non-playing collector (e.g. venue owner) can still be picked.
+            await _show_member_collector_panel(cid, rc_idx, rc.title)
+            return
 
         from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
         markup = InlineKeyboardMarkup(row_width=2)
@@ -673,6 +674,8 @@ async def pick_collector(message):
             for u in real_in
         ]
         markup.add(*buttons)
+        markup.row(InlineKeyboardButton(
+            "👥 Someone not playing…", callback_data=f"pickcol_more_{rc_idx}"))
         await bot.send_message(
             cid,
             f"📦 Who is collecting for *{_esc_md(rc.title or 'this game')}*?",
@@ -682,7 +685,68 @@ async def pick_collector(message):
         await reply_error(message, e)
 
 
-@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("pickcol_"))
+# Telegram caps inline keyboards at 100 buttons; well before that the panel
+# becomes unusable, so show the most recently active members and point at
+# /set_collector <name> for the long tail.
+_MEMBER_PANEL_LIMIT = 30
+
+
+async def _show_member_collector_panel(cid: int, rc_idx: int, rc_title: str = "",
+                                       mid: int | None = None) -> None:
+    """Collector picker over ALL active tracked members (not just IN voters) —
+    covers the non-playing collector, e.g. a venue owner who never votes."""
+    rollcalls = manager.get_rollcalls(cid)
+    rc = rollcalls[rc_idx] if rc_idx < len(rollcalls) else None
+    in_ids = {u.user_id for u in rc.inList} if rc else set()
+    members = [m for m in _db.get_active_members(cid) if m["user_id"] not in in_ids]
+    if not members:
+        raise incorrectParameter(
+            "No other known members to pick from — use /set_collector <name>."
+        )
+
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(*[
+        InlineKeyboardButton(
+            m.get("first_name") or m.get("username") or str(m["user_id"]),
+            callback_data=f"pickcol_{rc_idx}_{m['user_id']}",
+        )
+        for m in members[:_MEMBER_PANEL_LIMIT]
+    ])
+    overflow = ""
+    if len(members) > _MEMBER_PANEL_LIMIT:
+        overflow = f"\nShowing {_MEMBER_PANEL_LIMIT} — for anyone else use /set_collector <name>."
+    text = (f"📦 Who is collecting for *{_esc_md(rc_title or 'this game')}*?\n"
+            f"(all known members, IN or not){overflow}")
+    if mid is not None:
+        await safe_edit_text(cid, mid, text, parse_mode="Markdown")
+        await safe_edit_markup(cid, mid, markup)
+    else:
+        await bot.send_message(cid, text, parse_mode="Markdown", reply_markup=markup)
+
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("pickcol_more_"))
+async def pick_collector_more_callback(call):
+    """'Someone not playing…' — swap the IN-only picker for the all-members one."""
+    try:
+        cid = call.message.chat.id
+        if not await is_chat_admin(cid, call.from_user.id):
+            await bot.answer_callback_query(
+                call.id, "⛔ Only admins can set the collector", show_alert=True
+            )
+            return
+        rc_idx = int(call.data.rsplit("_", 1)[1])
+        await bot.answer_callback_query(call.id)
+        rollcalls = manager.get_rollcalls(cid)
+        title = rollcalls[rc_idx].title if rc_idx < len(rollcalls) else ""
+        await _show_member_collector_panel(cid, rc_idx, title, mid=call.message.message_id)
+    except Exception as exc:
+        logging.exception("pick_collector_more_callback failed")
+        await reply_error(call.message, exc)
+
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("pickcol_")
+                            and not call.data.startswith("pickcol_more_"))
 async def pick_collector_callback(call):
     try:
         cid = call.message.chat.id
@@ -706,19 +770,32 @@ async def pick_collector_callback(call):
                 (u for u in rc.inList if isinstance(u.user_id, int) and u.user_id == uid),
                 None,
             )
-            if target is None:
-                await bot.answer_callback_query(
-                    call.id, "That member is no longer IN — reopen /pick_collector.", show_alert=True
+            if target is not None:
+                target_name = target.name
+            else:
+                # All-members panel pick: the collector doesn't have to be IN
+                # (non-playing venue owner etc.) — as long as they're a known
+                # active member. set_collector resolves them by name below.
+                member = next(
+                    (m for m in _db.get_active_members(cid) if m["user_id"] == uid),
+                    None,
                 )
-                return
+                if member is None:
+                    await bot.answer_callback_query(
+                        call.id, "That member is unknown now — reopen /pick_collector.",
+                        show_alert=True,
+                    )
+                    return
+                target_name = (member.get("username")
+                               or member.get("first_name") or str(uid))
             result = dues_svc.set_collector(
-                cid, target.name, False,
+                cid, target_name, False,
                 call.from_user.id,
                 call.from_user.first_name or "Admin",
                 rc_number=rc_idx,
             )
 
-        await bot.answer_callback_query(call.id, f"📦 {target.name} is collecting")
+        await bot.answer_callback_query(call.id, f"📦 {target_name} is collecting")
         try:
             await bot.edit_message_text(
                 result["announcement"], cid, call.message.message_id,

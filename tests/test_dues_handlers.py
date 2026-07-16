@@ -644,6 +644,110 @@ class TestSettleNudge(unittest.IsolatedAsyncioTestCase):
         begin.assert_not_awaited()
 
 
+class TestPickCollectorNonIn(unittest.IsolatedAsyncioTestCase):
+    """Collector picker must also reach members who aren't IN (flow-audit #3:
+    non-playing collector, e.g. venue owner)."""
+
+    def setUp(self):
+        import bot_state
+        self.bot_state = bot_state
+        bot_state.bot.send_message = AsyncMock()
+        bot_state.bot.answer_callback_query = AsyncMock()
+        bot_state.bot.edit_message_text = AsyncMock()
+
+    def _rc(self, in_ids=()):
+        rc = MagicMock()
+        rc.title = "Sunday"
+        users = []
+        for uid in in_ids:
+            u = MagicMock()
+            u.user_id = uid
+            u.name = f"user{uid}"
+            users.append(u)
+        rc.inList = users
+        return rc
+
+    def _call(self, data, uid=1):
+        call = MagicMock()
+        call.data = data
+        call.message.chat.id = 100
+        call.message.message_id = 555
+        call.from_user.id = uid
+        call.from_user.first_name = "Admin"
+        return call
+
+    async def test_more_button_swaps_to_all_members_panel(self):
+        from handlers.dues import pick_collector_more_callback
+        mgr = _make_lock_manager()
+        mgr.get_rollcalls.return_value = [self._rc(in_ids=[1])]
+        members = [{"user_id": 9, "first_name": "VenueOwner", "username": "venue"}]
+        with patch("handlers.dues.is_chat_admin", new=AsyncMock(return_value=True)), \
+             patch("handlers.dues.manager", mgr), \
+             patch("handlers.dues._db.get_active_members", return_value=members), \
+             patch("handlers.dues.safe_edit_text", new=AsyncMock()) as edit_text, \
+             patch("handlers.dues.safe_edit_markup", new=AsyncMock()):
+            await pick_collector_more_callback(self._call("pickcol_more_0"))
+        text = edit_text.call_args[0][2]
+        self.assertIn("all known members", text)
+
+    async def test_all_members_panel_excludes_in_voters(self):
+        import telebot.types as tt
+        from handlers.dues import _show_member_collector_panel
+        mgr = _make_lock_manager()
+        mgr.get_rollcalls.return_value = [self._rc(in_ids=[1])]
+        members = [
+            {"user_id": 1, "first_name": "AlreadyIn", "username": "in1"},
+            {"user_id": 9, "first_name": "VenueOwner", "username": "venue"},
+        ]
+        tt.InlineKeyboardButton.reset_mock()
+        with patch("handlers.dues.manager", mgr), \
+             patch("handlers.dues._db.get_active_members", return_value=members):
+            await _show_member_collector_panel(100, 0, "Sunday")
+        datas = [c.kwargs.get("callback_data") for c in tt.InlineKeyboardButton.call_args_list]
+        self.assertIn("pickcol_0_9", datas)
+        self.assertNotIn("pickcol_0_1", datas)
+
+    async def test_callback_accepts_non_in_member(self):
+        from handlers.dues import pick_collector_callback
+        mgr = _make_lock_manager()
+        mgr.get_rollcalls.return_value = [self._rc(in_ids=[1])]
+        members = [{"user_id": 9, "first_name": "VenueOwner", "username": "venue"}]
+        svc_result = {"announcement": "📦 venue is collecting"}
+        with patch("handlers.dues.is_chat_admin", new=AsyncMock(return_value=True)), \
+             patch("handlers.dues.manager", mgr), \
+             patch("handlers.dues._db.get_active_members", return_value=members), \
+             patch("handlers.dues.dues_svc.set_collector", return_value=svc_result) as svc:
+            await pick_collector_callback(self._call("pickcol_0_9"))
+        svc.assert_called_once()
+        self.assertEqual(svc.call_args[0][1], "venue")
+
+    async def test_callback_rejects_unknown_uid(self):
+        from handlers.dues import pick_collector_callback
+        mgr = _make_lock_manager()
+        mgr.get_rollcalls.return_value = [self._rc(in_ids=[1])]
+        with patch("handlers.dues.is_chat_admin", new=AsyncMock(return_value=True)), \
+             patch("handlers.dues.manager", mgr), \
+             patch("handlers.dues._db.get_active_members", return_value=[]), \
+             patch("handlers.dues.dues_svc.set_collector") as svc:
+            await pick_collector_callback(self._call("pickcol_0_9"))
+        svc.assert_not_called()
+        alert = self.bot_state.bot.answer_callback_query.call_args
+        self.assertIn("unknown", alert[0][1])
+
+    async def test_no_real_in_users_falls_through_to_member_panel(self):
+        from handlers.dues import pick_collector
+        mgr = _make_lock_manager()
+        mgr.get_rollcalls.return_value = [self._rc(in_ids=[])]
+        members = [{"user_id": 9, "first_name": "VenueOwner", "username": "venue"}]
+        with _admin_ok(), \
+             patch("handlers.dues._require_dues_enabled"), \
+             patch("handlers.dues.manager", mgr), \
+             patch("handlers.dues._db.get_active_members", return_value=members):
+            await pick_collector(_msg("/pick_collector"))
+        text = self.bot_state.bot.send_message.call_args[0][1]
+        self.assertIn("all known members", text)
+
+
 class TestPostEndSettleNudge(unittest.IsolatedAsyncioTestCase):
     """_post_end_cleanup routes to the persistent nudge for dues-enabled
     chats, and the settle-initiated paths suppress it via settle_nudge=False."""

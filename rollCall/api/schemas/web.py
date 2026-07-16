@@ -94,6 +94,17 @@ class WebVoteRequest(BaseModel):
     comment: Optional[str] = Field(None, max_length=100, description="Optional note to attach to the vote")
 
 
+class WebProxyVoteRequest(BaseModel):
+    """Admin casts a vote on behalf of a non-Telegram member (web parity for
+    /sif /sof /smf). The actor is resolved from the signed id_token, never
+    from a client-supplied id."""
+    id_token: str = Field(..., description="Signed identity token of the acting web admin")
+    rollcall_num: int = Field(..., ge=1, description="1-based rollcall number")
+    proxy_name: str = Field(..., min_length=1, max_length=64, description="Name of the member being voted for")
+    vote: Literal["in", "out", "maybe"]
+    comment: Optional[str] = Field(None, max_length=100, description="Optional note to attach to the vote")
+
+
 class WebHeartbeatRequest(BaseModel):
     session_id: str = Field(..., min_length=1, max_length=64, description="Client-generated session UUID (per browser tab)")
 

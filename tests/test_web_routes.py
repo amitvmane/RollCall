@@ -538,5 +538,96 @@ class TestWebEndRollcall(unittest.TestCase):
         self.assertEqual(resp.json()["ended"], 1)
 
 
+class TestWebProxyVote(unittest.TestCase):
+    """Web parity for /sif /sof /smf — admin-gated proxy voting on the group
+    page (flow-audit #4)."""
+
+    def setUp(self):
+        from api.rate_limit import reset_buckets_for_tests
+        reset_buckets_for_tests()
+
+    def _body(self, **over):
+        body = {"id_token": "tok", "rollcall_num": 1,
+                "proxy_name": "Guest Ravi", "vote": "in"}
+        body.update(over)
+        return body
+
+    def test_missing_id_token_returns_422(self):
+        resp = _client().post("/api/v1/web/group/grp123/proxy-vote",
+                              json={"rollcall_num": 1, "proxy_name": "x", "vote": "in"})
+        self.assertEqual(resp.status_code, 422)
+
+    def test_invalid_group_token_returns_404(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value=None):
+            resp = _client().post("/api/v1/web/group/badgrp/proxy-vote", json=self._body())
+        self.assertEqual(resp.status_code, 404)
+
+    def test_invalid_id_token_returns_401(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch("api.identity.verify_identity_token", return_value=None):
+            resp = _client().post("/api/v1/web/group/grp123/proxy-vote", json=self._body())
+        self.assertEqual(resp.status_code, 401)
+
+    def test_non_admin_returns_403(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=False), \
+             patch("api.identity.verify_identity_token", return_value=77):
+            resp = _client().post("/api/v1/web/group/grp123/proxy-vote", json=self._body())
+        self.assertEqual(resp.status_code, 403)
+
+    def test_unknown_vote_choice_returns_422(self):
+        resp = _client().post("/api/v1/web/group/grp123/proxy-vote",
+                              json=self._body(vote="banana"))
+        self.assertEqual(resp.status_code, 422)
+
+    def test_admin_proxy_vote_calls_service_and_mirrors(self):
+        import api.routes.web as _web_mod
+        serialized = {"rollcall_id": 5, "title": "Sunday",
+                      "in": [{"name": "Guest Ravi"}], "out": [], "maybe": [], "waiting": []}
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value={"first_name": "Amit"}), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.proxy.set_in_for", new_callable=AsyncMock, return_value={}) as svc, \
+             patch.object(_web_mod, "_send_vote_notification", new_callable=AsyncMock) as notif, \
+             patch.object(_web_mod, "_mirror_panel_to_telegram", new_callable=AsyncMock) as mirror, \
+             patch("services.web._serialize_web_rollcall", return_value=serialized), \
+             patch("rollcall_manager.manager.get_rollcall", return_value=MagicMock()):
+            resp = _client().post("/api/v1/web/group/grp123/proxy-vote", json=self._body())
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.json()["in"][0]["name"], "Guest Ravi")
+        kwargs = svc.call_args.kwargs
+        self.assertEqual(kwargs["chat_id"], -100)
+        self.assertEqual(kwargs["admin_user_id"], 99)   # from the signed token
+        self.assertEqual(kwargs["admin_name"], "Amit")
+        self.assertEqual(kwargs["proxy_name"], "Guest Ravi")
+        self.assertEqual(kwargs["rc_number"], 0)        # 1-based → 0-based
+        notif.assert_awaited_once()
+        mirror.assert_awaited_once()
+
+    def test_out_vote_routes_to_set_out_for(self):
+        import api.routes.web as _web_mod
+        serialized = {"rollcall_id": 5, "title": "Sunday",
+                      "in": [], "out": [], "maybe": [], "waiting": []}
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value=None), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.proxy.set_out_for", new_callable=AsyncMock, return_value={}) as svc, \
+             patch.object(_web_mod, "_send_vote_notification", new_callable=AsyncMock), \
+             patch.object(_web_mod, "_mirror_panel_to_telegram", new_callable=AsyncMock), \
+             patch("services.web._serialize_web_rollcall", return_value=serialized), \
+             patch("rollcall_manager.manager.get_rollcall", return_value=MagicMock()):
+            resp = _client().post("/api/v1/web/group/grp123/proxy-vote",
+                                  json=self._body(vote="out"))
+        self.assertEqual(resp.status_code, 201)
+        svc.assert_awaited_once()
+        # No display info → falls back to the generic actor label
+        self.assertEqual(svc.call_args.kwargs["admin_name"], "(web admin)")
+
+
 if __name__ == "__main__":
     unittest.main()

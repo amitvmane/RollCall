@@ -235,6 +235,17 @@
           <button class="btn btn-secondary" style="width:100%;padding:8px" onclick="copyWebloginUrl()">📋 Copy link</button>
         </div>
       </div>
+      <!-- Proxy vote (needs an active rollcall — toggled alongside end-rc-row) -->
+      <div id="proxy-vote-row" style="display:none;border-top:1px solid var(--border);padding-top:12px;margin-top:12px">
+        <div style="font-size:.82rem;font-weight:600;color:var(--sub);margin-bottom:8px">🗳 Proxy vote</div>
+        <div style="font-size:.77rem;color:var(--sub);margin-bottom:10px">Vote on behalf of a member who isn't on Telegram (guest, +1) — same as /sif in the group.</div>
+        <input id="proxy-name-input" type="text" placeholder="Member name" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg);color:var(--text);font-size:.88rem;margin-bottom:8px"/>
+        <div style="display:flex;gap:8px">
+          <button class="btn" style="flex:1;padding:9px;border-radius:8px;font-weight:600;background:var(--border);color:var(--text)" onclick="doProxyVoteWeb('in')">✅ IN</button>
+          <button class="btn" style="flex:1;padding:9px;border-radius:8px;font-weight:600;background:var(--border);color:var(--text)" onclick="doProxyVoteWeb('out')">❌ OUT</button>
+          <button class="btn" style="flex:1;padding:9px;border-radius:8px;font-weight:600;background:var(--border);color:var(--text)" onclick="doProxyVoteWeb('maybe')">🤔 MAYBE</button>
+        </div>
+      </div>
     </div>
 
     <!-- Dues member card — shown when dues enabled and identity verified -->

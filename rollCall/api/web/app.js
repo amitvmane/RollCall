@@ -420,6 +420,8 @@ function renderRollcall(rc){
   $("lists-card").classList.remove("hidden");
   const endRow=document.getElementById("end-rc-row");
   if(endRow)endRow.style.display=_isWebAdmin?"":"none";
+  const proxyRow=document.getElementById("proxy-vote-row");
+  if(proxyRow)proxyRow.style.display=_isWebAdmin?"":"none";
   detectCurrentVote();renderLists();
 }
 
@@ -1258,6 +1260,39 @@ window.doEndRcWeb=async function(){
     toast(e.message||"Could not end rollcall",4000);
   }finally{
     if(btn){btn.disabled=false;btn.textContent="⏹ End Active Rollcall";}
+  }
+};
+
+// ── Proxy vote (admin votes for a non-Telegram member — /sif parity) ─────
+let _proxyVoting=false;
+window.doProxyVoteWeb=async function(voteType){
+  if(!_idToken){toast("Verify your Telegram identity first.",3500);return;}
+  if(!activeRcData){toast("No active rollcall.",2500);return;}
+  if(_proxyVoting)return;
+  const nameEl=document.getElementById("proxy-name-input");
+  const name=(nameEl?.value||"").trim();
+  if(!name){toast("Enter the member's name first.",2500);return;}
+  _proxyVoting=true;
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/proxy-vote`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({id_token:_idToken,rollcall_num:activeTabIdx+1,proxy_name:name,vote:voteType}),
+      signal:AbortSignal.timeout(10000),
+    });
+    if(!res.ok){
+      const d=await res.json().catch(()=>({}));
+      throw new Error(d.detail||"Failed to cast proxy vote");
+    }
+    const updated=await res.json();
+    activeRcData=updated;
+    if(IS_GROUP&&groupData)groupData.rollcalls[activeTabIdx]=updated;
+    if(nameEl)nameEl.value="";
+    toast(`🗳 ${name} → ${voteType.toUpperCase()}`,2500);
+    renderRollcall(updated);
+  }catch(e){
+    toast(e.message||"Could not cast proxy vote",4000);
+  }finally{
+    _proxyVoting=false;
   }
 };
 

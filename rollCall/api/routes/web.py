@@ -44,6 +44,7 @@ from api.schemas.web import (
     WebGroupStatsResponse,
     WebHeartbeatRequest,
     WebPresenceResponse,
+    WebProxyVoteRequest,
     WebRollcallResponse,
     WebStartRollcallRequest,
     WebVoteRequest,
@@ -331,6 +332,68 @@ async def web_end_rollcall(
     await _mirror_panel_to_telegram(chat_id, rc_num_ended)
 
     return WebEndRollcallResponse(ended=result["rc_number_ended_1based"])
+
+
+@router.post(
+    "/web/group/{group_token}/proxy-vote",
+    response_model=WebRollcallResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Cast a proxy vote for a non-Telegram member (requires web-admin identity)",
+)
+async def web_proxy_vote(
+    body: WebProxyVoteRequest,
+    group_token: str = Path(...),
+) -> WebRollcallResponse:
+    """Web parity for /sif /sof /smf — a verified web admin votes on behalf
+    of a member who isn't on Telegram (guest, +1, etc.)."""
+    chat = _db.get_chat_by_group_web_token(group_token)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Invalid group token")
+
+    actor_user_id = require_identity(
+        body.id_token, detail="Verify with Telegram before casting proxy votes."
+    )
+
+    chat_id = int(chat["chat_id"])
+    if not _db.is_web_admin(chat_id, actor_user_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not a web admin for this group.",
+        )
+
+    actor_name = "(web admin)"
+    try:
+        info = _db.get_member_display_info(chat_id, actor_user_id)
+        if info:
+            actor_name = info.get("first_name") or actor_name
+    except Exception:
+        pass
+
+    from services import proxy as proxy_svc
+    common = dict(
+        chat_id=chat_id,
+        admin_user_id=actor_user_id,
+        admin_name=actor_name,
+        proxy_name=body.proxy_name,
+        comment=body.comment,
+        rc_number=body.rollcall_num - 1,
+    )
+    if body.vote == "in":
+        await proxy_svc.set_in_for(**common)
+    elif body.vote == "out":
+        await proxy_svc.set_out_for(**common)
+    else:
+        await proxy_svc.set_maybe_for(**common)
+
+    await _send_vote_notification(chat_id, body.proxy_name, body.vote)
+    await _mirror_panel_to_telegram(chat_id, body.rollcall_num)
+
+    from rollcall_manager import manager as _mgr
+    from services.web import _serialize_web_rollcall
+    rc = _mgr.get_rollcall(chat_id, body.rollcall_num - 1)
+    if rc is None:
+        raise HTTPException(status_code=404, detail="Rollcall not found after vote")
+    return WebRollcallResponse(**_serialize_web_rollcall(rc))
 
 
 # ── Scheduled rollcalls ───────────────────────────────────────────────────────

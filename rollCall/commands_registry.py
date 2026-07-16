@@ -822,6 +822,39 @@ ADMIN_CATEGORY_ORDER = [
     "User Management", "Ghost Tracking", "Dues & Fund", "Audit", "API Access", "Super Admin",
 ]
 
+# Visual marker per category. The Telegram BotCommand menu is one flat list
+# with no headers, so each menu summary is prefixed with its category emoji
+# to keep the groups scannable; /help uses the same emoji on its headings.
+CATEGORY_EMOJI = {
+    "Vote": "🗳",
+    "View Lists": "📋",
+    "Stats & History": "📊",
+    "Settings": "⚙️",
+    "Rollcall": "📣",
+    "Proxy": "👥",
+    "Templates": "🗓",
+    "User Management": "🛂",
+    "Ghost Tracking": "👻",
+    "Audit": "🔍",
+    "API Access": "🔑",
+    "Dues & Fund": "💰",
+    "Super Admin": "🛡",
+}
+
+
+def menu_entries(scope, category_order):
+    """(name, marked summary) pairs for the Telegram BotCommand menu:
+    commands of `scope`, grouped by category in `category_order` (registry
+    order within a category, unknown categories last), each summary prefixed
+    with its category emoji."""
+    cmds = [c for c in COMMANDS if c["scope"] == scope]
+    rank = {cat: i for i, cat in enumerate(category_order)}
+    cmds.sort(key=lambda c: rank.get(c["category"], len(rank)))
+    return [
+        (c["name"], f"{CATEGORY_EMOJI.get(c['category'], '▪️')} {c['summary']}")
+        for c in cmds
+    ]
+
 
 def commands_for_scope(scope_set):
     """Return commands whose scope is in `scope_set`, preserving original order

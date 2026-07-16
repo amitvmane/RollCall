@@ -362,11 +362,18 @@ async def register_commands():
     either menu — they're documented in /help admin but hidden from the
     Telegram menu so non-owners don't see permission errors."""
     import telebot.types as ttypes
-    from commands_registry import COMMANDS
+    from commands_registry import menu_entries, USER_CATEGORY_ORDER, ADMIN_CATEGORY_ORDER
 
-    user_commands  = [ttypes.BotCommand(c["name"], c["summary"]) for c in COMMANDS if c["scope"] == "user"]
+    # menu_entries() groups each scope by the same category order /help uses
+    # and prefixes every summary with its category emoji — Telegram's menu is
+    # a flat list, so the emoji banding is the only grouping cue it can show.
+    user_commands = [
+        ttypes.BotCommand(name, summary)
+        for name, summary in menu_entries("user", USER_CATEGORY_ORDER)
+    ]
     admin_commands = user_commands + [
-        ttypes.BotCommand(c["name"], c["summary"]) for c in COMMANDS if c["scope"] == "admin"
+        ttypes.BotCommand(name, summary)
+        for name, summary in menu_entries("admin", ADMIN_CATEGORY_ORDER)
     ]
 
     # Default scope (regular members in groups + private chats): user commands only

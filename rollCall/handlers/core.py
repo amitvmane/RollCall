@@ -13,7 +13,7 @@ from db import get_all_chat_ids
 from services import settings as settings_svc
 from commands_registry import (
     COMMANDS, lookup_command, all_names_and_aliases,
-    USER_CATEGORY_ORDER, ADMIN_CATEGORY_ORDER,
+    USER_CATEGORY_ORDER, ADMIN_CATEGORY_ORDER, CATEGORY_EMOJI,
 )
 
 try:
@@ -58,7 +58,9 @@ def _render_command_list(scope_set, category_order, header):
 
     parts = [header, ""]
     for cat in ordered_cats:
-        parts.append(f"*{_esc_md(cat)}*")
+        emoji = CATEGORY_EMOJI.get(cat)
+        prefix = f"{emoji} " if emoji else ""
+        parts.append(f"{prefix}*{_esc_md(cat)}*")
         for c in by_cat[cat]:
             parts.append(_format_cmd_line(c))
         parts.append("")

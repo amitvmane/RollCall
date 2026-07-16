@@ -121,5 +121,42 @@ class TestPenaltyPanelTierExclusivity(unittest.IsolatedAsyncioTestCase):
         self.bot_state.bot.answer_callback_query.assert_awaited()
 
 
+class TestSendPenaltyPanelReturn(unittest.IsolatedAsyncioTestCase):
+    """send_penalty_panel signals whether the panel opened so the settle flow
+    can hand off to the confirm card instead of dead-ending (flow-audit #6)."""
+
+    def setUp(self):
+        import bot_state
+        self.bot_state = bot_state
+        sent = MagicMock()
+        sent.message_id = 5
+        bot_state.bot.send_message = AsyncMock(return_value=sent)
+        from handlers import penalty_panel as pp
+        self.pp = pp
+        pp._sessions.clear()
+
+    async def test_no_tiers_returns_false_and_hints_setup(self):
+        with patch("handlers.penalty_panel.db.get_penalty_tiers", return_value=[]):
+            opened = await self.pp.send_penalty_panel(100, 1, "Sunday")
+        self.assertFalse(opened)
+        hint = self.bot_state.bot.send_message.call_args[0][1]
+        self.assertIn("/add_penalty", hint)
+
+    async def test_no_members_returns_false(self):
+        tiers = [{"name": "late", "amount": 50, "description": "", "is_ditch": False}]
+        with patch("handlers.penalty_panel.db.get_penalty_tiers", return_value=tiers), \
+             patch("handlers.penalty_panel._members_for_rollcall", return_value=[]):
+            opened = await self.pp.send_penalty_panel(100, 1, "Sunday")
+        self.assertFalse(opened)
+
+    async def test_panel_opened_returns_true(self):
+        tiers = [{"name": "late", "amount": 50, "description": "", "is_ditch": False}]
+        with patch("handlers.penalty_panel.db.get_penalty_tiers", return_value=tiers), \
+             patch("handlers.penalty_panel._members_for_rollcall", return_value=_members()):
+            opened = await self.pp.send_penalty_panel(100, 1, "Sunday")
+        self.assertTrue(opened)
+        self.assertIn((100, 5), self.pp._sessions)
+
+
 if __name__ == "__main__":
     unittest.main()

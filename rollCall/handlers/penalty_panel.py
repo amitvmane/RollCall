@@ -175,11 +175,15 @@ async def send_penalty_panel(
     rollcall_id: int,
     title: str,
     ghost_eligible: bool = False,
-) -> None:
+) -> bool:
     """Send the penalty-marking panel for a just-ended rollcall.
 
     When ghost_eligible=True the ditch tier also writes ghost tracking records
     and Done finalises attendance (replaces the separate ghost prompt entirely).
+
+    Returns True if the panel actually opened. False means no panel (no tiers
+    configured, or nobody to mark) — the caller must continue the settle flow
+    itself, since there'll be no pen_d Done tap to hand off from.
     """
     tiers = db.get_penalty_tiers(chat_id)
     if not tiers:
@@ -187,13 +191,22 @@ async def send_penalty_panel(
         # fall back to the classic ghost prompt so no data is lost.
         if ghost_eligible:
             await _send_fallback_ghost_prompt(chat_id, rollcall_id, title)
-        return
+        try:
+            await bot.send_message(
+                chat_id,
+                "ℹ️ No penalty tiers set up — skipping penalty marking.\n"
+                "To use it next game: /add_penalty late15 50 mins:15 and "
+                "/add_penalty ditch 100 ditch No-show",
+            )
+        except Exception:
+            logging.exception("Failed to send no-tiers hint")
+        return False
 
     members = _members_for_rollcall(rollcall_id)
     if not members:
         if ghost_eligible:
             mark_rollcall_absent_done(rollcall_id)
-        return
+        return False
 
     session = _PenaltySession(
         chat_id=chat_id,
@@ -207,6 +220,7 @@ async def send_penalty_panel(
     _sessions[(chat_id, sent.message_id)] = session
     while len(_sessions) > _MAX_SESSIONS:
         _sessions.pop(next(iter(_sessions)))
+    return True
 
 
 # ── Callback handler ──────────────────────────────────────────────────────────

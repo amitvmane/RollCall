@@ -748,6 +748,37 @@ class TestPickCollectorNonIn(unittest.IsolatedAsyncioTestCase):
         self.assertIn("all known members", text)
 
 
+class TestBeginSettlementHandoff(unittest.IsolatedAsyncioTestCase):
+    """When the penalty panel can't open (no tiers / nobody to mark), the
+    guided settle flow must continue to the confirm card, not dead-end."""
+
+    async def test_falls_through_to_confirm_card_when_panel_skipped(self):
+        from handlers.dues import _begin_settlement
+        mgr = MagicMock()
+        mgr.get_ghost_tracking_enabled.return_value = False
+        with patch("handlers.dues._db.get_rollcall_in_users", return_value=[{"user_id": 1}]), \
+             patch("handlers.dues._db.get_rollcall", return_value={"absent_marked": 1}), \
+             patch("handlers.dues.manager", mgr), \
+             patch("handlers.penalty_panel.send_penalty_panel",
+                   new=AsyncMock(return_value=False)), \
+             patch("handlers.dues.show_settle_confirm", new=AsyncMock()) as confirm:
+            await _begin_settlement(100, 42, "Sunday")
+        confirm.assert_awaited_once_with(100, 42, "Sunday")
+
+    async def test_waits_for_done_tap_when_panel_opened(self):
+        from handlers.dues import _begin_settlement
+        mgr = MagicMock()
+        mgr.get_ghost_tracking_enabled.return_value = False
+        with patch("handlers.dues._db.get_rollcall_in_users", return_value=[{"user_id": 1}]), \
+             patch("handlers.dues._db.get_rollcall", return_value={"absent_marked": 1}), \
+             patch("handlers.dues.manager", mgr), \
+             patch("handlers.penalty_panel.send_penalty_panel",
+                   new=AsyncMock(return_value=True)), \
+             patch("handlers.dues.show_settle_confirm", new=AsyncMock()) as confirm:
+            await _begin_settlement(100, 42, "Sunday")
+        confirm.assert_not_awaited()
+
+
 class TestPostEndSettleNudge(unittest.IsolatedAsyncioTestCase):
     """_post_end_cleanup routes to the persistent nudge for dues-enabled
     chats, and the settle-initiated paths suppress it via settle_nudge=False."""

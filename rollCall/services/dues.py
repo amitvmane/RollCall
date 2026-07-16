@@ -933,11 +933,35 @@ def mark_late(
         raise incorrectParameter("Minutes must be at least 1.")
     tier = db.get_tier_for_minutes(chat_id, minutes)
     if tier is None:
-        raise incorrectParameter(
-            f"No late tier covers {minutes} min late. "
-            "Add one with: /add_penalty <name> <amount> mins:<threshold>"
-        )
+        raise incorrectParameter(_no_tier_nudge(chat_id, f"No late tier covers {minutes} min late.",
+                                                "mins:<threshold>",
+                                                "/add_penalty late15 50 mins:15"))
     return mark_penalty(chat_id, tier["name"], token, admin_uid, admin_name, rollcall_id)
+
+
+def _no_tier_nudge(chat_id: int, problem: str, flag_hint: str, example: str) -> str:
+    """Guided error for /mark_late and /mark_ditch when tier lookup fails —
+    a first-time admin who never ran /add_penalty gets setup steps, while a
+    group with tiers gets shown what it has so the gap is obvious."""
+    tiers = db.get_penalty_tiers(chat_id)
+    if not tiers:
+        return (
+            f"{problem}\n\n"
+            "This group has no penalty tiers yet — set them up once:\n"
+            f"  {example}\n"
+            "  /add_penalty ditch 100 ditch No-show\n"
+            "Then /penalties shows them, and marking works from then on."
+        )
+    lines = [f"{problem}\n\nExisting tiers:"]
+    for t in tiers:
+        extra = ""
+        if t.get("late_minutes_threshold"):
+            extra = f" (mins:{t['late_minutes_threshold']})"
+        elif t.get("is_ditch"):
+            extra = " (ditch)"
+        lines.append(f"  • {t['name']}: ₹{t['amount']}{extra}")
+    lines.append(f"\nAdd the missing one: /add_penalty <name> <amount> {flag_hint}")
+    return "\n".join(lines)
 
 
 def mark_ditch(
@@ -954,10 +978,9 @@ def mark_ditch(
     """
     tier = db.get_ditch_tier(chat_id)
     if tier is None:
-        raise incorrectParameter(
-            "No ditch tier configured. "
-            "Add one with: /add_penalty <name> <amount> ditch <description>"
-        )
+        raise incorrectParameter(_no_tier_nudge(chat_id, "No ditch tier configured.",
+                                                "ditch <description>",
+                                                "/add_penalty ditch 100 ditch No-show"))
     return mark_penalty(chat_id, tier["name"], token, admin_uid, admin_name, rollcall_id)
 
 

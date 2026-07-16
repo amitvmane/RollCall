@@ -298,7 +298,12 @@ async def _begin_settlement(cid: int, rollcall_id: int, title: str) -> None:
         manager.get_ghost_tracking_enabled(cid) and not row.get("absent_marked")
     )
     from handlers.penalty_panel import send_penalty_panel
-    await send_penalty_panel(cid, rollcall_id, title, ghost_eligible=ghost_eligible)
+    opened = await send_penalty_panel(cid, rollcall_id, title, ghost_eligible=ghost_eligible)
+    if not opened:
+        # No panel (no tiers configured, or nobody to mark) means no Done tap
+        # will ever fire — continue straight to the confirm/subsidy card so
+        # the guided flow doesn't silently dead-end here.
+        await show_settle_confirm(cid, rollcall_id, title)
 
 
 # ── Confirm / subsidy card ─────────────────────────────────────────────────────

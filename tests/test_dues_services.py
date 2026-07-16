@@ -1736,5 +1736,58 @@ class TestMarkPenaltyUPI(unittest.TestCase):
         self.assertNotIn("💳", r["announcement"])
 
 
+class TestNoTierNudge(unittest.TestCase):
+    """Flow-audit #6: /mark_late and /mark_ditch must guide the admin when
+    tier lookup fails — first-time setup steps if no tiers exist at all,
+    the existing tier list if there are tiers but none matches."""
+
+    def test_mark_late_no_tiers_at_all_gives_setup_steps(self):
+        from services.dues import mark_late
+        from exceptions import incorrectParameter
+        with patch("services.dues.db.get_tier_for_minutes", return_value=None), \
+             patch("services.dues.db.get_penalty_tiers", return_value=[]):
+            with self.assertRaises(incorrectParameter) as ctx:
+                mark_late(1, "amit", 20, admin_uid=99, admin_name="Admin")
+        msg = str(ctx.exception)
+        self.assertIn("no penalty tiers yet", msg)
+        self.assertIn("/add_penalty", msg)
+
+    def test_mark_late_with_tiers_lists_them(self):
+        from services.dues import mark_late
+        from exceptions import incorrectParameter
+        tiers = [{"name": "late60", "amount": 100, "late_minutes_threshold": 60,
+                  "is_ditch": False}]
+        with patch("services.dues.db.get_tier_for_minutes", return_value=None), \
+             patch("services.dues.db.get_penalty_tiers", return_value=tiers):
+            with self.assertRaises(incorrectParameter) as ctx:
+                mark_late(1, "amit", 20, admin_uid=99, admin_name="Admin")
+        msg = str(ctx.exception)
+        self.assertIn("late60", msg)
+        self.assertIn("mins:60", msg)
+        self.assertNotIn("no penalty tiers yet", msg)
+
+    def test_mark_ditch_no_tiers_at_all_gives_setup_steps(self):
+        from services.dues import mark_ditch
+        from exceptions import incorrectParameter
+        with patch("services.dues.db.get_ditch_tier", return_value=None), \
+             patch("services.dues.db.get_penalty_tiers", return_value=[]):
+            with self.assertRaises(incorrectParameter) as ctx:
+                mark_ditch(1, "amit", admin_uid=99, admin_name="Admin")
+        self.assertIn("no penalty tiers yet", str(ctx.exception))
+
+    def test_mark_ditch_with_tiers_shows_gap(self):
+        from services.dues import mark_ditch
+        from exceptions import incorrectParameter
+        tiers = [{"name": "late15", "amount": 50, "late_minutes_threshold": 15,
+                  "is_ditch": False}]
+        with patch("services.dues.db.get_ditch_tier", return_value=None), \
+             patch("services.dues.db.get_penalty_tiers", return_value=tiers):
+            with self.assertRaises(incorrectParameter) as ctx:
+                mark_ditch(1, "amit", admin_uid=99, admin_name="Admin")
+        msg = str(ctx.exception)
+        self.assertIn("late15", msg)
+        self.assertIn("ditch", msg)
+
+
 if __name__ == "__main__":
     unittest.main()

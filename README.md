@@ -5,7 +5,7 @@ A feature-rich Telegram bot for tracking event attendance in group chats. Member
 [![CI](https://github.com/amitvmane/RollCall/actions/workflows/ci.yml/badge.svg)](https://github.com/amitvmane/RollCall/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-7.6-green)](rollCall/version.json)
+[![Version](https://img.shields.io/badge/version-9.5-green)](rollCall/version.json)
 
 ---
 
@@ -14,26 +14,25 @@ A feature-rich Telegram bot for tracking event attendance in group chats. Member
 - **Attendance tracking** — in / out / maybe with optional comments
 - **Multiple roll calls** — run up to 3 events simultaneously in one group
 - **Attendance limits & waitlists** — cap attendees; overflow goes on a waitlist; promoted users get a private DM
-- **Proxy responses** — mark attendance on behalf of non-Telegram members (`/sif`, `/sof`, `/smf`)
+- **Proxy responses** — mark attendance on behalf of non-Telegram members (`/sif`, `/sof`, `/smf`) — also available from the group web page for web admins
 - **Event details** — title, date/time, location, and fee with automatic per-person cost splitting
-- **Templates** — save and reuse roll call configurations
-- **Scheduled templates** — weekly, biweekly, or monthly auto-start per template
-- **Reminders** — scheduled notifications before events; auto-closes at event time
+- **Templates & scheduling** — save reusable configs; weekly, biweekly, or monthly auto-start; `/repeat` clones last week's game in one command
+- **Reminders** — scheduled notifications before events; auto-closes at event time; `/auto_buzz` pings only non-voters before close
+- **💰 Dues & Treasury** — `/settle_dues` splits the ground fee per head with a UPI QR to pay; configurable penalty tiers (late/no-show), waivers, collector flow with UPI memory, group fund, weekly dues reports & reminders — all on an append-only, tamper-evident ledger where every transaction is announced in the chat. `/new_season` resets balances for a fresh season without deleting history
 - **Ghost tracking** — record no-shows per user, show leaderboard, prompt for reconfirmation on repeat offenders
-- **Buzz** — ping members who haven't voted yet; 30s rate-limited; auto-removes members who have left the group
-- **Attendance streaks** — track current and best consecutive-session streaks per user
+- **Achievement badges** — streak and games-played milestones announced at close and shown on the web leaderboard
+- **Statistics & history** — per-user attendance rate, streaks, personal bests, paginated session history, monthly wrap-up card & treasury statement
 - **In-place panel editing** — votes update the panel message instead of flooding the chat
-- **Statistics** — per-user attendance rate, streaks, IN/OUT/MAYBE counts
-- **History** — paginated view of ended rollcalls with participant and ghost counts
 - **Admin audit log** — every admin action recorded; viewable with `/audit_log`
-- **Manual status override** — admin can move any user to a different status with `/set_status`
-- **Admin controls** — restrict commands to designated group admins
-- **Webhook mode** — opt-in webhook support via `WEBHOOK_URL` env var (falls back to long-polling)
-- **Dual database support** — SQLite (default) or PostgreSQL
-- **Web voting** — shareable browser links for non-Telegram users; permanent per-group bookmarkable URL that works even when Telegram is banned
+- **Admin controls** — restrict commands to designated group admins; manual status override with `/set_status`
+- **Web voting** — shareable browser links for non-Telegram users; permanent per-group bookmarkable URL that works even when Telegram is down; installable PWA with push notifications
+- **User portal** — cross-group personal dashboard (`/portal/`): attendance, streaks, upcoming games, dues balance
+- **Flexible web login** — Telegram deep-link verify, Telegram Login Widget (no app needed), admin-issued single-use links (`/weblogin`), and personal login codes (`/mytoken`) that work even when Telegram itself is unreachable
 - **Telegram Mini App** — in-app voting interface via the Telegram menu button (no browser switch)
 - **REST API** — FastAPI layer with bearer-token auth; powers the web + Mini App frontends
-- **Docker-ready** — ships with a Dockerfile and Docker Compose configuration including a Cloudflare Tunnel sidecar
+- **Webhook mode** — opt-in webhook support via `WEBHOOK_URL` env var (falls back to long-polling)
+- **Dual database support** — SQLite (default) or PostgreSQL
+- **Docker-ready** — Dockerfile + Docker Compose with Cloudflare Tunnel and daily-DB-backup sidecars
 - **Health checks** — HTTP `/health` and `/ping` endpoints on port 8080
 
 ---
@@ -146,6 +145,11 @@ variables:
 
 ## Commands
 
+The tables below cover the most-used commands. The **authoritative, always-current
+list** lives in the bot itself — `/help` (user commands), `/help admin`, and
+`/help <command>` for a detail card — all rendered from
+[`commands_registry.py`](rollCall/commands_registry.py), the single source of truth.
+
 Append `::N` to most commands to target a specific rollcall when multiple are active (e.g. `/in ::2`).
 
 ### Core
@@ -154,11 +158,14 @@ Append `::N` to most commands to target a specific rollcall when multiple are ac
 |---|---|---|
 | `/start_roll_call [title]` | `/src` | Start a new roll call |
 | `/end_roll_call [::N]` | `/erc` | End rollcall #N |
+| `/cancel_roll_call [::N]` | `/xrc` | Cancel a rollcall without recording stats |
+| `/repeat` | `/rpt` | Clone the last ended rollcall (title, limit, location, fee) |
 | `/rollcalls` | `/r` | List all active rollcalls |
 | `/panel [::N]` | | Show inline control panel for rollcall #N |
 | `/in [comment] [::N]` | | Mark yourself IN |
 | `/out [comment] [::N]` | | Mark yourself OUT |
 | `/maybe [comment] [::N]` | | Mark yourself MAYBE |
+| `/summary [days]` | | Recap of recent sessions (count, avg attendance, top 3) |
 
 ### Lists
 
@@ -228,12 +235,42 @@ For adding non-Telegram members to a rollcall. Proxy names are limited to **40 c
 | `/set_admins` | Enable admin-only mode (group admins only) |
 | `/unset_admins` | Disable admin-only mode |
 
+### Dues & Treasury (admin only unless noted)
+
+Enable once with `/enable_dues` — a guided setup card walks through UPI and
+penalty tiers. The ledger is **append-only**: corrections are compensating
+entries, never deletes, and every money mutation is announced in the chat.
+
+| Command | Alias | Description |
+|---|---|---|
+| `/settle_dues [subsidy] [::N]` | | Close a game's books — guided flow: penalty panel → confirm card → per-head split with UPI QR |
+| `/pick_collector [::N]` | | Pick the collector from a button panel (IN members or any known member); remembers a returning collector's UPI |
+| `/set_collector name [paid] [upi] [::N]` | | Typed collector assignment |
+| `/mark_late name minutes` / `/mark_ditch name` | | Assess late/no-show penalty by tier |
+| `/mark_paid name [amount]` | `/paid` | Record a payment (admin or designated collector; user-scoped panel with no args) |
+| `/waive` `/reimburse` `/add_adhoc` `/cancel_game_dues` | | Corrections — all as compensating entries |
+| `/my_dues` | `/md` | Your own balance (everyone) |
+| `/dues` / `/dues_snapshot` / `/dues_export` | `/ds` `/de` | Full ledger view / group snapshot / CSV export |
+| `/fund` `/fund_history` `/fund_topup` `/log_expense` | | Group fund (penalties + rounding accumulate here) |
+| `/dues_report weekly\|off` | `/dr` | Auto-post a snapshot every Sunday evening |
+| `/new_season` | `/dues_reset` | Season reset — zero all balances via compensating entries, fund carry/zero choice, history preserved |
+| `/dues_setup` | | Re-open the guided setup status card |
+
+### Web Access
+
+| Command | Alias | Description |
+|---|---|---|
+| `/weblink` | | Permanent group web page + per-rollcall links (everyone) |
+| `/mytoken [off]` | | DM yourself a personal web login code — works even when Telegram is down (everyone) |
+| `/weblogin name` | | Admin issues a 7-day single-use login link for a member |
+
 ### Info & Stats
 
 | Command | Alias | Description |
 |---|---|---|
 | `/stats [name\|@user\|group\|top\|bot]` | `/s` | Attendance rate, streaks, IN/OUT/MAYBE counts |
 | `/history [N] [page]` | | Paginated ended rollcalls with counts (default 10 per page) |
+| `/card` | `/mc` | Shareable match-day card image of the IN list |
 | `/version` | `/v` | Show bot version |
 
 ### Chat Settings
@@ -258,24 +295,31 @@ For adding non-Telegram members to a rollcall. Proxy names are limited to **40 c
 RollCall/
 ├── rollCall/
 │   ├── runner.py              # Entry point, health server, webhook/polling setup
+│   ├── commands_registry.py   # Single source of truth for every command (menu + /help)
 │   ├── handlers/              # Thin Telegram adapters (one file per feature area)
 │   ├── services/              # Platform-agnostic business logic (bot + web + REST share this)
 │   ├── api/                   # FastAPI REST layer (gated by REST_API_ENABLED)
 │   │   ├── main.py            # App factory, mounts routes + static files
-│   │   ├── routes/            # REST endpoints (rollcalls, votes, web, miniapp, stats…)
+│   │   ├── identity.py        # Signed id_token issue/verify for web identity
+│   │   ├── routes/            # REST endpoints (rollcalls, votes, web, portal, auth, dues…)
 │   │   ├── schemas/           # Pydantic request/response models
-│   │   ├── web/               # Web voting SPA (index.html — join + group mode)
-│   │   └── miniapp/           # Telegram Mini App SPA (index.html + app.js + style.css)
+│   │   ├── web/               # Group voting SPA (PWA: push, manifest, service worker)
+│   │   ├── portal/            # Cross-group user portal SPA
+│   │   ├── admin/             # Admin console SPA
+│   │   ├── index/             # Public landing page
+│   │   └── miniapp/           # Telegram Mini App SPA
 │   ├── models.py              # RollCall and User data models
 │   ├── rollcall_manager.py    # In-memory cache + DB sync layer
 │   ├── db.py                  # Database abstraction (SQLite / PostgreSQL)
 │   ├── config.py              # Environment variable parsing
 │   ├── functions.py           # Shared helpers (timezone, admin checks)
-│   ├── check_reminders.py     # Timed reminder and auto-close scheduler
+│   ├── check_reminders.py     # Timed reminder, auto-close, and template auto-start scheduler
+│   ├── periodic_jobs.py       # Weekly dues nudges/reports, monthly wrap-up & treasury digest
 │   ├── exceptions.py          # Custom exception types
 │   └── version.json           # Version history
-├── tests/                     # pytest test suite (542+ tests)
-├── scripts/smoke_test.py      # Real-import boot check (run before dep bumps)
+├── tests/                     # Unit tests, fully mocked (900+)
+├── integration_tests/         # Real-DB + real-handler scenario tests (780+)
+├── scripts/smoke_test.py      # Real-import boot check (run before dep bumps / handler refactors)
 ├── .github/workflows/         # GitHub Actions CI/CD
 ├── dockerfile
 ├── docker-compose.yml
@@ -299,10 +343,10 @@ RollCall/
 
 ```bash
 pip install -r requirements.txt
-pytest tests/ -v
+pytest tests/ -v               # unit suite — all external deps mocked, fully offline
+pytest integration_tests/ -v   # scenario suite — real SQLite + real handlers, Telegram mocked
+python scripts/smoke_test.py   # real-import boot check against pinned deps
 ```
-
-Tests mock all external dependencies (Telegram API, database) so they run fully offline.
 
 ### Linting
 
@@ -442,6 +486,11 @@ See [version.json](rollCall/version.json) for the full version history.
 
 | Version | Highlights |
 |---|---|
+| **9.5** | Dues season reset (`/new_season` — compensating entries, fund carry/zero choice); dues epoch (games played while dues was off never resurface as unsettled); collector UPI memory with one-tap reuse |
+| **9.4** | Panel button fix (critical); pinned settle nudge with Settle-now button; collector picker reaches non-playing members; guided `/enable_dues` setup card + `/dues_setup`; web proxy voting; emoji-grouped command menu; `/mytoken` personal web login codes |
+| **9.1–9.3** | 💰 Dues & Treasury — per-head fee split with UPI QR, penalty tiers, waivers, collector flow, group fund, append-only ledger; dues web UI (member card + admin console); weekly dues reports & reminders; Telegram Login Widget; monthly wrap-up card & treasury statement |
+| **9.0** | Web platform — permanent group voting page (works when Telegram is down), installable PWA with push notifications, live stats/leaderboard, user portal, Mini App |
+| **8.x** | Achievement badges, `/repeat`, `/summary`, `/auto_buzz`, `/xrc` cancel-without-stats, collector rotation, idle re-engagement, REST API with bearer-token auth |
 | **7.4** | Auto panel on `/src` and template auto-start; "Ended by" attribution on rollcall end; panel_msg_id persistence fix (was silently broken); `_dm_promoted_real_user` proxy guard at all 5 call sites; debounce cancel on rollcall end; rate limit on panel vote buttons |
 | **7.3** | Louder mode fixes — `/sif`/`/sof`/`/smf` acks restored, `/in`/`/maybe` acks added, shh gating for all proxy commands; panel debounce (5 min, non-blocking) in louder mode; panel message ID persisted across restarts; SQLite cursor leak fix |
 | **7.2** | Bot freeze fix (TCP session TTL), audit log 2.0 (pagination, 6 new tracked actions, RC name instead of ID), auto-close fix after restart, 12-bug final audit (naive datetime, release_connection on SQLite, schedule columns preserved on template update, panel ID shift after end, and more), `/schedules` multi-select panel |

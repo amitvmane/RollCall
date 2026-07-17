@@ -611,6 +611,7 @@ class TestSettleNudge(unittest.IsolatedAsyncioTestCase):
         call.message.chat.id = 100
         call.message.message_id = 777
         with patch("handlers.dues._settle_admin_ok", new=AsyncMock(return_value=True)), \
+             patch("handlers.dues._db.get_or_create_chat", return_value={"dues_enabled": 1}), \
              patch("handlers.dues._db.get_game_closure", return_value=None), \
              patch("handlers.dues._db.get_rollcall", return_value={"title": "Sunday"}), \
              patch("handlers.dues._begin_settlement", new=AsyncMock()) as begin:
@@ -625,6 +626,7 @@ class TestSettleNudge(unittest.IsolatedAsyncioTestCase):
         call.message.chat.id = 100
         call.message.message_id = 777
         with patch("handlers.dues._settle_admin_ok", new=AsyncMock(return_value=True)), \
+             patch("handlers.dues._db.get_or_create_chat", return_value={"dues_enabled": 1}), \
              patch("handlers.dues._db.get_game_closure", return_value={"id": 1}), \
              patch("handlers.dues.safe_edit_markup", new=AsyncMock()), \
              patch("handlers.dues._begin_settlement", new=AsyncMock()) as begin:
@@ -632,6 +634,21 @@ class TestSettleNudge(unittest.IsolatedAsyncioTestCase):
         begin.assert_not_awaited()
         self.assertIn("Already settled", self._sent_text())
         self.assertNotIn((100, 42), _settle_nudge_msgs)
+
+    async def test_settle_now_blocked_when_dues_disabled(self):
+        """Nudge pinned before /disable_dues must not keep a live settle path."""
+        from handlers.dues import settle_now_callback
+        call = MagicMock()
+        call.data = "settle_now:42"
+        call.message.chat.id = 100
+        call.message.message_id = 777
+        with patch("handlers.dues._settle_admin_ok", new=AsyncMock(return_value=True)), \
+             patch("handlers.dues._db.get_or_create_chat", return_value={"dues_enabled": 0}), \
+             patch("handlers.dues._begin_settlement", new=AsyncMock()) as begin:
+            await settle_now_callback(call)
+        begin.assert_not_awaited()
+        alert = self.bot_state.bot.answer_callback_query.call_args
+        self.assertIn("disabled", alert[0][1])
 
     async def test_settle_now_button_admin_gated(self):
         from handlers.dues import settle_now_callback
@@ -878,6 +895,220 @@ class TestBeginSettlementHandoff(unittest.IsolatedAsyncioTestCase):
              patch("handlers.dues.show_settle_confirm", new=AsyncMock()) as confirm:
             await _begin_settlement(100, 42, "Sunday")
         confirm.assert_not_awaited()
+
+
+class TestNewSeasonHandler(unittest.IsolatedAsyncioTestCase):
+
+    def setUp(self):
+        import bot_state
+        self.bot_state = bot_state
+        bot_state.bot.send_message = AsyncMock()
+        bot_state.bot.answer_callback_query = AsyncMock()
+
+    def _preview(self):
+        return {"balances": [], "members": 4, "owed_total": 500,
+                "credit_total": 0, "fund_balance": 200}
+
+    async def test_confirm_card_shows_totals_and_fund_choice(self):
+        import telebot.types as tt
+        from handlers.dues import new_season_cmd
+        tt.InlineKeyboardButton.reset_mock()
+        with _admin_ok(), patch("handlers.dues._require_dues_enabled"), \
+             patch("handlers.dues.manager", _make_lock_manager()), \
+             patch("handlers.dues.dues_svc.new_season_preview", return_value=self._preview()):
+            await new_season_cmd(_msg("/new_season"))
+        text = self._sent_text()
+        self.assertIn("₹500", text)
+        self.assertIn("forgiven", text)
+        datas = [c.kwargs.get("callback_data") for c in tt.InlineKeyboardButton.call_args_list]
+        self.assertIn("season_go:carry", datas)
+        self.assertIn("season_go:zero", datas)
+        self.assertIn("season_cancel", datas)
+
+    def _sent_text(self, idx=0):
+        return self.bot_state.bot.send_message.call_args_list[idx][0][1]
+
+    async def test_nothing_to_reset_short_circuits(self):
+        from handlers.dues import new_season_cmd
+        empty = {"balances": [], "members": 0, "owed_total": 0,
+                 "credit_total": 0, "fund_balance": 0}
+        with _admin_ok(), patch("handlers.dues._require_dues_enabled"), \
+             patch("handlers.dues.manager", _make_lock_manager()), \
+             patch("handlers.dues.dues_svc.new_season_preview", return_value=empty):
+            await new_season_cmd(_msg("/new_season"))
+        self.assertIn("Nothing to reset", self._sent_text())
+
+    async def test_confirm_callback_admin_gated(self):
+        from handlers.dues import new_season_confirm_callback
+        call = MagicMock()
+        call.data = "season_go:zero"
+        call.message.chat.id = 100
+        with patch("handlers.dues.is_chat_admin", new=AsyncMock(return_value=False)), \
+             patch("handlers.dues.dues_svc.new_season") as svc:
+            await new_season_confirm_callback(call)
+        svc.assert_not_called()
+
+    async def test_confirm_callback_runs_reset_with_fund_choice(self):
+        from handlers.dues import new_season_confirm_callback
+        call = MagicMock()
+        call.data = "season_go:zero"
+        call.message.chat.id = 100
+        call.message.message_id = 5
+        call.from_user.id = 1
+        call.from_user.first_name = "Admin"
+        with patch("handlers.dues.is_chat_admin", new=AsyncMock(return_value=True)), \
+             patch("handlers.dues.manager", _make_lock_manager()), \
+             patch("handlers.dues.safe_edit_markup", new=AsyncMock()), \
+             patch("handlers.dues.send_md_fallback", new=AsyncMock()) as announce, \
+             patch("handlers.dues.dues_svc.new_season",
+                   return_value={"announcement": "🏁 Season closed!"}) as svc:
+            await new_season_confirm_callback(call)
+        self.assertTrue(svc.call_args[0][1])  # zero_fund=True from season_go:zero
+        announce.assert_awaited_once()
+
+
+class TestEnableDuesEpoch(unittest.IsolatedAsyncioTestCase):
+
+    def setUp(self):
+        import bot_state
+        self.bot_state = bot_state
+        bot_state.bot.send_message = AsyncMock()
+
+    def _run_enable(self, was_enabled):
+        from handlers.dues import enable_dues
+        settings = {"upi_vpa": None, "treasury_upi": None,
+                    "dues_round_step": 10, "dues_self_paid_mode": "auto"}
+        return enable_dues, {
+            "chat": {"dues_enabled": 1 if was_enabled else 0},
+            "settings": settings,
+        }
+
+    async def test_first_enable_stamps_epoch(self):
+        fn, ctx = self._run_enable(was_enabled=False)
+        with _admin_ok(), patch("handlers.dues.manager", _make_lock_manager()), \
+             patch("handlers.dues._db.get_or_create_chat", return_value=ctx["chat"]), \
+             patch("handlers.dues._db.update_chat_settings"), \
+             patch("handlers.dues._db.get_penalty_tiers", return_value=[]), \
+             patch("handlers.dues.dues_svc.get_dues_settings", return_value=ctx["settings"]), \
+             patch("handlers.dues.dues_svc.seed_default_penalty_tiers"), \
+             patch("handlers.dues.dues_svc.stamp_dues_epoch") as stamp:
+            await fn(_msg("/enable_dues"))
+        stamp.assert_called_once_with(100)
+
+    async def test_reenable_while_already_on_does_not_restamp(self):
+        """Running /enable_dues mid-season must not move the epoch — that
+        would hide genuinely unsettled games."""
+        fn, ctx = self._run_enable(was_enabled=True)
+        with _admin_ok(), patch("handlers.dues.manager", _make_lock_manager()), \
+             patch("handlers.dues._db.get_or_create_chat", return_value=ctx["chat"]), \
+             patch("handlers.dues._db.update_chat_settings"), \
+             patch("handlers.dues._db.get_penalty_tiers", return_value=[]), \
+             patch("handlers.dues.dues_svc.get_dues_settings", return_value=ctx["settings"]), \
+             patch("handlers.dues.dues_svc.seed_default_penalty_tiers"), \
+             patch("handlers.dues.dues_svc.stamp_dues_epoch") as stamp:
+            await fn(_msg("/enable_dues"))
+        stamp.assert_not_called()
+
+
+class TestCollectorUpiMemory(unittest.IsolatedAsyncioTestCase):
+
+    def setUp(self):
+        import bot_state
+        import handlers.dues as dues_handlers
+        self.bot_state = bot_state
+        self.dh = dues_handlers
+        sent = MagicMock()
+        sent.message_id = 888
+        bot_state.bot.send_message = AsyncMock(return_value=sent)
+        bot_state.bot.answer_callback_query = AsyncMock()
+        dues_handlers._pending_colupi.clear()
+        dues_handlers._pending_colupi_input.clear()
+
+    def _call(self, data, mid=888, uid=1):
+        call = MagicMock()
+        call.data = data
+        call.message.chat.id = 100
+        call.message.message_id = mid
+        call.from_user.id = uid
+        call.from_user.first_name = "Admin"
+        return call
+
+    async def test_card_offered_when_member_has_upi_history(self):
+        from handlers.dues import _offer_collector_upi, _pending_colupi
+        with patch("handlers.dues._db.get_last_collector_upi", return_value="ravi@upi"):
+            await _offer_collector_upi(100, 0, 9, "Ravi")
+        self.assertIn("ravi@upi", self.bot_state.bot.send_message.call_args[0][1])
+        self.assertEqual(_pending_colupi[(100, 888)]["upi"], "ravi@upi")
+
+    async def test_silent_for_first_time_collector(self):
+        from handlers.dues import _offer_collector_upi, _pending_colupi
+        with patch("handlers.dues._db.get_last_collector_upi", return_value=None):
+            await _offer_collector_upi(100, 0, 9, "Ravi")
+        self.bot_state.bot.send_message.assert_not_awaited()
+        self.assertEqual(_pending_colupi, {})
+
+    async def test_use_button_sets_collector_with_remembered_upi(self):
+        from handlers.dues import collector_upi_callback, _pending_colupi
+        _pending_colupi[(100, 888)] = {"rc_idx": 0, "uid": 9, "name": "Ravi",
+                                       "upi": "ravi@upi", "_ts": 0}
+        with patch("handlers.dues.is_chat_admin", new=AsyncMock(return_value=True)), \
+             patch("handlers.dues.manager", _make_lock_manager()), \
+             patch("handlers.dues.safe_edit_text", new=AsyncMock()), \
+             patch("handlers.dues.safe_edit_markup", new=AsyncMock()), \
+             patch("handlers.dues.dues_svc.set_collector",
+                   return_value={"announcement": "📦 Ravi · ravi@upi"}) as svc:
+            await collector_upi_callback(self._call("colupi_use"))
+        self.assertEqual(svc.call_args.kwargs["collector_upi"], "ravi@upi")
+        self.assertNotIn((100, 888), _pending_colupi)
+
+    async def test_group_button_keeps_group_fallback(self):
+        from handlers.dues import collector_upi_callback, _pending_colupi
+        _pending_colupi[(100, 888)] = {"rc_idx": 0, "uid": 9, "name": "Ravi",
+                                       "upi": "ravi@upi", "_ts": 0}
+        with patch("handlers.dues.is_chat_admin", new=AsyncMock(return_value=True)), \
+             patch("handlers.dues.safe_edit_text", new=AsyncMock()) as edit, \
+             patch("handlers.dues.safe_edit_markup", new=AsyncMock()), \
+             patch("handlers.dues.dues_svc.set_collector") as svc:
+            await collector_upi_callback(self._call("colupi_grp"))
+        svc.assert_not_called()   # collector already set; group fallback is the default
+        self.assertIn("Group UPI", edit.call_args[0][2])
+
+    async def test_new_button_arms_reply_and_valid_reply_sets_upi(self):
+        from handlers.dues import (collector_upi_callback, collector_upi_reply,
+                                   _pending_colupi, _pending_colupi_input)
+        _pending_colupi[(100, 888)] = {"rc_idx": 0, "uid": 9, "name": "Ravi",
+                                       "upi": "old@upi", "_ts": 0}
+        with patch("handlers.dues.is_chat_admin", new=AsyncMock(return_value=True)), \
+             patch("handlers.dues.safe_edit_text", new=AsyncMock()), \
+             patch("handlers.dues.safe_edit_markup", new=AsyncMock()):
+            await collector_upi_callback(self._call("colupi_new"))
+        self.assertIn((100, 1), _pending_colupi_input)
+
+        with patch("handlers.dues.manager", _make_lock_manager()), \
+             patch("handlers.dues.send_md_fallback", new=AsyncMock()), \
+             patch("handlers.dues.dues_svc.set_collector",
+                   return_value={"announcement": "ok"}) as svc:
+            await collector_upi_reply(_msg("ravi.new@okbank"))
+        self.assertEqual(svc.call_args.kwargs["collector_upi"], "ravi.new@okbank")
+        self.assertNotIn((100, 1), _pending_colupi_input)
+
+    async def test_invalid_upi_reply_keeps_prompt_armed(self):
+        from handlers.dues import collector_upi_reply, _pending_colupi_input
+        _pending_colupi_input[(100, 1)] = {"rc_idx": 0, "name": "Ravi", "_ts": 0}
+        with patch("handlers.dues.dues_svc.set_collector") as svc:
+            await collector_upi_reply(_msg("bad @ vpa"))
+        svc.assert_not_called()
+        self.assertIn((100, 1), _pending_colupi_input)
+
+    async def test_callbacks_admin_gated(self):
+        from handlers.dues import collector_upi_callback, _pending_colupi
+        _pending_colupi[(100, 888)] = {"rc_idx": 0, "uid": 9, "name": "Ravi",
+                                       "upi": "ravi@upi", "_ts": 0}
+        with patch("handlers.dues.is_chat_admin", new=AsyncMock(return_value=False)), \
+             patch("handlers.dues.dues_svc.set_collector") as svc:
+            await collector_upi_callback(self._call("colupi_use"))
+        svc.assert_not_called()
+        self.assertIn((100, 888), _pending_colupi)  # untouched for a real admin
 
 
 class TestPostEndSettleNudge(unittest.IsolatedAsyncioTestCase):

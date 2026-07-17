@@ -221,6 +221,14 @@ async def settle_now_callback(call):
         if not await _settle_admin_ok(call):
             return
         rollcall_id = int(call.data.split(":", 1)[1])
+        if not _db.get_or_create_chat(cid).get("dues_enabled"):
+            # Nudge pinned before /disable_dues — its button must not keep
+            # opening the settle flow while dues is off.
+            await bot.answer_callback_query(
+                call.id, "Dues is disabled for this group (/enable_dues to turn it back on).",
+                show_alert=True,
+            )
+            return
         await bot.answer_callback_query(call.id)
         if _db.get_game_closure(rollcall_id):
             # Someone settled it while the nudge sat pinned.
@@ -807,12 +815,140 @@ async def pick_collector_callback(call):
             )
         except Exception:
             pass  # collector was already set and confirmed above; the panel text is cosmetic
+
+        # UPI memory: if this member collected before with a personal UPI,
+        # offer it back — one tap instead of retyping it every game. The
+        # collector is already set either way; this card only decides where
+        # the money routes.
+        await _offer_collector_upi(cid, rc_idx, uid, target_name)
     except Exception:
         logging.exception("pick_collector_callback failed")
         try:
             await bot.answer_callback_query(call.id, "Could not set collector.", show_alert=True)
         except Exception:
             pass  # already logged above; nothing more useful to do if even the alert fails
+
+
+# ── Collector UPI memory ──────────────────────────────────────────────────────
+# game_closures permanently stores collector_uid + collector_upi, so a
+# returning collector's last UPI can be suggested instead of retyped
+# (most recent closure wins → correcting it once self-heals future games).
+
+# (cid, card_message_id) → {"rc_idx", "uid", "name", "upi", "_ts"}
+_pending_colupi: dict[tuple[int, int], dict] = {}
+# (cid, admin_uid) → {"rc_idx", "name", "_ts"} — armed by the ✏️ New UPI button
+_pending_colupi_input: dict[tuple[int, int], dict] = {}
+
+
+async def _offer_collector_upi(cid: int, rc_idx: int, uid: int, target_name: str) -> None:
+    last_upi = _db.get_last_collector_upi(cid, uid)
+    if not last_upi:
+        return  # first-time collector — group UPI fallback, current behavior
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton(f"✅ Use {last_upi}"[:64], callback_data="colupi_use"),
+        InlineKeyboardButton("✏️ New UPI", callback_data="colupi_new"),
+        InlineKeyboardButton("🏦 Group UPI", callback_data="colupi_grp"),
+    )
+    sent = await bot.send_message(
+        cid,
+        f"💳 Route this game's fees to {target_name}'s usual UPI `{_esc_md(last_upi)}`?",
+        parse_mode="Markdown", reply_markup=markup,
+    )
+    _prune_pending(_pending_colupi)
+    _pending_colupi[(cid, sent.message_id)] = {
+        "rc_idx": rc_idx, "uid": uid, "name": target_name, "upi": last_upi,
+        "_ts": datetime.now().timestamp(),
+    }
+
+
+@bot.callback_query_handler(func=lambda call: call.data in ("colupi_use", "colupi_new", "colupi_grp"))
+async def collector_upi_callback(call):
+    try:
+        cid = call.message.chat.id
+        if not await is_chat_admin(cid, call.from_user.id):
+            await bot.answer_callback_query(
+                call.id, "⛔ Only admins can set the collector UPI", show_alert=True)
+            return
+        pending = _pending_colupi.pop((cid, call.message.message_id), None)
+        if pending is None:
+            await bot.answer_callback_query(
+                call.id, "This prompt has expired — use /set_collector <name> <upi>.",
+                show_alert=True)
+            return
+
+        from telebot.types import InlineKeyboardMarkup
+        if call.data == "colupi_grp":
+            await bot.answer_callback_query(call.id, "Using the group UPI")
+            await safe_edit_text(cid, call.message.message_id,
+                                 "🏦 Group UPI will be used for this game.")
+            await safe_edit_markup(cid, call.message.message_id, InlineKeyboardMarkup())
+            return
+
+        if call.data == "colupi_new":
+            _prune_pending(_pending_colupi_input)
+            _pending_colupi_input[(cid, call.from_user.id)] = {
+                "rc_idx": pending["rc_idx"], "name": pending["name"],
+                "_ts": datetime.now().timestamp(),
+            }
+            await bot.answer_callback_query(call.id)
+            await safe_edit_text(
+                cid, call.message.message_id,
+                f"✏️ Reply with {pending['name']}'s new UPI (e.g. `name@okbank`).",
+                parse_mode="Markdown")
+            await safe_edit_markup(cid, call.message.message_id, InlineKeyboardMarkup())
+            return
+
+        # colupi_use — re-set the collector with the remembered UPI attached
+        await bot.answer_callback_query(call.id)
+        async with manager.get_chat_write_lock(cid):
+            result = dues_svc.set_collector(
+                cid, pending["name"], False,
+                call.from_user.id,
+                call.from_user.first_name or "Admin",
+                rc_number=pending["rc_idx"],
+                collector_upi=pending["upi"],
+            )
+        await safe_edit_text(cid, call.message.message_id, result["announcement"],
+                             parse_mode="Markdown")
+        await safe_edit_markup(cid, call.message.message_id, InlineKeyboardMarkup())
+    except Exception as exc:
+        logging.exception("collector_upi_callback error")
+        await reply_error(call.message, exc)
+
+
+@bot.message_handler(func=lambda m: (
+    m.from_user is not None
+    and m.text is not None
+    and not m.text.startswith("/")
+    and (m.chat.id, m.from_user.id) in _pending_colupi_input
+    and "@" in m.text
+))
+async def collector_upi_reply(message):
+    try:
+        cid = message.chat.id
+        uid = message.from_user.id
+        pending = _pending_colupi_input.get((cid, uid))
+        if not pending:
+            return
+        vpa = message.text.strip()
+        if not dues_svc._UPI_RE.match(vpa):
+            # Keep the prompt armed so the next reply retries.
+            await reply_error(message, incorrectParameter(
+                "That doesn't look like a UPI id (expected name@bank) — try again."))
+            return
+        _pending_colupi_input.pop((cid, uid), None)
+        async with manager.get_chat_write_lock(cid):
+            result = dues_svc.set_collector(
+                cid, pending["name"], False,
+                uid, message.from_user.first_name or "Admin",
+                rc_number=pending["rc_idx"],
+                collector_upi=vpa,
+            )
+        await send_md_fallback(cid, result["announcement"])
+    except Exception as e:
+        await reply_error(message, e)
 
 
 # ── /rotate_collector — round-robin auto-assignment ───────────────────────────
@@ -1472,7 +1608,16 @@ async def enable_dues(message):
         if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Admin only: /enable_dues")
         cid = message.chat.id
+        was_enabled = bool(_db.get_or_create_chat(cid).get("dues_enabled"))
         _db.update_chat_settings(cid, dues_enabled=1)
+        if not was_enabled:
+            # Disabled → enabled transition: dues history starts NOW. Games
+            # ended before this moment (pre-dues history, or games played
+            # while dues was off) must not surface as "unsettled" — settling
+            # one would retroactively charge members for a game the group
+            # handled outside the system. Re-running /enable_dues while
+            # already enabled deliberately does NOT restamp.
+            dues_svc.stamp_dues_epoch(cid)
         dues_svc.seed_default_penalty_tiers(cid)
         await bot.send_message(
             cid,
@@ -1611,6 +1756,92 @@ async def dues_nudges(message):
             raise incorrectParameter("Usage: /dues_nudges on · /dues_nudges off")
     except Exception as e:
         await reply_error(message, e)
+
+
+# ── /new_season — self-serve season reset ─────────────────────────────────────
+# Zeroes balances with compensating entries (never deletes) and stamps a fresh
+# dues epoch. The confirm card is the only way to execute it, and the fund
+# choice (carry vs zero) is made there explicitly — no default to get wrong.
+
+@bot.message_handler(func=lambda m: _cmd(m.text) in ("/new_season", "/dues_reset"))
+async def new_season_cmd(message):
+    try:
+        if await admin_rights(message, manager) is False:
+            raise insufficientPermissions("Admin only: /new_season")
+        cid = message.chat.id
+        _require_dues_enabled(cid)
+
+        preview = dues_svc.new_season_preview(cid)
+        if not preview["members"] and preview["fund_balance"] == 0:
+            await bot.send_message(
+                cid, "Nothing to reset — all balances and the fund are already at ₹0.")
+            return
+
+        lines = [
+            "🏁 *Close the season?*",
+            "",
+            f"This will clear {preview['members']} balance{'s' if preview['members'] != 1 else ''}:",
+        ]
+        if preview["owed_total"]:
+            lines.append(f"• ₹{preview['owed_total']} still owed — will be *forgiven, not collected*")
+        if preview["credit_total"]:
+            lines.append(f"• ₹{preview['credit_total']} in member credits — will be cleared")
+        lines += [
+            f"• Group fund: ₹{preview['fund_balance']}",
+            "",
+            "History is kept (nothing is deleted) and every clearing posts to "
+            "this chat. Choose what happens to the fund:",
+        ]
+        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+        markup = InlineKeyboardMarkup(row_width=2)
+        markup.row(
+            InlineKeyboardButton("🏦 Carry fund forward", callback_data="season_go:carry"),
+            InlineKeyboardButton("🧹 Zero everything", callback_data="season_go:zero"),
+        )
+        markup.row(InlineKeyboardButton("❌ Cancel", callback_data="season_cancel"))
+        await bot.send_message(cid, "\n".join(lines), parse_mode="Markdown", reply_markup=markup)
+    except Exception as e:
+        await reply_error(message, e)
+
+
+@bot.callback_query_handler(func=lambda call: call.data in ("season_go:carry", "season_go:zero"))
+async def new_season_confirm_callback(call):
+    try:
+        cid = call.message.chat.id
+        if not await is_chat_admin(cid, call.from_user.id):
+            await bot.answer_callback_query(
+                call.id, "⛔ Only admins can close the season", show_alert=True)
+            return
+        zero_fund = call.data.endswith(":zero")
+        await bot.answer_callback_query(call.id, "Closing the season…")
+        from telebot.types import InlineKeyboardMarkup
+        await safe_edit_markup(cid, call.message.message_id, InlineKeyboardMarkup())
+
+        async with manager.get_chat_write_lock(cid):
+            result = dues_svc.new_season(
+                cid, zero_fund,
+                call.from_user.id,
+                call.from_user.first_name or call.from_user.username or "Admin",
+            )
+        # Money post — always sends, shh or not (ledger durability rule).
+        await send_md_fallback(cid, result["announcement"])
+    except Exception as exc:
+        logging.exception("new_season_confirm_callback error")
+        await reply_error(call.message, exc)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "season_cancel")
+async def new_season_cancel_callback(call):
+    try:
+        cid = call.message.chat.id
+        await bot.answer_callback_query(call.id, "Cancelled")
+        await safe_edit_text(cid, call.message.message_id,
+                             "❌ Season reset cancelled — nothing changed.")
+        from telebot.types import InlineKeyboardMarkup
+        await safe_edit_markup(cid, call.message.message_id, InlineKeyboardMarkup())
+    except Exception as exc:
+        logging.exception("new_season_cancel_callback error")
+        await reply_error(call.message, exc)
 
 
 @bot.message_handler(func=lambda m: _cmd(m.text) == "/disable_dues")

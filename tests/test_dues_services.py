@@ -1789,5 +1789,89 @@ class TestNoTierNudge(unittest.TestCase):
         self.assertIn("ditch", msg)
 
 
+class TestNewSeason(unittest.TestCase):
+    """Season reset: compensating entries only (append-only preserved),
+    fund carry/zero choice, epoch stamp, unsettled-games guardrail."""
+
+    def _balances(self):
+        return [
+            {"user_id": 1, "member_name": "Alice", "balance": 150},
+            {"user_id": 2, "member_name": "Bob", "balance": -40},
+            {"user_id": None, "member_name": "GuestRavi", "balance": 100},
+        ]
+
+    def test_preview_blocked_by_unsettled_games(self):
+        from services.dues import new_season_preview
+        from exceptions import incorrectParameter
+        with patch("services.dues.db.get_unsettled_rollcalls",
+                   return_value=[{"id": 9, "title": "Last Sunday"}]):
+            with self.assertRaises(incorrectParameter) as ctx:
+                new_season_preview(1)
+        self.assertIn("Last Sunday", str(ctx.exception))
+
+    def test_preview_totals(self):
+        from services.dues import new_season_preview
+        with patch("services.dues.db.get_unsettled_rollcalls", return_value=[]), \
+             patch("services.dues.db.get_all_dues_balances", return_value=self._balances()), \
+             patch("services.dues.fund_summary", return_value={"fund_balance": 320}):
+            p = new_season_preview(1)
+        self.assertEqual(p["members"], 3)
+        self.assertEqual(p["owed_total"], 250)   # 150 + 100
+        self.assertEqual(p["credit_total"], 40)
+        self.assertEqual(p["fund_balance"], 320)
+
+    def test_reset_writes_compensating_entries_never_deletes(self):
+        from services.dues import new_season
+        with patch("services.dues.db.get_unsettled_rollcalls", return_value=[]), \
+             patch("services.dues.db.get_all_dues_balances", return_value=self._balances()), \
+             patch("services.dues.fund_summary", return_value={"fund_balance": 320}), \
+             patch("services.dues.db.add_dues_entry") as add_entry, \
+             patch("services.dues.db.add_fund_transaction") as add_fund, \
+             patch("services.dues.db.update_chat_settings") as upd, \
+             patch("services.dues.db.log_admin_action"):
+            result = new_season(1, zero_fund=False, admin_uid=99, admin_name="Admin")
+
+        # One adjustment per nonzero balance, exactly cancelling it
+        amounts = {c[0][3]: c[0][5] for c in add_entry.call_args_list}  # name → amount
+        self.assertEqual(add_entry.call_count, 3)
+        self.assertEqual(amounts["Alice"], -150)
+        self.assertEqual(amounts["Bob"], 40)
+        self.assertEqual(amounts["GuestRavi"], -100)
+        for c in add_entry.call_args_list:
+            self.assertEqual(c[0][4], "adjustment")
+        # Carry-forward: fund untouched
+        add_fund.assert_not_called()
+        self.assertEqual(result["fund_action"], "carried forward")
+        # Epoch stamped
+        self.assertIn("dues_epoch", upd.call_args.kwargs)
+
+    def test_reset_zero_fund_writes_fund_adjustment(self):
+        from services.dues import new_season
+        with patch("services.dues.db.get_unsettled_rollcalls", return_value=[]), \
+             patch("services.dues.db.get_all_dues_balances", return_value=[]), \
+             patch("services.dues.fund_summary", return_value={"fund_balance": 320}), \
+             patch("services.dues.db.add_dues_entry"), \
+             patch("services.dues.db.add_fund_transaction") as add_fund, \
+             patch("services.dues.db.update_chat_settings"), \
+             patch("services.dues.db.log_admin_action"):
+            result = new_season(1, zero_fund=True, admin_uid=99, admin_name="Admin")
+        self.assertEqual(add_fund.call_args[0][3], -320)
+        self.assertEqual(add_fund.call_args[0][2], "adjustment")
+        self.assertEqual(result["fund_action"], "zeroed")
+
+    def test_announcement_says_forgiven(self):
+        from services.dues import new_season
+        with patch("services.dues.db.get_unsettled_rollcalls", return_value=[]), \
+             patch("services.dues.db.get_all_dues_balances", return_value=self._balances()), \
+             patch("services.dues.fund_summary", return_value={"fund_balance": 0}), \
+             patch("services.dues.db.add_dues_entry"), \
+             patch("services.dues.db.add_fund_transaction"), \
+             patch("services.dues.db.update_chat_settings"), \
+             patch("services.dues.db.log_admin_action"):
+            result = new_season(1, zero_fund=False, admin_uid=99, admin_name="Admin")
+        self.assertIn("₹250", result["announcement"])
+        self.assertIn("forgiven", result["announcement"])
+
+
 if __name__ == "__main__":
     unittest.main()

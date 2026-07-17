@@ -773,6 +773,7 @@ _RECONCILE_COLUMNS = {
         ("last_idle_nudge",        "last_idle_nudge TEXT DEFAULT NULL",        "last_idle_nudge TEXT DEFAULT NULL"),
         ("collector_rotation",     "collector_rotation INTEGER DEFAULT 0",     "collector_rotation INTEGER DEFAULT 0"),
         ("last_collector_uid",     "last_collector_uid INTEGER DEFAULT NULL",  "last_collector_uid BIGINT DEFAULT NULL"),
+        ("dues_epoch",             "dues_epoch TEXT DEFAULT NULL",             "dues_epoch TEXT DEFAULT NULL"),
     ],
     "users": [
         ("in_pos",   "in_pos INTEGER DEFAULT NULL",   "in_pos INTEGER DEFAULT NULL"),
@@ -1695,7 +1696,7 @@ _VALID_CHAT_FIELDS = {
     'penalty_late_t1', 'penalty_late_t2', 'penalty_late_t3', 'penalty_ditch',
     'dues_enabled', 'dues_self_paid_mode',
     'auto_buzz_hours', 'dues_weekly_nudge', 'dues_report_enabled', 'last_idle_nudge',
-    'collector_rotation', 'last_collector_uid',
+    'collector_rotation', 'last_collector_uid', 'dues_epoch',
 }
 
 def update_chat_settings(chat_id: int, **kwargs) -> bool:
@@ -5359,25 +5360,50 @@ def count_fund_transactions(chat_id: int) -> int:
 
 
 def get_latest_closeable_rollcall(chat_id: int) -> Optional[Dict]:
-    """Most recent ended, not-cancelled rollcall with no financial closure yet."""
+    """Most recent ended, not-cancelled rollcall with no financial closure yet
+    (dues-epoch filtered — see _dues_epoch_clause)."""
     try:
         with _cursor() as cursor:
             ph = "%s" if db_type == "postgresql" else "?"
             active_false = "FALSE" if db_type == "postgresql" else "0"
+            epoch_sql, epoch_params = _dues_epoch_clause(chat_id, ph)
             cursor.execute(
                 f"""SELECT r.* FROM rollcalls r
                     LEFT JOIN game_closures gc ON gc.rollcall_id = r.id
                     WHERE r.chat_id = {ph}
                       AND r.is_active = {active_false}
                       AND COALESCE(r.is_cancelled, {active_false}) = {active_false}
-                      AND gc.id IS NULL
+                      AND gc.id IS NULL{epoch_sql}
                     ORDER BY r.ended_at IS NULL ASC, r.ended_at DESC, r.id DESC LIMIT 1""",
-                (chat_id,),
+                (chat_id, *epoch_params),
             )
             row = cursor.fetchone()
             return dict(row) if row else None
     except Exception:
         logging.exception("get_latest_closeable_rollcall failed")
+        return None
+
+
+def get_last_collector_upi(chat_id: int, user_id: int) -> Optional[str]:
+    """The UPI this member used the last time they collected, or None.
+    Source of the collector-UPI memory: most recent closure wins, so
+    correcting the UPI once self-heals every future suggestion."""
+    try:
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            cursor.execute(
+                f"""SELECT collector_upi FROM game_closures
+                    WHERE chat_id = {ph} AND collector_uid = {ph}
+                      AND collector_upi IS NOT NULL
+                    ORDER BY id DESC LIMIT 1""",
+                (chat_id, user_id),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            return row["collector_upi"] if isinstance(row, dict) else row[0]
+    except Exception:
+        logging.exception("get_last_collector_upi failed")
         return None
 
 
@@ -5436,24 +5462,38 @@ def upsert_penalty_tier(
         return False
 
 
+def _dues_epoch_clause(chat_id: int, ph: str):
+    """(sql_fragment, params) restricting closeable-game queries to games ended
+    after the chat's dues epoch. The epoch is stamped when dues is (re-)enabled
+    or a season reset runs — games from before it (pre-dues history, or games
+    played while dues was disabled) must never surface as 'unsettled', or an
+    admin could retroactively charge members for games settled outside the
+    system. NULL epoch (legacy groups) = no restriction."""
+    epoch = (get_or_create_chat(chat_id) or {}).get("dues_epoch")
+    if not epoch:
+        return "", ()
+    return f" AND r.ended_at > {ph}", (epoch,)
+
+
 def get_unsettled_rollcalls(chat_id: int, limit: int = 10) -> List[Dict]:
-    """All ended, not-cancelled rollcalls with no financial closure yet, newest
-    first. Same query as get_latest_closeable_rollcall minus the LIMIT 1 — used
-    by /settle_dues so an admin can reach an older unsettled game, not just the
-    latest one."""
+    """All ended, not-cancelled rollcalls with no financial closure yet and
+    ended after the dues epoch, newest first. Same query as
+    get_latest_closeable_rollcall minus the LIMIT 1 — used by /settle_dues so
+    an admin can reach an older unsettled game, not just the latest one."""
     try:
         with _cursor() as cursor:
             ph = "%s" if db_type == "postgresql" else "?"
             active_false = "FALSE" if db_type == "postgresql" else "0"
+            epoch_sql, epoch_params = _dues_epoch_clause(chat_id, ph)
             cursor.execute(
                 f"""SELECT r.* FROM rollcalls r
                     LEFT JOIN game_closures gc ON gc.rollcall_id = r.id
                     WHERE r.chat_id = {ph}
                       AND r.is_active = {active_false}
                       AND COALESCE(r.is_cancelled, {active_false}) = {active_false}
-                      AND gc.id IS NULL
+                      AND gc.id IS NULL{epoch_sql}
                     ORDER BY r.ended_at IS NULL ASC, r.ended_at DESC, r.id DESC LIMIT {ph}""",
-                (chat_id, limit),
+                (chat_id, *epoch_params, limit),
             )
             rows = cursor.fetchall()
             return [dict(row) for row in rows]

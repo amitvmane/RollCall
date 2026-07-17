@@ -853,6 +853,90 @@ def list_penalty_tiers(chat_id: int) -> dict:
     return {"tiers": tiers, "announcement": "\n".join(lines)}
 
 
+def stamp_dues_epoch(chat_id: int) -> str:
+    """Stamp 'dues history starts now' on the chat (format matches
+    rollcalls.ended_at = CURRENT_TIMESTAMP so the two compare correctly).
+    Called on enable-from-disabled and on /new_season — games ended before
+    the stamp never surface as unsettled (see db._dues_epoch_clause)."""
+    from datetime import datetime, timezone
+    epoch = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    db.update_chat_settings(chat_id, dues_epoch=epoch)
+    return epoch
+
+
+def new_season_preview(chat_id: int) -> dict:
+    """What /new_season would do, without writing anything — feeds the
+    confirm card. Raises if unsettled games block the reset."""
+    unsettled = db.get_unsettled_rollcalls(chat_id)
+    if unsettled:
+        titles = ", ".join((g.get("title") or f"#{g['id']}") for g in unsettled[:5])
+        raise incorrectParameter(
+            f"{len(unsettled)} game{'s are' if len(unsettled) != 1 else ' is'} still unsettled "
+            f"({titles}) — settle or cancel them first, then run /new_season again."
+        )
+    balances = db.get_all_dues_balances(chat_id, nonzero_only=True)
+    owed = sum(b["balance"] for b in balances if b["balance"] > 0)
+    credit = sum(-b["balance"] for b in balances if b["balance"] < 0)
+    return {
+        "balances": balances,
+        "members": len(balances),
+        "owed_total": owed,
+        "credit_total": credit,
+        "fund_balance": fund_summary(chat_id)["fund_balance"],
+    }
+
+
+def new_season(chat_id: int, zero_fund: bool, admin_uid: int, admin_name: str) -> dict:
+    """Close the season: zero every member balance with compensating
+    'adjustment' entries and optionally zero the fund. NEVER deletes — the
+    append-only ledger invariant holds and every zeroing is announced, so the
+    chat history remains the reconstruction source. Stamps a fresh dues epoch
+    so the new season starts clean."""
+    preview = new_season_preview(chat_id)  # re-checks the unsettled guard
+
+    for b in preview["balances"]:
+        db.add_dues_entry(
+            chat_id, None, b.get("user_id"), b.get("member_name") or "?",
+            "adjustment", -b["balance"],
+            "Season reset — balance cleared",
+            admin_uid, admin_name,
+        )
+
+    fund_action = "carried forward"
+    if zero_fund and preview["fund_balance"] != 0:
+        db.add_fund_transaction(
+            chat_id, None, "adjustment", -preview["fund_balance"],
+            "Season reset — fund zeroed", admin_uid, admin_name,
+        )
+        fund_action = "zeroed"
+    elif zero_fund:
+        fund_action = "zeroed"
+
+    stamp_dues_epoch(chat_id)
+    db.log_admin_action(chat_id, admin_uid, admin_name, "new_season",
+                        details=f"fund {fund_action}")
+
+    lines = [
+        "🏁 *Season closed!*",
+        "",
+        f"• {preview['members']} balance{'s' if preview['members'] != 1 else ''} cleared",
+    ]
+    if preview["owed_total"]:
+        lines.append(f"• ₹{preview['owed_total']} outstanding forgiven")
+    if preview["credit_total"]:
+        lines.append(f"• ₹{preview['credit_total']} in credits cleared")
+    lines.append(f"• Fund ₹{preview['fund_balance']} {fund_action}"
+                 if not (zero_fund and preview['fund_balance'] == 0)
+                 else "• Fund already empty")
+    lines += ["", f"Everyone starts the new season at ₹0. (by {_esc_md(admin_name)})"]
+    return {
+        "announcement": "\n".join(lines),
+        "members_cleared": preview["members"],
+        "owed_forgiven": preview["owed_total"],
+        "fund_action": fund_action,
+    }
+
+
 def mark_penalty(
     chat_id: int,
     tier_name: str,

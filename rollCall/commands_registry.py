@@ -582,8 +582,10 @@ COMMANDS = [
             "Shows the active rollcall's IN members as inline buttons — tap one to "
             "make them the collector. '👥 Someone not playing…' switches the panel "
             "to every known member (e.g. a non-playing venue owner). Only real "
-            "Telegram users are shown (proxies can't receive payments). Same effect "
-            "as /set_collector, one tap instead of typing a name."
+            "Telegram users are shown (proxies can't receive payments).\n\n"
+            "If the picked member collected before with a personal UPI, the bot "
+            "offers it back: ✅ use it / ✏️ reply with a new one / 🏦 group UPI. "
+            "Same effect as /set_collector, one tap instead of typing."
         ),
     },
     {
@@ -723,7 +725,23 @@ COMMANDS = [
             "(/settle_dues, /my_dues, /fund, etc.) are blocked until this is run.\n\n"
             "Seeds default penalty tiers and opens the guided setup card "
             "(/dues_setup) so UPI and rounding get configured up front.\n"
-            "Existing ledger data is preserved if re-enabled after /disable_dues."
+            "Existing ledger data is preserved if re-enabled after /disable_dues. "
+            "Enabling starts a fresh dues period: games ended before this moment "
+            "(or while dues was disabled) are never offered for settlement."
+        ),
+    },
+    {
+        "name": "new_season", "aliases": ["dues_reset"], "scope": "admin", "category": "Dues & Fund",
+        "args": "", "sample": "/new_season",
+        "summary": "Close the season — reset all balances to ₹0",
+        "details": (
+            "Zeroes every member balance and (optionally) the fund, then starts a "
+            "fresh dues season. Nothing is deleted — clearing is done with "
+            "compensating ledger entries and announced in the chat, so full history "
+            "is preserved (outstanding money is FORGIVEN, not collected).\n\n"
+            "Blocked while unsettled games exist. The confirm card asks whether the "
+            "fund carries forward or is zeroed. Also useful after a trial period: "
+            "experiment with dues, then /new_season for a clean start."
         ),
     },
     {

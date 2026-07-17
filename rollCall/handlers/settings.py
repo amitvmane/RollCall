@@ -438,7 +438,7 @@ async def wait_limit(message):
         await reply_error(message, e)
 
 
-@bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/shh")
+@bot.message_handler(func=lambda message: message.text.split(" ")[0].split("@")[0].lower() == "/shh")
 async def shh(message):
     if not await admin_rights(message, manager):
         await bot.send_message(message.chat.id, "You don't have permission to use this command.")
@@ -447,7 +447,7 @@ async def shh(message):
     await bot.send_message(message.chat.id, "Ok, i will keep quiet!")
 
 
-@bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/louder")
+@bot.message_handler(func=lambda message: message.text.split(" ")[0].split("@")[0].lower() == "/louder")
 async def louder(message):
     if not await admin_rights(message, manager):
         await bot.send_message(message.chat.id, "You don't have permission to use this command.")

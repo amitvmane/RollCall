@@ -555,8 +555,11 @@ async def show_panel(message):
 
 
 # ── btn_* callback handler ────────────────────────────────────────────────────
+# NOTE: the @callback_query_handler decorator lives on callback_handler (the
+# single-arg dispatcher further down), NOT on these _cb_* helpers — telebot
+# invokes handlers as fn(call), so registering a multi-arg helper breaks every
+# panel button with a TypeError swallowed inside telebot's dispatch.
 
-@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("btn_"))
 async def _cb_vote(call, cid: int, rc_number: int, action: str) -> None:
     """btn_{in,out,maybe}_{rc_number} — vote dispatch, ghost reconfirmation
     gate, waitlist/promotion announcements, and panel refresh."""
@@ -847,6 +850,7 @@ async def _cb_end_cancel(call, cid: int, rc_number: int, rc) -> None:
             logging.warning("Endcancel edit failed (chat=%s msg=%s): %s", cid, call.message.message_id, e)
 
 
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("btn_"))
 async def callback_handler(call):
     try:
         raw_data = call.data or ""

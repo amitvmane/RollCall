@@ -101,6 +101,39 @@ def main() -> int:
             raise RuntimeError(f"only {len(mh)} message handlers registered, expected ≥ 25")
     check("≥25 message handlers registered", some_handlers_present)
 
+    # ── 4b. Every registered handler must be callable as fn(update) ─────
+    # telebot invokes handlers with exactly one positional argument (the
+    # message / callback query). A decorator accidentally left on a multi-arg
+    # helper (as happened to _cb_vote in the R11 refactor) registers fine,
+    # imports fine, and then TypeErrors inside telebot's dispatch on every
+    # button press — invisible in app logs. Catch it here instead.
+    def handlers_take_single_arg():
+        import inspect
+        import bot_state
+        bad = []
+        for kind in ("message_handlers", "callback_query_handlers"):
+            for h in getattr(bot_state.bot, kind, None) or []:
+                fn = h.get("function") if isinstance(h, dict) else getattr(h, "function", None)
+                if fn is None:
+                    continue
+                try:
+                    params = list(inspect.signature(fn).parameters.values())
+                except (TypeError, ValueError):
+                    continue
+                required = [
+                    p for p in params
+                    if p.default is inspect.Parameter.empty
+                    and p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+                ]
+                if len(required) != 1:
+                    bad.append(f"{kind}: {fn.__module__}.{fn.__name__} requires {len(required)} args")
+        if bad:
+            raise RuntimeError(
+                "handlers registered with a signature telebot can't invoke "
+                f"(must be fn(update)): {bad}"
+            )
+    check("registered handlers are fn(update)-callable", handlers_take_single_arg)
+
     # ── 5. runner.py import chain (without running main()) ──────────────
     def import_runner_chain():
         import telegram_helper  # noqa: F401

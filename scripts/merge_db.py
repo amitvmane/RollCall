@@ -61,7 +61,11 @@ SUM_COLS = {
 
 
 def _cols(conn, table, schema="main"):
-    rows = conn.execute(f"SELECT name FROM {schema}.pragma_table_info(?)", (table,)).fetchall()
+    # Two-argument form — the schema-qualified `schema.pragma_table_info(t)`
+    # form silently ignores the schema prefix on newer SQLite (observed on
+    # 3.53: it returns main's columns for src), which made "common columns"
+    # include live-only columns and broke the INSERT…SELECT.
+    rows = conn.execute("SELECT name FROM pragma_table_info(?, ?)", (table, schema)).fetchall()
     return [r[0] for r in rows]
 
 

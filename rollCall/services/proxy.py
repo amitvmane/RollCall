@@ -120,12 +120,12 @@ async def set_in_for(
             rollcall_id=getattr(rc, "id", None), details=rc.title,
         )
 
-        if result == "AB":
+        if result in ("AB", "AW"):
             raise duplicateProxy("No duplicate proxy please :-), Thanks!")
         if result == "AA":
             raise repeatlyName("That name already exists!")
 
-        action = "waitlisted" if result == "AC" else "added"
+        action = "waitlisted" if result in ("AC", "AUW") else "added"
         return {
             "action": action,
             "rollcall": serialize_rollcall(rc, rc_number),

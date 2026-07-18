@@ -139,6 +139,40 @@ class TestInListLimit(unittest.TestCase):
         self.assertIn(u3, self.rc.waitList)
         self.assertEqual(len(self.rc.inList), 2)
 
+    def test_waitlisted_user_revoting_returns_AW_not_AB(self):
+        """Soak bug (Subhadeep): a WAITING member pressing IN again was told
+        'you're already IN' — waitlist re-votes must return a distinct code."""
+        u1 = make_user("Alice", "alice", 1)
+        u2 = make_user("Bob", "bob", 2)
+        u3 = make_user("Carol", "carol", 3)
+        self.rc.addIn(u1)
+        self.rc.addIn(u2)
+        self.rc.addIn(u3)  # waitlisted (AC)
+        again = make_user("Carol", "carol", 3)
+        self.assertEqual(self.rc.addIn(again), "AW")
+        self.assertIn(u3, self.rc.waitList)
+        self.assertNotIn(u3, self.rc.inList)
+
+    def test_waitlisted_comment_change_returns_AUW_and_stays_waiting(self):
+        u1 = make_user("Alice", "alice", 1)
+        u2 = make_user("Bob", "bob", 2)
+        u3 = make_user("Carol", "carol", 3)
+        self.rc.addIn(u1)
+        self.rc.addIn(u2)
+        self.rc.addIn(u3)
+        again = make_user("Carol", "carol", 3)
+        again.comment = "bringing pads"
+        self.assertEqual(self.rc.addIn(again), "AUW")
+        self.assertIn(u3, self.rc.waitList)
+        self.assertEqual(self.rc.waitList[0].comment, "bringing pads")
+        self.assertNotIn(u3, self.rc.inList)
+
+    def test_in_list_revote_still_returns_AB(self):
+        u1 = make_user("Alice", "alice", 1)
+        self.rc.addIn(u1)
+        again = make_user("Alice", "alice", 1)
+        self.assertEqual(self.rc.addIn(again), "AB")
+
     def test_waitlist_promoted_when_user_leaves(self):
         u1 = make_user("Alice", "alice", 1)
         u2 = make_user("Bob", "bob", 2)

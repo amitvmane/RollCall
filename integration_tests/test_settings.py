@@ -249,3 +249,46 @@ class TestSetRollcallReminder(IntegrationBase):
         await self.reminder(self.msg("/srr 0", ADMIN_USER))
         texts = self.sent_texts()
         self.assertTrue(any("hour" in t.lower() or "higher" in t.lower() or "format" in t.lower() for t in texts))
+
+
+class TestWaitlistRevoteMessage(IntegrationBase):
+    """Soak bug 2026-07-18 (Subhadeep): a WAITING member pressing IN again was
+    told "you're already IN". Full stack repro: limit → overflow → re-vote."""
+
+    async def _fill_to_waitlist(self):
+        await self.start_rc("Sunday 7AM Mhatre")
+        await self.wait_limit(self.msg("/sl 1", ADMIN_USER))
+        await self.vote_in(USERS[0])            # fills the single IN spot
+        await self.vote_in(USERS[1])            # overflows to WAITING
+        rc = self.rc(0)
+        self.assertEqual([u.user_id for u in rc.waitList], [USERS[1]["id"]])
+
+    async def test_waiting_member_revote_says_waiting_not_in(self):
+        await self._fill_to_waitlist()
+        get_mock_bot().send_message.reset_mock()
+        await self.vote_in(USERS[1])            # re-vote while WAITING
+        texts = self.sent_texts()
+        reply = next((t for t in texts if "WAITING" in t), None)
+        self.assertIsNotNone(reply, f"expected WAITING message, got: {texts}")
+        self.assertTrue(all("already IN" not in t for t in texts), texts)
+        self.assertIn("#1 in line", reply)
+        # State untouched — still exactly one IN, one WAITING
+        rc = self.rc(0)
+        self.assertEqual(len(rc.inList), 1)
+        self.assertEqual(len(rc.waitList), 1)
+
+    async def test_waiting_member_comment_change_never_announces_in(self):
+        await self._fill_to_waitlist()
+        get_mock_bot().send_message.reset_mock()
+        await self.vote_in(USERS[1], comment="reaching by 7.15")
+        texts = self.sent_texts()
+        self.assertTrue(all("→ IN" not in t for t in texts), texts)
+        rc = self.rc(0)
+        self.assertEqual(len(rc.waitList), 1)
+        self.assertEqual(rc.waitList[0].comment, "reaching by 7.15")
+
+    async def test_in_member_revote_still_says_already_in(self):
+        await self._fill_to_waitlist()
+        get_mock_bot().send_message.reset_mock()
+        await self.vote_in(USERS[0])            # re-vote while IN
+        self.assertTrue(any("already IN" in t for t in self.sent_texts()))

@@ -481,6 +481,48 @@ class TestVotingService(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(alreadyInList):
                 await vote_in(100, 1, "Alice")
 
+    async def test_vote_in_while_waitlisted_says_waiting_not_already_in(self):
+        """Soak bug: WAITING member re-voting IN got 'you're already IN'."""
+        from exceptions import alreadyInList
+        waiting_user = _make_user("Alice", user_id=1)
+        rc = _make_rc(limit=1, in_list=[_make_user("Bob", user_id=2)])
+        rc.waitList = [waiting_user]
+        rc.addIn.return_value = "AW"
+        mgr = _make_manager([rc])
+
+        with patch("services.voting.manager", mgr), \
+             patch("rollcall_manager.manager", mgr), \
+             patch("services.voting.upsert_chat_member"), \
+             patch("services.voting.increment_user_stat") as inc, \
+             patch("services.voting.increment_rollcall_stat"), \
+             patch("services.voting.get_ghost_count", return_value=0):
+            from services.voting import vote_in
+            with self.assertRaises(alreadyInList) as ctx:
+                await vote_in(100, 1, "Alice")
+
+        msg = str(ctx.exception)
+        self.assertIn("WAITING", msg)
+        self.assertNotIn("already IN", msg)
+        self.assertIn("#1 in line", msg)
+        inc.assert_not_called()  # no phantom total_in stat
+
+    async def test_vote_in_comment_change_while_waitlisted_stays_waitlisted(self):
+        """AUW must announce WAITING, not IN — status didn't change."""
+        rc = _make_rc(limit=1, in_list=[_make_user("Bob", user_id=2)])
+        rc.addIn.return_value = "AUW"
+        mgr = _make_manager([rc])
+
+        with patch("services.voting.manager", mgr), \
+             patch("rollcall_manager.manager", mgr), \
+             patch("services.voting.upsert_chat_member"), \
+             patch("services.voting.increment_user_stat"), \
+             patch("services.voting.increment_rollcall_stat"), \
+             patch("services.voting.get_ghost_count", return_value=0):
+            from services.voting import vote_in
+            result = await vote_in(100, 1, "Alice", comment="new note")
+
+        self.assertEqual(result["action"], "waitlisted")
+
     async def test_vote_out_moved_from_in(self):
         u = _make_user("Alice", user_id=1)
         rc = _make_rc(in_list=[u])

@@ -398,12 +398,15 @@ class RollCall:
                     self._save_user_to_db(user, 'in')
                     return 'AU'
             for us in self.waitList:
+                # Distinct codes from the inList branch above — a waitlisted
+                # member re-voting IN must be told they're WAITING, not "already
+                # IN" (and a comment change must not announce "→ IN" either).
                 if us.user_id == user.user_id and us.comment == user.comment:
-                    return "AB"
+                    return "AW"
                 elif us.user_id == user.user_id and us.comment != user.comment:
                     us.comment = user.comment
                     self._save_user_to_db(user, 'waitlist')
-                    return 'AU'
+                    return 'AUW'
 
         for us in self.outList[:]:
             if us.user_id == user.user_id:

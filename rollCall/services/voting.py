@@ -136,14 +136,23 @@ async def vote_in(
         rc.save()
 
         rc_db_id = _rc_db_id(rc)
-        if result not in ("AB", "AC", "AU") and rc_db_id is not None and isinstance(user.user_id, int):
+        if result not in ("AB", "AC", "AU", "AW", "AUW") and rc_db_id is not None and isinstance(user.user_id, int):
             increment_user_stat(chat_id, user.user_id, "total_in")
             increment_rollcall_stat(rc_db_id, "total_in")
 
         if result == "AB":
             raise alreadyInList(f"{user.name}, you're already IN for '{rc.title}'.")
+        if result == "AW":
+            pos = next((i + 1 for i, u in enumerate(rc.waitList) if u.user_id == user.user_id), None)
+            pos_note = f" (#{pos} in line)" if pos else ""
+            raise alreadyInList(
+                f"{user.name}, you're on the WAITING list for '{rc.title}'{pos_note} — "
+                "you'll be moved IN automatically when a spot opens."
+            )
 
-        action = "waitlisted" if result == "AC" else "added"
+        # AUW = comment updated while still waitlisted — must announce WAITING,
+        # not IN (the member's status hasn't changed).
+        action = "waitlisted" if result in ("AC", "AUW") else "added"
         return {
             "action": action,
             "rollcall": serialize_rollcall(rc, rc_number),

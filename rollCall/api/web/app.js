@@ -389,7 +389,20 @@ function renderRcMeta(rc){
     meta.push("🕐 Closes: "+esc(rc.finalize_date)+(cdHtml?" "+cdHtml:""));
   }
   if(rc.location)meta.push("📍 "+esc(rc.location));
-  if(rc.fee)meta.push(`<strong style="color:var(--accent)">💰 Fee: ${esc(rc.fee)}/person</strong>`);
+  if(rc.fee){
+    // rc.fee is the TOTAL event cost (set via /event_fee) — it was
+    // mislabeled "/person" here. Mirror the Telegram panel's "Event Fee" +
+    // "Individual Fee" pair: show the total, plus the live per-head split
+    // once someone's actually IN (matches models.py's _ind_fee rounding).
+    let feeLine=`<strong style="color:var(--accent)">💰 Fee: ${esc(rc.fee)} total</strong>`;
+    const inCount=(rc.in||[]).length;
+    const feeNum=parseFloat(String(rc.fee).replace(/[^0-9.]/g,""));
+    if(inCount>0&&!isNaN(feeNum)){
+      const perHead=Math.round((feeNum/inCount)*100)/100;
+      feeLine+=` <span style="opacity:.75;font-weight:500">(₹${perHead}/person)</span>`;
+    }
+    meta.push(feeLine);
+  }
   $("rc-meta").innerHTML=meta.map(m=>`<span>${m}</span>`).join("<br/>");
 }
 
@@ -605,10 +618,10 @@ async function silentRefresh(){
           activeRcData=rcs[activeTabIdx];
           const _rc=activeRcData;
           $("rc-title").textContent=rcs.length>1?`#${activeTabIdx+1} · ${_rc.title}`:_rc.title;
-          const _m=[];
-          if(_rc.finalize_date){const _cd=formatCountdown(_rc.finalize_epoch);const _cdH=_cd?`<span class="cd-pill${_cd.includes("m")&&!_cd.includes("h")?" soon":""}">${esc(_cd)}</span>`:"";_m.push("🕐 Closes: "+esc(_rc.finalize_date)+(_cdH?" "+_cdH:""));}
-          if(_rc.location)_m.push("📍 "+esc(_rc.location));
-          $("rc-meta").innerHTML=_m.map(x=>`<span>${x}</span>`).join("<br/>");
+          // Reuse the single meta-row builder (was duplicated inline here,
+          // out of sync, and silently dropped the fee line on every 30s
+          // background refresh).
+          renderRcMeta(_rc);
           detectCurrentVote();renderLists();renderCapBar(activeRcData);
           $("count-badge").textContent=activeRcData.limit?activeRcData.in.length+"/"+activeRcData.limit+" IN":activeRcData.in.length+" IN";
         }

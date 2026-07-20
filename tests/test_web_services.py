@@ -372,12 +372,13 @@ class TestGetGroupWebToken(unittest.TestCase):
 
 class TestGetRollcallsByGroupToken(unittest.TestCase):
 
-    def _call(self, group_token, chat_row=None, rollcalls=None):
+    def _call(self, group_token, chat_row=None, rollcalls=None, templates=None):
         from services.web import get_rollcalls_by_group_token
         mgr = MagicMock()
         mgr.get_rollcalls.return_value = rollcalls or []
         with patch("services.web.db") as mock_db, \
-             patch("services.web.manager", mgr):
+             patch("services.web.manager", mgr), \
+             patch("services.web._list_templates", return_value=templates or []):
             mock_db.get_chat_by_group_web_token.return_value = chat_row
             return get_rollcalls_by_group_token(group_token)
 
@@ -437,10 +438,79 @@ class TestGetRollcallsByGroupToken(unittest.TestCase):
         mgr.get_rollcalls.return_value = []
         chat = _chat_row(chat_id=999)
         with patch("services.web.db") as mock_db, \
-             patch("services.web.manager", mgr):
+             patch("services.web.manager", mgr), \
+             patch("services.web._list_templates", return_value=[]):
             mock_db.get_chat_by_group_web_token.return_value = chat
             get_rollcalls_by_group_token("grouptoken")
         mgr.get_rollcalls.assert_called_once_with(999)
+
+    # ── schedule_enabled truthiness regression (live-soak bug, 2026-07-20) ──
+    #
+    # templates.schedule_enabled is a SQLite TEXT column; disable_template_
+    # schedule() writes it via a bound int 0, which SQLite's TEXT affinity
+    # silently stores as the STRING "0". A plain `if t.get("schedule_enabled")`
+    # treats any non-empty string as truthy, so a template the admin just
+    # disabled via /schedules kept appearing in the web page's "Coming Up"
+    # list — while /schedules itself (routed through the same list_templates
+    # normalization) correctly showed it as disabled. These tests exercise
+    # get_rollcalls_by_group_token with the exact raw shapes list_templates
+    # can hand back post-normalization.
+
+    def _tmpl(self, name="SundayGame", enabled=True, **over):
+        t = {
+            "name": name, "title": "Weekend Sunday morning football Game",
+            "schedule_day": "saturday", "schedule_time": "09:00",
+            "recurrence_type": "weekly", "event_day": "sunday",
+            "event_time": "06:30", "location": "GroundZeroMahtre",
+            "fee": "1500", "limit": 16, "schedule_enabled": enabled,
+            "last_scheduled_date": None,
+        }
+        t.update(over)
+        return t
+
+    def test_disabled_schedule_excluded_from_upcoming(self):
+        result = self._call("grouptoken", chat_row=_chat_row(),
+                            templates=[self._tmpl(enabled=False)])
+        self.assertEqual(result["upcoming"], [])
+
+    def test_enabled_schedule_included_in_upcoming(self):
+        result = self._call("grouptoken", chat_row=_chat_row(),
+                            templates=[self._tmpl(enabled=True)])
+        self.assertEqual(len(result["upcoming"]), 1)
+        self.assertEqual(result["upcoming"][0]["name"], "SundayGame")
+
+    def test_mixed_enabled_and_disabled_only_enabled_shown(self):
+        result = self._call(
+            "grouptoken", chat_row=_chat_row(),
+            templates=[
+                self._tmpl(name="SaturdayGame", enabled=False),
+                self._tmpl(name="SundayGame", enabled=True),
+            ],
+        )
+        names = [t["name"] for t in result["upcoming"]]
+        self.assertEqual(names, ["SundayGame"])
+
+    def test_both_disabled_upcoming_is_empty(self):
+        """Exact live-soak repro: both templates paused, page must show none."""
+        result = self._call(
+            "grouptoken", chat_row=_chat_row(),
+            templates=[
+                self._tmpl(name="SaturdayGame", enabled=False),
+                self._tmpl(name="SundayGame", enabled=False),
+            ],
+        )
+        self.assertEqual(result["upcoming"], [])
+
+    def test_upcoming_fields_come_from_normalized_template(self):
+        """fee/limit map from the normalized keys (fee/limit), not the raw
+        DB column names (eventfee/inlistlimit) — list_templates already
+        renamed them, so the old db.get_templates() field names must not
+        be referenced here again."""
+        result = self._call("grouptoken", chat_row=_chat_row(),
+                            templates=[self._tmpl(enabled=True, fee="750", limit=10)])
+        entry = result["upcoming"][0]
+        self.assertEqual(entry["fee"], "750")
+        self.assertEqual(entry["limit"], 10)
 
 
 if __name__ == "__main__":

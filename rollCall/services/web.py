@@ -15,6 +15,7 @@ import db
 from exceptions import incorrectParameter, parameterMissing
 from rollcall_manager import manager
 from services import proxy as proxy_svc
+from services.templates import list_templates as _list_templates
 
 
 def hash_login_token(token: str) -> str:
@@ -236,7 +237,14 @@ def get_rollcalls_by_group_token(group_token: str) -> dict:
     chat_id = chat["chat_id"]
     rollcalls = manager.get_rollcalls(chat_id)
 
-    templates = db.get_templates(chat_id)
+    # Route through templates_svc.list_templates (not db.get_templates directly):
+    # schedule_enabled is a SQLite TEXT column, so a disabled schedule can be
+    # stored as the STRING "0" — a naive `if t.get("schedule_enabled")` treats
+    # that as truthy (any non-empty string is truthy in Python) and a paused
+    # template would still show as "upcoming" on the web page even though
+    # /schedules correctly shows it disabled. list_templates already applies
+    # the safe string-aware normalization used by every Telegram-facing path.
+    templates = _list_templates(chat_id)
     upcoming = [
         {
             "name": t["name"],
@@ -247,8 +255,8 @@ def get_rollcalls_by_group_token(group_token: str) -> dict:
             "event_day": t.get("event_day"),
             "event_time": t.get("event_time"),
             "location": t.get("location"),
-            "fee": t.get("eventfee"),
-            "limit": t.get("inlistlimit"),
+            "fee": t.get("fee"),
+            "limit": t.get("limit"),
         }
         for t in templates
         if t.get("schedule_enabled") and t.get("schedule_day") and t.get("schedule_time")

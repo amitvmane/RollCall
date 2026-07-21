@@ -31,7 +31,15 @@
     <div id="tg-widget-wrap" style="display:none">
       <div class="login-divider"><span>or</span></div>
       <p class="sub" style="font-size:.8rem;text-align:center">No Telegram app on this device? Log in with your Telegram account directly:</p>
-      <div id="tg-login-widget" style="display:flex;justify-content:center;margin-top:8px"></div>
+      <div id="tg-login-widget" style="display:flex;justify-content:center;margin-top:8px;min-height:40px"></div>
+      <!-- Telegram's widget script is cross-origin — we can't detect from
+           here whether it actually rendered a working button or its own
+           "Bot domain invalid" error inside the iframe it injects (happens
+           whenever the domain hasn't been set via /setdomain in BotFather,
+           e.g. any ephemeral tunnel URL that changes on restart). Always
+           show this so a silently-broken widget explains itself instead of
+           leaving instructional text pointing at nothing. -->
+      <p class="sub" style="font-size:.72rem;text-align:center;margin-top:6px;opacity:.75">Nothing above? This login method isn't set up for this domain yet — use one of the options below instead.</p>
     </div>
     <div class="login-divider"><span>or</span></div>
     <p class="sub" style="font-size:.8rem;text-align:center">Have a login code from the bot? (Get one anytime with <b>/mytoken</b> — works even when Telegram is down.)</p>

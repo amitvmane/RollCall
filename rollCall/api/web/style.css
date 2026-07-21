@@ -154,7 +154,7 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 /* ── Tabs: match selector ── */
 .tab-bar{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none}
 .tab-bar::-webkit-scrollbar{display:none}
-.tab-btn{flex-shrink:0;padding:6px 14px;border:1.5px solid var(--border);border-radius:8px;background:var(--card);font-size:.82rem;cursor:pointer;white-space:nowrap;transition:all .15s;display:flex;flex-direction:column;align-items:center;gap:1px}
+.tab-btn{flex-shrink:0;padding:6px 14px;border:1.5px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);font-size:.82rem;cursor:pointer;white-space:nowrap;transition:all .15s;display:flex;flex-direction:column;align-items:center;gap:1px}
 .tab-btn .tn{font-size:.63rem;font-weight:800;opacity:.65;font-family:var(--font-mono)}
 .tab-btn .tt{font-size:.8rem;font-weight:600;max-width:110px;overflow:hidden;text-overflow:ellipsis}
 .tab-btn.active{background:var(--accent);color:#0A1310;border-color:var(--accent)}
@@ -267,24 +267,20 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .upcoming-title{font-weight:600;font-size:.87rem;margin-bottom:2px}
 .upcoming-meta{font-size:.75rem;color:var(--sub)}
 
-/* ── Dark-mode structural tweaks not covered by plain var() lookups ── */
-html.dark body{background:var(--bg);color:var(--text)}
-html.dark .card{background:var(--card)}
-html.dark .vote-btn{background:var(--card);color:var(--text)}
-html.dark .tab-btn{background:var(--card);border-color:var(--border)}
-html.dark .list-items li{border-bottom-color:var(--border)}
-html.dark .cap-bar{background:var(--border)}
-html.dark .refresh-bar{background:var(--border)}
-html.dark .name-row input{background:var(--card);color:var(--text);border-color:var(--border)}
-html.dark .comment-input{background:var(--card);color:var(--text);border-color:var(--border)}
-html.dark .copy-btn{border-color:var(--border);color:var(--sub)}
-html.dark .copy-btn:hover{border-color:var(--accent);color:var(--accent)}
-html.dark .no-rc{color:var(--sub)}
-html.dark input[type="text"],html.dark input[type="number"]{background:var(--card);color:var(--text);border-color:var(--border)}
+/* No separate "html.dark .X" block: every value in this stylesheet is a
+   var(--...) that already resolves correctly per-theme via :root vs
+   html.dark's own variable definitions above. An explicit html.dark
+   override here would ALSO be redundant AND a real hazard — it adds an
+   extra type+class to the selector's specificity, which can silently beat
+   a same-element state modifier like .active/.spinning (exactly what
+   happened to .tab-btn.active's amber background here originally: a
+   redundant html.dark rule outranked it and the active tab rendered with
+   no highlight at all in dark mode). If a color ever needs to differ by
+   theme beyond what the variables already encode, add a dedicated
+   variable rather than a parallel html.dark selector. */
 
 /* ── Presence badge ── */
-.presence-badge{font-size:.72rem;font-weight:600;color:var(--accent);background:rgba(232,169,59,.15);padding:2px 8px;border-radius:6px;margin-left:6px;white-space:nowrap;font-family:var(--font-mono)}
-html.dark .presence-badge{color:#E8A93B}
+.presence-badge{font-size:.72rem;font-weight:600;color:var(--accent);background:var(--accent-dim);padding:2px 8px;border-radius:6px;margin-left:6px;white-space:nowrap;font-family:var(--font-mono)}
 
 /* ── Telegram offline banner ── */
 .tg-offline-bar{background:var(--danger-dim);color:var(--danger-fg);padding:10px 14px;font-size:.82rem;font-weight:600;display:flex;align-items:center;gap:8px;margin-bottom:8px;border-radius:8px}

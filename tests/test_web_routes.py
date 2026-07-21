@@ -946,6 +946,32 @@ class TestWebTemplateContentEditAndStart(unittest.TestCase):
         self.assertIsNone(svc.call_args.kwargs["location"])
         self.assertIsNone(svc.call_args.kwargs["fee"])
         self.assertIsNone(svc.call_args.kwargs["limit"])
+        self.assertIsNone(svc.call_args.kwargs["event_day"])
+        self.assertIsNone(svc.call_args.kwargs["event_time"])
+
+    def test_update_content_event_day_time_distinct_from_schedule(self):
+        """event_day/event_time (when the game happens, used to auto-close)
+        must reach upsert_template as their own kwargs — never conflated
+        with schedule_day/schedule_time (when the template auto-opens)."""
+        import api.routes.web as _web_mod
+        updated = self._tmpl(event_day="sunday", event_time="07:00")
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value=None), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.templates.upsert_template", return_value=updated) as svc, \
+             patch.object(_web_mod, "_send_event_notification", new_callable=AsyncMock):
+            resp = _client().put(
+                "/api/v1/web/group/grp123/templates/SundayGame",
+                json={"id_token": "tok", "event_day": "sunday", "event_time": "07:00"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["event_day"], "sunday")
+        self.assertEqual(resp.json()["event_time"], "07:00")
+        self.assertEqual(svc.call_args.kwargs["event_day"], "sunday")
+        self.assertEqual(svc.call_args.kwargs["event_time"], "07:00")
+        # No schedule fields present in this schema at all — content-only route.
+        self.assertNotIn("schedule_day", svc.call_args.kwargs)
+        self.assertNotIn("schedule_time", svc.call_args.kwargs)
 
     # ── start now ────────────────────────────────────────────────────────
 

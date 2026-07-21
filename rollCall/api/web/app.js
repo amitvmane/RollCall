@@ -1885,17 +1885,20 @@ function renderTemplatesSchedule(){
     const enabled=t.schedule_enabled;
     const recLabel={weekly:"weekly",biweekly:"every 2 weeks",monthly:"monthly"}[t.recurrence_type]||t.recurrence_type;
     const when=enabled
-      ?(t.recurrence_type==="monthly"
-        ?`Day ${esc(t.schedule_day)} of each month at ${esc(t.schedule_time)}`
-        :`${esc((t.schedule_day||"").replace(/^./,c=>c.toUpperCase()))} ${esc(t.schedule_time)} (${recLabel})`)
+      ?`Opens ${t.recurrence_type==="monthly"
+        ?`day ${esc(t.schedule_day)} of each month at ${esc(t.schedule_time)}`
+        :`${esc((t.schedule_day||"").replace(/^./,c=>c.toUpperCase()))} ${esc(t.schedule_time)} (${recLabel})`}`
       :"Not scheduled";
+    const closes=(t.event_day&&t.event_time)
+      ?`Closes ${esc((t.event_day||"").replace(/^./,c=>c.toUpperCase()))} ${esc(t.event_time)}`
+      :"";
     const meta=[t.location,t.fee?`₹${t.fee}`:null,t.limit?`Cap ${t.limit}`:null].filter(Boolean).join(" · ");
     const editing=_templatesEditingName===t.name;
     return `<div class="sched-item" style="flex-direction:column;align-items:stretch">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%">
         <div class="sched-item-info">
           <div class="sched-item-title">${esc(t.title||t.name)}</div>
-          <div class="sched-item-time">${when}</div>
+          <div class="sched-item-time">${when}${closes?" · "+closes:""}</div>
           ${meta?`<div class="upcoming-meta">${esc(meta)}</div>`:""}
         </div>
         <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
@@ -1915,7 +1918,9 @@ function renderTemplatesSchedule(){
 function renderTemplateEditForm(t){
   const isMonthly=t.recurrence_type==="monthly";
   const dayOpts=WEEKDAYS.map(d=>`<option value="${d}" ${t.schedule_day===d?"selected":""}>${d[0].toUpperCase()+d.slice(1)}</option>`).join("");
+  const eventDayOpts='<option value="">No fixed day</option>'+WEEKDAYS.map(d=>`<option value="${d}" ${t.event_day===d?"selected":""}>${d[0].toUpperCase()+d.slice(1)}</option>`).join("");
   const inp=(id,val,ph)=>`<input id="${id}" type="text" placeholder="${ph}" value="${esc(val||"")}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem"/>`;
+  const sublabel=text=>`<div style="font-size:.72rem;color:var(--sub);margin-top:-4px">${text}</div>`;
   return `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px">
     <div class="id-prompt-label" style="text-align:left;margin-bottom:0">Details</div>
     ${inp(`tsf-title-${t.name}`,t.title,"Title")}
@@ -1924,7 +1929,16 @@ function renderTemplateEditForm(t){
       ${inp(`tsf-fee-${t.name}`,t.fee,"Fee")}
     </div>
     <input id="tsf-limit-${t.name}" type="number" min="1" max="1000" placeholder="Cap (max attendees)" value="${t.limit||""}" style="padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem"/>
-    <div class="id-prompt-label" style="text-align:left;margin-bottom:0;margin-top:4px">Schedule</div>
+
+    <div class="id-prompt-label" style="text-align:left;margin-bottom:0;margin-top:4px">🏟 Event day &amp; time</div>
+    ${sublabel("When the game itself happens — closes voting on any rollcall started from this template.")}
+    <div style="display:flex;gap:8px">
+      <select id="tsf-eventday-${t.name}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">${eventDayOpts}</select>
+      <input id="tsf-eventtime-${t.name}" type="time" value="${esc(t.event_time||"")}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem"/>
+    </div>
+
+    <div class="id-prompt-label" style="text-align:left;margin-bottom:0;margin-top:4px">🗓 Auto-start schedule</div>
+    ${sublabel("When this template repeats and opens a new rollcall automatically — separate from the event time above.")}
     <div style="display:flex;gap:8px">
       <select id="tsf-rec-${t.name}" onchange="_onTsfRecurrenceChange('${esc(t.name)}')" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
         <option value="weekly" ${t.recurrence_type==="weekly"?"selected":""}>Weekly</option>
@@ -1995,6 +2009,18 @@ window.saveTemplate=async function(name){
   };
   const limitVal=document.getElementById(`tsf-limit-${name}`).value;
   contentBody.limit=limitVal?parseInt(limitVal,10):null;
+
+  // Event day/time (when the game happens — auto-closes the rollcall) is
+  // separate from the schedule above (when the template auto-opens). Both
+  // or neither — a lone value silently does nothing on the backend.
+  const eventDay=document.getElementById(`tsf-eventday-${name}`).value||null;
+  const eventTime=document.getElementById(`tsf-eventtime-${name}`).value||null;
+  if((eventDay&&!eventTime)||(!eventDay&&eventTime)){
+    toast("Set both event day and time, or leave both blank.",3000);
+    return;
+  }
+  contentBody.event_day=eventDay;
+  contentBody.event_time=eventTime;
 
   try{
     // Content first, then schedule (only when already enabled) — either can

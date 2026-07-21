@@ -238,6 +238,9 @@ class WebTemplateResponse(BaseModel):
 
 
 class WebSetScheduleRequest(BaseModel):
+    """When the template auto-opens a new rollcall — distinct from
+    WebUpdateTemplateRequest.event_day/event_time, which is when the game
+    itself happens and is used to auto-close it."""
     id_token: str = Field(..., description="Signed identity token of the acting web admin")
     recurrence_type: Literal["weekly", "biweekly", "monthly"] = "weekly"
     schedule_day: Optional[str] = Field(None, description="Weekday name (weekly/biweekly) — ignored for monthly")
@@ -251,12 +254,19 @@ class WebToggleScheduleRequest(BaseModel):
 
 class WebUpdateTemplateRequest(BaseModel):
     """Partial update of a template's content — fields left unset preserve
-    the existing value (matches services.templates.upsert_template)."""
+    the existing value (matches services.templates.upsert_template).
+
+    event_day/event_time are the game's own day+time (used to auto-close a
+    rollcall started from this template) — distinct from schedule_day/
+    schedule_time on WebSetScheduleRequest, which control when the rollcall
+    auto-opens."""
     id_token: str = Field(..., description="Signed identity token of the acting web admin")
     title: Optional[str] = Field(None, max_length=200)
     location: Optional[str] = Field(None, max_length=200)
     fee: Optional[str] = Field(None, max_length=50)
     limit: Optional[int] = Field(None, ge=1, le=1000)
+    event_day: Optional[str] = Field(None, description="Weekday name the event itself happens on (used for auto-close)")
+    event_time: Optional[str] = Field(None, description="HH:MM the event itself happens at (used for auto-close)")
 
 
 class WebStartTemplateRequest(BaseModel):

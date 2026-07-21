@@ -549,7 +549,7 @@ async def web_disable_template_schedule(
 @router.put(
     "/web/group/{group_token}/templates/{name}",
     response_model=WebTemplateResponse,
-    summary="Edit a template's content — title/location/fee/limit (requires web-admin identity)",
+    summary="Edit a template's content — title/location/fee/limit/event day+time (requires web-admin identity)",
 )
 async def web_update_template(
     body: WebUpdateTemplateRequest,
@@ -563,6 +563,7 @@ async def web_update_template(
         chat_id=chat_id, name=name,
         admin_user_id=actor_user_id, admin_name=actor_name,
         title=body.title, location=body.location, fee=body.fee, limit=body.limit,
+        event_day=body.event_day, event_time=body.event_time,
     )
     await _send_event_notification(chat_id, f"✏️ Template '{name}' updated (via web).")
     return WebTemplateResponse(**tmpl)

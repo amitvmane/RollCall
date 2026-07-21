@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=5.0"/>
-  <meta name="theme-color" content="#2563eb"/>
+  <meta name="theme-color" content="#0A1310"/>
   <meta name="mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
@@ -14,6 +14,9 @@
   <!-- manifest set dynamically by app.js once group token is known -->
   <script src="/shared/theme-init.js"></script>
   <script async src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800;900&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet"/>
   <link rel="stylesheet" href="/shared/tokens.css"/>
   <link rel="stylesheet" href="/web/style.css"/>
 </head>
@@ -131,28 +134,25 @@
       </div>
     </div>
 
-    <!-- Upcoming scheduled rollcalls -->
-    <div id="upcoming-card" class="card hidden"></div>
-
-    <!-- Identity -->
+    <!-- Identity — compact single-row strip, right above the vote buttons.
+         Was a tall 2-button chooser sandwiched between event details and a
+         schedule preview, forcing 4 scroll-stops before a first-time voter
+         could act; now it's one thin row that collapses to a tiny name-chip
+         for returning visitors (see renderIdentity() in app.js). -->
     <div class="card" id="identity-card">
       <!-- Picker: first-visit group users choose Telegram or guest entry -->
       <div id="identity-picker-row" class="hidden">
-        <div style="font-size:.78rem;color:var(--sub);margin-bottom:12px;text-align:center">How would you like to vote?</div>
-        <button class="id-picker-option id-picker-option-tg" id="picker-tg-btn" onclick="startTgVerify()">
-          <span class="id-picker-icon">✈</span>
-          <span>
-            <div class="id-picker-label">Continue with Telegram</div>
-            <div class="id-picker-sub">Verified identity — your vote is linked to your account</div>
-          </span>
-        </button>
-        <button class="id-picker-option id-picker-option-guest" id="picker-guest-btn" onclick="showGuestInput()">
-          <span class="id-picker-icon">👤</span>
-          <span>
-            <div class="id-picker-label">Vote as guest</div>
-            <div class="id-picker-sub">Enter any name — quick, no login needed</div>
-          </span>
-        </button>
+        <div class="id-prompt-label">Who's voting?</div>
+        <div style="display:flex;gap:8px">
+          <button class="id-picker-option id-picker-option-tg" id="picker-tg-btn" onclick="startTgVerify()">
+            <span class="id-picker-icon">✈</span>
+            <span class="id-picker-label">Telegram</span>
+          </button>
+          <button class="id-picker-option id-picker-option-guest" id="picker-guest-btn" onclick="showGuestInput()">
+            <span class="id-picker-icon">👤</span>
+            <span class="id-picker-label">Guest</span>
+          </button>
+        </div>
       </div>
       <div id="name-input-row" class="hidden">
         <div style="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:8px">Enter your name to vote</div>
@@ -196,6 +196,11 @@
       <div class="refresh-bar"><div id="refresh-fill" class="refresh-fill"></div></div>
       <span id="refresh-label" class="refresh-label"></span>
     </div>
+
+    <!-- Upcoming scheduled rollcalls — demoted below the live game/vote
+         action (was between the event card and identity, competing with
+         the thing a visitor actually came to do). -->
+    <div id="upcoming-card" class="card hidden"></div>
 
     <!-- Stats card — group mode only, lazy-loaded after identity is known -->
     <div id="stats-card" class="card hidden"></div>

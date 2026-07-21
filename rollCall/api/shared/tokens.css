@@ -11,6 +11,18 @@
    instead of three different greens depending which surface you're on. */
 
 :root{
+  /* Matchday type system — shared by all 5 surfaces so a visitor moving
+     between the voting page, portal, and admin console reads them as one
+     product even where layouts differ. Big Shoulders Display = condensed
+     athletic/scoreboard display face (titles, big numbers); IBM Plex Sans =
+     body text with real character (not Inter/Roboto/Arial); IBM Plex Mono =
+     tabular numerals for countdowns and ledger figures. Each surface links
+     its own Google Fonts <link>; if that fails to load, the fallback stack
+     still reads fine. */
+  --font-display:"Big Shoulders Display",'Arial Narrow',sans-serif;
+  --font-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+
   --bg:#f0f4f8;--card:#fff;--border:#e4e8ef;--hover:#f1f5f9;
   --text:#0f172a;--sub:#64748b;--accent:#2563eb;--accent-dim:#eff6ff;
   --danger:#dc2626;--danger-dim:#fef2f2;--success:#16a34a;--warn:#d97706;

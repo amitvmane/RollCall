@@ -72,20 +72,29 @@ def _fmt_schedule_entry(t: dict) -> str:
     status = "🟢" if enabled else "🔴"
     paused_tag = "" if enabled else "  <i>(paused)</i>"
 
+    # "Opens"/"closes" are two unrelated things (when the template
+    # auto-fires vs. when this game happens and voting closes) that used to
+    # be stitched together as a bare "X → Y" — easily misread as a single
+    # time range. Label each half explicitly, and fold the recurrence into
+    # "Opens" since only the opening actually recurs.
     rec_label = {"weekly": "weekly", "biweekly": "every 2 weeks", "monthly": "monthly"}.get(recurrence, recurrence)
     if recurrence == "monthly":
-        timing = f"day {html.escape(sched_day)} at {html.escape(sched_time)}"
-        if event_day and event_time:
-            timing += f" → closes day {html.escape(event_day)} at {html.escape(event_time)}"
+        opens = f"day {html.escape(sched_day)} at {html.escape(sched_time)}"
     else:
-        timing = f"{html.escape(sched_day.capitalize())} {html.escape(sched_time)}"
-        if event_day and event_time:
-            timing += f" → {html.escape(event_day.capitalize())} {html.escape(event_time)}"
+        opens = f"{html.escape(sched_day.capitalize())} {html.escape(sched_time)}"
+    timing = f"Opens {opens} ({rec_label})"
+
+    if event_day and event_time:
+        if recurrence == "monthly":
+            closes = f"day {html.escape(event_day)} at {html.escape(event_time)}"
+        else:
+            closes = f"{html.escape(event_day.capitalize())} {html.escape(event_time)}"
+        timing += f" → closes {closes}"
 
     last = f"last run: {html.escape(last_run)}" if last_run else "never run"
     return (
         f"{status} <b>{html.escape(title)}</b> <code>[{html.escape(name)}]</code>{paused_tag}\n"
-        f"   {timing}  ·  {rec_label}  ·  {last}"
+        f"   {timing}  ·  {last}"
     )
 
 

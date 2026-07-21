@@ -138,7 +138,12 @@ S.token=localStorage.getItem(LS)||"";
   const hp=new URLSearchParams((window.location.hash||"").replace(/^#/,""));
   const qp=new URLSearchParams(window.location.search);
   const t=hp.get("token")||qp.get("token");
-  if(t&&!S.token){S.token=t;doLogin();}
+  // doLogin() reads its token from the #ti input field, not from S.token —
+  // populate the field so the one-click link actually signs in instead of
+  // silently no-opping (doLogin's first line returns early on an empty
+  // field, which is exactly what "click a link, S.token set programmatically,
+  // input never touched" produces).
+  if(t&&!S.token){$id("ti").value=t;doLogin();}
   else if(S.token)boot();
   if(t){
     qp.delete("token");

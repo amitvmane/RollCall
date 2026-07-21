@@ -1,9 +1,14 @@
 /* RollCall Mini App — vanilla JS, no build step */
 'use strict';
 
-const tg = window.Telegram.WebApp;
-tg.ready();
-tg.expand();
+// window.Telegram is injected by the telegram-web-app.js CDN script (see
+// index.html) — it can be absent if that script hasn't finished loading yet,
+// failed to load (network/ad-blocker), or the page was opened outside
+// Telegram entirely. Falling through to null here (instead of crashing on
+// window.Telegram.WebApp) lets auth()/boot()'s existing try/catch route this
+// into the normal error screen instead of an unrecoverable blank "Loading…".
+const tg = (window.Telegram && window.Telegram.WebApp) || null;
+if (tg) { tg.ready(); tg.expand(); }
 
 // ── State ────────────────────────────────────────────────────────────────────
 const state = {
@@ -47,6 +52,9 @@ async function apiFetch(path, opts = {}) {
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 async function auth() {
+  if (!tg) {
+    throw new Error('Telegram Mini App API failed to load — open this page inside the Telegram app, or try again.');
+  }
   const initData = tg.initData;
   if (!initData) {
     // Dev mode: show a "no initData" message so devs know what's happening

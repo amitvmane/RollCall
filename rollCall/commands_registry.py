@@ -352,7 +352,9 @@ COMMANDS = [
             "Weekly:    /schedule_template name <weekday> <HH:MM>\n"
             "Biweekly:  /schedule_template name <weekday> <HH:MM> biweekly\n"
             "Monthly:   /schedule_template name monthly <day> <HH:MM>\n"
-            "Disable:   /schedule_template name off"
+            "Disable:   /schedule_template name off\n\n"
+            "Also editable self-serve from the group's web page (admin actions → "
+            "🔁 Recurring Schedules) — any web admin can do this without server access."
         ),
     },
     {

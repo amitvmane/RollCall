@@ -215,3 +215,32 @@ class WebEndRollcallRequest(BaseModel):
 
 class WebAdminStatusResponse(BaseModel):
     is_admin: bool
+
+
+class WebTemplateResponse(BaseModel):
+    """Recurring-schedule status for one template — feeds the group web
+    page's admin-only schedule editor (self-serve, id_token-gated; the
+    separate token-gated /admin/ console is a bottleneck for non-owner
+    group admins, so this lives on the page every web admin already has
+    self-serve access to)."""
+    name: str
+    title: Optional[str] = None
+    schedule_enabled: bool = False
+    schedule_day: Optional[str] = None
+    schedule_time: Optional[str] = None
+    recurrence_type: str = "weekly"
+    event_day: Optional[str] = None
+    event_time: Optional[str] = None
+    last_scheduled_date: Optional[str] = None
+
+
+class WebSetScheduleRequest(BaseModel):
+    id_token: str = Field(..., description="Signed identity token of the acting web admin")
+    recurrence_type: Literal["weekly", "biweekly", "monthly"] = "weekly"
+    schedule_day: Optional[str] = Field(None, description="Weekday name (weekly/biweekly) — ignored for monthly")
+    schedule_time: str = Field(..., description="HH:MM local time")
+    monthly_day: Optional[int] = Field(None, ge=1, le=31, description="Day of month (monthly only)")
+
+
+class WebToggleScheduleRequest(BaseModel):
+    id_token: str = Field(..., description="Signed identity token of the acting web admin")

@@ -1845,6 +1845,144 @@ window.toggleAdminSection=function(name){
   if(ch)ch.textContent=_adminSectionOpen[name]?"▲":"▼";
 };
 
+// ── Recurring template schedules (self-serve — no server/API-token needed,
+// unlike the separate /admin/ console) ──────────────────────────────────
+const WEEKDAYS=["monday","tuesday","wednesday","thursday","friday","saturday","sunday"];
+let _templatesScheduleOpen=false, _templatesCache=null, _templatesEditingName=null;
+
+window.toggleTemplatesSchedule=async function(){
+  _templatesScheduleOpen=!_templatesScheduleOpen;
+  const body=document.getElementById("templates-schedule-body");
+  const ch=document.getElementById("templates-chevron");
+  if(body)body.classList.toggle("hidden",!_templatesScheduleOpen);
+  if(ch)ch.textContent=_templatesScheduleOpen?"▲":"▼";
+  if(_templatesScheduleOpen&&!_templatesCache)await loadTemplatesSchedule();
+};
+
+async function loadTemplatesSchedule(){
+  const body=document.getElementById("templates-schedule-body");
+  if(!body||!_idToken)return;
+  body.innerHTML='<div class="sched-empty">Loading…</div>';
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/templates?id_token=${encodeURIComponent(_idToken)}`,
+      {signal:AbortSignal.timeout(8000)});
+    if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"Failed to load templates");
+    _templatesCache=await res.json();
+    renderTemplatesSchedule();
+  }catch(e){
+    body.innerHTML=`<div class="sched-empty">${esc(e.message||"Could not load templates")}</div>`;
+  }
+}
+
+function renderTemplatesSchedule(){
+  const body=document.getElementById("templates-schedule-body");
+  if(!body)return;
+  if(!_templatesCache||!_templatesCache.length){
+    body.innerHTML='<div class="sched-empty">No templates yet — create one with /set_template in the group.</div>';
+    return;
+  }
+  body.innerHTML=_templatesCache.map(t=>{
+    const enabled=t.schedule_enabled;
+    const recLabel={weekly:"weekly",biweekly:"every 2 weeks",monthly:"monthly"}[t.recurrence_type]||t.recurrence_type;
+    const when=enabled
+      ?(t.recurrence_type==="monthly"
+        ?`Day ${esc(t.schedule_day)} of each month at ${esc(t.schedule_time)}`
+        :`${esc((t.schedule_day||"").replace(/^./,c=>c.toUpperCase()))} ${esc(t.schedule_time)} (${recLabel})`)
+      :"Not scheduled";
+    const editing=_templatesEditingName===t.name;
+    return `<div class="sched-item" style="flex-direction:column;align-items:stretch">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%">
+        <div class="sched-item-info">
+          <div class="sched-item-title">${esc(t.title||t.name)}</div>
+          <div class="sched-item-time">${when}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+          <label class="admin-toggle" title="${enabled?'Disable':'Enable'} schedule">
+            <input type="checkbox" ${enabled?"checked":""} onchange="toggleTemplateSchedule('${esc(t.name)}',this.checked)"/>
+            <span class="admin-toggle-slider"></span>
+          </label>
+          <button class="id-change" onclick="toggleTemplateEditForm('${esc(t.name)}')">${editing?"✕":"✏️"}</button>
+        </div>
+      </div>
+      ${editing?renderTemplateEditForm(t):""}
+    </div>`;
+  }).join("");
+}
+
+function renderTemplateEditForm(t){
+  const isMonthly=t.recurrence_type==="monthly";
+  const dayOpts=WEEKDAYS.map(d=>`<option value="${d}" ${t.schedule_day===d?"selected":""}>${d[0].toUpperCase()+d.slice(1)}</option>`).join("");
+  return `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px">
+    <div style="display:flex;gap:8px">
+      <select id="tsf-rec-${t.name}" onchange="_onTsfRecurrenceChange('${esc(t.name)}')" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
+        <option value="weekly" ${t.recurrence_type==="weekly"?"selected":""}>Weekly</option>
+        <option value="biweekly" ${t.recurrence_type==="biweekly"?"selected":""}>Every 2 weeks</option>
+        <option value="monthly" ${isMonthly?"selected":""}>Monthly</option>
+      </select>
+    </div>
+    <div style="display:flex;gap:8px">
+      <select id="tsf-day-${t.name}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem;${isMonthly?"display:none":""}">${dayOpts}</select>
+      <input id="tsf-monthday-${t.name}" type="number" min="1" max="31" placeholder="Day (1-31)" value="${isMonthly?esc(t.schedule_day||""):""}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem;${isMonthly?"":"display:none"}"/>
+      <input id="tsf-time-${t.name}" type="time" value="${esc(t.schedule_time||"09:00")}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem"/>
+    </div>
+    <button class="btn btn-primary" style="padding:9px" onclick="saveTemplateSchedule('${esc(t.name)}')">Save schedule</button>
+  </div>`;
+}
+
+window._onTsfRecurrenceChange=function(name){
+  const isMonthly=document.getElementById(`tsf-rec-${name}`).value==="monthly";
+  document.getElementById(`tsf-day-${name}`).style.display=isMonthly?"none":"";
+  document.getElementById(`tsf-monthday-${name}`).style.display=isMonthly?"":"none";
+};
+
+window.toggleTemplateEditForm=function(name){
+  _templatesEditingName=_templatesEditingName===name?null:name;
+  renderTemplatesSchedule();
+};
+
+window.saveTemplateSchedule=async function(name){
+  const recurrence_type=document.getElementById(`tsf-rec-${name}`).value;
+  const schedule_time=document.getElementById(`tsf-time-${name}`).value;
+  if(!schedule_time){toast("Pick a time first.",2500);return;}
+  const body={id_token:_idToken,recurrence_type,schedule_time};
+  if(recurrence_type==="monthly"){
+    const md=parseInt(document.getElementById(`tsf-monthday-${name}`).value,10);
+    if(!md||md<1||md>31){toast("Enter a day of month (1-31).",2500);return;}
+    body.monthly_day=md;
+  }else{
+    body.schedule_day=document.getElementById(`tsf-day-${name}`).value;
+  }
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/templates/${encodeURIComponent(name)}/schedule`,{
+      method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),
+      signal:AbortSignal.timeout(8000),
+    });
+    if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"Failed to save schedule");
+    const updated=await res.json();
+    _templatesCache=_templatesCache.map(t=>t.name===name?updated:t);
+    _templatesEditingName=null;
+    renderTemplatesSchedule();
+    toast(`🗓 Schedule saved for ${name}`,2500);
+  }catch(e){toast(e.message||"Could not save schedule",4000);}
+};
+
+window.toggleTemplateSchedule=async function(name,enabled){
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/templates/${encodeURIComponent(name)}/schedule/${enabled?"enable":"disable"}`,{
+      method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id_token:_idToken}),
+      signal:AbortSignal.timeout(8000),
+    });
+    if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"Failed to update schedule");
+    const updated=await res.json();
+    _templatesCache=_templatesCache.map(t=>t.name===name?updated:t);
+    renderTemplatesSchedule();
+    toast(enabled?`🟢 ${name} enabled`:`🔴 ${name} disabled`,2000);
+  }catch(e){
+    toast(e.message||"Could not update schedule",4000);
+    renderTemplatesSchedule(); // revert the toggle's optimistic UI state
+  }
+};
+
 async function refreshDues(){
   if(!_idToken)return;
   try{

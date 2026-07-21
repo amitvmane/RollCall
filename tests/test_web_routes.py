@@ -629,5 +629,150 @@ class TestWebProxyVote(unittest.TestCase):
         self.assertEqual(svc.call_args.kwargs["admin_name"], "(web admin)")
 
 
+class TestWebTemplateSchedule(unittest.TestCase):
+    """Self-serve recurring-schedule editor on the group web page — id_token
+    + is_web_admin gated, no server/API-token access needed (unlike the
+    separate token-gated /admin/ console routes in api/routes/templates.py)."""
+
+    def setUp(self):
+        from api.rate_limit import reset_buckets_for_tests
+        reset_buckets_for_tests()
+
+    def _tmpl(self, **over):
+        t = {"name": "SundayGame", "title": "Sunday Game", "schedule_enabled": True,
+             "schedule_day": "saturday", "schedule_time": "09:00", "recurrence_type": "weekly",
+             "event_day": "sunday", "event_time": "06:30", "last_scheduled_date": None}
+        t.update(over)
+        return t
+
+    # ── list ──────────────────────────────────────────────────────────────
+
+    def test_list_requires_id_token(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch("api.identity.verify_identity_token", return_value=None):
+            resp = _client().get("/api/v1/web/group/grp123/templates?id_token=bad")
+        self.assertEqual(resp.status_code, 401)
+
+    def test_list_requires_web_admin(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=False), \
+             patch("api.identity.verify_identity_token", return_value=77):
+            resp = _client().get("/api/v1/web/group/grp123/templates?id_token=tok")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_list_invalid_group_token_404(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value=None):
+            resp = _client().get("/api/v1/web/group/badgrp/templates?id_token=tok")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_list_returns_templates_for_admin(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.templates.list_templates", return_value=[self._tmpl()]):
+            resp = _client().get("/api/v1/web/group/grp123/templates?id_token=tok")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()[0]["name"], "SundayGame")
+
+    # ── set schedule ─────────────────────────────────────────────────────
+
+    def test_set_schedule_non_admin_403(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=False), \
+             patch("api.identity.verify_identity_token", return_value=77):
+            resp = _client().put(
+                "/api/v1/web/group/grp123/templates/SundayGame/schedule",
+                json={"id_token": "tok", "recurrence_type": "weekly",
+                      "schedule_day": "saturday", "schedule_time": "09:00"})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_set_schedule_calls_service_and_mirrors_to_telegram(self):
+        import api.routes.web as _web_mod
+        updated = self._tmpl(schedule_day="thursday", schedule_time="18:00")
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value={"first_name": "Amit"}), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.templates.set_schedule", return_value=updated) as svc, \
+             patch("services.templates.get_one_template", return_value=updated), \
+             patch.object(_web_mod, "_send_event_notification", new_callable=AsyncMock) as notify:
+            resp = _client().put(
+                "/api/v1/web/group/grp123/templates/SundayGame/schedule",
+                json={"id_token": "tok", "recurrence_type": "weekly",
+                      "schedule_day": "thursday", "schedule_time": "18:00"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(svc.call_args.kwargs["chat_id"], -100)
+        self.assertEqual(svc.call_args.kwargs["admin_user_id"], 99)
+        self.assertEqual(svc.call_args.kwargs["admin_name"], "Amit")
+        self.assertEqual(svc.call_args.kwargs["schedule_day"], "thursday")
+        notify.assert_awaited_once()
+        self.assertIn("SundayGame", notify.call_args[0][1])
+
+    def test_set_schedule_monthly_passes_monthly_day(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value=None), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.templates.set_schedule", return_value=self._tmpl()) as svc, \
+             patch("services.templates.get_one_template", return_value=self._tmpl()), \
+             patch.object(_web_mod, "_send_event_notification", new_callable=AsyncMock):
+            resp = _client().put(
+                "/api/v1/web/group/grp123/templates/SundayGame/schedule",
+                json={"id_token": "tok", "recurrence_type": "monthly",
+                      "schedule_time": "09:00", "monthly_day": 15})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(svc.call_args.kwargs["monthly_day"], 15)
+
+    # ── enable / disable ─────────────────────────────────────────────────
+
+    def test_enable_schedule(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value=None), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.templates.enable_schedule") as svc, \
+             patch("services.templates.get_one_template", return_value=self._tmpl()), \
+             patch.object(_web_mod, "_send_event_notification", new_callable=AsyncMock) as notify:
+            resp = _client().post(
+                "/api/v1/web/group/grp123/templates/SundayGame/schedule/enable",
+                json={"id_token": "tok"})
+        self.assertEqual(resp.status_code, 200)
+        svc.assert_called_once_with(-100, "SundayGame", 99, "(web admin)")
+        self.assertIn("enabled", notify.call_args[0][1])
+
+    def test_disable_schedule(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value=None), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.templates.disable_schedule") as svc, \
+             patch("services.templates.get_one_template", return_value=self._tmpl(schedule_enabled=False)), \
+             patch.object(_web_mod, "_send_event_notification", new_callable=AsyncMock) as notify:
+            resp = _client().post(
+                "/api/v1/web/group/grp123/templates/SundayGame/schedule/disable",
+                json={"id_token": "tok"})
+        self.assertEqual(resp.status_code, 200)
+        svc.assert_called_once_with(-100, "SundayGame", 99, "(web admin)")
+        self.assertIn("disabled", notify.call_args[0][1])
+
+    def test_disable_schedule_non_admin_403(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=False), \
+             patch("api.identity.verify_identity_token", return_value=77):
+            resp = _client().post(
+                "/api/v1/web/group/grp123/templates/SundayGame/schedule/disable",
+                json={"id_token": "tok"})
+        self.assertEqual(resp.status_code, 403)
+
+
 if __name__ == "__main__":
     unittest.main()

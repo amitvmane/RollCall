@@ -46,7 +46,10 @@ from api.schemas.web import (
     WebPresenceResponse,
     WebProxyVoteRequest,
     WebRollcallResponse,
+    WebSetScheduleRequest,
     WebStartRollcallRequest,
+    WebTemplateResponse,
+    WebToggleScheduleRequest,
     WebVoteRequest,
     UpcomingRollcall,
 )
@@ -394,6 +397,125 @@ async def web_proxy_vote(
     if rc is None:
         raise HTTPException(status_code=404, detail="Rollcall not found after vote")
     return WebRollcallResponse(**_serialize_web_rollcall(rc))
+
+
+# ── Recurring template schedules ─────────────────────────────────────────────
+# Self-serve (id_token + is_web_admin), unlike /admin/'s bearer-API-token
+# routes in api/routes/templates.py which need out-of-band `make token` —
+# a real bottleneck for any group admin who isn't the server operator. Any
+# web admin (auto-registered by running /weblink in their group) can edit
+# their own group's recurring schedules here without ever touching the
+# server. Wraps the same services.templates functions the /schedule_template
+# Telegram command and the token-gated REST routes already call.
+
+def _require_web_admin(group_token: str, id_token: str) -> tuple[int, int]:
+    """Resolve + admin-check in one place for the schedule-editor routes.
+    Returns (chat_id, actor_user_id). Raises 404/401/403 as appropriate."""
+    chat = _db.get_chat_by_group_web_token(group_token)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Invalid group token")
+    actor_user_id = require_identity(id_token, detail="Verify with Telegram first.")
+    chat_id = int(chat["chat_id"])
+    if not _db.is_web_admin(chat_id, actor_user_id):
+        raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
+    return chat_id, actor_user_id
+
+
+async def _actor_display_name(chat_id: int, actor_user_id: int) -> str:
+    try:
+        info = _db.get_member_display_info(chat_id, actor_user_id)
+        if info:
+            return info.get("first_name") or "(web admin)"
+    except Exception:
+        pass
+    return "(web admin)"
+
+
+@router.get(
+    "/web/group/{group_token}/templates",
+    response_model=list[WebTemplateResponse],
+    summary="List templates with schedule status (requires web-admin identity)",
+)
+async def web_list_templates(
+    group_token: str = Path(...),
+    id_token: str = "",
+) -> list[WebTemplateResponse]:
+    chat_id, _ = _require_web_admin(group_token, id_token)
+    from services import templates as tmpl_svc
+    return [WebTemplateResponse(**t) for t in tmpl_svc.list_templates(chat_id)]
+
+
+@router.put(
+    "/web/group/{group_token}/templates/{name}/schedule",
+    response_model=WebTemplateResponse,
+    summary="Set a template's recurring auto-start schedule (requires web-admin identity)",
+)
+async def web_set_template_schedule(
+    body: WebSetScheduleRequest,
+    group_token: str = Path(...),
+    name: str = Path(...),
+) -> WebTemplateResponse:
+    chat_id, actor_user_id = _require_web_admin(group_token, body.id_token)
+    actor_name = await _actor_display_name(chat_id, actor_user_id)
+
+    from services import templates as tmpl_svc
+    result = tmpl_svc.set_schedule(
+        chat_id=chat_id, name=name,
+        admin_user_id=actor_user_id, admin_name=actor_name,
+        recurrence_type=body.recurrence_type,
+        schedule_day=body.schedule_day,
+        schedule_time=body.schedule_time,
+        monthly_day=body.monthly_day,
+    )
+    tmpl = tmpl_svc.get_one_template(chat_id, name)
+
+    recurrence_label = {"weekly": "weekly", "biweekly": "every 2 weeks", "monthly": "monthly"}.get(
+        body.recurrence_type, body.recurrence_type)
+    when = (f"day {body.monthly_day} of each month at {body.schedule_time}"
+           if body.recurrence_type == "monthly"
+           else f"{(body.schedule_day or '').capitalize()} {body.schedule_time} ({recurrence_label})")
+    await _send_event_notification(
+        chat_id, f"🗓 Schedule updated for '{name}' (via web): opens {when}."
+    )
+    return WebTemplateResponse(**{**tmpl, **result})
+
+
+@router.post(
+    "/web/group/{group_token}/templates/{name}/schedule/enable",
+    response_model=WebTemplateResponse,
+    summary="Re-enable a template's schedule (requires web-admin identity)",
+)
+async def web_enable_template_schedule(
+    body: WebToggleScheduleRequest,
+    group_token: str = Path(...),
+    name: str = Path(...),
+) -> WebTemplateResponse:
+    chat_id, actor_user_id = _require_web_admin(group_token, body.id_token)
+    actor_name = await _actor_display_name(chat_id, actor_user_id)
+    from services import templates as tmpl_svc
+    tmpl_svc.enable_schedule(chat_id, name, actor_user_id, actor_name)
+    tmpl = tmpl_svc.get_one_template(chat_id, name)
+    await _send_event_notification(chat_id, f"🟢 Schedule enabled for '{name}' (via web).")
+    return WebTemplateResponse(**tmpl)
+
+
+@router.post(
+    "/web/group/{group_token}/templates/{name}/schedule/disable",
+    response_model=WebTemplateResponse,
+    summary="Disable a template's schedule (requires web-admin identity)",
+)
+async def web_disable_template_schedule(
+    body: WebToggleScheduleRequest,
+    group_token: str = Path(...),
+    name: str = Path(...),
+) -> WebTemplateResponse:
+    chat_id, actor_user_id = _require_web_admin(group_token, body.id_token)
+    actor_name = await _actor_display_name(chat_id, actor_user_id)
+    from services import templates as tmpl_svc
+    tmpl_svc.disable_schedule(chat_id, name, actor_user_id, actor_name)
+    tmpl = tmpl_svc.get_one_template(chat_id, name)
+    await _send_event_notification(chat_id, f"🔴 Schedule disabled for '{name}' (via web).")
+    return WebTemplateResponse(**tmpl)
 
 
 # ── Scheduled rollcalls ───────────────────────────────────────────────────────

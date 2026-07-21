@@ -83,10 +83,32 @@ def get_one_template(chat_id: int, name: str) -> dict:
 
 # ─── Upsert ───────────────────────────────────────────────────────────────────
 
+_UNSAFE_NAME_CHARS = set("<>\"'`\\")
+
+
 def _validate_name(name: str) -> str:
+    """Used by every template operation (get/start/delete/schedule/upsert)
+    — deliberately lenient (non-empty only). The unsafe-character check
+    lives in _validate_new_name below, applied only at template CREATION,
+    so an existing template whose name predates that rule (or was created
+    via a path that doesn't enforce it) stays fully usable — starting,
+    editing, or deleting it must never be blocked by its own name."""
     n = (name or "").strip()
     if not n:
         raise parameterMissing("Template name is required")
+    return n
+
+
+def _validate_new_name(name: str) -> str:
+    """Stricter check for names not yet in the DB — rejects characters that
+    render unescaped in some admin surfaces (defense in depth; the web
+    page's own renderer also escapes safely regardless of this)."""
+    n = _validate_name(name)
+    if _UNSAFE_NAME_CHARS & set(n):
+        raise incorrectParameter(
+            "Template name can't contain < > \" ' ` or \\ "
+            "(they're rendered unescaped in some admin surfaces)."
+        )
     return n
 
 
@@ -110,31 +132,57 @@ def upsert_template(
     row — fields passed as None are preserved from the existing template
     (matching the bot handler's behaviour).
 
+    To explicitly CLEAR a string field (title/location/fee/event_day/
+    event_time) rather than preserve it, pass "" — it's treated as "set to
+    empty" and normalized to None in storage. Pass limit=0 to explicitly
+    clear the cap (0 is never a valid real limit). None still always means
+    "don't touch this field", which the token-gated REST API's true
+    partial-update contract depends on.
+
     Returns the full serialized template after save.
     Raises:
       parameterMissing — name empty
-      incorrectParameter — event_day is not a valid weekday name
+      incorrectParameter — event_day is not a valid weekday name, or only
+        one of event_day/event_time ends up set (both-or-neither)
     """
     name = _validate_name(name)
-    if event_day is not None and event_day.lower() not in WEEKDAY_MAP:
+    if event_day and event_day.lower() not in WEEKDAY_MAP:
         raise incorrectParameter(
             f"'{event_day}' is not a valid weekday. "
             "Use: monday, tuesday, wednesday, thursday, friday, saturday, sunday"
         )
 
-    # Merge with existing row so callers can do partial updates
-    existing = get_template(chat_id, name) or {}
+    def _norm_str(v):
+        return v or None
+
+    # Merge with existing row so callers can do partial updates. The
+    # stricter character check only applies when this is a genuine
+    # creation (no existing row) — an existing template must never become
+    # unusable because of its own already-established name.
+    existing = get_template(chat_id, name)
+    if existing is None:
+        name = _validate_new_name(name)
+    existing = existing or {}
     merged = {
-        "title":          title if title is not None else existing.get("title"),
-        "inlistlimit":    limit if limit is not None else existing.get("inlistlimit"),
-        "location":       location if location is not None else existing.get("location"),
-        "eventfee":       fee if fee is not None else existing.get("eventfee"),
+        "title":          _norm_str(title) if title is not None else existing.get("title"),
+        "inlistlimit":    (None if limit == 0 else limit) if limit is not None else existing.get("inlistlimit"),
+        "location":       _norm_str(location) if location is not None else existing.get("location"),
+        "eventfee":       _norm_str(fee) if fee is not None else existing.get("eventfee"),
         "offsetdays":     offset_days if offset_days is not None else existing.get("offsetdays"),
         "offsethours":    offset_hours if offset_hours is not None else existing.get("offsethours"),
         "offsetminutes":  offset_minutes if offset_minutes is not None else existing.get("offsetminutes"),
-        "event_day":      event_day if event_day is not None else existing.get("event_day"),
-        "event_time":     event_time if event_time is not None else existing.get("event_time"),
+        "event_day":      _norm_str(event_day) if event_day is not None else existing.get("event_day"),
+        "event_time":     _norm_str(event_time) if event_time is not None else existing.get("event_time"),
     }
+
+    # Only enforce both-or-neither when this call actually touches one of
+    # the two fields — an unrelated update (e.g. just changing limit) must
+    # not be blocked by a pre-existing half-set legacy row it never asked
+    # to change.
+    if (event_day is not None or event_time is not None) and bool(merged["event_day"]) != bool(merged["event_time"]):
+        raise incorrectParameter(
+            "event_day and event_time must be set together (or both left unset)."
+        )
 
     ok = create_or_update_template(chat_id, name, **merged)
     if not ok:

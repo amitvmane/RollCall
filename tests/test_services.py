@@ -1234,6 +1234,105 @@ class TestTemplatesService(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(incorrectParameter):
                 upsert_template(100, "weekly", 1, "Admin", event_day="Blorgday")
 
+    def test_upsert_template_empty_string_clears_field(self):
+        """"" is the explicit-clear signal for string fields — distinct
+        from None (preserve), which the token-gated REST API's real
+        partial-update contract depends on."""
+        existing = self._db_row("weekly", title="Old Title", location="Turf 3", eventfee="500")
+        with patch("services.templates.get_template", return_value=existing), \
+             patch("services.templates.create_or_update_template", return_value=True) as create, \
+             patch("services.templates.log_admin_action"):
+            from services.templates import upsert_template
+            result = upsert_template(100, "weekly", 1, "Admin", location="", fee="")
+        self.assertIsNone(result["location"])
+        self.assertIsNone(result["fee"])
+        self.assertIsNone(create.call_args.kwargs["location"])
+        self.assertIsNone(create.call_args.kwargs["eventfee"])
+        # Untouched field (title) must still be preserved via None.
+        self.assertEqual(result["title"], "Old Title")
+
+    def test_upsert_template_limit_zero_clears_cap(self):
+        existing = self._db_row("weekly", inlistlimit=15)
+        with patch("services.templates.get_template", return_value=existing), \
+             patch("services.templates.create_or_update_template", return_value=True), \
+             patch("services.templates.log_admin_action"):
+            from services.templates import upsert_template
+            result = upsert_template(100, "weekly", 1, "Admin", limit=0)
+        self.assertIsNone(result["limit"])
+
+    def test_upsert_template_limit_none_preserves_cap(self):
+        existing = self._db_row("weekly", inlistlimit=15)
+        with patch("services.templates.get_template", return_value=existing), \
+             patch("services.templates.create_or_update_template", return_value=True), \
+             patch("services.templates.log_admin_action"):
+            from services.templates import upsert_template
+            result = upsert_template(100, "weekly", 1, "Admin", title="New Title")
+        self.assertEqual(result["limit"], 15)
+
+    def test_upsert_template_clearing_event_day_alone_raises(self):
+        """Both-or-neither: clearing just one half of an existing
+        event_day/event_time pair must be rejected, not silently leave the
+        template half-configured."""
+        from exceptions import incorrectParameter
+        existing = self._db_row("weekly", event_day="friday", event_time="18:00")
+        with patch("services.templates.get_template", return_value=existing):
+            from services.templates import upsert_template
+            with self.assertRaises(incorrectParameter):
+                upsert_template(100, "weekly", 1, "Admin", event_day="")
+
+    def test_upsert_template_clearing_both_event_fields_together_ok(self):
+        existing = self._db_row("weekly", event_day="friday", event_time="18:00")
+        with patch("services.templates.get_template", return_value=existing), \
+             patch("services.templates.create_or_update_template", return_value=True), \
+             patch("services.templates.log_admin_action"):
+            from services.templates import upsert_template
+            result = upsert_template(100, "weekly", 1, "Admin", event_day="", event_time="")
+        self.assertIsNone(result["event_day"])
+        self.assertIsNone(result["event_time"])
+
+    def test_upsert_template_unrelated_update_ignores_legacy_half_set_pair(self):
+        """A pre-existing row with a half-set event pair (e.g. from before
+        this validation existed) must not block an unrelated field update
+        that never touches event_day/event_time."""
+        existing = self._db_row("weekly", event_day="friday", event_time=None)
+        with patch("services.templates.get_template", return_value=existing), \
+             patch("services.templates.create_or_update_template", return_value=True), \
+             patch("services.templates.log_admin_action"):
+            from services.templates import upsert_template
+            result = upsert_template(100, "weekly", 1, "Admin", limit=5)
+        self.assertEqual(result["limit"], 5)
+
+    def test_upsert_template_name_with_quote_rejected_on_create(self):
+        """Unsafe characters are only blocked at genuine creation (no
+        existing row) — see test_upsert_template_existing_quoted_name_still_
+        usable for why an existing template must never be locked out by its
+        own name."""
+        from exceptions import incorrectParameter
+        with patch("services.templates.get_template", return_value=None):
+            from services.templates import upsert_template
+            with self.assertRaises(incorrectParameter):
+                upsert_template(100, "sam's_game", 1, "Admin", title="X")
+
+    def test_upsert_template_name_with_angle_bracket_rejected_on_create(self):
+        from exceptions import incorrectParameter
+        with patch("services.templates.get_template", return_value=None):
+            from services.templates import upsert_template
+            with self.assertRaises(incorrectParameter):
+                upsert_template(100, "<script>", 1, "Admin", title="X")
+
+    def test_upsert_template_existing_quoted_name_still_usable(self):
+        """A template that already exists with an unsafe character in its
+        name (e.g. created before this validation shipped, or via a path
+        that predates it) must remain fully editable — the character check
+        must not retroactively lock admins out of their own template."""
+        existing = self._db_row("sam's_game", title="Old")
+        with patch("services.templates.get_template", return_value=existing), \
+             patch("services.templates.create_or_update_template", return_value=True), \
+             patch("services.templates.log_admin_action"):
+            from services.templates import upsert_template
+            result = upsert_template(100, "sam's_game", 1, "Admin", title="New")
+        self.assertEqual(result["title"], "New")
+
     def test_delete_one_template_success(self):
         row = self._db_row()
         with patch("services.templates.get_template", return_value=row), \

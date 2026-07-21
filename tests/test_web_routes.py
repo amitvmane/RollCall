@@ -661,6 +661,7 @@ class TestWebAdminStatusLiveCheck(unittest.TestCase):
         import api.routes.web as _web_mod
         with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
              patch("api.routes.web.verify_identity_token", return_value=99), \
+             patch("rollcall_manager.manager.get_admin_rights", return_value=True), \
              patch("bot_state.bot.get_chat_member", new_callable=AsyncMock,
                    return_value=self._member("administrator")), \
              patch.object(_web_mod._db, "set_web_admin") as set_admin, \
@@ -674,6 +675,7 @@ class TestWebAdminStatusLiveCheck(unittest.TestCase):
         import api.routes.web as _web_mod
         with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
              patch("api.routes.web.verify_identity_token", return_value=99), \
+             patch("rollcall_manager.manager.get_admin_rights", return_value=True), \
              patch("bot_state.bot.get_chat_member", new_callable=AsyncMock,
                    return_value=self._member("creator")), \
              patch.object(_web_mod._db, "set_web_admin"):
@@ -682,10 +684,14 @@ class TestWebAdminStatusLiveCheck(unittest.TestCase):
 
     def test_demoted_member_revokes_stale_cache(self):
         """The core fix: someone who WAS a web admin but lost real Telegram
-        admin status must be revoked, not grandfathered in forever."""
+        admin status must be revoked, not grandfathered in forever — but
+        only in a group that has actually locked itself down with
+        /set_admins (see test_default_open_group_skips_live_check for the
+        common default-open case, which must NOT revoke)."""
         import api.routes.web as _web_mod
         with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
              patch("api.routes.web.verify_identity_token", return_value=99), \
+             patch("rollcall_manager.manager.get_admin_rights", return_value=True), \
              patch("bot_state.bot.get_chat_member", new_callable=AsyncMock,
                    return_value=self._member("member")), \
              patch.object(_web_mod._db, "set_web_admin") as set_admin, \
@@ -695,6 +701,27 @@ class TestWebAdminStatusLiveCheck(unittest.TestCase):
         revoke.assert_called_once_with(-100, 99)
         set_admin.assert_not_called()
 
+    def test_default_open_group_skips_live_check(self):
+        """Regression test: in a default-open group (never ran /set_admins,
+        the common case), Telegram admin/creator status was never the
+        criterion for granting web-admin — /weblink hands it to any member.
+        The live check must not run at all here, or it would silently
+        revoke every non-Telegram-admin the moment they load the page."""
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch("api.routes.web.verify_identity_token", return_value=99), \
+             patch("rollcall_manager.manager.get_admin_rights", return_value=False), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True) as cached, \
+             patch("bot_state.bot.get_chat_member", new_callable=AsyncMock) as gcm, \
+             patch.object(_web_mod._db, "set_web_admin") as set_admin, \
+             patch.object(_web_mod._db, "revoke_web_admin") as revoke:
+            resp = _client().get("/api/v1/web/group/grp123/admin-status?id_token=tok")
+        self.assertTrue(resp.json()["is_admin"])
+        cached.assert_called_once_with(-100, 99)
+        gcm.assert_not_awaited()
+        set_admin.assert_not_called()
+        revoke.assert_not_called()
+
     def test_telegram_unreachable_falls_back_to_cache_true(self):
         """Outage resilience: if the live check itself fails, don't lock an
         already-cached admin out — this page must keep working when
@@ -702,6 +729,7 @@ class TestWebAdminStatusLiveCheck(unittest.TestCase):
         import api.routes.web as _web_mod
         with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
              patch("api.routes.web.verify_identity_token", return_value=99), \
+             patch("rollcall_manager.manager.get_admin_rights", return_value=True), \
              patch("bot_state.bot.get_chat_member", new_callable=AsyncMock,
                    side_effect=Exception("Telegram unreachable")), \
              patch.object(_web_mod._db, "is_web_admin", return_value=True) as cached:
@@ -713,6 +741,7 @@ class TestWebAdminStatusLiveCheck(unittest.TestCase):
         import api.routes.web as _web_mod
         with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
              patch("api.routes.web.verify_identity_token", return_value=99), \
+             patch("rollcall_manager.manager.get_admin_rights", return_value=True), \
              patch("bot_state.bot.get_chat_member", new_callable=AsyncMock,
                    side_effect=Exception("Telegram unreachable")), \
              patch.object(_web_mod._db, "is_web_admin", return_value=False):
@@ -926,11 +955,13 @@ class TestWebTemplateContentEditAndStart(unittest.TestCase):
         notify.assert_awaited_once()
         self.assertIn("SundayGame", notify.call_args[0][1])
 
-    def test_update_content_partial_update_omits_unset_fields(self):
-        """Fields left out of the request must not be forced to None-
-        overwrite — upsert_template's own partial-update semantics handle
-        this, but the route must actually pass None (not e.g. empty
-        string) for anything the client didn't send."""
+    def test_update_content_blank_fields_clear_not_preserve(self):
+        """This route always receives the whole form, not a sparse patch —
+        unlike the token-gated REST API's real partial-update contract. A
+        field the client didn't send (None) must translate to upsert_
+        template's explicit-clear signal ("" for strings, 0 for limit), NOT
+        its preserve-existing signal (None) — otherwise an admin blanking a
+        field in the edit form to intentionally clear it silently no-ops."""
         import api.routes.web as _web_mod
         with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
              patch.object(_web_mod._db, "is_web_admin", return_value=True), \
@@ -943,11 +974,11 @@ class TestWebTemplateContentEditAndStart(unittest.TestCase):
                 json={"id_token": "tok", "title": "Only Title Changes"})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(svc.call_args.kwargs["title"], "Only Title Changes")
-        self.assertIsNone(svc.call_args.kwargs["location"])
-        self.assertIsNone(svc.call_args.kwargs["fee"])
+        self.assertEqual(svc.call_args.kwargs["location"], "")
+        self.assertEqual(svc.call_args.kwargs["fee"], "")
         self.assertIsNone(svc.call_args.kwargs["limit"])
-        self.assertIsNone(svc.call_args.kwargs["event_day"])
-        self.assertIsNone(svc.call_args.kwargs["event_time"])
+        self.assertEqual(svc.call_args.kwargs["event_day"], "")
+        self.assertEqual(svc.call_args.kwargs["event_time"], "")
 
     def test_update_content_event_day_time_distinct_from_schedule(self):
         """event_day/event_time (when the game happens, used to auto-close)

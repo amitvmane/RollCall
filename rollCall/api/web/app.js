@@ -103,6 +103,15 @@ let currentVote=null, activeRcData=null, groupData=null, activeTabIdx=0, voting=
 // ── DOM ────────────────────────────────────────────────────────────────────
 function $(x){return document.getElementById(x)}
 function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
+// For interpolating free-text (e.g. a template name) inside a single-quoted
+// JS string literal that itself sits inside an inline onclick="..." HTML
+// attribute. esc() alone only protects the HTML-attribute layer (&<>") —
+// it leaves ' and \ untouched, so a name containing an apostrophe breaks
+// out of the JS string once the browser HTML-decodes the attribute and
+// hands the result to the JS parser. Apply this FIRST, then esc() the
+// result: escJsAttr(name) escapes \ and ' for the JS-string layer, then
+// esc() escapes &<>" for the HTML-attribute layer around it.
+function escJsAttr(s){return String(s||"").replace(/\\/g,"\\\\").replace(/'/g,"\\'")}
 
 // ── Theme toggle ───────────────────────────────────────────────────────────
 function updateThemeBtn(){
@@ -1902,12 +1911,12 @@ function renderTemplatesSchedule(){
           ${meta?`<div class="upcoming-meta">${esc(meta)}</div>`:""}
         </div>
         <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
-          <button class="id-change" title="Start a rollcall from this template now" onclick="startTemplateNow('${esc(t.name)}')">▶️</button>
+          <button class="id-change" title="Start a rollcall from this template now" onclick="startTemplateNow('${esc(escJsAttr(t.name))}')">▶️</button>
           <label class="admin-toggle" title="${enabled?'Disable':'Enable'} schedule">
-            <input type="checkbox" ${enabled?"checked":""} onchange="toggleTemplateSchedule('${esc(t.name)}',this.checked)"/>
+            <input type="checkbox" ${enabled?"checked":""} onchange="toggleTemplateSchedule('${esc(escJsAttr(t.name))}',this.checked)"/>
             <span class="admin-toggle-slider"></span>
           </label>
-          <button class="id-change" onclick="toggleTemplateEditForm('${esc(t.name)}')">${editing?"✕":"✏️"}</button>
+          <button class="id-change" onclick="toggleTemplateEditForm('${esc(escJsAttr(t.name))}')">${editing?"✕":"✏️"}</button>
         </div>
       </div>
       ${editing?renderTemplateEditForm(t):""}
@@ -1917,41 +1926,51 @@ function renderTemplatesSchedule(){
 
 function renderTemplateEditForm(t){
   const isMonthly=t.recurrence_type==="monthly";
-  const dayOpts=WEEKDAYS.map(d=>`<option value="${d}" ${t.schedule_day===d?"selected":""}>${d[0].toUpperCase()+d.slice(1)}</option>`).join("");
+  const safeName=esc(t.name);
+  // For a monthly template, schedule_day holds a day-of-month number (e.g.
+  // "15"), not a weekday name — it never matches an option below. Without
+  // a placeholder, the browser silently pre-selects "Monday" (the first
+  // option) with nothing actually chosen; an admin switching recurrence
+  // from monthly to weekly could then save that unintended default. A
+  // disabled placeholder forces an explicit pick, or an empty value that
+  // the backend correctly rejects instead of silently saving "Monday".
+  const scheduleDayIsWeekday=WEEKDAYS.includes(t.schedule_day);
+  const dayOpts=(scheduleDayIsWeekday?"":'<option value="" disabled selected>Choose a day…</option>')
+    +WEEKDAYS.map(d=>`<option value="${d}" ${t.schedule_day===d?"selected":""}>${d[0].toUpperCase()+d.slice(1)}</option>`).join("");
   const eventDayOpts='<option value="">No fixed day</option>'+WEEKDAYS.map(d=>`<option value="${d}" ${t.event_day===d?"selected":""}>${d[0].toUpperCase()+d.slice(1)}</option>`).join("");
   const inp=(id,val,ph)=>`<input id="${id}" type="text" placeholder="${ph}" value="${esc(val||"")}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem"/>`;
   const sublabel=text=>`<div style="font-size:.72rem;color:var(--sub);margin-top:-4px">${text}</div>`;
   return `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px">
     <div class="id-prompt-label" style="text-align:left;margin-bottom:0">Details</div>
-    ${inp(`tsf-title-${t.name}`,t.title,"Title")}
+    ${inp(`tsf-title-${safeName}`,t.title,"Title")}
     <div style="display:flex;gap:8px">
-      ${inp(`tsf-location-${t.name}`,t.location,"Location")}
-      ${inp(`tsf-fee-${t.name}`,t.fee,"Fee")}
+      ${inp(`tsf-location-${safeName}`,t.location,"Location")}
+      ${inp(`tsf-fee-${safeName}`,t.fee,"Fee")}
     </div>
-    <input id="tsf-limit-${t.name}" type="number" min="1" max="1000" placeholder="Cap (max attendees)" value="${t.limit||""}" style="padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem"/>
+    <input id="tsf-limit-${safeName}" type="number" min="1" max="1000" placeholder="Cap (max attendees)" value="${t.limit||""}" style="padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem"/>
 
     <div class="id-prompt-label" style="text-align:left;margin-bottom:0;margin-top:4px">🏟 Event day &amp; time</div>
     ${sublabel("When the game itself happens — closes voting on any rollcall started from this template.")}
     <div style="display:flex;gap:8px">
-      <select id="tsf-eventday-${t.name}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">${eventDayOpts}</select>
-      <input id="tsf-eventtime-${t.name}" type="time" value="${esc(t.event_time||"")}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem"/>
+      <select id="tsf-eventday-${safeName}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">${eventDayOpts}</select>
+      <input id="tsf-eventtime-${safeName}" type="time" value="${esc(t.event_time||"")}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem"/>
     </div>
 
     <div class="id-prompt-label" style="text-align:left;margin-bottom:0;margin-top:4px">🗓 Auto-start schedule</div>
     ${sublabel("When this template repeats and opens a new rollcall automatically — separate from the event time above.")}
     <div style="display:flex;gap:8px">
-      <select id="tsf-rec-${t.name}" onchange="_onTsfRecurrenceChange('${esc(t.name)}')" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
+      <select id="tsf-rec-${safeName}" onchange="_onTsfRecurrenceChange('${esc(escJsAttr(t.name))}')" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
         <option value="weekly" ${t.recurrence_type==="weekly"?"selected":""}>Weekly</option>
         <option value="biweekly" ${t.recurrence_type==="biweekly"?"selected":""}>Every 2 weeks</option>
         <option value="monthly" ${isMonthly?"selected":""}>Monthly</option>
       </select>
     </div>
     <div style="display:flex;gap:8px">
-      <select id="tsf-day-${t.name}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem;${isMonthly?"display:none":""}">${dayOpts}</select>
-      <input id="tsf-monthday-${t.name}" type="number" min="1" max="31" placeholder="Day (1-31)" value="${isMonthly?esc(t.schedule_day||""):""}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem;${isMonthly?"":"display:none"}"/>
-      <input id="tsf-time-${t.name}" type="time" value="${esc(t.schedule_time||"09:00")}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem"/>
+      <select id="tsf-day-${safeName}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem;${isMonthly?"display:none":""}">${dayOpts}</select>
+      <input id="tsf-monthday-${safeName}" type="number" min="1" max="31" placeholder="Day (1-31)" value="${isMonthly?esc(t.schedule_day||""):""}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem;${isMonthly?"":"display:none"}"/>
+      <input id="tsf-time-${safeName}" type="time" value="${esc(t.schedule_time||"09:00")}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem"/>
     </div>
-    <button class="btn btn-primary" style="padding:9px" onclick="saveTemplate('${esc(t.name)}')">💾 Save</button>
+    <button class="btn btn-primary" style="padding:9px" onclick="saveTemplate('${esc(escJsAttr(t.name))}')">💾 Save</button>
   </div>`;
 }
 
@@ -2007,8 +2026,11 @@ window.saveTemplate=async function(name){
     location:document.getElementById(`tsf-location-${name}`).value||null,
     fee:document.getElementById(`tsf-fee-${name}`).value||null,
   };
+  // 0 is the backend's "explicitly clear the cap" sentinel (no real limit
+  // is ever 0) — sent when the field is left blank, so clearing it here
+  // actually removes the cap instead of silently preserving the old one.
   const limitVal=document.getElementById(`tsf-limit-${name}`).value;
-  contentBody.limit=limitVal?parseInt(limitVal,10):null;
+  contentBody.limit=limitVal?parseInt(limitVal,10):0;
 
   // Event day/time (when the game happens — auto-closes the rollcall) is
   // separate from the schedule above (when the template auto-opens). Both

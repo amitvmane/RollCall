@@ -354,7 +354,7 @@ COMMANDS = [
             "Monthly:   /schedule_template name monthly <day> <HH:MM>\n"
             "Disable:   /schedule_template name off\n\n"
             "Also editable self-serve from the group's web page (admin actions → "
-            "🔁 Recurring Schedules) — any web admin can do this without server access."
+            "📋 Templates) — any web admin can do this without server access."
         ),
     },
     {

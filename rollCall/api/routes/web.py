@@ -212,6 +212,17 @@ async def web_admin_status(
         return WebAdminStatusResponse(is_admin=False)
     chat_id = int(chat["chat_id"])
 
+    # Only live-check against Telegram when the group has actually locked
+    # itself down with /set_admins — same gate functions.admin_rights() uses
+    # for every Telegram-side admin command. In a default-open group (the
+    # default), Telegram admin/creator status was never the criterion for
+    # granting web-admin in the first place (/weblink hands it to anyone),
+    # so treating "not a Telegram admin" as "revoke" here would silently
+    # undo that grant for the common case the instant the page loads.
+    from rollcall_manager import manager as _mgr
+    if not _mgr.get_admin_rights(chat_id):
+        return WebAdminStatusResponse(is_admin=_db.is_web_admin(chat_id, tg_user_id))
+
     # Live-check against Telegram on every load instead of trusting a
     # snapshot forever: promotes a real Telegram admin automatically (no
     # /weblink needed — that command still exists and still calls
@@ -222,12 +233,6 @@ async def web_admin_status(
         from bot_state import bot
         member = await bot.get_chat_member(chat_id, tg_user_id)
         is_admin_now = member.status in ("administrator", "creator")
-        if is_admin_now:
-            name = getattr(getattr(member, "user", None), "first_name", None) or f"user{tg_user_id}"
-            _db.set_web_admin(chat_id, tg_user_id, name)
-        else:
-            _db.revoke_web_admin(chat_id, tg_user_id)
-        return WebAdminStatusResponse(is_admin=is_admin_now)
     except Exception:
         # Telegram unreachable, bot removed from the group, rate-limited,
         # etc. — fall back to the cached flag rather than locking an admin
@@ -238,6 +243,16 @@ async def web_admin_status(
             chat_id, tg_user_id, exc_info=True,
         )
         return WebAdminStatusResponse(is_admin=_db.is_web_admin(chat_id, tg_user_id))
+
+    # Bookkeeping is intentionally outside the try above — a bug here
+    # shouldn't be silently reinterpreted as "Telegram is down" and masked
+    # by the cache fallback.
+    if is_admin_now:
+        name = getattr(getattr(member, "user", None), "first_name", None) or f"user{tg_user_id}"
+        _db.set_web_admin(chat_id, tg_user_id, name)
+    else:
+        _db.revoke_web_admin(chat_id, tg_user_id)
+    return WebAdminStatusResponse(is_admin=is_admin_now)
 
 
 @router.patch(
@@ -305,12 +320,13 @@ async def web_start_rollcall(
     from services import rollcalls as rc_svc
     from services.web import _serialize_web_rollcall
     from rollcall_manager import manager as _mgr
-    result = await rc_svc.start_rollcall(
-        chat_id=chat_id,
-        title=body.title,
-        started_by_user_id=actor_user_id,
-        started_by_name="(web)",
-    )
+    async with _mgr.get_chat_write_lock(chat_id):
+        result = await rc_svc.start_rollcall(
+            chat_id=chat_id,
+            title=body.title,
+            started_by_user_id=actor_user_id,
+            started_by_name="(web)",
+        )
     rc = _mgr.get_rollcall(chat_id, result["rc_index"])
     if rc is None:
         raise HTTPException(status_code=500, detail="Rollcall created but could not be retrieved")
@@ -559,11 +575,22 @@ async def web_update_template(
     chat_id, actor_user_id = _require_web_admin(group_token, body.id_token)
     actor_name = await _actor_display_name(chat_id, actor_user_id)
     from services import templates as tmpl_svc
+    # This route always receives the whole form, not a sparse patch — unlike
+    # the token-gated REST API's real partial-update contract, a blank field
+    # here means "clear it", not "leave unchanged". upsert_template's None
+    # means preserve, so translate the web form's None (blank) into "" (its
+    # explicit-clear signal); limit=0 is upsert_template's clear signal for
+    # the cap and passes through as-is (the schema already forbids a
+    # meaningless real 0-limit).
     tmpl = tmpl_svc.upsert_template(
         chat_id=chat_id, name=name,
         admin_user_id=actor_user_id, admin_name=actor_name,
-        title=body.title, location=body.location, fee=body.fee, limit=body.limit,
-        event_day=body.event_day, event_time=body.event_time,
+        title=body.title if body.title is not None else "",
+        location=body.location if body.location is not None else "",
+        fee=body.fee if body.fee is not None else "",
+        limit=body.limit,
+        event_day=body.event_day if body.event_day is not None else "",
+        event_time=body.event_time if body.event_time is not None else "",
     )
     await _send_event_notification(chat_id, f"✏️ Template '{name}' updated (via web).")
     return WebTemplateResponse(**tmpl)
@@ -586,11 +613,14 @@ async def web_start_template(
     from services.web import _serialize_web_rollcall
     from rollcall_manager import manager as _mgr
 
-    result = await tmpl_svc.start_template(
-        chat_id=chat_id, name=name,
-        admin_user_id=actor_user_id, admin_name=actor_name,
-        extra_title=body.extra_title,
-    )
+    # Creates a new rollcall — serialize with /erc and other concurrent
+    # chat-state mutations per CLAUDE.md's "Chat mutations" rule.
+    async with _mgr.get_chat_write_lock(chat_id):
+        result = await tmpl_svc.start_template(
+            chat_id=chat_id, name=name,
+            admin_user_id=actor_user_id, admin_name=actor_name,
+            extra_title=body.extra_title,
+        )
     rc = _mgr.get_rollcall(chat_id, result["rc_index"])
     if rc is None:
         raise HTTPException(status_code=500, detail="Rollcall created but could not be retrieved")

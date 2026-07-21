@@ -253,8 +253,12 @@ class WebToggleScheduleRequest(BaseModel):
 
 
 class WebUpdateTemplateRequest(BaseModel):
-    """Partial update of a template's content — fields left unset preserve
-    the existing value (matches services.templates.upsert_template).
+    """Full-form update of a template's content — unlike the token-gated
+    REST API's upsert_template contract, this route always receives every
+    field from the web editor, so a blank/omitted field here means "clear
+    it", not "leave unchanged" (see web_update_template's translation to
+    services.templates.upsert_template's own None=preserve / ""=clear
+    convention).
 
     event_day/event_time are the game's own day+time (used to auto-close a
     rollcall started from this template) — distinct from schedule_day/
@@ -264,7 +268,7 @@ class WebUpdateTemplateRequest(BaseModel):
     title: Optional[str] = Field(None, max_length=200)
     location: Optional[str] = Field(None, max_length=200)
     fee: Optional[str] = Field(None, max_length=50)
-    limit: Optional[int] = Field(None, ge=1, le=1000)
+    limit: Optional[int] = Field(None, ge=0, le=1000, description="0 clears the cap (no valid real limit is 0)")
     event_day: Optional[str] = Field(None, description="Weekday name the event itself happens on (used for auto-close)")
     event_time: Optional[str] = Field(None, description="HH:MM the event itself happens at (used for auto-close)")
 

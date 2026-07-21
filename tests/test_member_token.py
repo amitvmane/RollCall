@@ -168,6 +168,32 @@ class TestMyTokenHandler(unittest.IsolatedAsyncioTestCase):
                        if c[0][0] == -100]
         self.assertTrue(any("private chat" in t for t in group_texts))
 
+    async def test_instructions_dm_failure_after_code_sent_does_not_claim_nothing_sent(self):
+        """If the code DM lands but the instructions DM fails (transient
+        error), the user already has a live, usable code — the group
+        message must say so, not claim nothing was delivered (which would
+        misleadingly suggest re-running /mytoken, needlessly burning the
+        code they just received)."""
+        from handlers.web import mytoken_cmd
+        call_count = {"n": 0}
+
+        async def _send(chat_id, *a, **k):
+            if chat_id == 501:
+                call_count["n"] += 1
+                if call_count["n"] == 2:
+                    raise Exception("transient Telegram error")
+            return MagicMock()
+
+        self.bot_state.bot.send_message = AsyncMock(side_effect=_send)
+        with patch.dict(os.environ, {"WEB_BASE_URL": "https://rc.example"}), \
+             patch("handlers.web._db.upsert_member_login_token", return_value=True):
+            await mytoken_cmd(self._msg())
+        group_texts = [c[0][1] for c in self.bot_state.bot.send_message.call_args_list
+                       if c[0][0] == -100]
+        self.assertTrue(len(group_texts) == 1)
+        self.assertNotIn("couldn't DM you", group_texts[0])
+        self.assertIn("Sent you your login code", group_texts[0])
+
     async def test_private_chat_gets_no_group_confirmation(self):
         from handlers.web import mytoken_cmd
         with patch.dict(os.environ, {"WEB_BASE_URL": "https://rc.example"}), \

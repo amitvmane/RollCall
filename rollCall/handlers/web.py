@@ -232,8 +232,30 @@ async def mytoken_cmd(message):
         portal_url = f"{base}/portal/"
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(InlineKeyboardButton("🌐 Open portal & log in", url=portal_url))
+        # Two separate DMs (code, then instructions) — each can fail on its
+        # own, and the two failure modes need different messages. If the
+        # first fails, nothing reached the user and re-running /mytoken is
+        # the right advice. If the first succeeds but the second doesn't,
+        # the user already has a live, usable code — telling them "I
+        # couldn't DM you, try again" would be wrong (misleadingly implies
+        # nothing arrived) and re-running would needlessly burn the code
+        # they just received (upsert_member_login_token overwrites it).
         try:
             await bot.send_message(user.id, f"`{token}`", parse_mode="Markdown")
+        except Exception:
+            # Bot can't DM users who never opened a private chat with it. The
+            # code was already replaced above, which is fine — the old one
+            # stops working and the retry issues a fresh one.
+            if message.chat.type != "private":
+                await bot.send_message(
+                    cid,
+                    f"📪 I couldn't DM you, {_esc_md(user.first_name or 'there')} — "
+                    "open a private chat with me (tap my name → Start) and run /mytoken again.",
+                    parse_mode="Markdown",
+                )
+            return
+
+        try:
             await bot.send_message(
                 user.id,
                 "🔑 *Your personal web login code* — tap it above to copy.\n\n"
@@ -244,14 +266,15 @@ async def mytoken_cmd(message):
                 reply_markup=markup,
             )
         except Exception:
-            # Bot can't DM users who never opened a private chat with it. The
-            # code was already replaced above, which is fine — the old one
-            # stops working and the retry issues a fresh one.
+            logging.warning(
+                "[mytoken] instructions DM failed after the code DM already succeeded uid=%s",
+                user.id, exc_info=True,
+            )
             if message.chat.type != "private":
                 await bot.send_message(
                     cid,
-                    f"📪 I couldn't DM you, {_esc_md(user.first_name or 'there')} — "
-                    "open a private chat with me (tap my name → Start) and run /mytoken again.",
+                    f"📬 Sent you your login code, {_esc_md(user.first_name or 'there')} — "
+                    f"open {portal_url} and choose *Login with code* to use it.",
                     parse_mode="Markdown",
                 )
             return

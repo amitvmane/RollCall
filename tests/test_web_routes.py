@@ -872,5 +872,140 @@ class TestWebTemplateSchedule(unittest.TestCase):
         self.assertEqual(resp.status_code, 403)
 
 
+class TestWebTemplateContentEditAndStart(unittest.TestCase):
+    """Editing a template's content (title/location/fee/limit) and starting
+    a rollcall from it on demand — both self-serve, same id_token +
+    is_web_admin gate as the schedule editor above."""
+
+    def setUp(self):
+        from api.rate_limit import reset_buckets_for_tests
+        reset_buckets_for_tests()
+
+    def _tmpl(self, **over):
+        t = {"name": "SundayGame", "title": "Sunday Game", "location": "Turf 3",
+             "fee": "1500", "limit": 16, "schedule_enabled": True,
+             "schedule_day": "saturday", "schedule_time": "09:00", "recurrence_type": "weekly",
+             "event_day": "sunday", "event_time": "06:30", "last_scheduled_date": None}
+        t.update(over)
+        return t
+
+    # ── content edit ─────────────────────────────────────────────────────
+
+    def test_update_content_non_admin_403(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=False), \
+             patch("api.identity.verify_identity_token", return_value=77):
+            resp = _client().put(
+                "/api/v1/web/group/grp123/templates/SundayGame",
+                json={"id_token": "tok", "title": "New Title"})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_update_content_calls_upsert_and_mirrors(self):
+        import api.routes.web as _web_mod
+        updated = self._tmpl(title="Sunday Futsal", location="Turf 5", fee="1800", limit=20)
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value={"first_name": "Amit"}), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.templates.upsert_template", return_value=updated) as svc, \
+             patch.object(_web_mod, "_send_event_notification", new_callable=AsyncMock) as notify:
+            resp = _client().put(
+                "/api/v1/web/group/grp123/templates/SundayGame",
+                json={"id_token": "tok", "title": "Sunday Futsal",
+                      "location": "Turf 5", "fee": "1800", "limit": 20})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["title"], "Sunday Futsal")
+        self.assertEqual(svc.call_args.kwargs["chat_id"], -100)
+        self.assertEqual(svc.call_args.kwargs["admin_user_id"], 99)
+        self.assertEqual(svc.call_args.kwargs["admin_name"], "Amit")
+        self.assertEqual(svc.call_args.kwargs["title"], "Sunday Futsal")
+        self.assertEqual(svc.call_args.kwargs["location"], "Turf 5")
+        self.assertEqual(svc.call_args.kwargs["fee"], "1800")
+        self.assertEqual(svc.call_args.kwargs["limit"], 20)
+        notify.assert_awaited_once()
+        self.assertIn("SundayGame", notify.call_args[0][1])
+
+    def test_update_content_partial_update_omits_unset_fields(self):
+        """Fields left out of the request must not be forced to None-
+        overwrite — upsert_template's own partial-update semantics handle
+        this, but the route must actually pass None (not e.g. empty
+        string) for anything the client didn't send."""
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value=None), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.templates.upsert_template", return_value=self._tmpl()) as svc, \
+             patch.object(_web_mod, "_send_event_notification", new_callable=AsyncMock):
+            resp = _client().put(
+                "/api/v1/web/group/grp123/templates/SundayGame",
+                json={"id_token": "tok", "title": "Only Title Changes"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(svc.call_args.kwargs["title"], "Only Title Changes")
+        self.assertIsNone(svc.call_args.kwargs["location"])
+        self.assertIsNone(svc.call_args.kwargs["fee"])
+        self.assertIsNone(svc.call_args.kwargs["limit"])
+
+    # ── start now ────────────────────────────────────────────────────────
+
+    def test_start_template_non_admin_403(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=False), \
+             patch("api.identity.verify_identity_token", return_value=77):
+            resp = _client().post(
+                "/api/v1/web/group/grp123/templates/SundayGame/start",
+                json={"id_token": "tok"})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_start_template_calls_service_and_mirrors_panel(self):
+        import api.routes.web as _web_mod
+        serialized = {"rollcall_id": 5, "title": "Sunday Game",
+                      "in": [], "out": [], "maybe": [], "waiting": []}
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value={"first_name": "Amit"}), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.templates.start_template", new_callable=AsyncMock,
+                   return_value={"rc_index": 0}) as svc, \
+             patch("services.web._serialize_web_rollcall", return_value=serialized), \
+             patch("rollcall_manager.manager.get_rollcall", return_value=MagicMock()), \
+             patch.object(_web_mod, "_mirror_panel_to_telegram", new_callable=AsyncMock) as mirror:
+            resp = _client().post(
+                "/api/v1/web/group/grp123/templates/SundayGame/start",
+                json={"id_token": "tok", "extra_title": "Extra"})
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.json()["title"], "Sunday Game")
+        self.assertEqual(svc.call_args.kwargs["chat_id"], -100)
+        self.assertEqual(svc.call_args.kwargs["admin_user_id"], 99)
+        self.assertEqual(svc.call_args.kwargs["admin_name"], "Amit")
+        self.assertEqual(svc.call_args.kwargs["name"], "SundayGame")
+        self.assertEqual(svc.call_args.kwargs["extra_title"], "Extra")
+        mirror.assert_awaited_once_with(-100, 1, force_new=True)
+
+    def test_start_template_rollcall_missing_after_create_500(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value=None), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.templates.start_template", new_callable=AsyncMock,
+                   return_value={"rc_index": 0}), \
+             patch("rollcall_manager.manager.get_rollcall", return_value=None):
+            resp = _client().post(
+                "/api/v1/web/group/grp123/templates/SundayGame/start",
+                json={"id_token": "tok"})
+        self.assertEqual(resp.status_code, 500)
+
+    def test_start_template_invalid_group_token_404(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value=None):
+            resp = _client().post(
+                "/api/v1/web/group/badgrp/templates/SundayGame/start",
+                json={"id_token": "tok"})
+        self.assertEqual(resp.status_code, 404)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1889,14 +1889,17 @@ function renderTemplatesSchedule(){
         ?`Day ${esc(t.schedule_day)} of each month at ${esc(t.schedule_time)}`
         :`${esc((t.schedule_day||"").replace(/^./,c=>c.toUpperCase()))} ${esc(t.schedule_time)} (${recLabel})`)
       :"Not scheduled";
+    const meta=[t.location,t.fee?`₹${t.fee}`:null,t.limit?`Cap ${t.limit}`:null].filter(Boolean).join(" · ");
     const editing=_templatesEditingName===t.name;
     return `<div class="sched-item" style="flex-direction:column;align-items:stretch">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%">
         <div class="sched-item-info">
           <div class="sched-item-title">${esc(t.title||t.name)}</div>
           <div class="sched-item-time">${when}</div>
+          ${meta?`<div class="upcoming-meta">${esc(meta)}</div>`:""}
         </div>
-        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+          <button class="id-change" title="Start a rollcall from this template now" onclick="startTemplateNow('${esc(t.name)}')">▶️</button>
           <label class="admin-toggle" title="${enabled?'Disable':'Enable'} schedule">
             <input type="checkbox" ${enabled?"checked":""} onchange="toggleTemplateSchedule('${esc(t.name)}',this.checked)"/>
             <span class="admin-toggle-slider"></span>
@@ -1912,7 +1915,16 @@ function renderTemplatesSchedule(){
 function renderTemplateEditForm(t){
   const isMonthly=t.recurrence_type==="monthly";
   const dayOpts=WEEKDAYS.map(d=>`<option value="${d}" ${t.schedule_day===d?"selected":""}>${d[0].toUpperCase()+d.slice(1)}</option>`).join("");
+  const inp=(id,val,ph)=>`<input id="${id}" type="text" placeholder="${ph}" value="${esc(val||"")}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem"/>`;
   return `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px">
+    <div class="id-prompt-label" style="text-align:left;margin-bottom:0">Details</div>
+    ${inp(`tsf-title-${t.name}`,t.title,"Title")}
+    <div style="display:flex;gap:8px">
+      ${inp(`tsf-location-${t.name}`,t.location,"Location")}
+      ${inp(`tsf-fee-${t.name}`,t.fee,"Fee")}
+    </div>
+    <input id="tsf-limit-${t.name}" type="number" min="1" max="1000" placeholder="Cap (max attendees)" value="${t.limit||""}" style="padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem"/>
+    <div class="id-prompt-label" style="text-align:left;margin-bottom:0;margin-top:4px">Schedule</div>
     <div style="display:flex;gap:8px">
       <select id="tsf-rec-${t.name}" onchange="_onTsfRecurrenceChange('${esc(t.name)}')" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
         <option value="weekly" ${t.recurrence_type==="weekly"?"selected":""}>Weekly</option>
@@ -1925,9 +1937,23 @@ function renderTemplateEditForm(t){
       <input id="tsf-monthday-${t.name}" type="number" min="1" max="31" placeholder="Day (1-31)" value="${isMonthly?esc(t.schedule_day||""):""}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem;${isMonthly?"":"display:none"}"/>
       <input id="tsf-time-${t.name}" type="time" value="${esc(t.schedule_time||"09:00")}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem"/>
     </div>
-    <button class="btn btn-primary" style="padding:9px" onclick="saveTemplateSchedule('${esc(t.name)}')">Save schedule</button>
+    <button class="btn btn-primary" style="padding:9px" onclick="saveTemplate('${esc(t.name)}')">💾 Save</button>
   </div>`;
 }
+
+window.startTemplateNow=async function(name){
+  if(!confirm(`Start a rollcall from "${name}" now?`))return;
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/templates/${encodeURIComponent(name)}/start`,{
+      method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id_token:_idToken}),
+      signal:AbortSignal.timeout(10000),
+    });
+    if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"Failed to start rollcall");
+    toast(`✅ Started from ${name}`,2500);
+    activeTabIdx=0;
+    await loadGroup();
+  }catch(e){toast(e.message||"Could not start rollcall",4000);}
+};
 
 window._onTsfRecurrenceChange=function(name){
   const isMonthly=document.getElementById(`tsf-rec-${name}`).value==="monthly";
@@ -1940,30 +1966,61 @@ window.toggleTemplateEditForm=function(name){
   renderTemplatesSchedule();
 };
 
-window.saveTemplateSchedule=async function(name){
-  const recurrence_type=document.getElementById(`tsf-rec-${name}`).value;
-  const schedule_time=document.getElementById(`tsf-time-${name}`).value;
-  if(!schedule_time){toast("Pick a time first.",2500);return;}
-  const body={id_token:_idToken,recurrence_type,schedule_time};
-  if(recurrence_type==="monthly"){
-    const md=parseInt(document.getElementById(`tsf-monthday-${name}`).value,10);
-    if(!md||md<1||md>31){toast("Enter a day of month (1-31).",2500);return;}
-    body.monthly_day=md;
-  }else{
-    body.schedule_day=document.getElementById(`tsf-day-${name}`).value;
+window.saveTemplate=async function(name){
+  // Only push a schedule update if the schedule is already enabled for this
+  // template — otherwise saving content-only edits would silently switch a
+  // disabled schedule on using whatever defaults happen to sit in the form.
+  const current=(_templatesCache||[]).find(t=>t.name===name);
+  const scheduleWasEnabled=!!(current&&current.schedule_enabled);
+
+  let scheduleBody=null;
+  if(scheduleWasEnabled){
+    const recurrence_type=document.getElementById(`tsf-rec-${name}`).value;
+    const schedule_time=document.getElementById(`tsf-time-${name}`).value;
+    if(!schedule_time){toast("Pick a time first.",2500);return;}
+    scheduleBody={id_token:_idToken,recurrence_type,schedule_time};
+    if(recurrence_type==="monthly"){
+      const md=parseInt(document.getElementById(`tsf-monthday-${name}`).value,10);
+      if(!md||md<1||md>31){toast("Enter a day of month (1-31).",2500);return;}
+      scheduleBody.monthly_day=md;
+    }else{
+      scheduleBody.schedule_day=document.getElementById(`tsf-day-${name}`).value;
+    }
   }
+  const contentBody={
+    id_token:_idToken,
+    title:document.getElementById(`tsf-title-${name}`).value||null,
+    location:document.getElementById(`tsf-location-${name}`).value||null,
+    fee:document.getElementById(`tsf-fee-${name}`).value||null,
+  };
+  const limitVal=document.getElementById(`tsf-limit-${name}`).value;
+  contentBody.limit=limitVal?parseInt(limitVal,10):null;
+
   try{
-    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/templates/${encodeURIComponent(name)}/schedule`,{
-      method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),
+    // Content first, then schedule (only when already enabled) — either can
+    // fail independently; both errors surface clearly rather than silently
+    // only saving one half.
+    const contentRes=await fetch(`/api/v1/web/group/${URL_TOKEN}/templates/${encodeURIComponent(name)}`,{
+      method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(contentBody),
       signal:AbortSignal.timeout(8000),
     });
-    if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"Failed to save schedule");
-    const updated=await res.json();
+    if(!contentRes.ok)throw new Error((await contentRes.json().catch(()=>({}))).detail||"Failed to save template details");
+    let updated=await contentRes.json();
+
+    if(scheduleBody){
+      const schedRes=await fetch(`/api/v1/web/group/${URL_TOKEN}/templates/${encodeURIComponent(name)}/schedule`,{
+        method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(scheduleBody),
+        signal:AbortSignal.timeout(8000),
+      });
+      if(!schedRes.ok)throw new Error((await schedRes.json().catch(()=>({}))).detail||"Details saved, but schedule failed to save");
+      updated=await schedRes.json();
+    }
+
     _templatesCache=_templatesCache.map(t=>t.name===name?updated:t);
     _templatesEditingName=null;
     renderTemplatesSchedule();
-    toast(`🗓 Schedule saved for ${name}`,2500);
-  }catch(e){toast(e.message||"Could not save schedule",4000);}
+    toast(`💾 Saved ${name}`,2500);
+  }catch(e){toast(e.message||"Could not save template",4000);}
 };
 
 window.toggleTemplateSchedule=async function(name,enabled){

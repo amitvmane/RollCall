@@ -251,12 +251,13 @@
           <button class="btn" style="flex:1;padding:9px;border-radius:8px;font-weight:600;background:var(--border);color:var(--text)" onclick="doProxyVoteWeb('maybe')">🤔 MAYBE</button>
         </div>
       </div>
-      <!-- Recurring template schedules — self-serve editor (id_token +
-           is_web_admin only, no server access needed, unlike the separate
-           /admin/ console which requires an out-of-band API token). -->
+      <!-- Templates: start now, edit content, or manage recurring schedule
+           — self-serve editor (id_token + is_web_admin only, no server
+           access needed, unlike the separate /admin/ console which
+           requires an out-of-band API token). -->
       <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:12px">
         <div class="dues-admin-section-hdr" onclick="toggleTemplatesSchedule()">
-          🔁 Recurring Schedules <span id="templates-chevron">▼</span>
+          📋 Templates <span id="templates-chevron">▼</span>
         </div>
         <div id="templates-schedule-body" class="hidden"></div>
       </div>

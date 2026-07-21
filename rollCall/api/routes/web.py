@@ -49,8 +49,10 @@ from api.schemas.web import (
     WebRollcallResponse,
     WebSetScheduleRequest,
     WebStartRollcallRequest,
+    WebStartTemplateRequest,
     WebTemplateResponse,
     WebToggleScheduleRequest,
+    WebUpdateTemplateRequest,
     WebVoteRequest,
     UpcomingRollcall,
 )
@@ -542,6 +544,60 @@ async def web_disable_template_schedule(
     tmpl = tmpl_svc.get_one_template(chat_id, name)
     await _send_event_notification(chat_id, f"🔴 Schedule disabled for '{name}' (via web).")
     return WebTemplateResponse(**tmpl)
+
+
+@router.put(
+    "/web/group/{group_token}/templates/{name}",
+    response_model=WebTemplateResponse,
+    summary="Edit a template's content — title/location/fee/limit (requires web-admin identity)",
+)
+async def web_update_template(
+    body: WebUpdateTemplateRequest,
+    group_token: str = Path(...),
+    name: str = Path(...),
+) -> WebTemplateResponse:
+    chat_id, actor_user_id = _require_web_admin(group_token, body.id_token)
+    actor_name = await _actor_display_name(chat_id, actor_user_id)
+    from services import templates as tmpl_svc
+    tmpl = tmpl_svc.upsert_template(
+        chat_id=chat_id, name=name,
+        admin_user_id=actor_user_id, admin_name=actor_name,
+        title=body.title, location=body.location, fee=body.fee, limit=body.limit,
+    )
+    await _send_event_notification(chat_id, f"✏️ Template '{name}' updated (via web).")
+    return WebTemplateResponse(**tmpl)
+
+
+@router.post(
+    "/web/group/{group_token}/templates/{name}/start",
+    response_model=WebRollcallResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Start a rollcall from a template right now (requires web-admin identity)",
+)
+async def web_start_template(
+    body: WebStartTemplateRequest,
+    group_token: str = Path(...),
+    name: str = Path(...),
+) -> WebRollcallResponse:
+    chat_id, actor_user_id = _require_web_admin(group_token, body.id_token)
+    actor_name = await _actor_display_name(chat_id, actor_user_id)
+    from services import templates as tmpl_svc
+    from services.web import _serialize_web_rollcall
+    from rollcall_manager import manager as _mgr
+
+    result = await tmpl_svc.start_template(
+        chat_id=chat_id, name=name,
+        admin_user_id=actor_user_id, admin_name=actor_name,
+        extra_title=body.extra_title,
+    )
+    rc = _mgr.get_rollcall(chat_id, result["rc_index"])
+    if rc is None:
+        raise HTTPException(status_code=500, detail="Rollcall created but could not be retrieved")
+
+    # Same visibility as any other rollcall start — post the panel into the
+    # Telegram group so it's votable there too, not just on the web.
+    await _mirror_panel_to_telegram(chat_id, result["rc_index"] + 1, force_new=True)
+    return WebRollcallResponse(**_serialize_web_rollcall(rc))
 
 
 # ── Scheduled rollcalls ───────────────────────────────────────────────────────

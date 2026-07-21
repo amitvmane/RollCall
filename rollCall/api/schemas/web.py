@@ -218,13 +218,16 @@ class WebAdminStatusResponse(BaseModel):
 
 
 class WebTemplateResponse(BaseModel):
-    """Recurring-schedule status for one template — feeds the group web
-    page's admin-only schedule editor (self-serve, id_token-gated; the
-    separate token-gated /admin/ console is a bottleneck for non-owner
-    group admins, so this lives on the page every web admin already has
-    self-serve access to)."""
+    """Template status for the group web page's admin-only editor
+    (self-serve, id_token-gated; the separate token-gated /admin/ console
+    is a bottleneck for non-owner group admins, so this lives on the page
+    every web admin already has self-serve access to). Covers both the
+    template's content and its recurring schedule."""
     name: str
     title: Optional[str] = None
+    location: Optional[str] = None
+    fee: Optional[str] = None
+    limit: Optional[int] = None
     schedule_enabled: bool = False
     schedule_day: Optional[str] = None
     schedule_time: Optional[str] = None
@@ -244,3 +247,18 @@ class WebSetScheduleRequest(BaseModel):
 
 class WebToggleScheduleRequest(BaseModel):
     id_token: str = Field(..., description="Signed identity token of the acting web admin")
+
+
+class WebUpdateTemplateRequest(BaseModel):
+    """Partial update of a template's content — fields left unset preserve
+    the existing value (matches services.templates.upsert_template)."""
+    id_token: str = Field(..., description="Signed identity token of the acting web admin")
+    title: Optional[str] = Field(None, max_length=200)
+    location: Optional[str] = Field(None, max_length=200)
+    fee: Optional[str] = Field(None, max_length=50)
+    limit: Optional[int] = Field(None, ge=1, le=1000)
+
+
+class WebStartTemplateRequest(BaseModel):
+    id_token: str = Field(..., description="Signed identity token of the acting web admin")
+    extra_title: Optional[str] = Field(None, max_length=200, description="Optional suffix appended to the template's base title")

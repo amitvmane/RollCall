@@ -3,6 +3,9 @@ Core handlers: /start, /help, /rollcalls, /version, /set_admins, /unset_admins, 
 """
 import json
 import logging
+import os
+
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot_state import bot, data_file_path, reply_error
 from config import ADMINS
@@ -11,6 +14,7 @@ from functions import admin_rights, auto_complete_timezone
 from rollcall_manager import manager
 from db import get_all_chat_ids
 from services import settings as settings_svc
+from services.web import get_group_web_token
 from commands_registry import (
     COMMANDS, lookup_command, all_names_and_aliases,
     USER_CATEGORY_ORDER, ADMIN_CATEGORY_ORDER, CATEGORY_EMOJI,
@@ -303,7 +307,30 @@ async def config_timezone(message):
         cid = message.chat.id
 
         if len(msg.split(" ")) < 2:
-            raise parameterMissing("The correct format is: /timezone continent/country or continent/state")
+            # Telegram's Bot API has no concept of a group's location or
+            # timezone at all — there's nothing to auto-detect from a
+            # command. A browser, on the other hand, always knows its own
+            # timezone, so point admins at the group web page's one-tap
+            # detect button instead of making them guess an IANA string.
+            base = os.environ.get("WEB_BASE_URL", "").rstrip("/")
+            current = manager.get_chat(cid).get("timezone", "Asia/Kolkata")
+            text = (
+                f"Current timezone: <b>{current}</b>\n\n"
+                "Not sure what to set it to? Telegram doesn't expose your group's "
+                "location, so I can't auto-detect it here — but your browser knows "
+                "its own timezone.\n\n"
+                "Or set it directly: <code>/timezone Asia/Kolkata</code>"
+            )
+            markup = None
+            if base:
+                group_token = get_group_web_token(cid)
+                markup = InlineKeyboardMarkup()
+                markup.add(InlineKeyboardButton(
+                    "📍 Detect timezone on the group page",
+                    url=f"{base}/web/group/{group_token}",
+                ))
+            await bot.send_message(cid, text, parse_mode="HTML", reply_markup=markup)
+            return
         if len(msg.split(" ")[1].split("/")) < 2:
             raise parameterMissing("The correct format is: /timezone continent/country or continent/state")
 

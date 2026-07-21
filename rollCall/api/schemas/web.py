@@ -47,11 +47,13 @@ class WebGroupResponse(BaseModel):
     shh_mode: bool = False
     dues_enabled: bool = False
     bot_username: str = ""
+    timezone: str = "Asia/Kolkata"
 
 
 class WebGroupSettingsRequest(BaseModel):
     id_token: str = Field(..., description="Signed identity token of the admin making the change")
     shh_mode: Optional[bool] = Field(None, description="Silent mode — suppresses per-vote bot notifications")
+    timezone: Optional[str] = Field(None, description="IANA timezone, e.g. Asia/Kolkata — usually the admin's browser-detected zone")
 
 
 class ScheduledRollcallRequest(BaseModel):

@@ -226,6 +226,15 @@
           <span class="admin-toggle-slider"></span>
         </label>
       </div>
+      <!-- Timezone -->
+      <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px">
+        <div style="font-size:.82rem;font-weight:600;color:var(--sub);margin-bottom:2px">🕐 Timezone</div>
+        <div style="font-size:.77rem;color:var(--sub);margin-bottom:10px">Used for scheduled templates and auto-close timing. Telegram doesn't expose a group's location — this detects your browser's timezone instead.</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+          <div id="tz-current" style="font-size:.85rem;font-weight:600;font-family:var(--font-mono)"></div>
+          <button class="btn btn-secondary" style="padding:8px 12px;white-space:nowrap" onclick="doDetectTimezone()">📍 Detect from this browser</button>
+        </div>
+      </div>
       <!-- Member login links -->
       <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px">
         <div style="font-size:.82rem;font-weight:600;color:var(--sub);margin-bottom:8px">🔐 Member login link</div>

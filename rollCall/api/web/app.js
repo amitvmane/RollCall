@@ -1152,7 +1152,7 @@ async function _checkWebAdmin(){
     _isWebAdmin=!!d.is_admin;
     const card=document.getElementById("admin-card");
     if(card)card.classList.toggle("hidden",!_isWebAdmin);
-    if(_isWebAdmin){_syncShhToggle();_renderWeekdayHint();}
+    if(_isWebAdmin){_syncShhToggle();_syncTimezoneDisplay();_renderWeekdayHint();}
   }catch(_){}
   // Load dues after admin status is resolved — both member and admin sections
   loadDuesSection().catch(()=>{});
@@ -1163,6 +1163,35 @@ function _syncShhToggle(){
   if(!tog||!groupData)return;
   tog.checked=!!groupData.shh_mode;
 }
+
+function _syncTimezoneDisplay(){
+  const el=document.getElementById("tz-current");
+  if(!el||!groupData)return;
+  el.textContent=groupData.timezone||"Asia/Kolkata";
+}
+
+window.doDetectTimezone=async function(){
+  if(!_idToken){toast("Verify with Telegram first.",3000);return;}
+  let detected;
+  try{
+    detected=Intl.DateTimeFormat().resolvedOptions().timeZone;
+  }catch(_){detected=null;}
+  if(!detected){toast("Couldn't detect a timezone from this browser.",3000);return;}
+  const current=groupData?.timezone||"Asia/Kolkata";
+  if(detected===current){toast(`Already set to ${detected}.`,2500);return;}
+  if(!confirm(`Detected ${detected} from this browser.\n\nSet this as the group's timezone? (Currently: ${current})`))return;
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/settings`,{
+      method:"PATCH",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({id_token:_idToken,timezone:detected}),
+      signal:AbortSignal.timeout(8000),
+    });
+    if(!res.ok){const d=await res.json().catch(()=>({}));throw new Error(d.detail||"Failed to set timezone");}
+    if(groupData)groupData.timezone=detected;
+    _syncTimezoneDisplay();
+    toast(`🕐 Timezone set to ${detected}`,2500);
+  }catch(e){toast(e.message||"Could not set timezone",4000);}
+};
 
 let _lastWebloginUrl="";
 

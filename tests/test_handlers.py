@@ -363,11 +363,30 @@ class TestConfigTimezone(HandlerTestBase):
         # behavior check: confirmation message sent with the resolved timezone
         self.assertIn("Asia/Calcutta", self._sent_text())
 
-    async def test_missing_parameter_sends_error(self):
+    async def test_missing_parameter_sends_detect_hint(self):
+        """No-arg /timezone can't auto-detect anything itself (Telegram
+        exposes no location data for a group) — it should show the current
+        value and point at the browser-based detect flow, not just error."""
         msg = self._make_message("/timezone")
-        with self._patch_manager():
+        self.manager.get_chat.return_value = {"timezone": "Asia/Kolkata"}
+        with self._patch_manager(), \
+             patch.dict('os.environ', {'WEB_BASE_URL': 'https://rc.example'}), \
+             patch('handlers.core.get_group_web_token', return_value='grp123'):
             await self.config_timezone(msg)
         self.assertGreater(self._sent_count(), 0)
+        sent = self._sent_text()
+        self.assertIn("Asia/Kolkata", sent)
+        markup = self.bot_state.bot.send_message.call_args_list[0].kwargs.get("reply_markup")
+        self.assertIsNotNone(markup, "expected a 'detect on group page' button")
+
+    async def test_missing_parameter_no_web_base_url_skips_button(self):
+        msg = self._make_message("/timezone")
+        self.manager.get_chat.return_value = {"timezone": "Asia/Kolkata"}
+        with self._patch_manager(), patch.dict('os.environ', {'WEB_BASE_URL': ''}):
+            await self.config_timezone(msg)
+        self.assertGreater(self._sent_count(), 0)
+        markup = self.bot_state.bot.send_message.call_args_list[0].kwargs.get("reply_markup")
+        self.assertIsNone(markup)
 
     async def test_invalid_timezone_sends_link(self):
         msg = self._make_message("/timezone Fake/Place")

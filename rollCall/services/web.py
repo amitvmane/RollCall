@@ -270,4 +270,5 @@ def get_rollcalls_by_group_token(group_token: str) -> dict:
         "shh_mode": bool(chat.get("shh_mode", False)),
         "dues_enabled": bool(chat.get("dues_enabled", False)),
         "bot_username": db.get_system_config("bot_username") or "",
+        "timezone": chat.get("timezone") or "Asia/Kolkata",
     }

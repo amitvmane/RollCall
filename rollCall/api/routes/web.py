@@ -289,6 +289,15 @@ async def update_group_settings(
             f"{_icon} Silent mode {_desc} (by {actor_name}, via web)",
         )
 
+    if body.timezone is not None:
+        actor_name = await _actor_display_name(chat_id, actor_user_id)
+        from services import settings as settings_svc
+        settings_svc.set_timezone(chat_id, body.timezone, actor_user_id, actor_name)
+        await _send_event_notification(
+            chat_id,
+            f"🕐 Timezone set to {body.timezone} (by {actor_name}, via web)",
+        )
+
 
 @router.post(
     "/web/group/{group_token}/start-rollcall",

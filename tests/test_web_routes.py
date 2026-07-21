@@ -1064,5 +1064,68 @@ class TestWebTemplateContentEditAndStart(unittest.TestCase):
         self.assertEqual(resp.status_code, 404)
 
 
+class TestWebGroupSettingsTimezone(unittest.TestCase):
+    """Browser-based timezone detect/set — /web/group/{token}/settings PATCH.
+    Telegram exposes no location signal for a group, so this is the only
+    real auto-detect path (the admin's own browser)."""
+
+    def setUp(self):
+        from api.rate_limit import reset_buckets_for_tests
+        reset_buckets_for_tests()
+
+    def test_set_timezone_non_admin_403(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=False), \
+             patch.object(_web_mod, "require_identity", return_value=77):
+            resp = _client().patch(
+                "/api/v1/web/group/grp123/settings",
+                json={"id_token": "tok", "timezone": "Asia/Kolkata"})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_set_timezone_calls_service_and_mirrors(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value={"first_name": "Amit"}), \
+             patch.object(_web_mod, "require_identity", return_value=99), \
+             patch("services.settings.set_timezone", return_value={}) as svc, \
+             patch.object(_web_mod, "_send_event_notification", new_callable=AsyncMock) as notify:
+            resp = _client().patch(
+                "/api/v1/web/group/grp123/settings",
+                json={"id_token": "tok", "timezone": "America/New_York"})
+        self.assertEqual(resp.status_code, 204)
+        svc.assert_called_once_with(-100, "America/New_York", 99, "Amit")
+        notify.assert_awaited_once()
+        self.assertIn("America/New_York", notify.call_args[0][1])
+
+    def test_omitted_timezone_does_not_call_service(self):
+        """timezone absent from the request must not touch settings at all
+        — only shh_mode (or whichever field was actually sent) should fire."""
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod, "require_identity", return_value=99), \
+             patch("services.settings.set_timezone") as svc:
+            resp = _client().patch(
+                "/api/v1/web/group/grp123/settings",
+                json={"id_token": "tok"})
+        self.assertEqual(resp.status_code, 204)
+        svc.assert_not_called()
+
+    def test_group_response_includes_timezone(self):
+        with patch(
+            "services.web.get_rollcalls_by_group_token",
+            return_value={
+                "group_token": "grp123", "group_name": "Test", "rollcalls": [],
+                "upcoming": [], "shh_mode": False, "dues_enabled": False,
+                "bot_username": "", "timezone": "Asia/Kolkata",
+            },
+        ):
+            resp = _client().get("/api/v1/web/group/grp123")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["timezone"], "Asia/Kolkata")
+
+
 if __name__ == "__main__":
     unittest.main()

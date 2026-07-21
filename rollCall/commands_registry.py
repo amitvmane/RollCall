@@ -116,9 +116,9 @@ COMMANDS = [
     },
     {
         "name": "timezone", "aliases": ["tz"], "scope": "user", "category": "Settings",
-        "args": "Region/City", "sample": "/timezone Asia/Kolkata",
+        "args": "[Region/City]", "sample": "/timezone Asia/Kolkata",
         "summary": "Set your timezone",
-        "details": "Sets the bot's timezone for this chat — used for /when, scheduled templates, and auto-close timing.",
+        "details": "Sets the bot's timezone for this chat — used for /when, scheduled templates, and auto-close timing. Run with no argument for a one-tap browser-based detect link (Telegram itself has no way to know your group's location).",
     },
     {
         "name": "help", "aliases": [], "scope": "user", "category": "Settings",

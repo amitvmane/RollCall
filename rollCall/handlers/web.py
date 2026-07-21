@@ -220,16 +220,23 @@ async def mytoken_cmd(message):
         if not ok:
             raise incorrectParameter("Could not create a login code — try again.")
 
-        dm_text = (
-            "🔑 *Your personal web login code*\n\n"
-            f"`{token}`\n\n"
-            f"Use it at {base} → “Login with code” to see your groups and vote "
-            "without Telegram.\n\n"
-            "⚠️ Anyone with this code can act as you — keep it private.\n"
-            "Run /mytoken again to replace it, or /mytoken off to revoke."
-        )
+        # Code goes out alone, on its own message — nothing else on the line
+        # to fight with when tapping/long-pressing to copy. Instructions +
+        # a direct button to the portal's login screen follow separately.
+        portal_url = f"{base}/portal/"
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("🌐 Open portal & log in", url=portal_url))
         try:
-            await bot.send_message(user.id, dm_text, parse_mode="Markdown")
+            await bot.send_message(user.id, f"`{token}`", parse_mode="Markdown")
+            await bot.send_message(
+                user.id,
+                "🔑 *Your personal web login code* — tap it above to copy.\n\n"
+                "Open the portal below, choose *Login with code*, and paste it in.\n\n"
+                "⚠️ Anyone with this code can act as you — keep it private.\n"
+                "Run /mytoken again to replace it, or /mytoken off to revoke.",
+                parse_mode="Markdown",
+                reply_markup=markup,
+            )
         except Exception:
             # Bot can't DM users who never opened a private chat with it. The
             # code was already replaced above, which is fine — the old one

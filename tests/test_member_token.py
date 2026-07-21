@@ -125,13 +125,32 @@ class TestMyTokenHandler(unittest.IsolatedAsyncioTestCase):
              patch("handlers.web._db.upsert_member_login_token", return_value=True) as up:
             await mytoken_cmd(self._msg())
         calls = self._texts()
-        self.assertEqual(calls[0][0], 501)                 # DM to the user, not the group
-        self.assertIn("login code", calls[0][1])
-        self.assertEqual(calls[1][0], -100)                # group gets only the pointer
-        self.assertIn("DM", calls[1][1])
-        # Stored value is the hash — it must not appear in the DM text
+        # Code goes out ALONE on its own message — nothing else on the line
+        # to interfere with tap/long-press-to-copy.
+        self.assertEqual(calls[0][0], 501)
+        self.assertTrue(calls[0][1].startswith("`") and calls[0][1].endswith("`"))
+        # Instructions + portal button follow as a separate DM
+        self.assertEqual(calls[1][0], 501)
+        self.assertIn("login code", calls[1][1])
+        markup = self.bot_state.bot.send_message.call_args_list[1].kwargs.get("reply_markup")
+        self.assertIsNotNone(markup, "portal login button missing from instructions DM")
+        # Group gets only the pointer, not the code or instructions
+        self.assertEqual(calls[2][0], -100)
+        self.assertIn("DM", calls[2][1])
+        # Stored value is the hash — it must not appear in either DM
         stored_hash = up.call_args[0][1]
         self.assertNotIn(stored_hash, calls[0][1])
+        self.assertNotIn(stored_hash, calls[1][1])
+
+    async def test_portal_button_links_to_portal_login(self):
+        import telebot.types as tt
+        from handlers.web import mytoken_cmd
+        tt.InlineKeyboardButton.reset_mock()
+        with patch.dict(os.environ, {"WEB_BASE_URL": "https://rc.example"}), \
+             patch("handlers.web._db.upsert_member_login_token", return_value=True):
+            await mytoken_cmd(self._msg())
+        self.assertEqual(
+            tt.InlineKeyboardButton.call_args.kwargs.get("url"), "https://rc.example/portal/")
 
     async def test_dm_failure_points_user_at_private_chat(self):
         from handlers.web import mytoken_cmd
@@ -155,8 +174,8 @@ class TestMyTokenHandler(unittest.IsolatedAsyncioTestCase):
              patch("handlers.web._db.upsert_member_login_token", return_value=True):
             await mytoken_cmd(self._msg(chat_id=501, chat_type="private"))
         calls = self._texts()
-        self.assertEqual(len(calls), 1)                    # just the DM itself
-        self.assertEqual(calls[0][0], 501)
+        self.assertEqual(len(calls), 2)                    # code + instructions, no group ping
+        self.assertTrue(all(c[0] == 501 for c in calls))
 
     async def test_off_revokes(self):
         from handlers.web import mytoken_cmd

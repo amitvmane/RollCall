@@ -44,10 +44,16 @@ async def weblink_cmd(message):
         group_token = get_group_web_token(cid)
         group_url = f"{base}/web/group/{group_token}"
 
-        # Cache the caller as a web admin so they can start rollcalls from the web
-        # when Telegram is unavailable. Only stored when the caller is verifiably
-        # a Telegram user (message.from_user is set).
-        if message.from_user:
+        # /weblink itself stays open to every member (the voting link below is
+        # useful to anyone) — but web-admin status is real mutating power
+        # (start/end rollcall, silent mode, proxy votes, schedule editing) and
+        # must respect the SAME admin gate every other admin command in the
+        # bot uses. Grant it only when the caller passes admin_rights() —
+        # i.e. either the group hasn't locked itself down with /set_admins
+        # (matches today's default-open behavior), or they're a real
+        # Telegram admin/creator if it has. Never block the command itself
+        # on this — a non-admin still gets their voting link.
+        if message.from_user and await admin_rights(message, manager):
             user = message.from_user
             tg_name = user.first_name or (f"@{user.username}" if user.username else str(user.id))
             _db.set_web_admin(cid, user.id, tg_name)

@@ -629,6 +629,104 @@ class TestWebProxyVote(unittest.TestCase):
         self.assertEqual(svc.call_args.kwargs["admin_name"], "(web admin)")
 
 
+class TestWebAdminStatusLiveCheck(unittest.TestCase):
+    """admin-status now live-checks Telegram on every load instead of
+    trusting the web_admins cache forever — auto-grants a real Telegram
+    admin (no /weblink needed) and auto-revokes anyone who's lost that
+    role, with graceful fallback to the cache if Telegram is unreachable
+    (so a brief outage doesn't lock an admin out of the web surface that's
+    supposed to survive Telegram being down)."""
+
+    def setUp(self):
+        from api.rate_limit import reset_buckets_for_tests
+        reset_buckets_for_tests()
+
+    def _member(self, status, first_name="Amit"):
+        m = MagicMock()
+        m.status = status
+        m.user = MagicMock()
+        m.user.first_name = first_name
+        return m
+
+    def test_no_id_token_returns_false_without_calling_telegram(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch("bot_state.bot.get_chat_member", new_callable=AsyncMock) as gcm:
+            resp = _client().get("/api/v1/web/group/grp123/admin-status")
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.json()["is_admin"])
+        gcm.assert_not_awaited()
+
+    def test_real_admin_grants_and_caches(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch("api.routes.web.verify_identity_token", return_value=99), \
+             patch("bot_state.bot.get_chat_member", new_callable=AsyncMock,
+                   return_value=self._member("administrator")), \
+             patch.object(_web_mod._db, "set_web_admin") as set_admin, \
+             patch.object(_web_mod._db, "revoke_web_admin") as revoke:
+            resp = _client().get("/api/v1/web/group/grp123/admin-status?id_token=tok")
+        self.assertTrue(resp.json()["is_admin"])
+        set_admin.assert_called_once_with(-100, 99, "Amit")
+        revoke.assert_not_called()
+
+    def test_creator_also_grants(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch("api.routes.web.verify_identity_token", return_value=99), \
+             patch("bot_state.bot.get_chat_member", new_callable=AsyncMock,
+                   return_value=self._member("creator")), \
+             patch.object(_web_mod._db, "set_web_admin"):
+            resp = _client().get("/api/v1/web/group/grp123/admin-status?id_token=tok")
+        self.assertTrue(resp.json()["is_admin"])
+
+    def test_demoted_member_revokes_stale_cache(self):
+        """The core fix: someone who WAS a web admin but lost real Telegram
+        admin status must be revoked, not grandfathered in forever."""
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch("api.routes.web.verify_identity_token", return_value=99), \
+             patch("bot_state.bot.get_chat_member", new_callable=AsyncMock,
+                   return_value=self._member("member")), \
+             patch.object(_web_mod._db, "set_web_admin") as set_admin, \
+             patch.object(_web_mod._db, "revoke_web_admin") as revoke:
+            resp = _client().get("/api/v1/web/group/grp123/admin-status?id_token=tok")
+        self.assertFalse(resp.json()["is_admin"])
+        revoke.assert_called_once_with(-100, 99)
+        set_admin.assert_not_called()
+
+    def test_telegram_unreachable_falls_back_to_cache_true(self):
+        """Outage resilience: if the live check itself fails, don't lock an
+        already-cached admin out — this page must keep working when
+        Telegram is down, admin actions included."""
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch("api.routes.web.verify_identity_token", return_value=99), \
+             patch("bot_state.bot.get_chat_member", new_callable=AsyncMock,
+                   side_effect=Exception("Telegram unreachable")), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True) as cached:
+            resp = _client().get("/api/v1/web/group/grp123/admin-status?id_token=tok")
+        self.assertTrue(resp.json()["is_admin"])
+        cached.assert_called_once_with(-100, 99)
+
+    def test_telegram_unreachable_falls_back_to_cache_false(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch("api.routes.web.verify_identity_token", return_value=99), \
+             patch("bot_state.bot.get_chat_member", new_callable=AsyncMock,
+                   side_effect=Exception("Telegram unreachable")), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=False):
+            resp = _client().get("/api/v1/web/group/grp123/admin-status?id_token=tok")
+        self.assertFalse(resp.json()["is_admin"])
+
+    def test_invalid_group_token_false(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value=None):
+            resp = _client().get("/api/v1/web/group/badgrp/admin-status?id_token=tok")
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.json()["is_admin"])
+
+
 class TestWebTemplateSchedule(unittest.TestCase):
     """Self-serve recurring-schedule editor on the group web page — id_token
     + is_web_admin gated, no server/API-token access needed (unlike the

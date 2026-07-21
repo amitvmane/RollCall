@@ -4666,6 +4666,22 @@ def is_web_admin(chat_id: int, tg_user_id: int) -> bool:
         return False
 
 
+def revoke_web_admin(chat_id: int, tg_user_id: int) -> None:
+    """Clear a cached web admin — called when a live Telegram admin-status
+    recheck finds the user is no longer an admin/creator of the chat. Without
+    this, web-admin status (granted correctly at the time) never expired even
+    after the person lost their real Telegram admin role."""
+    try:
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"DELETE FROM web_admins WHERE chat_id={ph} AND tg_user_id={ph}",
+                (chat_id, tg_user_id),
+            )
+    except Exception:
+        logging.exception("revoke_web_admin failed")
+
+
 def get_response_time_leaderboard(chat_id: int, limit: int = 10) -> List[Dict]:
     """
     Return per-user average and best response time (seconds from rollcall start

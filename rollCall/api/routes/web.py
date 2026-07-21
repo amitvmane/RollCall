@@ -15,6 +15,7 @@ Push notifications:
   GET  /api/v1/web/group/{token}/manifest.json   → dynamic PWA manifest
 """
 import json
+import logging
 import os
 from typing import Optional
 
@@ -207,9 +208,34 @@ async def web_admin_status(
     chat = _db.get_chat_by_group_web_token(group_token)
     if not chat or not tg_user_id:
         return WebAdminStatusResponse(is_admin=False)
-    return WebAdminStatusResponse(
-        is_admin=_db.is_web_admin(int(chat["chat_id"]), tg_user_id)
-    )
+    chat_id = int(chat["chat_id"])
+
+    # Live-check against Telegram on every load instead of trusting a
+    # snapshot forever: promotes a real Telegram admin automatically (no
+    # /weblink needed — that command still exists and still calls
+    # set_web_admin as a convenience for command-line users, but it's no
+    # longer the only way in) and revokes anyone who's lost their admin
+    # role since the cache was last set.
+    try:
+        from bot_state import bot
+        member = await bot.get_chat_member(chat_id, tg_user_id)
+        is_admin_now = member.status in ("administrator", "creator")
+        if is_admin_now:
+            name = getattr(getattr(member, "user", None), "first_name", None) or f"user{tg_user_id}"
+            _db.set_web_admin(chat_id, tg_user_id, name)
+        else:
+            _db.revoke_web_admin(chat_id, tg_user_id)
+        return WebAdminStatusResponse(is_admin=is_admin_now)
+    except Exception:
+        # Telegram unreachable, bot removed from the group, rate-limited,
+        # etc. — fall back to the cached flag rather than locking an admin
+        # out of the one surface that's supposed to keep working when
+        # Telegram itself is down.
+        logging.warning(
+            "[web_admin_status] live check failed chat=%s user=%s — using cached value",
+            chat_id, tg_user_id, exc_info=True,
+        )
+        return WebAdminStatusResponse(is_admin=_db.is_web_admin(chat_id, tg_user_id))
 
 
 @router.patch(

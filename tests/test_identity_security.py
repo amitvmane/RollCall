@@ -187,9 +187,16 @@ class TestWebAdminRequiresIdentity(unittest.TestCase):
         self.assertFalse(resp.json()["is_admin"])
 
     def test_admin_status_true_for_signed_admin(self):
+        # admin-status live-checks Telegram first (see TestWebAdminStatusLiveCheck
+        # in test_web_routes.py for that path in full); forcing the live check to
+        # fail here isolates this test to its original intent — a signed identity
+        # whose cached is_web_admin flag is True gets is_admin=True — without
+        # depending on whatever bot_state.bot.get_chat_member happens to be left
+        # as by other test files sharing that singleton in a full-suite run.
         tok = _good_token(600)
         with patch("api.routes.web._db.get_chat_by_group_web_token", return_value={"chat_id": -100}), \
-             patch("api.routes.web._db.is_web_admin", return_value=True):
+             patch("api.routes.web._db.is_web_admin", return_value=True), \
+             patch("bot_state.bot.get_chat_member", side_effect=Exception("no live check in this test")):
             resp = _client().get(
                 f"/api/v1/web/group/grouptok/admin-status?id_token={tok}"
             )

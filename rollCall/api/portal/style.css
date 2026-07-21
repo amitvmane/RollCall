@@ -1,5 +1,10 @@
 /* Portal-specific styles — builds on /admin/style.css */
 
+/* Matchday type system — condensed display face for titles, tabular mono
+   for figures, matching the group voting page. */
+.detail-header h2,.group-name{font-family:var(--font-display);letter-spacing:.01em}
+.summary-val,.stat-val,.dues-balance-val{font-family:var(--font-mono)}
+
 .detail-overlay{
   display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:200;
 }
@@ -139,9 +144,9 @@
 .dot-in{background:var(--in);}
 .dot-out{background:var(--out);}
 .dot-maybe{background:var(--maybe);}
-.dot-miss{background:#d1d5db;}
-.dark .dot-miss{background:#4b5563;}
-.dot-cancelled{background:#e5e7eb;border:1.5px dashed #9ca3af;box-sizing:border-box;}
+.dot-miss{background:var(--border);}
+.dark .dot-miss{background:var(--sub);}
+.dot-cancelled{background:var(--border);border:1.5px dashed var(--sub);box-sizing:border-box;}
 .session-title{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .session-date{color:var(--sub);font-size:.78rem;white-space:nowrap;}
 .session-status{
@@ -151,9 +156,9 @@
 .status-out{background:var(--danger-bg);color:var(--danger-fg);}
 .status-maybe{background:var(--warn-bg);color:var(--warn-fg);}
 .status-miss{background:var(--hover);color:var(--sub);}
-.status-cancelled{background:#f3f4f6;color:#6b7280;font-style:italic;}
+.status-cancelled{background:var(--hover);color:var(--sub);font-style:italic;}
 .session-cancelled{opacity:.7;}
-.dark .status-cancelled{background:#374151;color:#9ca3af;}
+.dark .status-cancelled{background:var(--border);color:var(--sub);}
 
 /* Sparkline */
 .sparkline{display:flex;gap:4px;margin-top:8px;flex-wrap:wrap;}

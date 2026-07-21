@@ -1,12 +1,18 @@
 /* Telegram Mini App — uses CSS vars injected by the WebApp SDK */
+/* Colors intentionally come from Telegram's injected --tg-theme-* vars, not
+   the shared Matchday palette — a Mini App is supposed to blend into the
+   host client's own theme (light/dark, accent color) rather than force an
+   unrelated app palette. Fallbacks below (used only if those vars are
+   somehow absent, e.g. a very old client) lean toward the Matchday accent
+   for brand consistency in that edge case. */
 :root {
   --tg-bg: var(--tg-theme-bg-color, #ffffff);
   --tg-text: var(--tg-theme-text-color, #000000);
   --tg-hint: var(--tg-theme-hint-color, #999999);
-  --tg-link: var(--tg-theme-link-color, #2678b6);
-  --tg-btn: var(--tg-theme-button-color, #2678b6);
+  --tg-link: var(--tg-theme-link-color, var(--accent, #B8720A));
+  --tg-btn: var(--tg-theme-button-color, var(--accent, #B8720A));
   --tg-btn-text: var(--tg-theme-button-text-color, #ffffff);
-  --tg-secondary-bg: var(--tg-theme-secondary-bg-color, #f0f0f0);
+  --tg-secondary-bg: var(--tg-theme-secondary-bg-color, #F5F1E4);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -64,7 +70,13 @@ body {
   z-index: 10;
 }
 
-h1 { font-size: 18px; font-weight: 600; padding-bottom: 8px; }
+h1 {
+  font-family: var(--font-display, inherit);
+  font-size: 22px; font-weight: 700; letter-spacing: .01em;
+  padding-bottom: 8px;
+}
+
+.count-badge { font-family: var(--font-mono, inherit); }
 
 /* ── Tab bar (one tab per parallel rollcall) ─────────────────── */
 .tab-bar {

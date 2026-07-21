@@ -17,11 +17,11 @@
      dark). --ink/--muted/--accent-dark are landing-page-only aliases/shades
      that don't have a shared equivalent. */
   :root {
-    --accent-dark: #1d4ed8;
+    --accent-dark: #7A4D08;
     --ink: var(--text);
     --muted: var(--sub);
   }
-  html.dark { --accent-dark: #60a5fa; }
+  html.dark { --accent-dark: #F0BC6B; }
   * { box-sizing: border-box; }
   body {
     margin: 0;
@@ -84,11 +84,10 @@
     font-weight: 600; font-size: .9rem;
   }
   code {
-    background: #eef2ff; color: var(--accent-dark);
+    background: var(--accent-dim); color: var(--accent-dark);
     padding: 1px 6px; border-radius: 5px;
     font-size: .9em;
   }
-  html.dark code { background: rgba(59,130,246,.15); }
   footer {
     text-align: center; color: var(--muted);
     font-size: .85rem; padding: 32px 20px 48px;

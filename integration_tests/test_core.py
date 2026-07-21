@@ -121,10 +121,14 @@ class TestTimezone(IntegrationBase):
         texts = self.sent_texts()
         self.assertTrue(any("format" in t.lower() or "invalid" in t.lower() for t in texts))
 
-    async def test_timezone_no_arg_sends_error(self):
+    async def test_timezone_no_arg_shows_current_and_detect_hint(self):
+        """No-arg /timezone can't auto-detect anything itself (Telegram
+        exposes no location signal for a group) — it shows the current
+        value and points at the browser-based detect flow instead of a
+        bare usage error."""
         await self.config_timezone(self.msg("/tz", ADMIN_USER))
         texts = self.sent_texts()
-        self.assertTrue(any("format" in t.lower() for t in texts))
+        self.assertTrue(any("timezone" in t.lower() for t in texts))
 
 
 class TestBroadcast(IntegrationBase):

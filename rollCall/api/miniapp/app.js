@@ -17,6 +17,14 @@ const state = {
   userId: null,
   rollcalls: [],
   activeIdx: 0,   // which rollcall tab is shown
+  // id_token + groupToken let the Mini App reuse the same id_token-gated
+  // /web/group/{token}/... admin routes the group web page already uses
+  // (e.g. settings) instead of needing a parallel bearer-scoped admin
+  // surface — the vote-scoped bearer token above isn't enough for those.
+  idToken: null,
+  groupToken: null,
+  isWebAdmin: false,
+  timezone: 'Asia/Kolkata',
 };
 
 // ── DOM refs ─────────────────────────────────────────────────────────────────
@@ -30,6 +38,9 @@ const $chatTitle   = $('chat-title');
 const $rcTabs      = $('rc-tabs');
 const $rcList      = $('rollcall-list');
 const $emptyState  = $('empty-state');
+const $settingsBtn = $('settings-btn');
+const $settingsPanel = $('settings-panel');
+const $tzCurrent   = $('tz-current');
 
 // ── API helpers ──────────────────────────────────────────────────────────────
 const API = window.location.origin + '/api/v1';
@@ -69,6 +80,10 @@ async function auth() {
   state.token  = data.token;
   state.chatId = data.chat_id;
   state.userId = data.user_id;
+  state.idToken = data.id_token || null;
+  state.groupToken = data.group_token || null;
+  state.isWebAdmin = !!data.is_web_admin;
+  state.timezone = data.timezone || 'Asia/Kolkata';
 }
 
 // ── Data loading ─────────────────────────────────────────────────────────────
@@ -214,6 +229,56 @@ window.switchTab = function(idx) {
   renderActive();
 };
 
+window.toggleSettings = function() {
+  $settingsPanel?.classList.toggle('hidden');
+};
+
+// Telegram's own dialog styling reads as native inside the Mini App —
+// browser alert()/confirm() would look out of place. Falls back to the
+// browser versions if showAlert/showConfirm aren't available (very old
+// clients), same defensive spirit as the top-of-file `tg` null check.
+function _tgAlert(msg) {
+  if (tg && typeof tg.showAlert === 'function') tg.showAlert(msg);
+  else alert(msg);
+}
+function _tgConfirm(msg) {
+  return new Promise(resolve => {
+    if (tg && typeof tg.showConfirm === 'function') tg.showConfirm(msg, ok => resolve(ok));
+    else resolve(confirm(msg));
+  });
+}
+
+window.detectTimezone = async function() {
+  if (!state.idToken || !state.groupToken) {
+    _tgAlert("Can't set timezone from here — try the group web page instead.");
+    return;
+  }
+  let detected;
+  try {
+    detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  } catch (_) { detected = null; }
+  if (!detected) { _tgAlert("Couldn't detect a timezone from this device."); return; }
+  if (detected === state.timezone) { _tgAlert(`Already set to ${detected}.`); return; }
+  const ok = await _tgConfirm(`Detected ${detected} on this device. Set this as the group's timezone? (Currently: ${state.timezone})`);
+  if (!ok) return;
+  try {
+    const res = await fetch(`${window.location.origin}/api/v1/web/group/${state.groupToken}/settings`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id_token: state.idToken, timezone: detected }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || 'Failed to set timezone');
+    }
+    state.timezone = detected;
+    if ($tzCurrent) $tzCurrent.textContent = detected;
+    _tgAlert(`Timezone set to ${detected}`);
+  } catch (e) {
+    _tgAlert(e.message || 'Could not set timezone');
+  }
+};
+
 window.vote = async function(rcIdx, voteType) {
   const rc = state.rollcalls[rcIdx];
   if (!rc) return;
@@ -271,6 +336,10 @@ async function boot() {
 
     showMain();
     render();
+    if (state.isWebAdmin && $settingsBtn) {
+      $settingsBtn.classList.remove('hidden');
+      if ($tzCurrent) $tzCurrent.textContent = state.timezone;
+    }
 
     // Telegram WebApp back button — go back if user navigates to a tab
     tg.BackButton?.onClick(() => {

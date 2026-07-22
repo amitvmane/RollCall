@@ -27,7 +27,7 @@ from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
-from db import _hash_token, generate_api_token, insert_api_token
+from db import _hash_token, generate_api_token, get_or_create_chat, insert_api_token, is_web_admin
 
 router = APIRouter()
 
@@ -46,6 +46,13 @@ class MiniAppAuthResponse(BaseModel):
     # Signed identity proof (see api/identity.py) for endpoints that key off
     # the user rather than a chat-scoped bearer token.
     id_token: Optional[str] = None
+    # Permanent group web token + web-admin flag — lets the Mini App reuse
+    # the exact same id_token-gated /web/group/{token}/... admin routes the
+    # group web page already uses (e.g. settings), rather than needing a
+    # parallel bearer-token-scoped admin surface.
+    group_token: Optional[str] = None
+    is_web_admin: bool = False
+    timezone: str = "Asia/Kolkata"
 
 
 def _validate_init_data(init_data: str, bot_token: str) -> dict:
@@ -189,6 +196,13 @@ async def miniapp_auth(body: MiniAppAuthRequest) -> MiniAppAuthResponse:
     except IdentityError:
         id_token = None
 
+    # Local var deliberately not named `timezone` — shadows the datetime.timezone
+    # imported at module level (used just above for expires_at).
+    chat_row = get_or_create_chat(chat_id)
+    group_token = chat_row.get("group_web_token")
+    chat_timezone = chat_row.get("timezone") or "Asia/Kolkata"
+    web_admin = bool(is_web_admin(chat_id, user_id))
+
     logging.info(
         "[miniapp_auth] issued token chat=%s user=%s expires=%s",
         chat_id, user_id, expires_at.isoformat(),
@@ -200,6 +214,9 @@ async def miniapp_auth(body: MiniAppAuthRequest) -> MiniAppAuthResponse:
         user_id=user_id,
         chat_id=chat_id,
         id_token=id_token,
+        group_token=group_token,
+        is_web_admin=web_admin,
+        timezone=chat_timezone,
     )
 
 

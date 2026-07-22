@@ -748,6 +748,47 @@ class TestMiniAppAuthRoute(unittest.TestCase):
         insert_kwargs = mock_insert.call_args.kwargs
         self.assertEqual(insert_kwargs.get("scopes"), "read,vote")
 
+    def test_miniapp_auth_includes_group_token_and_admin_flag(self):
+        """The Mini App reuses the group web page's id_token-gated /web/
+        group/{token}/settings route (e.g. for timezone) rather than a
+        parallel bearer-scoped admin surface — it needs group_token,
+        is_web_admin, and the current timezone to do that."""
+        init_data = self._make_init_data("123:TEST")
+        with patch.dict(os.environ, {"TELEGRAM_TOKEN": "123:TEST"}), \
+             patch("api.routes.auth.generate_api_token", return_value="rawtoken123"), \
+             patch("api.routes.auth._hash_token", return_value="hashedtoken"), \
+             patch("api.routes.auth.insert_api_token"), \
+             patch("api.routes.auth.get_or_create_chat",
+                   return_value={"group_web_token": "grp123", "timezone": "America/New_York"}), \
+             patch("api.routes.auth.is_web_admin", return_value=True):
+            client = TestClient(self._app(), raise_server_exceptions=False)
+            resp = client.post(
+                "/api/v1/auth/telegram/miniapp",
+                json={"init_data": init_data},
+            )
+        self.assertEqual(resp.status_code, 201)
+        body = resp.json()
+        self.assertEqual(body["group_token"], "grp123")
+        self.assertEqual(body["timezone"], "America/New_York")
+        self.assertTrue(body["is_web_admin"])
+
+    def test_miniapp_auth_non_admin_flag_false(self):
+        init_data = self._make_init_data("123:TEST")
+        with patch.dict(os.environ, {"TELEGRAM_TOKEN": "123:TEST"}), \
+             patch("api.routes.auth.generate_api_token", return_value="rawtoken123"), \
+             patch("api.routes.auth._hash_token", return_value="hashedtoken"), \
+             patch("api.routes.auth.insert_api_token"), \
+             patch("api.routes.auth.get_or_create_chat",
+                   return_value={"group_web_token": "grp123", "timezone": "Asia/Kolkata"}), \
+             patch("api.routes.auth.is_web_admin", return_value=False):
+            client = TestClient(self._app(), raise_server_exceptions=False)
+            resp = client.post(
+                "/api/v1/auth/telegram/miniapp",
+                json={"init_data": init_data},
+            )
+        self.assertEqual(resp.status_code, 201)
+        self.assertFalse(resp.json()["is_web_admin"])
+
     def test_miniapp_auth_wrong_token_401(self):
         init_data = self._make_init_data("123:CORRECT")
         with patch.dict(os.environ, {"TELEGRAM_TOKEN": "999:WRONG"}):

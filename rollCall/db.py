@@ -4232,22 +4232,35 @@ def lookup_api_token(token_hash: str) -> Optional[Dict]:
                 now = datetime.now(timezone.utc).replace(tzinfo=None)
                 try:
                     if isinstance(expires_at, str):
-                        # SQLite stores datetimes as strings (datetime.__str__ gives
-                        # "YYYY-MM-DD HH:MM:SS.ffffff"). Try all plausible formats.
+                        # SQLite stores datetimes as strings. Callers that pass a
+                        # tz-aware expires_at (e.g. api/routes/auth.py's Mini App
+                        # token: datetime.now(timezone.utc) + timedelta(...)) get
+                        # str()'d with a "+00:00" offset suffix — none of the
+                        # naive strptime formats below match that, so try
+                        # fromisoformat first (handles the offset directly; needs
+                        # "T" not " " before Python 3.11, but this repo targets
+                        # 3.12 where either separator works).
                         parsed = None
-                        for fmt in (
-                            "%Y-%m-%d %H:%M:%S.%f",
-                            "%Y-%m-%d %H:%M:%S",
-                            "%Y-%m-%dT%H:%M:%SZ",
-                            "%Y-%m-%dT%H:%M:%S",
-                            "%Y-%m-%dT%H:%M:%S.%fZ",
-                            "%Y-%m-%dT%H:%M:%S.%f",
-                        ):
-                            try:
-                                parsed = datetime.strptime(expires_at, fmt).replace(tzinfo=None)
-                                break
-                            except ValueError:
-                                continue
+                        try:
+                            parsed = datetime.fromisoformat(expires_at)
+                            if parsed.tzinfo is not None:
+                                parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+                        except ValueError:
+                            # SQLite stores naive datetimes as strings (datetime.__str__
+                            # gives "YYYY-MM-DD HH:MM:SS.ffffff"). Try all plausible formats.
+                            for fmt in (
+                                "%Y-%m-%d %H:%M:%S.%f",
+                                "%Y-%m-%d %H:%M:%S",
+                                "%Y-%m-%dT%H:%M:%SZ",
+                                "%Y-%m-%dT%H:%M:%S",
+                                "%Y-%m-%dT%H:%M:%S.%fZ",
+                                "%Y-%m-%dT%H:%M:%S.%f",
+                            ):
+                                try:
+                                    parsed = datetime.strptime(expires_at, fmt).replace(tzinfo=None)
+                                    break
+                                except ValueError:
+                                    continue
                         # Unparseable expiry → treat as expired (safe default).
                         if parsed is None:
                             return None

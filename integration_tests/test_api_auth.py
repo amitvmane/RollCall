@@ -126,6 +126,32 @@ class TestBadTokens(AuthBase):
         )
         self.assertEqual(r.status_code, 401)
 
+    def test_tz_aware_expiry_not_yet_expired_is_accepted(self):
+        """Regression: api/routes/auth.py's Mini App token mints expires_at
+        as a tz-AWARE datetime (datetime.now(timezone.utc) + timedelta(...)),
+        not the naive one every other caller uses. SQLite str()s that with a
+        "+00:00" suffix that none of lookup_api_token's naive strptime
+        formats matched, so a freshly-issued, not-yet-expired Mini App token
+        was rejected as 'unparseable expiry -> treat as expired' on every
+        single request — the Mini App's own auth flow was broken end to end
+        on SQLite. fromisoformat() now handles the offset directly."""
+        not_expired = datetime.now(timezone.utc) + timedelta(hours=1)
+        token = _mint_token(CHAT_ID, "read", label="tz_aware_valid", expires_at=not_expired)
+        r = self.client.get(
+            f"/api/v1/chats/{CHAT_ID}/rollcalls",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(r.status_code, 200)
+
+    def test_tz_aware_expiry_already_expired_returns_401(self):
+        already_expired = datetime.now(timezone.utc) - timedelta(hours=1)
+        token = _mint_token(CHAT_ID, "read", label="tz_aware_expired", expires_at=already_expired)
+        r = self.client.get(
+            f"/api/v1/chats/{CHAT_ID}/rollcalls",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(r.status_code, 401)
+
 
 class TestScopes(AuthBase):
 

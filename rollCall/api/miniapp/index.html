@@ -27,9 +27,20 @@
     </div>
     <div id="main" class="hidden">
       <header class="app-header">
-        <h1 id="chat-title">RollCall</h1>
+        <div class="app-header-row">
+          <h1 id="chat-title">RollCall</h1>
+          <button id="settings-btn" class="settings-btn hidden" onclick="toggleSettings()" title="Settings" aria-label="Settings">⚙️</button>
+        </div>
         <div id="rc-tabs" class="tab-bar"></div>
       </header>
+      <div id="settings-panel" class="settings-panel hidden">
+        <div class="section-label">🕐 Timezone</div>
+        <p class="hint">Used for scheduled templates and auto-close timing.</p>
+        <div class="settings-row">
+          <span id="tz-current" class="tz-current"></span>
+          <button class="btn btn-primary" onclick="detectTimezone()">📍 Detect</button>
+        </div>
+      </div>
       <div id="rollcall-list"></div>
       <div id="empty-state" class="center-fill hidden">
         <div class="empty-icon">📋</div>

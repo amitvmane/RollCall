@@ -1127,5 +1127,46 @@ class TestWebGroupSettingsTimezone(unittest.TestCase):
         self.assertEqual(resp.json()["timezone"], "Asia/Kolkata")
 
 
+class TestWebMembersList(unittest.TestCase):
+    """GET /web/group/{token}/members — powers the login-link picker (real
+    members only; proxy/guest names never appear here since they aren't
+    real chat_members rows)."""
+
+    def setUp(self):
+        from api.rate_limit import reset_buckets_for_tests
+        reset_buckets_for_tests()
+
+    def test_requires_web_admin(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=False), \
+             patch("api.identity.verify_identity_token", return_value=77):
+            resp = _client().get("/api/v1/web/group/grp123/members?id_token=tok")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_returns_member_list(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch.object(_web_mod._db, "get_active_members", return_value=[
+                 {"user_id": 1, "first_name": "Amit", "username": "amit"},
+                 {"user_id": 2, "first_name": "Priya", "username": None},
+             ]):
+            resp = _client().get("/api/v1/web/group/grp123/members?id_token=tok")
+        self.assertEqual(resp.status_code, 200)
+        members = resp.json()["members"]
+        self.assertEqual(len(members), 2)
+        self.assertEqual(members[0]["first_name"], "Amit")
+        self.assertEqual(members[0]["username"], "amit")
+        self.assertIsNone(members[1]["username"])
+
+    def test_invalid_group_token_404(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value=None):
+            resp = _client().get("/api/v1/web/group/badgrp/members?id_token=tok")
+        self.assertEqual(resp.status_code, 404)
+
+
 if __name__ == "__main__":
     unittest.main()

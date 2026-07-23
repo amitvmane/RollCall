@@ -213,6 +213,8 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .upcoming-time{font-size:.78rem;font-weight:700;color:var(--text);font-family:var(--font-mono)}
 .upcoming-info{flex:1;min-width:0}
 .upcoming-title{font-weight:600;font-size:.87rem;margin-bottom:2px}
+.upcoming-opens-lbl{font-size:.66rem;color:var(--sub);text-transform:uppercase;letter-spacing:.04em;font-weight:700;margin-bottom:3px}
+.upcoming-event{font-size:.78rem;color:var(--text);font-weight:600;margin-bottom:2px}
 .upcoming-meta{font-size:.75rem;color:var(--sub)}
 
 /* No separate "html.dark .X" block: every value in this stylesheet is a

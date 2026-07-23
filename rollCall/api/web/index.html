@@ -236,13 +236,16 @@
       </div>
       <!-- Member login links -->
       <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px">
-        <div style="font-size:.82rem;font-weight:600;color:var(--sub);margin-bottom:8px">🔐 Member login link</div>
-        <div style="font-size:.77rem;color:var(--sub);margin-bottom:10px">Generate a 7-day single-use link for a member who can't verify via Telegram.</div>
-        <div style="display:flex;gap:8px;margin-bottom:8px">
-          <input id="weblogin-name-input" type="text" placeholder="First name or @username" style="flex:1;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg);color:var(--text);font-size:.88rem"/>
-          <button class="btn btn-primary" style="padding:9px 14px;white-space:nowrap" onclick="doIssueWeblogin()">Generate</button>
+        <div style="font-size:.82rem;font-weight:600;color:var(--sub);margin-bottom:2px">🔐 Member login link</div>
+        <div style="font-size:.77rem;color:var(--sub);margin-bottom:10px">Pick a member below for a 7-day single-use Telegram login link. For a guest or proxy who isn't on Telegram, choose "Someone else" — that generates a plain voting link with their name pre-filled (not a real login; guest voting never needed one, this just saves them typing).</div>
+        <select id="weblogin-member-select" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg);color:var(--text);font-size:.88rem;margin-bottom:8px" onchange="onWebloginSelectChange()">
+          <option value="">Loading members…</option>
+        </select>
+        <div id="weblogin-name-row" class="hidden" style="display:flex;gap:8px;margin-bottom:8px">
+          <input id="weblogin-name-input" type="text" placeholder="Guest or proxy name" style="flex:1;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg);color:var(--text);font-size:.88rem"/>
         </div>
-        <div id="weblogin-result" class="hidden" style="background:var(--border);border-radius:8px;padding:10px 12px;font-size:.8rem">
+        <button class="btn btn-primary" style="width:100%;padding:9px 14px" onclick="doIssueWeblogin()">Generate</button>
+        <div id="weblogin-result" class="hidden" style="background:var(--border);border-radius:8px;padding:10px 12px;font-size:.8rem;margin-top:8px">
           <div style="font-weight:600;margin-bottom:4px" id="weblogin-result-name"></div>
           <div style="word-break:break-all;font-family:monospace;font-size:.77rem;margin-bottom:8px" id="weblogin-result-url"></div>
           <button class="btn btn-secondary" style="width:100%;padding:8px" onclick="copyWebloginUrl()">📋 Copy link</button>

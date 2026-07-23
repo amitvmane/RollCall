@@ -51,6 +51,26 @@ if(_verifiedUserId&&!_idToken){
   }catch(_){}
 })();
 
+// Admin-issued guest voting link: ?guest=<name> pre-fills and saves a guest
+// display name. This is a convenience deep link, NOT an identity grant —
+// guest voting is already open to anyone who types any name on this page
+// with no login of any kind, so this can't escalate access; it only saves
+// a proxy/non-Telegram member the trouble of typing their own name. Never
+// overwrites a name already set for this browser.
+(function(){
+  try{
+    const p=new URLSearchParams(window.location.search);
+    const g=p.get("guest");
+    if(g&&!localStorage.getItem(LS_NAME)&&!localStorage.getItem(LS_NAME_OVERRIDE)){
+      localStorage.setItem(LS_NAME,g.slice(0,64));
+      p.delete("guest");
+      const qs=p.toString();
+      const clean=window.location.pathname+(qs?"?"+qs:"");
+      history.replaceState(null,"",clean);
+    }
+  }catch(_){}
+})();
+
 // Only show "invalid URL" when a token IS present but the mode is wrong (corrupted link).
 // No token = home screen, handled at the bottom of the file.
 if(URL_TOKEN&&(URL_MODE!=="join"&&URL_MODE!=="group")){
@@ -533,16 +553,29 @@ function renderUpcoming(upcoming){
   });
   if(!thisWeek.length){el.classList.add("hidden");return;}
   el.classList.remove("hidden");
-  el.innerHTML=`<div class="upcoming-header">📅 Coming Up This Week</div>`
+  // Two distinct things were previously shown as one unlabeled date/time:
+  // schedule_day/time is when the rollcall AUTO-OPENS (recurring); event_
+  // day/time is when the game itself happens (Event Details). Label both
+  // explicitly instead of only showing the open time and calling it done.
+  el.innerHTML=`<div class="upcoming-header">📅 Upcoming Rollcalls</div>`
     +thisWeek.map(u=>{
       const d=nextScheduledDate(u.schedule_day,u.schedule_time);
       const dateStr=d?d.toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"}):"";
       const timeStr=d?d.toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"}):"";
       const title=u.title||u.name;
+      const hasEvent=u.event_day&&u.event_time;
+      const eventStr=hasEvent
+        ?`🏟 Event: ${u.event_day[0].toUpperCase()+u.event_day.slice(1)} ${u.event_time}`
+        :"";
       const meta=[u.location?`📍 ${u.location}`:"",u.fee?`💰 ${u.fee}`:"",u.limit?`👥 Cap: ${u.limit}`:""].filter(Boolean).join(" · ");
       return `<div class="upcoming-row">
-        <div class="upcoming-when"><span class="upcoming-day">${dateStr}</span><span class="upcoming-time">${timeStr}</span></div>
-        <div class="upcoming-info"><div class="upcoming-title">${title}</div>${meta?`<div class="upcoming-meta">${meta}</div>`:""}</div>
+        <div class="upcoming-when" title="Opens (auto-starts)"><span class="upcoming-day">${dateStr}</span><span class="upcoming-time">${timeStr}</span></div>
+        <div class="upcoming-info">
+          <div class="upcoming-title">${title}</div>
+          <div class="upcoming-opens-lbl">Opens for voting</div>
+          ${eventStr?`<div class="upcoming-event">${eventStr}</div>`:""}
+          ${meta?`<div class="upcoming-meta">${meta}</div>`:""}
+        </div>
       </div>`;
     }).join("");
 }
@@ -1152,7 +1185,7 @@ async function _checkWebAdmin(){
     _isWebAdmin=!!d.is_admin;
     const card=document.getElementById("admin-card");
     if(card)card.classList.toggle("hidden",!_isWebAdmin);
-    if(_isWebAdmin){_syncShhToggle();_syncTimezoneDisplay();_renderWeekdayHint();}
+    if(_isWebAdmin){_syncShhToggle();_syncTimezoneDisplay();_renderWeekdayHint();_loadWeblogInMembers();}
   }catch(_){}
   // Load dues after admin status is resolved — both member and admin sections
   loadDuesSection().catch(()=>{});
@@ -1194,29 +1227,80 @@ window.doDetectTimezone=async function(){
 };
 
 let _lastWebloginUrl="";
+const WEBLOGIN_OTHER="__other__";
+
+async function _loadWeblogInMembers(){
+  const sel=document.getElementById("weblogin-member-select");
+  if(!sel||!_idToken)return;
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/members?id_token=${encodeURIComponent(_idToken)}`,{signal:AbortSignal.timeout(8000)});
+    if(!res.ok)throw new Error();
+    const data=await res.json();
+    const members=data.members||[];
+    const opts=members.map(m=>{
+      const label=m.username?`${esc(m.first_name||"")} (@${esc(m.username)})`:esc(m.first_name||"?");
+      const value=esc(m.first_name||m.username||"");
+      return `<option value="${value}">${label}</option>`;
+    }).join("");
+    if(members.length){
+      sel.innerHTML=opts+`<option value="${WEBLOGIN_OTHER}">✏️ Someone else (guest / proxy)</option>`;
+    }else{
+      // No real members yet — skip straight to the guest/proxy input
+      // instead of offering a placeholder the admin has to click past.
+      sel.innerHTML=`<option value="${WEBLOGIN_OTHER}" selected>✏️ Someone else (guest / proxy) — no members yet</option>`;
+      onWebloginSelectChange();
+    }
+  }catch(_){
+    sel.innerHTML=`<option value="${WEBLOGIN_OTHER}" selected>✏️ Someone else (guest / proxy)</option>`;
+    onWebloginSelectChange();
+  }
+}
+
+window.onWebloginSelectChange=function(){
+  const sel=document.getElementById("weblogin-member-select");
+  const row=document.getElementById("weblogin-name-row");
+  const isOther=sel&&sel.value===WEBLOGIN_OTHER;
+  row?.classList.toggle("hidden",!isOther);
+  if(isOther)document.getElementById("weblogin-name-input")?.focus();
+};
 
 window.doIssueWeblogin=async function(){
   if(!_idToken){toast("Verify with Telegram first.",3000);return;}
-  const nameEl=document.getElementById("weblogin-name-input");
-  const name=(nameEl?.value||"").trim();
-  if(!name){toast("Enter a name or @username.",2500);return;}
+  const sel=document.getElementById("weblogin-member-select");
   const resultEl=document.getElementById("weblogin-result");
   const nameOut=document.getElementById("weblogin-result-name");
   const urlOut=document.getElementById("weblogin-result-url");
-  try{
-    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/issue-weblogin`,{
-      method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({id_token:_idToken,member_name:name}),
-      signal:AbortSignal.timeout(10000),
-    });
-    if(!res.ok){const d=await res.json().catch(()=>({}));throw new Error(d.detail||"Failed");}
-    const data=await res.json();
-    _lastWebloginUrl=data.login_url;
-    if(nameOut)nameOut.textContent=`Link for ${data.member_name} — valid 7 days, single use`;
-    if(urlOut)urlOut.textContent=data.login_url;
-    resultEl?.classList.remove("hidden");
-    if(nameEl)nameEl.value="";
-  }catch(e){toast(e.message||"Could not generate link.",4000);}
+
+  if(sel&&sel.value&&sel.value!==WEBLOGIN_OTHER){
+    // Real member — existing single-use Telegram-identity link.
+    try{
+      const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/issue-weblogin`,{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({id_token:_idToken,member_name:sel.value}),
+        signal:AbortSignal.timeout(10000),
+      });
+      if(!res.ok){const d=await res.json().catch(()=>({}));throw new Error(d.detail||"Failed");}
+      const data=await res.json();
+      _lastWebloginUrl=data.login_url;
+      if(nameOut)nameOut.textContent=`Link for ${data.member_name} — valid 7 days, single use`;
+      if(urlOut)urlOut.textContent=data.login_url;
+      resultEl?.classList.remove("hidden");
+    }catch(e){toast(e.message||"Could not generate link.",4000);}
+    return;
+  }
+
+  // Guest / proxy — plain pre-filled voting link, no backend call needed:
+  // guest voting was already open to anyone typing any name, this is just
+  // a convenience deep link, not an identity grant.
+  const nameEl=document.getElementById("weblogin-name-input");
+  const name=(nameEl?.value||"").trim();
+  if(!name){toast("Enter a name.",2500);return;}
+  const url=`${window.location.origin}/web/group/${URL_TOKEN}?guest=${encodeURIComponent(name.slice(0,64))}`;
+  _lastWebloginUrl=url;
+  if(nameOut)nameOut.textContent=`Guest link for ${name} — reusable, no expiry, pre-fills their name`;
+  if(urlOut)urlOut.textContent=url;
+  resultEl?.classList.remove("hidden");
+  if(nameEl)nameEl.value="";
 };
 
 window.copyWebloginUrl=function(){

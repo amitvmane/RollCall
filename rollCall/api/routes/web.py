@@ -762,6 +762,32 @@ async def delete_scheduled_rollcall(
 
 # ── Web login token issuance (admin → member) ────────────────────────────────
 
+class _MemberListItem(BaseModel):
+    first_name: Optional[str] = None
+    username: Optional[str] = None
+
+
+class _MemberListResponse(BaseModel):
+    members: list[_MemberListItem]
+
+
+@router.get(
+    "/web/group/{group_token}/members",
+    response_model=_MemberListResponse,
+    summary="List real Telegram members for the login-link picker (requires web-admin identity)",
+)
+async def list_members_for_weblogin(
+    group_token: str = Path(...),
+    id_token: str = "",
+) -> _MemberListResponse:
+    chat_id, _ = _require_web_admin(group_token, id_token)
+    members = _db.get_active_members(chat_id)
+    return _MemberListResponse(members=[
+        _MemberListItem(first_name=m.get("first_name"), username=m.get("username"))
+        for m in members
+    ])
+
+
 class _WebloginRequest(BaseModel):
     id_token: str
     member_name: str

@@ -177,8 +177,8 @@ function showApp(){
   loadGroups();
 }
 
-$id("unlink-btn").addEventListener("click",()=>{
-  if(!confirm("Unlink your Telegram identity? You'll need to verify again to see your groups."))return;
+$id("logout-btn").addEventListener("click",()=>{
+  if(!confirm("Log out? You'll need to verify again to see your groups."))return;
   localStorage.removeItem(LS_TG_USER_ID);
   localStorage.removeItem(LS_TG_NAME);
   localStorage.removeItem(LS_ID_TOKEN);
@@ -307,8 +307,13 @@ function groupCardHTML(g,i){
     ?`<span class="group-badge badge-active">● Rollcall open</span>`
     :`<span class="group-badge badge-inactive">${g.total_sessions} sessions</span>`;
 
-  const voteBtn=g.has_active_rollcall&&g.group_web_token
-    ?`<a class="vote-btn" href="/web/group/${esc(g.group_web_token)}" target="_blank" onclick="event.stopPropagation()">Vote Now →</a>`
+  // Always a direct, clickable link to the group's permanent page — not
+  // just the "Vote Now" CTA that used to only appear while a rollcall was
+  // active, leaving idle groups with no link at all.
+  const voteBtn=g.group_web_token
+    ?(g.has_active_rollcall
+      ?`<a class="vote-btn" href="/web/group/${esc(g.group_web_token)}" target="_blank" onclick="event.stopPropagation()">Vote Now →</a>`
+      :`<a class="vote-btn vote-btn-secondary" href="/web/group/${esc(g.group_web_token)}" target="_blank" onclick="event.stopPropagation()">Open group page →</a>`)
     :"";
 
   const rank=g.rank!=null?`#${g.rank}`:"—";

@@ -190,8 +190,8 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .btn{padding:10px 24px;border:none;border-radius:8px;font-size:.95rem;font-weight:700;cursor:pointer;font-family:var(--font-body)}
 .btn-primary{background:var(--accent);color:#fff}
 .btn-secondary{background:var(--border);color:var(--text)}
-.no-rc{text-align:center;padding:32px 16px;color:var(--sub);font-size:.92rem}
-.no-rc .icon{font-size:2rem;margin-bottom:8px;opacity:.6}
+.no-rc{display:flex;align-items:center;gap:10px;padding:6px 4px;color:var(--sub);font-size:.85rem}
+.no-rc .icon{font-size:1.3rem;opacity:.6;flex-shrink:0}
 .refresh-bar-wrap{display:flex;align-items:center;gap:8px;margin-top:4px}
 .refresh-bar{flex:1;height:2px;background:var(--border);border-radius:1px;overflow:hidden}
 .refresh-fill{height:100%;background:var(--accent);border-radius:1px;width:100%}

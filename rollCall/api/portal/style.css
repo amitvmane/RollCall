@@ -115,6 +115,14 @@
 }
 .vote-btn:hover{opacity:.9;}
 
+/* Less prominent than the "Vote Now" primary — shown when there's no
+   active rollcall, so the card still has a direct clickable link to the
+   group's permanent page without visually competing with the real CTA. */
+.vote-btn-secondary{
+  background:none;border:1.5px solid var(--border);color:var(--accent);
+}
+.vote-btn-secondary:hover{background:var(--hover);opacity:1;}
+
 /* Detail panel extras */
 .detail-meta-row{
   display:flex;flex-wrap:wrap;gap:8px;margin-bottom:4px;font-size:.78rem;color:var(--sub);

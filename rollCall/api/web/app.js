@@ -761,7 +761,7 @@ function renderStats(d){
   const histArr=(d.recent_history||[]).slice().reverse();
   const maxIn=histArr.length?Math.max(...histArr.map(h=>h.in_count||0),1):1;
   const trendHtml=histArr.length>=2?`
-  <div class="sp-trend-label">📈 Recent Attendance</div>
+  <div class="sp-trend-label">📈 Your recent attendance</div>
   <div class="sp-trend">
     ${histArr.map(h=>{
       const barH=Math.round((h.in_count||0)/maxIn*70)+10;

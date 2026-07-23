@@ -2,11 +2,11 @@
    web, miniapp). Load this BEFORE any surface-specific stylesheet so it can
    override nothing and just supply the variables they consume.
 
-   "Matchday" palette (2026-07-21 group-page redesign, promoted here
-   2026-07-22 to the shared default so every surface is one product instead
-   of the voting page alone looking different from portal/admin/miniapp): a
-   matchday programme / stadium scoreboard, not a SaaS dashboard. Warm
-   ticket-paper in light mode, deep pitch-night in dark mode. Vote-specific
+   Blue palette matching the bot's own logo (#2563eb — see web/logo.svg,
+   admin/logo.svg). The "Matchday" warm-amber palette (2026-07-21/22) was
+   tried and then reverted back to this blue on user request; the
+   typography upgrade from that redesign (Big Shoulders Display / IBM Plex
+   Sans / IBM Plex Mono) is kept — only the colors reverted. Vote-specific
    (--in/--out/--maybe) and dues-specific (--dues-owed/--dues-credit/
    --dues-settled) tokens are deliberately aliased to the same hex as the
    generic success/danger/warn tokens where the underlying concept is the
@@ -15,56 +15,49 @@
    you're on. */
 
 :root{
-  /* Matchday type system — shared by all 5 surfaces so a visitor moving
-     between the voting page, portal, and admin console reads them as one
-     product even where layouts differ. Big Shoulders Display = condensed
-     athletic/scoreboard display face (titles, big numbers); IBM Plex Sans =
-     body text with real character (not Inter/Roboto/Arial); IBM Plex Mono =
-     tabular numerals for countdowns and ledger figures. Each surface links
-     its own Google Fonts <link>; if that fails to load, the fallback stack
-     still reads fine. */
+  /* Shared type system — condensed display face for titles/big numbers,
+     body text with real character (not Inter/Roboto/Arial), tabular mono
+     for countdowns and ledger figures. Each surface links its own Google
+     Fonts <link>; if that fails to load, the fallback stack still reads
+     fine. */
   --font-display:"Big Shoulders Display",'Arial Narrow',sans-serif;
   --font-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
   --font-mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
 
-  /* ── Matchday palette (light = "day match, ticket paper") ── */
-  --bg:#F5F1E4;--card:#FFFFFF;--border:#E4DDC7;--hover:#EDE7D6;
-  --text:#161B15;--sub:#6B6A4E;--accent:#B8720A;--accent-dim:#FBF0DC;
-  --danger:#C6362C;--danger-dim:#FBE9E7;--success:#0F7A44;--warn:#8A6A1F;
-  --radius:10px;--radius-sm:6px;
-  --shadow:0 1px 2px rgba(21,20,10,.08),0 2px 6px rgba(21,20,10,.05);
-  --shadow-md:0 6px 24px rgba(21,20,10,.14);
-  --pitch-line:rgba(15,122,68,.14);
+  --bg:#f0f4f8;--card:#fff;--border:#e4e8ef;--hover:#f1f5f9;
+  --text:#0f172a;--sub:#64748b;--accent:#2563eb;--accent-dim:#eff6ff;
+  --danger:#dc2626;--danger-dim:#fef2f2;--success:#16a34a;--warn:#d97706;
+  --radius:14px;--radius-sm:8px;--shadow:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.06);
+  --shadow-md:0 4px 16px rgba(0,0,0,.1);
 
   --in:var(--success);--out:var(--danger);--maybe:var(--warn);
 
-  --dues-owed:var(--danger);--dues-credit:#0E7A8A;--dues-settled:var(--success);
+  --dues-owed:var(--danger);--dues-credit:#0891b2;--dues-settled:var(--success);
 
   /* "Light pill" bg+fg pairs — the same combo shows up verbatim under many
      different class names across surfaces (vote status badges, session
      history dots' labels, dues status badges, milestone banners). One pair
      per semantic color, so every surface's version of "this is a success
      state" renders identically instead of each having its own shade. */
-  --success-bg:#DEF3E4;--success-fg:#0F7A44;
-  --danger-bg:#FBE4E1;--danger-fg:#B0281E;
-  --warn-bg:#F2E7CC;--warn-fg:#7A5C16;
+  --success-bg:#dcfce7;--success-fg:#15803d;
+  --danger-bg:#fee2e2;--danger-fg:#b91c1c;
+  --warn-bg:#fef3c7;--warn-fg:#b45309;
 }
 
 html.dark{
-  /* ── Matchday palette (dark = "night match, floodlit pitch") ── */
-  --bg:#0A1310;--card:#122019;--border:#22352A;--hover:#17251D;
-  --text:#F2F3EC;--sub:#93A08F;--accent:#E8A93B;--accent-dim:rgba(232,169,59,.14);
-  --danger:#F0665A;--danger-dim:rgba(240,102,90,.14);
-  --success:#3ECF7E;--warn:#C9A15A;
-  --shadow:0 1px 2px rgba(0,0,0,.5),0 2px 8px rgba(0,0,0,.4);
-  --shadow-md:0 8px 28px rgba(0,0,0,.55);
-  --pitch-line:rgba(62,207,126,.10);
+  --bg:#0f172a;--card:#1e293b;--border:#334155;--hover:#293548;
+  --text:#f1f5f9;--sub:#94a3b8;
+  --accent:#3b82f6;--accent-dim:rgba(59,130,246,.15);
+  --danger:#f87171;--danger-dim:rgba(248,113,113,.12);
+  --success:#4ade80;--warn:#fbbf24;
+  --shadow:0 1px 3px rgba(0,0,0,.5),0 1px 2px rgba(0,0,0,.4);
+  --shadow-md:0 4px 16px rgba(0,0,0,.5);
 
-  --dues-credit:#3FC5D6;
+  --dues-credit:#22d3ee;
 
-  --success-bg:rgba(62,207,126,.16);--success-fg:#5EE096;
-  --danger-bg:rgba(240,102,90,.16);--danger-fg:#F3897E;
-  --warn-bg:rgba(201,161,90,.18);--warn-fg:#D9BB84;
+  --success-bg:rgba(74,222,128,.18);--success-fg:#4ade80;
+  --danger-bg:rgba(248,113,113,.18);--danger-fg:#f87171;
+  --warn-bg:rgba(251,191,36,.18);--warn-fg:#fbbf24;
 }
 
 /* Ready-made "light pill" status chips built from the pairs above.

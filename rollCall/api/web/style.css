@@ -1,20 +1,10 @@
 /* ═══════════════════════════════════════════════════════════════════════
-   RollCall — "Matchday" redesign (2026-07-21)
+   RollCall — group voting page
 
-   Direction: a matchday programme / stadium scoreboard, not a SaaS
-   dashboard. Big Shoulders Display for titles/scores/countdown (condensed,
-   athletic); IBM Plex Sans for body copy; IBM Plex Mono for tabular
-   numerals. Deep pitch-night in dark mode, warm ticket-paper in light.
-
-   The palette itself now lives in /shared/tokens.css (promoted there
-   2026-07-22 so admin/portal/miniapp match this page instead of each
-   surface reading as a different product) — this file only adds the
-   page-specific layout/motion/texture built on top of those variables.
-
-   Every selector app.js already reads/writes (classList toggles, template-
-   string class names) is preserved — this is a reskin + reorg, not a
-   markup rewrite, precisely because this page is live and money-adjacent
-   (dues) for groups worldwide this session can't visually babysit.
+   Blue palette matching the bot's logo, shared via /shared/tokens.css
+   (the "Matchday" warm-amber redesign this file used to carry was tried
+   and reverted on user request — the typography upgrade from that pass
+   is kept, only the colors and its turf-texture decoration are gone).
    ═══════════════════════════════════════════════════════════════════════ */
 
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -23,14 +13,6 @@ body{
   font-family:var(--font-body);
   background:var(--bg);color:var(--text);min-height:100vh;padding:0 0 32px;
   -webkit-text-size-adjust:100%;
-  /* Turf-grain atmosphere: two faint diagonal line-fields (pitch markings)
-     + a subtle noise layer, all inline SVG so no image asset is needed and
-     it degrades to nothing if blocked. Deliberately very low-opacity —
-     texture, not decoration you consciously notice. */
-  background-image:
-    repeating-linear-gradient(135deg,var(--pitch-line) 0,var(--pitch-line) 1px,transparent 1px,transparent 64px),
-    repeating-linear-gradient(45deg,var(--pitch-line) 0,var(--pitch-line) 1px,transparent 1px,transparent 64px);
-  background-attachment:fixed;
 }
 #app{padding:0 14px}
 
@@ -60,11 +42,11 @@ html.dark .brand-bar{background:linear-gradient(180deg,#0D1712 0%,#000 220%)}
 .brand-name{font-size:1.15rem;font-weight:800;color:#fff;letter-spacing:.01em;text-transform:uppercase}
 .brand-actions{display:flex;align-items:center;gap:6px}
 .brand-theme-btn,.brand-notify-btn{background:rgba(255,255,255,.12);border:none;color:#fff;font-size:1rem;width:32px;height:32px;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s}
-.brand-theme-btn:hover,.brand-notify-btn:hover{background:var(--accent);color:#0A1310}
-.brand-notify-btn.notify-on{background:var(--accent);color:#0A1310}
+.brand-theme-btn:hover,.brand-notify-btn:hover{background:var(--accent);color:#fff}
+.brand-notify-btn.notify-on{background:var(--accent);color:#fff}
 .brand-notify-btn.notify-blocked{opacity:.5;cursor:default}
 .brand-install-btn{background:transparent;border:1.5px solid var(--accent);color:var(--accent);font-size:.75rem;font-weight:700;padding:5px 10px;border-radius:8px;cursor:pointer;white-space:nowrap;letter-spacing:.03em;text-transform:uppercase;transition:all .15s;line-height:1}
-.brand-install-btn:hover{background:var(--accent);color:#0A1310}
+.brand-install-btn:hover{background:var(--accent);color:#fff}
 body.tg-mode .brand-bar{display:none}
 body.tg-mode #app{padding:12px 14px 32px}
 body.tg-mode{
@@ -123,7 +105,7 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .tab-btn{flex-shrink:0;padding:6px 14px;border:1.5px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);font-size:.82rem;cursor:pointer;white-space:nowrap;transition:all .15s;display:flex;flex-direction:column;align-items:center;gap:1px}
 .tab-btn .tn{font-size:.63rem;font-weight:800;opacity:.65;font-family:var(--font-mono)}
 .tab-btn .tt{font-size:.8rem;font-weight:600;max-width:110px;overflow:hidden;text-overflow:ellipsis}
-.tab-btn.active{background:var(--accent);color:#0A1310;border-color:var(--accent)}
+.tab-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
 .tab-btn.active .tn{opacity:.75}
 
 /* ── Identity: compact single-row strip (was a tall 2-button stacked
@@ -206,7 +188,7 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .spinner{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 .btn{padding:10px 24px;border:none;border-radius:8px;font-size:.95rem;font-weight:700;cursor:pointer;font-family:var(--font-body)}
-.btn-primary{background:var(--accent);color:#0A1310}
+.btn-primary{background:var(--accent);color:#fff}
 .btn-secondary{background:var(--border);color:var(--text)}
 .no-rc{text-align:center;padding:32px 16px;color:var(--sub);font-size:.92rem}
 .no-rc .icon{font-size:2rem;margin-bottom:8px;opacity:.6}
@@ -336,7 +318,7 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .dues-balance-amount.credit{color:var(--dues-credit)}
 .dues-balance-label{font-size:.78rem;color:var(--sub);margin-top:4px;font-weight:600}
 .dues-pay-row{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
-.dues-upi-btn{display:block;width:100%;padding:12px;background:var(--accent);color:#0A1310;border:none;border-radius:8px;font-size:.95rem;font-weight:800;cursor:pointer;text-align:center;text-decoration:none}
+.dues-upi-btn{display:block;width:100%;padding:12px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:.95rem;font-weight:800;cursor:pointer;text-align:center;text-decoration:none}
 .dues-upi-btn:hover{opacity:.9}
 .dues-vpa-row{display:flex;align-items:center;gap:8px;background:var(--bg);border-radius:8px;padding:8px 12px}
 .dues-vpa-text{font-family:var(--font-mono);font-size:.86rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -396,9 +378,6 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .group-cta{text-align:center;padding:18px 12px 22px;font-size:.82rem;color:var(--sub)}
 .group-cta a{color:var(--accent);font-weight:700;text-decoration:none}
 .group-cta a:hover{text-decoration:underline}
-
-.dark .dues-close-preview{background:#0A1310}
-.dark .dues-fund-form input,.dark .dues-settings-input,.dark .dues-modal-input{background:#0A1310;border-color:var(--border)}
 
 #dues-balances-body,#dues-ledger-body{overflow-x:auto}
 

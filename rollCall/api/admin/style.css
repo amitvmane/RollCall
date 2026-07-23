@@ -12,7 +12,7 @@ body{font-family:var(--font-body);background:var(--bg);color:var(--text);-webkit
 .stat-box-val,.slb-rank{font-family:var(--font-mono)}
 
 /* ── Login ── */
-#login-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:20px;background:linear-gradient(135deg,#5C3A08 0%,var(--accent) 100%)}
+#login-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:20px;background:linear-gradient(135deg,#1e3a8a 0%,var(--accent) 100%)}
 .login-card{background:var(--card);border-radius:var(--radius);padding:36px 32px;width:100%;max-width:400px;box-shadow:var(--shadow-md)}
 .login-brand{display:flex;align-items:center;gap:10px;margin-bottom:6px}
 .login-brand .logo-icon{width:40px;height:40px;background:var(--accent);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.3rem}
@@ -25,7 +25,7 @@ body{font-family:var(--font-body);background:var(--bg);color:var(--text);-webkit
 .login-scope-note{font-size:.75rem;color:var(--sub);margin-top:10px;text-align:center;line-height:1.5}
 
 /* ── Top bar ── */
-.topbar{background:var(--accent);color:#fff;padding:0 16px;height:54px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:200;box-shadow:0 2px 12px rgba(184,114,10,.35)}
+.topbar{background:var(--accent);color:#fff;padding:0 16px;height:54px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:200;box-shadow:0 2px 12px rgba(37,99,235,.35)}
 .topbar-left{display:flex;align-items:center;gap:10px}
 .topbar .logo{font-weight:700;font-size:1rem;letter-spacing:-.01em}
 .topbar .group-crumb{font-size:.82rem;opacity:.8;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -233,7 +233,7 @@ body{font-family:var(--font-body);background:var(--bg);color:var(--text);-webkit
 .lc{text-align:center;padding:40px}
 .toast{position:fixed;bottom:20px;right:16px;left:16px;max-width:380px;margin:0 auto;padding:11px 16px;border-radius:var(--radius-sm);font-size:.87rem;box-shadow:var(--shadow-md);opacity:0;transform:translateY(10px);transition:opacity .22s,transform .22s;pointer-events:none;z-index:9999;color:#fff}
 .toast.show{opacity:1;transform:none}
-.toast.info{background:#3A3226}
+.toast.info{background:#1e293b}
 .toast.ok{background:var(--success)}
 .toast.err{background:var(--danger)}
 .toast.warn{background:var(--warn)}
@@ -260,7 +260,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:12px 0}
 
 /* ── Dark mode — variable overrides come from /shared/tokens.css; only
    admin-specific dark-mode rules that aren't plain var() lookups live here ── */
-html.dark #login-screen{background:linear-gradient(135deg,var(--bg) 0%,#4A2F07 100%)}
+html.dark #login-screen{background:linear-gradient(135deg,var(--bg) 0%,#1e3a8a 100%)}
 html.dark .login-card input{background:var(--card);color:var(--text)}
 html.dark .topbar{box-shadow:0 2px 12px rgba(0,0,0,.6)}
 html.dark .gi{border-bottom-color:var(--border)}
@@ -269,7 +269,7 @@ html.dark .gi.active{background:var(--accent-dim)}
 html.dark .sb-head{background:var(--card)}
 html.dark input,html.dark select,html.dark textarea{background:var(--hover);color:var(--text);border-color:var(--border)}
 html.dark input::placeholder,html.dark textarea::placeholder{color:var(--sub)}
-html.dark input:focus,html.dark select:focus,html.dark textarea:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(232,169,59,.2);outline:none}
+html.dark input:focus,html.dark select:focus,html.dark textarea:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(59,130,246,.2);outline:none}
 html.dark input[type="datetime-local"],html.dark input[type="date"],html.dark input[type="time"]{color-scheme:dark}
 html.dark .rename-row{background:var(--hover);border-bottom-color:var(--border)}
 html.dark .rc-row--editing{background:var(--hover);border-left-color:var(--accent)}

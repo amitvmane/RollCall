@@ -1,18 +1,18 @@
 /* Telegram Mini App — uses CSS vars injected by the WebApp SDK */
 /* Colors intentionally come from Telegram's injected --tg-theme-* vars, not
-   the shared Matchday palette — a Mini App is supposed to blend into the
-   host client's own theme (light/dark, accent color) rather than force an
+   the shared app palette — a Mini App is supposed to blend into the host
+   client's own theme (light/dark, accent color) rather than force an
    unrelated app palette. Fallbacks below (used only if those vars are
-   somehow absent, e.g. a very old client) lean toward the Matchday accent
+   somehow absent, e.g. a very old client) lean toward the shared accent
    for brand consistency in that edge case. */
 :root {
   --tg-bg: var(--tg-theme-bg-color, #ffffff);
   --tg-text: var(--tg-theme-text-color, #000000);
   --tg-hint: var(--tg-theme-hint-color, #999999);
-  --tg-link: var(--tg-theme-link-color, var(--accent, #B8720A));
-  --tg-btn: var(--tg-theme-button-color, var(--accent, #B8720A));
+  --tg-link: var(--tg-theme-link-color, var(--accent, #2563eb));
+  --tg-btn: var(--tg-theme-button-color, var(--accent, #2563eb));
   --tg-btn-text: var(--tg-theme-button-text-color, #ffffff);
-  --tg-secondary-bg: var(--tg-theme-secondary-bg-color, #F5F1E4);
+  --tg-secondary-bg: var(--tg-theme-secondary-bg-color, #f0f4f8);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }

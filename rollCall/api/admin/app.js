@@ -9,6 +9,18 @@ function $id(x){return document.getElementById(x)}
 window.$id=$id;
 function esc(s){return String(s??"")}
 function escH(s){return String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
+// For interpolating free-text (e.g. a template name) inside a single-quoted
+// JS string literal that itself sits inside an inline onclick="..." HTML
+// attribute. JSON.stringify() alone is NOT safe here — it always wraps in
+// DOUBLE quotes, which collide with the onclick="..." attribute's own
+// double quotes and truncate it (e.g. onclick="fn(${JSON.stringify(name)})"
+// renders as onclick="fn(" with everything after the embedded " silently
+// dropped — a real bug this exact pattern caused for template
+// edit/start/save in this file). escH() alone only protects the
+// HTML-attribute layer (&<>") — it leaves ' and \ untouched, so a name
+// containing an apostrophe still breaks out. Apply escJsAttr() FIRST, then
+// escH() the result, and wrap in single quotes in the template string.
+function escJsAttr(s){return String(s??"").replace(/\\/g,"\\\\").replace(/'/g,"\\'")}
 function cidK(cid){return "c"+String(cid).replace(/[-]/g,"_")}
 
 // Datetime: "DD-MM-YYYY HH:MM" ↔ "YYYY-MM-DDTHH:MM"
@@ -817,8 +829,8 @@ function buildTmplPanel(cid,tmpls){
         ${schedBadge}
       </div>
       <div style="display:flex;gap:6px;flex-shrink:0">
-        <button class="btn btn-ghost btn-sm" onclick="toggleTmplEdit(${cid},${JSON.stringify(t.name)})">✎ Edit</button>
-        <button class="btn btn-success btn-sm" onclick="doStartTmpl(${cid},${JSON.stringify(escH(t.name))},this)">▶ Start</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleTmplEdit(${cid},'${escH(escJsAttr(t.name))}')">✎ Edit</button>
+        <button class="btn btn-success btn-sm" onclick="doStartTmpl(${cid},'${escH(escJsAttr(t.name))}',this)">▶ Start</button>
       </div>
     </div>
     <div class="tmpl-edit-panel" id="tmpledit-${eid}" style="display:none">
@@ -869,13 +881,19 @@ function buildTmplEditForm(cid,t,eid){
       <div style="flex:1"><label>Event time</label><input id="tef-etime-${eid}" class="amf-inp" type="time" value="${t.event_time||""}"/></div>
     </div>
     <div class="tmpl-ef-actions">
-      <button class="btn btn-primary btn-sm" onclick="saveTmplEdit(${cid},${JSON.stringify(t.name)},'${eid}')">Save</button>
-      <button class="btn btn-ghost btn-sm" onclick="toggleTmplEdit(${cid},${JSON.stringify(t.name)})">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="saveTmplEdit(${cid},'${escH(escJsAttr(t.name))}','${eid}')">Save</button>
+      <button class="btn btn-ghost btn-sm" onclick="toggleTmplEdit(${cid},'${escH(escJsAttr(t.name))}')">Cancel</button>
     </div>
   </div>`;
 }
 window.toggleTmplEdit=function(cid,name){
-  const eid=`te-${cidK(cid)}-${name.replace(/[^a-z0-9]/gi,"_")}`;
+  // Must match buildTmplPanel's eid construction exactly (CSS.escape when
+  // available, same regex fallback otherwise) — these previously diverged
+  // (this function never used CSS.escape), so any template name containing
+  // a space or other non-alphanumeric character produced a different id
+  // here than the one actually rendered, and the lookup below silently
+  // found nothing.
+  const eid=`te-${cidK(cid)}-${CSS.escape?CSS.escape(name):name.replace(/[^a-z0-9]/gi,"_")}`;
   const el=$id(`tmpledit-${eid}`);
   if(el)el.style.display=el.style.display==="none"?"block":"none";
 };

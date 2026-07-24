@@ -512,6 +512,52 @@ class TestGetRollcallsByGroupToken(unittest.TestCase):
         self.assertEqual(entry["fee"], "750")
         self.assertEqual(entry["limit"], 10)
 
+    def test_daily_template_included_despite_no_schedule_day(self):
+        """A daily template has schedule_day=None — must not be filtered out
+        the way a genuinely incomplete/malformed row would be (same class of
+        bug as the /schedules command's filter)."""
+        result = self._call("grouptoken", chat_row=_chat_row(),
+                            templates=[self._tmpl(enabled=True, schedule_day=None,
+                                                  recurrence_type="daily")])
+        self.assertEqual(len(result["upcoming"]), 1)
+
+    def test_one_time_pending_entries_included_in_upcoming(self):
+        from services.web import get_rollcalls_by_group_token
+        mgr = MagicMock()
+        mgr.get_rollcalls.return_value = []
+        pending = [{"id": 1, "title": "FridayMatch", "display_title": "Friday Match Night",
+                    "scheduled_at": "2026-07-25T13:00:00Z", "location": "Court 3",
+                    "fee": "200", "limit": 10}]
+        with patch("services.web.db") as mock_db, \
+             patch("services.web.manager", mgr), \
+             patch("services.web._list_templates", return_value=[]), \
+             patch("services.web._tmpl_svc.list_pending_once", return_value=pending):
+            mock_db.get_chat_by_group_web_token.return_value = _chat_row()
+            result = get_rollcalls_by_group_token("grouptoken")
+        self.assertEqual(len(result["upcoming"]), 1)
+        entry = result["upcoming"][0]
+        self.assertEqual(entry["title"], "Friday Match Night")
+        self.assertEqual(entry["scheduled_at"], "2026-07-25T13:00:00Z")
+        self.assertEqual(entry["recurrence_type"], "once")
+        self.assertEqual(entry["location"], "Court 3")
+
+    def test_one_time_and_recurring_both_included(self):
+        from services.web import get_rollcalls_by_group_token
+        mgr = MagicMock()
+        mgr.get_rollcalls.return_value = []
+        pending = [{"id": 1, "title": "OneOff", "display_title": None,
+                    "scheduled_at": "2026-07-25T13:00:00Z", "location": None,
+                    "fee": None, "limit": None}]
+        with patch("services.web.db") as mock_db, \
+             patch("services.web.manager", mgr), \
+             patch("services.web._list_templates", return_value=[self._tmpl(enabled=True)]), \
+             patch("services.web._tmpl_svc.list_pending_once", return_value=pending):
+            mock_db.get_chat_by_group_web_token.return_value = _chat_row()
+            result = get_rollcalls_by_group_token("grouptoken")
+        self.assertEqual(len(result["upcoming"]), 2)
+        names = {e["name"] for e in result["upcoming"]}
+        self.assertEqual(names, {"SundayGame", "OneOff"})
+
 
 if __name__ == "__main__":
     unittest.main()

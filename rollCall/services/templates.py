@@ -24,6 +24,7 @@ from db import (
     enable_template_schedule,
     get_template,
     get_templates,
+    get_upcoming_scheduled_rollcalls,
     log_admin_action,
     set_template_schedule,
 )
@@ -57,6 +58,7 @@ def _serialize_template(t: dict) -> dict:
         "schedule_enabled": str(t.get("schedule_enabled", "0")) not in ("0", "False", "None", ""),
         "recurrence_type": t.get("recurrence_type") or "weekly",
         "last_scheduled_date": t.get("last_scheduled_date"),
+        "schedule_expires_at": t.get("schedule_expires_at"),
     }
 
 
@@ -65,6 +67,40 @@ def _serialize_template(t: dict) -> dict:
 def list_templates(chat_id: int) -> list[dict]:
     """Return all templates for a chat."""
     return [_serialize_template(t) for t in get_templates(chat_id)]
+
+
+def list_pending_once(chat_id: int) -> list[dict]:
+    """Return pending one-time scheduled rollcalls for a chat, with the
+    referenced template's real fields resolved when one matches.
+
+    The one-time "Schedule" flow (New Rollcall modal) always saves a
+    template first, then repurposes a scheduled_rollcalls row's `title`
+    column to hold that template's NAME rather than a raw display title —
+    no new column needed to link them (see check_reminders.py's firing
+    logic). This is the single shared place that resolves that link, used
+    by every "what's scheduled" surface (the web page's own one-time list,
+    /schedules, and Coming Up This Week) so they can't drift out of sync
+    with each other.
+
+    Rows whose title doesn't match any template (pre-feature rows, or a
+    template that was deleted after being scheduled) come back with
+    display_title=None — callers should fall back to showing the raw title.
+    """
+    rows = get_upcoming_scheduled_rollcalls(chat_id)
+    out = []
+    for r in rows:
+        tmpl = get_template(chat_id, r["title"])
+        out.append({
+            "id": r["id"],
+            "title": r["title"],
+            "scheduled_at": r["scheduled_at"],
+            "created_by_name": r["created_by_name"],
+            "display_title": tmpl.get("title") if tmpl else None,
+            "location": tmpl.get("location") if tmpl else None,
+            "fee": tmpl.get("eventfee") if tmpl else None,
+            "limit": tmpl.get("inlistlimit") if tmpl else None,
+        })
+    return out
 
 
 def get_one_template(chat_id: int, name: str) -> dict:
@@ -197,7 +233,8 @@ def upsert_template(
                                 "schedule_time": existing.get("schedule_time"),
                                 "schedule_enabled": existing.get("schedule_enabled"),
                                 "recurrence_type": existing.get("recurrence_type"),
-                                "last_scheduled_date": existing.get("last_scheduled_date")})
+                                "last_scheduled_date": existing.get("last_scheduled_date"),
+                                "schedule_expires_at": existing.get("schedule_expires_at")})
 
 
 # ─── Start (spawn rollcall from template) ─────────────────────────────────────
@@ -310,7 +347,7 @@ def delete_one_template(
 
 # ─── Schedule ─────────────────────────────────────────────────────────────────
 
-_VALID_RECURRENCE = {"weekly", "biweekly", "monthly"}
+_VALID_RECURRENCE = {"daily", "weekly", "biweekly", "monthly"}
 _VALID_WEEKDAYS = set(WEEKDAY_MAP.keys())
 
 
@@ -324,6 +361,7 @@ def get_schedule(chat_id: int, name: str) -> dict:
         "schedule_enabled": t.get("schedule_enabled", False),
         "recurrence_type": t.get("recurrence_type", "weekly"),
         "last_scheduled_date": t.get("last_scheduled_date"),
+        "schedule_expires_at": t.get("schedule_expires_at"),
     }
 
 
@@ -336,12 +374,24 @@ def set_schedule(
     schedule_day: Optional[str] = None,
     schedule_time: Optional[str] = None,
     monthly_day: Optional[int] = None,
+    expires_at: Optional[str] = None,
 ) -> dict:
     """
     Set or update a template's auto-start schedule.
 
     For weekly / biweekly: schedule_day (full weekday name) + schedule_time HH:MM.
     For monthly: monthly_day (1-31) + schedule_time HH:MM.
+    For daily: schedule_day is ignored (fires every day) — only schedule_time
+    is required.
+
+    expires_at — optional "YYYY-MM-DD"; the schedule auto-disables itself
+    (template and its content are untouched, only schedule_enabled flips
+    off — see check_template_schedules) once the chat's local date passes
+    this. Defaults to one year from today if not given, so a schedule can
+    never be silently left running for years after everyone's forgotten
+    about it — callers that genuinely want a long-lived schedule should
+    pass an explicit far-future date.
+
     Returns the updated schedule dict.
 
     Raises:
@@ -356,7 +406,7 @@ def set_schedule(
     if recurrence_type not in _VALID_RECURRENCE:
         raise incorrectParameter(
             f"Invalid recurrence type '{recurrence_type}'. "
-            "Use: weekly, biweekly, monthly"
+            "Use: daily, weekly, biweekly, monthly"
         )
 
     if recurrence_type == "monthly":
@@ -373,6 +423,16 @@ def set_schedule(
         except ValueError:
             raise incorrectParameter(f"'{schedule_time}' is not a valid time. Use HH:MM")
         sched_day_str = str(monthly_day)
+    elif recurrence_type == "daily":
+        if not schedule_time:
+            raise parameterMissing("schedule_time (HH:MM) is required")
+        try:
+            sh, sm = map(int, schedule_time.split(":"))
+            if not (0 <= sh < 24 and 0 <= sm < 60):
+                raise ValueError
+        except ValueError:
+            raise incorrectParameter(f"'{schedule_time}' is not a valid time. Use HH:MM")
+        sched_day_str = None
     else:
         if not schedule_day:
             raise parameterMissing("schedule_day (weekday name) is required")
@@ -392,14 +452,22 @@ def set_schedule(
             raise incorrectParameter(f"'{schedule_time}' is not a valid time. Use HH:MM")
         sched_day_str = sched_day_lower
 
-    ok = set_template_schedule(chat_id, name, sched_day_str, schedule_time, recurrence_type)
+    if expires_at:
+        try:
+            datetime.strptime(expires_at, "%Y-%m-%d")
+        except ValueError:
+            raise incorrectParameter(f"'{expires_at}' is not a valid date. Use YYYY-MM-DD")
+    else:
+        expires_at = (datetime.now() + timedelta(days=365)).strftime("%Y-%m-%d")
+
+    ok = set_template_schedule(chat_id, name, sched_day_str, schedule_time, recurrence_type, expires_at)
     if not ok:
         raise incorrectParameter("Failed to save schedule. Please try again.")
 
     log_admin_action(
         chat_id, admin_user_id, admin_name,
         "schedule_template", target_name=name,
-        details=f"{recurrence_type} {sched_day_str} {schedule_time}",
+        details=f"{recurrence_type} {sched_day_str or ''} {schedule_time} until {expires_at}",
     )
     return get_schedule(chat_id, name)
 

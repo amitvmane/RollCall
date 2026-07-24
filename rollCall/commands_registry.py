@@ -326,10 +326,18 @@ COMMANDS = [
     },
     {
         "name": "set_template", "aliases": [], "scope": "admin", "category": "Templates",
-        "args": 'name "Title" [limit=N] [location=X] [fee=X]',
-        "sample": '/set_template friday "Friday Football" limit=14 location="Turf 3" fee=200',
+        "args": 'name "Title" [limit=N] [location=X] [fee=X] [event_day=weekday] [event_time=HH:MM] [offset_days=D] [offset_hours=H] [offset_minutes=M]',
+        "sample": '/set_template friday "Friday Football" limit=14 location="Turf 3" fee=200 event_day=friday event_time=19:00',
         "summary": "Create or update a template",
-        "details": "Saves a reusable rollcall config. Use /start_template name to spin one up.",
+        "details": (
+            "Saves a reusable rollcall config. Use /start_template name to spin one up.\n\n"
+            "event_day/event_time — when the game itself happens (closes voting on any "
+            "rollcall started from this template). offset_days/hours/minutes — alternative "
+            "to event_day/time: closes N days/hours/minutes after the rollcall opens, for a "
+            "one-off game with no fixed weekday. Use one or the other, not both.\n\n"
+            "Auto-start scheduling (when the template repeats and opens automatically) is a "
+            "separate step — see /schedule_template."
+        ),
     },
     {
         "name": "start_template", "aliases": [], "scope": "admin", "category": "Templates",
@@ -345,14 +353,19 @@ COMMANDS = [
     },
     {
         "name": "schedule_template", "aliases": [], "scope": "admin", "category": "Templates",
-        "args": "name <weekday|monthly|biweekly|off> <HH:MM>",
+        "args": "name <weekday|daily|monthly|biweekly|off> <HH:MM> [6m|12m|until=YYYY-MM-DD]",
         "sample": "/schedule_template friday friday 18:00",
         "summary": "Schedule auto-start for a template",
         "details": (
             "Weekly:    /schedule_template name <weekday> <HH:MM>\n"
             "Biweekly:  /schedule_template name <weekday> <HH:MM> biweekly\n"
+            "Daily:     /schedule_template name daily <HH:MM>\n"
             "Monthly:   /schedule_template name monthly <day> <HH:MM>\n"
             "Disable:   /schedule_template name off\n\n"
+            "Add 6m / 12m / until=YYYY-MM-DD anywhere in the command to set when the "
+            "schedule auto-disables itself (template stays, only the recurring "
+            "schedule turns off) — defaults to 1 year out if omitted, so a schedule "
+            "is never accidentally left running for years.\n\n"
             "Also editable self-serve from the group's web page (admin actions → "
             "📋 Templates) — any web admin can do this without server access."
         ),

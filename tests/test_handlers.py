@@ -455,6 +455,65 @@ class TestListTemplates(HandlerTestBase):
 
 
 # ===========================================================================
+# /schedules — recurring templates + one-time pending entries
+# ===========================================================================
+
+class TestSchedulesCommand(HandlerTestBase):
+
+    async def test_no_schedules_and_no_pending_sends_notice(self):
+        msg = self._make_message("/schedules")
+        with patch('handlers.templates.templates_svc.list_templates', return_value=[]), \
+             patch('handlers.templates.templates_svc.list_pending_once', return_value=[]):
+            await self.schedules_command(msg)
+        self.assertIn("no scheduled templates", self._sent_text().lower())
+
+    async def test_daily_template_included_despite_no_schedule_day(self):
+        """A daily-recurring template has schedule_day=None (no weekday to
+        match) — must not be filtered out of /schedules the way a
+        malformed/incomplete row would be."""
+        templates = [{"name": "standup", "title": "Daily Standup", "schedule_enabled": True,
+                      "schedule_day": None, "schedule_time": "09:00", "recurrence_type": "daily",
+                      "event_day": None, "event_time": None, "last_scheduled_date": None,
+                      "schedule_expires_at": "2027-01-01"}]
+        msg = self._make_message("/schedules")
+        with patch('handlers.templates.templates_svc.list_templates', return_value=templates), \
+             patch('handlers.templates.templates_svc.list_pending_once', return_value=[]):
+            await self.schedules_command(msg)
+        text = self._sent_text()
+        self.assertIn("Daily Standup", text)
+        self.assertIn("every day", text)
+
+    async def test_pending_once_entries_shown_in_own_section(self):
+        pending = [{"id": 1, "title": "FridayMatch", "display_title": "Friday Match Night",
+                    "scheduled_at": "2026-07-25T13:00:00Z", "location": "Court 3",
+                    "fee": "200", "limit": 10, "created_by_name": "Amit"}]
+        msg = self._make_message("/schedules")
+        with patch('handlers.templates.templates_svc.list_templates', return_value=[]), \
+             patch('handlers.templates.templates_svc.list_pending_once', return_value=pending):
+            await self.schedules_command(msg)
+        text = self._sent_text()
+        self.assertIn("One-time", text)
+        self.assertIn("Friday Match Night", text)
+        self.assertIn("Court 3", text)
+
+    async def test_both_sections_shown_together(self):
+        templates = [{"name": "weekly", "title": "Weekly Game", "schedule_enabled": True,
+                      "schedule_day": "monday", "schedule_time": "18:00", "recurrence_type": "weekly",
+                      "event_day": None, "event_time": None, "last_scheduled_date": None,
+                      "schedule_expires_at": None}]
+        pending = [{"id": 1, "title": "OneOff", "display_title": None,
+                    "scheduled_at": "2026-07-25T13:00:00Z", "location": None,
+                    "fee": None, "limit": None, "created_by_name": "Amit"}]
+        msg = self._make_message("/schedules")
+        with patch('handlers.templates.templates_svc.list_templates', return_value=templates), \
+             patch('handlers.templates.templates_svc.list_pending_once', return_value=pending):
+            await self.schedules_command(msg)
+        text = self._sent_text()
+        self.assertIn("Weekly Game", text)
+        self.assertIn("OneOff", text)
+
+
+# ===========================================================================
 # /start_roll_call  /src
 # ===========================================================================
 

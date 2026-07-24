@@ -56,6 +56,7 @@ async def start_rollcall(
     limit: int | None = None,
     event_day: str | None = None,
     event_time: str | None = None,
+    finalize_at: str | None = None,
 ) -> dict:
     """
     Create a new active rollcall for the chat.
@@ -64,14 +65,19 @@ async def start_rollcall(
       chat_id           — Telegram chat id (or platform-equivalent later)
       title             — title for the rollcall. `None` or empty falls back to '<Empty>'.
       started_by_*      — identity of the user starting it (for audit log)
-      location, fee, limit, event_day, event_time — optional, same vocabulary
-        and application logic as services.templates.start_template (applies
-        to the same rollcalls table columns — no new storage). event_day is
-        a weekday name; event_time is HH:MM. Together they compute
-        finalizeDate the identical way a template-started rollcall does —
-        this is "when does the game happen" (auto-close time), independent
-        of "when did voting open" (now, since this is the immediate-start
-        path).
+      location, fee, limit — optional, applied directly to the same rollcalls
+        table columns start_template uses.
+      event_day, event_time — optional weekday name + HH:MM. Only meaningful
+        for a rollcall that will recur (a weekly/biweekly/monthly template) —
+        "closes next occurrence of this weekday." Ignored if finalize_at is
+        also given.
+      finalize_at — optional UTC ISO 8601 datetime string (e.g. from a web
+        <input type="datetime-local"> converted via JS toISOString()) for a
+        ONE-TIME rollcall's exact close time — the same underlying
+        rc.finalizeDate field services.settings.set_rollcall_time sets via
+        /set_rollcall_time, just applied at creation instead of after the
+        fact. Takes precedence over event_day/event_time when both are
+        given (a one-off exact date is more specific than "next Xday").
 
     Returns:
       Dict with the created rollcall's serialized state, plus a `rc_index`
@@ -104,7 +110,7 @@ async def start_rollcall(
     if fee:
         rc.event_fee = fee
 
-    if event_day and event_time:
+    if finalize_at or (event_day and event_time):
         chat = manager.get_chat(chat_id)
         tzname = chat.get("timezone", "Asia/Kolkata")
         try:
@@ -113,9 +119,18 @@ async def start_rollcall(
             tz = pytz.timezone("Asia/Kolkata")
             tzname = "Asia/Kolkata"
         rc.timezone = tzname
-        dt = get_next_weekday_datetime(tz, event_day, event_time)
-        if dt:
-            rc.finalizeDate = dt
+        if finalize_at:
+            try:
+                dt = datetime.fromisoformat(finalize_at.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = pytz.utc.localize(dt)
+                rc.finalizeDate = dt.astimezone(tz)
+            except ValueError:
+                pass
+        else:
+            dt = get_next_weekday_datetime(tz, event_day, event_time)
+            if dt:
+                rc.finalizeDate = dt
 
     rc.save()
 

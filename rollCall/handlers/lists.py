@@ -18,6 +18,7 @@ from db import (
     upsert_chat_member,
 )
 from services import lists as lists_svc
+from services.stats import session_display_date
 from utils.text import parse_rc_suffix
 from datetime import datetime
 
@@ -147,7 +148,7 @@ async def history_command(message):
         header = f"*📋 Rollcalls {start_num}–{start_num + len(records) - 1}*" + (f" (page {page})" if page > 1 else "") + ":"
         lines = [header, ""]
         for i, r in enumerate(records, start_num):
-            ended = _fmt_ended_at(r.get("ended_at"))
+            ended = _fmt_ended_at(session_display_date(r))
             title = r.get("title") or "Untitled"
             in_count = r.get("in_count", 0)
             ghost_count = r.get("ghost_count", 0)

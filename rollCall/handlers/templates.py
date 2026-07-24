@@ -5,7 +5,7 @@ Template handlers: /templates, /set_template, /start_template, /delete_template,
 import asyncio
 import html
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -18,6 +18,29 @@ from services import templates as templates_svc
 
 def _ts() -> str:
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _extract_expiry_token(parts: list[str]):
+    """Scan args for an optional expiry token (6m / 12m / until=YYYY-MM-DD),
+    matching the same three choices the web New Rollcall modal offers, and
+    return (remaining_parts, expires_at_or_None, error_or_None). expires_at
+    is a "YYYY-MM-DD" string; error is a user-facing message if the token
+    was present but malformed. Doesn't require a specific position since the
+    required args differ in count across daily/weekly/monthly."""
+    for i, p in enumerate(parts):
+        pl = p.lower()
+        if pl in ("6m", "12m"):
+            months = 6 if pl == "6m" else 12
+            expires = (datetime.now() + timedelta(days=30 * months)).strftime("%Y-%m-%d")
+            return parts[:i] + parts[i + 1:], expires, None
+        if pl.startswith("until="):
+            date_str = p.split("=", 1)[1]
+            try:
+                datetime.strptime(date_str, "%Y-%m-%d")
+            except ValueError:
+                return parts, None, f"'{date_str}' is not a valid date. Use until=YYYY-MM-DD."
+            return parts[:i] + parts[i + 1:], date_str, None
+    return parts, None, None
 
 
 @bot.message_handler(func=lambda message: message.text.split(" ")[0].split("@")[0].lower() == "/templates")
@@ -68,6 +91,7 @@ def _fmt_schedule_entry(t: dict) -> str:
     event_time = t.get("event_time") or ""
     recurrence = t.get("recurrence_type") or "weekly"
     last_run = t.get("last_scheduled_date")
+    expires_at = t.get("schedule_expires_at")
 
     status = "🟢" if enabled else "🔴"
     paused_tag = "" if enabled else "  <i>(paused)</i>"
@@ -77,9 +101,11 @@ def _fmt_schedule_entry(t: dict) -> str:
     # be stitched together as a bare "X → Y" — easily misread as a single
     # time range. Label each half explicitly, and fold the recurrence into
     # "Opens" since only the opening actually recurs.
-    rec_label = {"weekly": "weekly", "biweekly": "every 2 weeks", "monthly": "monthly"}.get(recurrence, recurrence)
+    rec_label = {"daily": "daily", "weekly": "weekly", "biweekly": "every 2 weeks", "monthly": "monthly"}.get(recurrence, recurrence)
     if recurrence == "monthly":
         opens = f"day {html.escape(sched_day)} at {html.escape(sched_time)}"
+    elif recurrence == "daily":
+        opens = f"every day at {html.escape(sched_time)}"
     else:
         opens = f"{html.escape(sched_day.capitalize())} {html.escape(sched_time)}"
     timing = f"Opens {opens} ({rec_label})"
@@ -92,9 +118,10 @@ def _fmt_schedule_entry(t: dict) -> str:
         timing += f" → closes {closes}"
 
     last = f"last run: {html.escape(last_run)}" if last_run else "never run"
+    expiry = f"  ·  until {html.escape(expires_at)}" if expires_at else ""
     return (
         f"{status} <b>{html.escape(title)}</b> <code>[{html.escape(name)}]</code>{paused_tag}\n"
-        f"   {timing}  ·  {last}"
+        f"   {timing}  ·  {last}{expiry}"
     )
 
 
@@ -127,11 +154,29 @@ def _build_schedules_keyboard(templates: list, cid: int) -> InlineKeyboardMarkup
     return markup
 
 
+def _fmt_pending_once_entry(p: dict) -> str:
+    """One-off entries created via the web New Rollcall modal's Schedule ->
+    Once path — a scheduled_rollcalls row, not a recurring template, so it
+    has no pause/resume toggle and no repeat concept, just a single exact
+    fire time."""
+    title = p.get("display_title") or p.get("title")
+    when = str(p.get("scheduled_at") or "")
+    meta = " · ".join(filter(None, [
+        p.get("location"),
+        f"₹{p['fee']}" if p.get("fee") else None,
+        f"cap {p['limit']}" if p.get("limit") else None,
+    ]))
+    meta_line = f"\n   {html.escape(meta)}" if meta else ""
+    return f"🕐 <b>{html.escape(title)}</b>\n   Fires once at {html.escape(when)}{meta_line}"
+
+
 async def _send_schedules(cid: int, edit_msg_id: int = None):
     templates = templates_svc.list_templates(cid)
-    scheduled = [t for t in templates if t.get("schedule_day") and t.get("schedule_time")]
+    scheduled = [t for t in templates
+                 if t.get("schedule_time") and (t.get("schedule_day") or t.get("recurrence_type") == "daily")]
+    pending_once = templates_svc.list_pending_once(cid)
 
-    if not scheduled:
+    if not scheduled and not pending_once:
         text = "📅 No scheduled templates yet.\nUse /schedule_template to set up auto-start."
         if edit_msg_id:
             try:
@@ -143,13 +188,20 @@ async def _send_schedules(cid: int, edit_msg_id: int = None):
             await bot.send_message(cid, text)
         return
 
-    active = sum(1 for t in scheduled if t.get("schedule_enabled"))
-    selected_count = len(_sched_selection.get(cid, set()))
-    sel_hint = f"  ·  <i>{selected_count} selected</i>" if selected_count else ""
-    header = f"<b>📅 Scheduled Templates</b>  ({active} active / {len(scheduled)} total{sel_hint})\n"
-    body = "\n\n".join([_fmt_schedule_entry(t) for t in scheduled])
-    text = f"{header}\n{body}"
-    markup = _build_schedules_keyboard(scheduled, cid)
+    sections = []
+    if scheduled:
+        active = sum(1 for t in scheduled if t.get("schedule_enabled"))
+        selected_count = len(_sched_selection.get(cid, set()))
+        sel_hint = f"  ·  <i>{selected_count} selected</i>" if selected_count else ""
+        header = f"<b>📅 Scheduled Templates</b>  ({active} active / {len(scheduled)} total{sel_hint})\n"
+        body = "\n\n".join([_fmt_schedule_entry(t) for t in scheduled])
+        sections.append(f"{header}\n{body}")
+    if pending_once:
+        header = f"<b>🕐 One-time (upcoming)</b>  ({len(pending_once)} pending)\n"
+        body = "\n\n".join([_fmt_pending_once_entry(p) for p in pending_once])
+        sections.append(f"{header}\n{body}")
+    text = "\n\n".join(sections)
+    markup = _build_schedules_keyboard(scheduled, cid) if scheduled else None
 
     if edit_msg_id:
         try:
@@ -183,6 +235,10 @@ async def schedule_template_cmd(message):
 
         cid = message.chat.id
         parts = message.text.strip().split()
+        parts, expires_at, expiry_err = _extract_expiry_token(parts)
+        if expiry_err:
+            await bot.send_message(cid, expiry_err)
+            return
 
         if len(parts) < 2:
             await bot.send_message(
@@ -191,12 +247,16 @@ async def schedule_template_cmd(message):
                 "/schedule_template <name> <weekday> <HH:MM>           — weekly auto-start\n"
                 "/schedule_template <name> <weekday> <HH:MM> biweekly  — every 2 weeks\n"
                 "/schedule_template <name> monthly <day> <HH:MM>       — monthly on day N\n"
+                "/schedule_template <name> daily <HH:MM>               — every day\n"
                 "/schedule_template <name> off                          — disable\n"
                 "/schedule_template <name>                              — show current schedule\n\n"
+                "Add 6m / 12m / until=YYYY-MM-DD anywhere to set when the schedule "
+                "auto-disables (defaults to 1 year out if omitted).\n\n"
                 "Examples:\n"
                 "/schedule_template sunday_game friday 09:00\n"
                 "/schedule_template sunday_game friday 09:00 biweekly\n"
-                "/schedule_template sunday_game monthly 15 09:00"
+                "/schedule_template sunday_game monthly 15 09:00\n"
+                "/schedule_template sunday_game daily 09:00 6m"
             )
             return
 
@@ -215,15 +275,20 @@ async def schedule_template_cmd(message):
             event_time = tmpl.get("event_time")
             last_run = tmpl.get("last_scheduled_date")
             recurrence_type = tmpl.get("recurrence_type") or "weekly"
-            if sched_enabled and sched_day and sched_time:
-                recurrence_label = {"weekly": "weekly", "biweekly": "every 2 weeks", "monthly": "monthly"}.get(recurrence_type, recurrence_type)
+            sched_expires = tmpl.get("schedule_expires_at")
+            if sched_enabled and sched_time and (sched_day or recurrence_type == "daily"):
+                recurrence_label = {"daily": "daily", "weekly": "weekly", "biweekly": "every 2 weeks", "monthly": "monthly"}.get(recurrence_type, recurrence_type)
                 if recurrence_type == "monthly":
                     opens_str = f"day {sched_day} of each month at {sched_time}"
+                elif recurrence_type == "daily":
+                    opens_str = f"every day at {sched_time}"
                 else:
                     opens_str = f"{sched_day.capitalize()} {sched_time} ({recurrence_label})"
                 status = f"🗓 *{_esc_md(name)}* schedule: 🟢 enabled\nOpens: {opens_str}\n"
                 if event_day and event_time:
                     status += f"Closes: {event_day.capitalize()} {event_time}\n"
+                if sched_expires:
+                    status += f"Auto-disables after: {sched_expires}\n"
                 if last_run:
                     status += f"Last auto-started: {last_run}"
             else:
@@ -265,6 +330,10 @@ async def schedule_template_cmd(message):
             sched_day = str(day_num)
             sched_time = parts[4]
             recurrence_type = "monthly"
+        elif sched_day == "daily":
+            sched_time = parts[3]
+            recurrence_type = "daily"
+            sched_day = None
         else:
             sched_time = parts[3]
             if len(parts) > 4 and parts[4].lower() == "biweekly":
@@ -304,23 +373,27 @@ async def schedule_template_cmd(message):
                 return
 
         try:
-            templates_svc.set_schedule(
+            updated = templates_svc.set_schedule(
                 cid, name, message.from_user.id, message.from_user.first_name,
                 recurrence_type=recurrence_type,
                 schedule_day=sched_day if recurrence_type != "monthly" else None,
                 schedule_time=sched_time,
                 monthly_day=day_num if recurrence_type == "monthly" else None,
+                expires_at=expires_at,
             )
-            recurrence_label = {"weekly": "weekly", "biweekly": "every 2 weeks", "monthly": "monthly"}.get(recurrence_type, recurrence_type)
+            recurrence_label = {"daily": "daily", "weekly": "weekly", "biweekly": "every 2 weeks", "monthly": "monthly"}.get(recurrence_type, recurrence_type)
             if recurrence_type == "monthly":
                 opens_str = f"day {sched_day} of each month at {sched_time}"
+            elif recurrence_type == "daily":
+                opens_str = f"every day at {sched_time}"
             else:
                 opens_str = f"{sched_day.capitalize()} at {sched_time} ({recurrence_label})"
             closes_str = f"\nCloses: {event_day.capitalize()} at {event_time}" if event_day and event_time else ""
+            expires_str = f"\nAuto-disables after: {updated.get('schedule_expires_at')}"
             await bot.send_message(
                 cid,
                 f"🟢 Schedule set for template *{_esc_md(name)}*:\n"
-                f"Opens: {opens_str}{closes_str}",
+                f"Opens: {opens_str}{closes_str}{expires_str}",
                 parse_mode="Markdown"
             )
         except Exception:

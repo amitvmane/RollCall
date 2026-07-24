@@ -282,6 +282,48 @@ class TestRollcallsService(unittest.IsolatedAsyncioTestCase):
         rc.save.assert_called()
         self.assertEqual(result["title"], "Match Day")
 
+    async def test_start_rollcall_finalize_at_sets_exact_close_time(self):
+        """finalize_at (an exact UTC ISO datetime, from the New Rollcall
+        modal's one-time close-time picker) sets finalizeDate directly,
+        bypassing the weekday-based event_day/event_time computation —
+        the same field /set_rollcall_time sets after the fact, just applied
+        at creation time instead."""
+        mgr = self._mgr()
+        rc = _make_rc("Sunday Cricket")
+        mgr.add_rollcall.return_value = rc
+
+        with patch("services.rollcalls.manager", mgr), \
+             patch("services.rollcalls.log_admin_action"), \
+             patch("services.rollcalls.increment_user_stat"):
+            from services.rollcalls import start_rollcall
+            await start_rollcall(
+                100, "Sunday Cricket", 1, "Admin",
+                finalize_at="2026-07-26T05:10:00.000Z",
+            )
+
+        self.assertIsNotNone(rc.finalizeDate)
+        # Asia/Kolkata (chat default) is UTC+5:30 -> 05:10 UTC == 10:40 local
+        self.assertEqual(rc.finalizeDate.hour, 10)
+        self.assertEqual(rc.finalizeDate.minute, 40)
+
+    async def test_start_rollcall_finalize_at_takes_precedence_over_event_day(self):
+        mgr = self._mgr()
+        rc = _make_rc("Sunday Cricket")
+        mgr.add_rollcall.return_value = rc
+
+        with patch("services.rollcalls.manager", mgr), \
+             patch("services.rollcalls.log_admin_action"), \
+             patch("services.rollcalls.increment_user_stat"):
+            from services.rollcalls import start_rollcall
+            await start_rollcall(
+                100, "Sunday Cricket", 1, "Admin",
+                event_day="monday", event_time="09:00",
+                finalize_at="2026-07-26T05:10:00.000Z",
+            )
+
+        self.assertEqual(rc.finalizeDate.hour, 10)
+        self.assertEqual(rc.finalizeDate.minute, 40)
+
     async def test_start_rollcall_no_fields_leaves_rc_untouched(self):
         """Backward compat: the original title-only call path (bare Start/
         Schedule modals, /src command) must not touch location/fee/limit."""
@@ -1229,6 +1271,37 @@ class TestTemplatesService(unittest.IsolatedAsyncioTestCase):
             result = list_templates(100)
         self.assertEqual(result, [])
 
+    def test_list_pending_once_resolves_matching_template(self):
+        rows = [{"id": 1, "title": "FridayMatch", "scheduled_at": "2026-07-25T13:00:00Z",
+                 "created_by_name": "Amit"}]
+        tmpl = {"name": "FridayMatch", "title": "Friday Match Night", "location": "Court 3",
+                "eventfee": "200", "inlistlimit": 10}
+        with patch("services.templates.get_upcoming_scheduled_rollcalls", return_value=rows), \
+             patch("services.templates.get_template", return_value=tmpl):
+            from services.templates import list_pending_once
+            result = list_pending_once(100)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["display_title"], "Friday Match Night")
+        self.assertEqual(result[0]["location"], "Court 3")
+        self.assertEqual(result[0]["fee"], "200")
+        self.assertEqual(result[0]["limit"], 10)
+
+    def test_list_pending_once_no_matching_template(self):
+        rows = [{"id": 2, "title": "Just A Title", "scheduled_at": "2026-07-25T13:00:00Z",
+                 "created_by_name": "Amit"}]
+        with patch("services.templates.get_upcoming_scheduled_rollcalls", return_value=rows), \
+             patch("services.templates.get_template", return_value=None):
+            from services.templates import list_pending_once
+            result = list_pending_once(100)
+        self.assertIsNone(result[0]["display_title"])
+        self.assertEqual(result[0]["title"], "Just A Title")
+
+    def test_list_pending_once_empty(self):
+        with patch("services.templates.get_upcoming_scheduled_rollcalls", return_value=[]):
+            from services.templates import list_pending_once
+            result = list_pending_once(100)
+        self.assertEqual(result, [])
+
     def test_get_one_template_found(self):
         row = self._db_row("weekly")
         with patch("services.templates.get_template", return_value=row):
@@ -1415,8 +1488,55 @@ class TestTemplatesService(unittest.IsolatedAsyncioTestCase):
         with patch("services.templates.get_template", return_value=row):
             from services.templates import set_schedule
             with self.assertRaises(incorrectParameter):
-                set_schedule(100, "weekly", 1, "Admin", recurrence_type="daily",
+                set_schedule(100, "weekly", 1, "Admin", recurrence_type="yearly",
                              schedule_day="monday", schedule_time="09:00")
+
+    def test_set_schedule_daily_no_schedule_day_required(self):
+        row = self._db_row()
+        updated_row = {**row, "schedule_day": None, "schedule_time": "09:00",
+                       "schedule_enabled": "1", "recurrence_type": "daily"}
+        with patch("services.templates.get_template", side_effect=[row, updated_row, updated_row]), \
+             patch("services.templates.set_template_schedule", return_value=True) as mock_sched, \
+             patch("services.templates.log_admin_action"):
+            from services.templates import set_schedule
+            result = set_schedule(100, "weekly", 1, "Admin", recurrence_type="daily", schedule_time="09:00")
+        self.assertEqual(result["recurrence_type"], "daily")
+        # schedule_day must be None for daily — no weekday to match
+        self.assertIsNone(mock_sched.call_args.args[2])
+
+    def test_set_schedule_defaults_expiry_to_one_year(self):
+        import datetime
+        row = self._db_row()
+        updated_row = {**row, "schedule_day": "monday", "schedule_time": "09:00", "schedule_enabled": "1"}
+        with patch("services.templates.get_template", side_effect=[row, updated_row, updated_row]), \
+             patch("services.templates.set_template_schedule", return_value=True) as mock_sched, \
+             patch("services.templates.log_admin_action"):
+            from services.templates import set_schedule
+            set_schedule(100, "weekly", 1, "Admin", recurrence_type="weekly",
+                         schedule_day="monday", schedule_time="09:00")
+        expires_arg = mock_sched.call_args.args[5]
+        expected = (datetime.datetime.now() + datetime.timedelta(days=365)).strftime("%Y-%m-%d")
+        self.assertEqual(expires_arg, expected)
+
+    def test_set_schedule_explicit_expiry_passed_through(self):
+        row = self._db_row()
+        updated_row = {**row, "schedule_day": "monday", "schedule_time": "09:00", "schedule_enabled": "1"}
+        with patch("services.templates.get_template", side_effect=[row, updated_row, updated_row]), \
+             patch("services.templates.set_template_schedule", return_value=True) as mock_sched, \
+             patch("services.templates.log_admin_action"):
+            from services.templates import set_schedule
+            set_schedule(100, "weekly", 1, "Admin", recurrence_type="weekly",
+                         schedule_day="monday", schedule_time="09:00", expires_at="2027-01-01")
+        self.assertEqual(mock_sched.call_args.args[5], "2027-01-01")
+
+    def test_set_schedule_invalid_expiry_raises(self):
+        from exceptions import incorrectParameter
+        row = self._db_row()
+        with patch("services.templates.get_template", return_value=row):
+            from services.templates import set_schedule
+            with self.assertRaises(incorrectParameter):
+                set_schedule(100, "weekly", 1, "Admin", recurrence_type="weekly",
+                             schedule_day="monday", schedule_time="09:00", expires_at="not-a-date")
 
     def test_set_schedule_template_not_found_raises(self):
         from exceptions import incorrectParameter
@@ -1618,6 +1738,62 @@ class TestStatsService(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["title"], "Game")
         self.assertEqual(result[0]["in_count"], 5)
+
+    def test_history_prefers_finalize_date_over_ended_at(self):
+        """A rollcall closed late (e.g. a batch catch-up after a bot outage)
+        must show its real event date, not the day the bot got around to
+        closing it — see session_display_date."""
+        rows = [{"id": 1, "title": "Game", "ended_at": "2026-07-17 17:04:01",
+                 "finalize_date": "2026-07-05 06:30:00", "created_at": "2026-07-01 10:00:00",
+                 "in_count": 5, "out_count": 1, "maybe_count": 0}]
+        with patch("services.stats.get_rollcall_history", return_value=rows):
+            from services.stats import history
+            result = history(100, limit=5)
+        self.assertEqual(result[0]["ended_at"], "2026-07-05 06:30:00")
+
+    def test_history_falls_back_to_created_at_when_no_finalize_date(self):
+        rows = [{"id": 1, "title": "Game", "ended_at": "2026-07-17 17:04:01",
+                 "finalize_date": None, "created_at": "2026-07-01 10:00:00",
+                 "in_count": 0, "out_count": 0, "maybe_count": 0}]
+        with patch("services.stats.get_rollcall_history", return_value=rows):
+            from services.stats import history
+            result = history(100, limit=5)
+        self.assertEqual(result[0]["ended_at"], "2026-07-01 10:00:00")
+
+    def test_history_falls_back_to_ended_at_when_nothing_else_available(self):
+        rows = [{"id": 1, "title": "Game", "ended_at": "2026-07-17 17:04:01",
+                 "in_count": 0, "out_count": 0, "maybe_count": 0}]
+        with patch("services.stats.get_rollcall_history", return_value=rows):
+            from services.stats import history
+            result = history(100, limit=5)
+        self.assertEqual(result[0]["ended_at"], "2026-07-17 17:04:01")
+
+    def test_session_display_date_direct(self):
+        from services.stats import session_display_date
+        self.assertEqual(session_display_date({"finalize_date": "A", "created_at": "B", "ended_at": "C"}), "A")
+        self.assertEqual(session_display_date({"finalize_date": None, "created_at": "B", "ended_at": "C"}), "B")
+        self.assertEqual(session_display_date({"finalize_date": None, "created_at": None, "ended_at": "C"}), "C")
+        self.assertEqual(session_display_date({}), "")
+
+    def test_web_group_stats_personal_recent_sessions_uses_finalize_date(self):
+        row = {"status": "in", "ended_at": "2026-07-17 17:04:01", "finalize_date": "2026-07-05 06:30:00"}
+        chat = {"chat_id": 100}
+        personal = {"user_id": 5}
+        with patch("db.get_chat_by_group_web_token", return_value=chat), \
+             patch("services.stats.group_stats", return_value={
+                 "real_participants": 0, "proxy_participants": 0, "total_rollcalls": 0,
+                 "avg_attendance": 0, "real_attendance_slots": 0, "proxy_attendance_slots": 0,
+                 "waitlist_promotions": 0, "ghost_leaderboard": []}), \
+             patch("services.stats.leaderboard", return_value={"entries": []}), \
+             patch("services.stats.history", return_value=[]), \
+             patch("services.stats.resolve_user", return_value=("real", 5, "Amit")), \
+             patch("services.stats.personal_stats", return_value=personal), \
+             patch("services.stats.get_user_session_history", return_value=[row]), \
+             patch("services.stats.weekday_attendance", return_value=[]), \
+             patch("services.stats._entry_badges", return_value=[]):
+            from services.stats import web_group_stats
+            result = web_group_stats("tok123", lookup_name="Amit")
+        self.assertEqual(result["personal"]["recent_sessions"][0]["ended_at"], "2026-07-05 06:30:00")
 
 
 if __name__ == "__main__":

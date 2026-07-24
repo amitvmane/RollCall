@@ -540,15 +540,23 @@ function nextScheduledDate(schedDay,schedTime){
   d.setDate(now.getDate()+diff);d.setHours(h,m,0,0);
   return d;
 }
+// A one-time entry (Schedule -> Once) carries an exact scheduled_at instead
+// of a recurring schedule_day/schedule_time — use it directly rather than
+// computing a "next occurrence," which only makes sense for something that
+// repeats.
+function _upcomingEffectiveDate(u){
+  if(u.scheduled_at){const d=new Date(u.scheduled_at);return isNaN(d)?null:d;}
+  return nextScheduledDate(u.schedule_day,u.schedule_time);
+}
 function renderUpcoming(upcoming){
   const el=$("upcoming-card");
   if(!el)return;
   const thisWeek=(upcoming||[]).filter(u=>{
-    const d=nextScheduledDate(u.schedule_day,u.schedule_time);
+    const d=_upcomingEffectiveDate(u);
     return d&&(d-new Date())<=7*24*60*60*1000;
   }).sort((a,b)=>{
-    const da=nextScheduledDate(a.schedule_day,a.schedule_time);
-    const db=nextScheduledDate(b.schedule_day,b.schedule_time);
+    const da=_upcomingEffectiveDate(a);
+    const db=_upcomingEffectiveDate(b);
     return (da||0)-(db||0);
   });
   if(!thisWeek.length){el.classList.add("hidden");return;}
@@ -559,10 +567,11 @@ function renderUpcoming(upcoming){
   // explicitly instead of only showing the open time and calling it done.
   el.innerHTML=`<div class="upcoming-header">📅 Upcoming Rollcalls</div>`
     +thisWeek.map(u=>{
-      const d=nextScheduledDate(u.schedule_day,u.schedule_time);
+      const d=_upcomingEffectiveDate(u);
       const dateStr=d?d.toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"}):"";
       const timeStr=d?d.toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"}):"";
       const title=u.title||u.name;
+      const isOnce=!!u.scheduled_at;
       const hasEvent=u.event_day&&u.event_time;
       const eventStr=hasEvent
         ?`🏟 Event: ${u.event_day[0].toUpperCase()+u.event_day.slice(1)} ${u.event_time}`
@@ -572,7 +581,7 @@ function renderUpcoming(upcoming){
         <div class="upcoming-when" title="Opens (auto-starts)"><span class="upcoming-day">${dateStr}</span><span class="upcoming-time">${timeStr}</span></div>
         <div class="upcoming-info">
           <div class="upcoming-title">${title}</div>
-          <div class="upcoming-opens-lbl">Opens for voting</div>
+          <div class="upcoming-opens-lbl">${isOnce?"Opens for voting (one-time)":"Opens for voting"}</div>
           ${eventStr?`<div class="upcoming-event">${eventStr}</div>`:""}
           ${meta?`<div class="upcoming-meta">${meta}</div>`:""}
         </div>
@@ -1363,7 +1372,6 @@ window.closeNewRollcallModal=function(){
 function renderNewRollcallModalBody(){
   const body=document.getElementById("nrc-body");
   if(!body)return;
-  const eventDayOpts='<option value="">No fixed day</option>'+WEEKDAYS.map(d=>`<option value="${d}">${d[0].toUpperCase()+d.slice(1)}</option>`).join("");
   body.innerHTML=`
     <div id="nrc-template-row" style="margin-bottom:14px">
       <label style="font-size:.8rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">Start from a template (optional)</label>
@@ -1377,12 +1385,7 @@ function renderNewRollcallModalBody(){
       <input id="nrc-location" type="text" placeholder="Location" maxlength="200" style="flex:1;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem"/>
       <input id="nrc-fee" type="text" placeholder="Fee" maxlength="50" style="flex:1;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem"/>
     </div>
-    <input id="nrc-limit" type="number" min="1" max="1000" placeholder="Capacity (max attendees)" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem;margin-bottom:12px"/>
-    <label style="font-size:.78rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">🏟 Event day &amp; time (when the game happens — closes voting)</label>
-    <div style="display:flex;gap:8px;margin-bottom:16px">
-      <select id="nrc-eventday" style="flex:1;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem">${eventDayOpts}</select>
-      <input id="nrc-eventtime" type="time" style="flex:1;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem"/>
-    </div>
+    <input id="nrc-limit" type="number" min="1" max="1000" placeholder="Capacity (max attendees)" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem;margin-bottom:16px"/>
     <label style="font-size:.8rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">When should it start?</label>
     <div class="nrc-seg" style="margin-bottom:12px">
       <button type="button" class="nrc-seg-btn active" id="nrc-seg-now" onclick="_nrcSetTiming('now')">Now</button>
@@ -1393,6 +1396,29 @@ function renderNewRollcallModalBody(){
   _nrcRenderTimingBody();
 }
 
+// ── Close-time helpers ──────────────────────────────────────────────────
+// "Closes at" is always optional in the UI — if left blank we default to
+// end of day (23:59 local) rather than leaving the rollcall open forever
+// by accident. This mirrors /set_rollcall_time's exact-datetime mechanic
+// (services/settings.py::set_rollcall_time) applied at creation time
+// instead of after the fact, and is deliberately NOT the weekday-based
+// event_day/event_time picker — "next Xday" doesn't mean anything useful
+// for a single one-off close time. The weekday picker is kept only for
+// genuinely recurring templates (Weekly/Biweekly/Monthly below), where
+// "closes next Xday" is the correct, repeatable concept.
+function _nrcEndOfDayISO(baseDate){
+  const d=new Date(baseDate);
+  d.setHours(23,59,0,0);
+  return d.toISOString();
+}
+function _nrcOffsetFromMs(openMs,closeMs){
+  let diffMin=Math.round((closeMs-openMs)/60000);
+  if(diffMin<0)diffMin=0;
+  const days=Math.floor(diffMin/1440);diffMin-=days*1440;
+  const hours=Math.floor(diffMin/60);const minutes=diffMin-hours*60;
+  return{days,hours,minutes};
+}
+
 function _nrcRenderTimingBody(){
   const el=document.getElementById("nrc-timing-body");
   if(!el)return;
@@ -1400,6 +1426,9 @@ function _nrcRenderTimingBody(){
   if(_nrcState.timing==="now"){
     if(btn)btn.textContent="Start →";
     el.innerHTML=`
+      <label style="font-size:.78rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">Closes at (optional)</label>
+      <input id="nrc-close-at" type="datetime-local" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:.95rem;background:var(--card);color:var(--text);margin-bottom:4px"/>
+      <div style="font-size:.72rem;color:var(--sub);margin-bottom:14px">Leave blank to auto-close at 11:59 PM today.</div>
       <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer">
         <input type="checkbox" id="nrc-save-template-check" onchange="document.getElementById('nrc-save-template-row').classList.toggle('hidden',!this.checked)"/>
         <span style="font-size:.85rem;font-weight:600">💾 Also save as a reusable template</span>
@@ -1411,18 +1440,26 @@ function _nrcRenderTimingBody(){
     return;
   }
   if(btn)btn.textContent="Schedule →";
+  const eventDayOpts=WEEKDAYS.map(d=>`<option value="${d}" ${_nrcState.eventDay===d?"selected":""}>${d[0].toUpperCase()+d.slice(1)}</option>`).join("");
   el.innerHTML=`
     <div style="font-size:.75rem;color:var(--sub);margin-bottom:10px">Scheduling always saves these details as a template first, so it can repeat (or fire once) later.</div>
     <label style="font-size:.78rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">Repeat</label>
     <select id="nrc-recurrence" onchange="_nrcOnRecurrenceChange(this.value)" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem;margin-bottom:12px">
-      <option value="once">Just once</option>
-      <option value="weekly">Weekly</option>
-      <option value="biweekly">Every 2 weeks</option>
-      <option value="monthly">Monthly</option>
+      <option value="once" ${_nrcState.recurrence==="once"?"selected":""}>Just once</option>
+      <option value="daily" ${_nrcState.recurrence==="daily"?"selected":""}>Daily</option>
+      <option value="weekly" ${_nrcState.recurrence==="weekly"?"selected":""}>Weekly</option>
+      <option value="biweekly" ${_nrcState.recurrence==="biweekly"?"selected":""}>Every 2 weeks</option>
+      <option value="monthly" ${_nrcState.recurrence==="monthly"?"selected":""}>Monthly</option>
     </select>
     <div id="nrc-rec-once" style="margin-bottom:12px">
-      <label style="font-size:.78rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">Date &amp; time (your local time)</label>
-      <input id="nrc-sched-at" type="datetime-local" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:.95rem;background:var(--card);color:var(--text)"/>
+      <label style="font-size:.78rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">Opens for voting (your local time)</label>
+      <input id="nrc-sched-at" type="datetime-local" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:.95rem;background:var(--card);color:var(--text);margin-bottom:12px"/>
+      <label style="font-size:.78rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">Closes at (optional)</label>
+      <input id="nrc-close-at-once" type="datetime-local" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:.95rem;background:var(--card);color:var(--text);margin-bottom:4px"/>
+      <div style="font-size:.72rem;color:var(--sub)">Leave blank to auto-close at 11:59 PM that day.</div>
+    </div>
+    <div id="nrc-rec-daily" style="display:none;margin-bottom:12px">
+      <input id="nrc-rec-dailytime" type="time" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem"/>
     </div>
     <div id="nrc-rec-weekly" style="display:none;gap:8px;margin-bottom:12px">
       <select id="nrc-rec-day" style="flex:1;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem">${WEEKDAYS.map(d=>`<option value="${d}">${d[0].toUpperCase()+d.slice(1)}</option>`).join("")}</select>
@@ -1431,6 +1468,25 @@ function _nrcRenderTimingBody(){
     <div id="nrc-rec-monthly" style="display:none;gap:8px;margin-bottom:12px">
       <input id="nrc-rec-monthday" type="number" min="1" max="31" placeholder="Day (1-31)" style="flex:1;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem"/>
       <input id="nrc-rec-monthtime" type="time" style="flex:1;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem"/>
+    </div>
+    <div id="nrc-rec-eventclose" style="display:none;margin-bottom:12px">
+      <label style="font-size:.78rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">🏟 Event day &amp; time (when the game happens — closes voting, repeats every cycle)</label>
+      <div style="display:flex;gap:8px">
+        <select id="nrc-eventday" style="flex:1;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem"><option value="">No fixed day</option>${eventDayOpts}</select>
+        <input id="nrc-eventtime" type="time" value="${esc(_nrcState.eventTime||"")}" style="flex:1;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem"/>
+      </div>
+    </div>
+    <div id="nrc-rec-expiry" style="display:none;margin-bottom:12px">
+      <label style="font-size:.78rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">Auto-disable this schedule after</label>
+      <select id="nrc-expiry-mode" onchange="document.getElementById('nrc-expiry-date-row').classList.toggle('hidden',this.value!=='custom')" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem;margin-bottom:8px">
+        <option value="12m">12 months</option>
+        <option value="6m">6 months</option>
+        <option value="custom">Custom date…</option>
+      </select>
+      <div id="nrc-expiry-date-row" class="hidden">
+        <input id="nrc-expiry-date" type="date" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem"/>
+      </div>
+      <div style="font-size:.72rem;color:var(--sub);margin-top:4px">The template stays — only the recurring schedule turns off, and you can re-enable it anytime.</div>
     </div>
     <label style="font-size:.8rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">Template name</label>
     <input id="nrc-template-name" type="text" placeholder="e.g. sunday-cricket" maxlength="50" value="${esc(_nrcState.templateName||"")}" oninput="_nrcSetTemplateName(this.value)" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem"/>
@@ -1443,10 +1499,30 @@ function _nrcRenderTimingBody(){
     const pad=n=>String(n).padStart(2,"0");
     atInp.value=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }
+  const dailyTime=document.getElementById("nrc-rec-dailytime");
+  if(dailyTime)dailyTime.value="09:00";
   const recTime=document.getElementById("nrc-rec-time");
   if(recTime)recTime.value="09:00";
   const monthTime=document.getElementById("nrc-rec-monthtime");
   if(monthTime)monthTime.value="09:00";
+  _nrcOnRecurrenceChange(_nrcState.recurrence||"once");
+}
+
+// Resolves the expiry picker's selection ("6m"/"12m"/"custom") into a
+// "YYYY-MM-DD" string, or null if the picker isn't in the DOM (Once mode,
+// where a recurring schedule's expiry doesn't apply).
+function _nrcResolveExpiryDate(){
+  const mode=document.getElementById("nrc-expiry-mode")?.value;
+  if(!mode)return null;
+  if(mode==="custom"){
+    const v=document.getElementById("nrc-expiry-date")?.value;
+    return v||null;
+  }
+  const months=mode==="6m"?6:12;
+  const d=new Date();
+  d.setMonth(d.getMonth()+months);
+  const pad=n=>String(n).padStart(2,"0");
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 }
 
 window._nrcSetTemplateName=function(v){
@@ -1462,10 +1538,13 @@ window._nrcSetTiming=function(mode){
 
 window._nrcOnRecurrenceChange=function(value){
   _nrcState.recurrence=value;
-  const show=(id,on)=>{const e=document.getElementById(id);if(e)e.style.display=on?"flex":"none";};
-  show("nrc-rec-once",value==="once");
-  show("nrc-rec-weekly",value==="weekly"||value==="biweekly");
-  show("nrc-rec-monthly",value==="monthly");
+  const show=(id,on,display)=>{const e=document.getElementById(id);if(e)e.style.display=on?display:"none";};
+  show("nrc-rec-once",value==="once","block");
+  show("nrc-rec-daily",value==="daily","block");
+  show("nrc-rec-weekly",value==="weekly"||value==="biweekly","flex");
+  show("nrc-rec-monthly",value==="monthly","flex");
+  show("nrc-rec-eventclose",value!=="once","block");
+  show("nrc-rec-expiry",value!=="once","block");
 };
 
 function _nrcRenderTemplateOptions(){
@@ -1481,7 +1560,7 @@ window._nrcOnTemplateSelect=function(name){
   if(!t){
     set("nrc-title","");set("nrc-location","");set("nrc-fee","");set("nrc-limit","");
     set("nrc-eventday","");set("nrc-eventtime","");
-    _nrcState.templateName="";
+    _nrcState.templateName="";_nrcState.eventDay="";_nrcState.eventTime="";
     const nameInp=document.getElementById("nrc-template-name");
     if(nameInp)nameInp.value="";
     return;
@@ -1492,6 +1571,12 @@ window._nrcOnTemplateSelect=function(name){
   set("nrc-limit",t.limit||"");
   set("nrc-eventday",t.event_day||"");
   set("nrc-eventtime",t.event_time||"");
+  // eventday/eventtime inputs only exist in the DOM in Schedule ->
+  // Weekly/Biweekly/Monthly mode — stash the value in state too (same
+  // pattern as templateName) so it's restored correctly if the user picks
+  // a template while on the Now/Once tab and switches to Weekly later.
+  _nrcState.eventDay=t.event_day||"";
+  _nrcState.eventTime=t.event_time||"";
   _nrcState.templateName=name;
   const nameInp=document.getElementById("nrc-template-name");
   if(nameInp)nameInp.value=name;
@@ -1505,25 +1590,31 @@ window.submitNewRollcall=async function(){
   const fee=(document.getElementById("nrc-fee")?.value||"").trim()||null;
   const limitVal=document.getElementById("nrc-limit")?.value;
   const limit=limitVal?parseInt(limitVal,10):null;
-  const eventDay=document.getElementById("nrc-eventday")?.value||null;
-  const eventTime=document.getElementById("nrc-eventtime")?.value||null;
-  if((eventDay&&!eventTime)||(!eventDay&&eventTime)){
-    toast("Set both event day and time, or leave both blank.",3000);
-    return;
-  }
 
   const btn=document.getElementById("nrc-submit-btn");
   if(_nrcState.timing==="now"){
     const saveAsTemplate=document.getElementById("nrc-save-template-check")?.checked;
     const templateName=(document.getElementById("nrc-template-name")?.value||"").trim();
     if(saveAsTemplate&&!templateName){toast("Enter a name for the template.",2500);return;}
+    // Closes-at is optional — a one-off exact date/time (see _nrcRenderTimingBody's
+    // comment), defaulting to end of today if left blank so it never stays
+    // open forever by accident.
+    const closeAtLocal=document.getElementById("nrc-close-at")?.value;
+    let finalizeAt;
+    if(closeAtLocal){
+      const ms=new Date(closeAtLocal).getTime();
+      if(isNaN(ms)){toast("Invalid close date/time.",2500);return;}
+      finalizeAt=new Date(ms).toISOString();
+    }else{
+      finalizeAt=_nrcEndOfDayISO(new Date());
+    }
     if(btn){btn.disabled=true;btn.textContent="Starting…";}
     try{
       const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/start-rollcall`,{
         method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
           id_token:_idToken,title,location,fee,limit,
-          event_day:eventDay,event_time:eventTime,
+          finalize_at:finalizeAt,
           save_as_template:saveAsTemplate?templateName:null,
         }),
         signal:AbortSignal.timeout(10000),
@@ -1550,28 +1641,63 @@ window.submitNewRollcall=async function(){
   const recurrence=_nrcState.recurrence;
 
   let scheduledAt=null,schedDay=null,schedTime=null,monthDay=null;
+  let offsetDays=null,offsetHours=null,offsetMinutes=null;
+  let eventDay=null,eventTime=null;
   if(recurrence==="once"){
     const atLocal=document.getElementById("nrc-sched-at")?.value;
     if(!atLocal){toast("Pick a date and time.",2500);return;}
-    const localMs=new Date(atLocal).getTime();
-    if(isNaN(localMs)||localMs<=Date.now()){toast("Choose a future date and time.",3000);return;}
-    scheduledAt=new Date(localMs).toISOString();
+    const openMs=new Date(atLocal).getTime();
+    if(isNaN(openMs)||openMs<=Date.now()){toast("Choose a future date and time.",3000);return;}
+    scheduledAt=new Date(openMs).toISOString();
+    // Closes-at is an exact date/time too (like the Now tab) — not a
+    // weekday, since "next Xday" doesn't mean anything for a single
+    // occurrence. Converted to an offset-from-open here because the fire
+    // logic (services/templates.py::start_template) only learns the real
+    // open time when the template actually fires, days later — offset_days/
+    // hours/minutes are existing template columns built exactly for this
+    // ("closes N days/hours after it opens").
+    const closeAtLocal=document.getElementById("nrc-close-at-once")?.value;
+    const closeMs=closeAtLocal?new Date(closeAtLocal).getTime():new Date(_nrcEndOfDayISO(new Date(openMs))).getTime();
+    if(closeAtLocal&&isNaN(closeMs)){toast("Invalid close date/time.",2500);return;}
+    ({days:offsetDays,hours:offsetHours,minutes:offsetMinutes}=_nrcOffsetFromMs(openMs,closeMs));
   }else if(recurrence==="monthly"){
     monthDay=parseInt(document.getElementById("nrc-rec-monthday")?.value,10);
     schedTime=document.getElementById("nrc-rec-monthtime")?.value;
     if(!monthDay||monthDay<1||monthDay>31){toast("Enter a day of month (1-31).",2500);return;}
     if(!schedTime){toast("Pick a time.",2500);return;}
+    eventDay=document.getElementById("nrc-eventday")?.value||null;
+    eventTime=document.getElementById("nrc-eventtime")?.value||null;
+  }else if(recurrence==="daily"){
+    schedTime=document.getElementById("nrc-rec-dailytime")?.value;
+    if(!schedTime){toast("Pick a time.",2500);return;}
+    eventDay=document.getElementById("nrc-eventday")?.value||null;
+    eventTime=document.getElementById("nrc-eventtime")?.value||null;
   }else{
     schedDay=document.getElementById("nrc-rec-day")?.value;
     schedTime=document.getElementById("nrc-rec-time")?.value;
     if(!schedTime){toast("Pick a time.",2500);return;}
+    eventDay=document.getElementById("nrc-eventday")?.value||null;
+    eventTime=document.getElementById("nrc-eventtime")?.value||null;
+  }
+  if((eventDay&&!eventTime)||(!eventDay&&eventTime)){
+    toast("Set both event day and time, or leave both blank.",3000);
+    return;
+  }
+  let expiresAt=null;
+  if(recurrence!=="once"){
+    expiresAt=_nrcResolveExpiryDate();
+    if(!expiresAt){toast("Pick a valid end date for the schedule.",2500);return;}
   }
 
   if(btn){btn.disabled=true;btn.textContent="Scheduling…";}
   try{
+    const tmplBody={id_token:_idToken,title,location,fee,limit:limit||0,event_day:eventDay,event_time:eventTime};
+    if(recurrence==="once"){
+      tmplBody.offset_days=offsetDays;tmplBody.offset_hours=offsetHours;tmplBody.offset_minutes=offsetMinutes;
+    }
     const tmplRes=await fetch(`/api/v1/web/group/${URL_TOKEN}/templates/${encodeURIComponent(templateName)}`,{
       method:"PUT",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({id_token:_idToken,title,location,fee,limit:limit||0,event_day:eventDay,event_time:eventTime}),
+      body:JSON.stringify(tmplBody),
       signal:AbortSignal.timeout(8000),
     });
     if(!tmplRes.ok)throw new Error((await tmplRes.json().catch(()=>({}))).detail||"Failed to save template");
@@ -1584,9 +1710,9 @@ window.submitNewRollcall=async function(){
       });
       if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"Failed to schedule rollcall");
     }else{
-      const schedBody={id_token:_idToken,recurrence_type:recurrence,schedule_time:schedTime};
+      const schedBody={id_token:_idToken,recurrence_type:recurrence,schedule_time:schedTime,expires_at:expiresAt};
       if(recurrence==="monthly")schedBody.monthly_day=monthDay;
-      else schedBody.schedule_day=schedDay;
+      else if(recurrence!=="daily")schedBody.schedule_day=schedDay;
       const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/templates/${encodeURIComponent(templateName)}/schedule`,{
         method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(schedBody),
         signal:AbortSignal.timeout(8000),
@@ -2204,6 +2330,15 @@ async function loadTemplatesSchedule(){
       {signal:AbortSignal.timeout(8000)});
     if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"Failed to load templates");
     _templatesCache=await res.json();
+    // Also load the one-time pending list (if not already cached) so a
+    // template that's only referenced by a pending one-off fire — never
+    // schedule_enabled — doesn't get mislabeled "Not scheduled" below.
+    if(!_scheduledOnceCache){
+      try{
+        const r2=await fetch(`/api/v1/web/group/${URL_TOKEN}/scheduled-rollcalls?id_token=${encodeURIComponent(_idToken)}`,{signal:AbortSignal.timeout(5000)});
+        if(r2.ok)_scheduledOnceCache=(await r2.json()).items||[];
+      }catch(_){/* best-effort — Templates list still renders without it */}
+    }
     renderTemplatesSchedule();
   }catch(e){
     body.innerHTML=`<div class="sched-empty">${esc(e.message||"Could not load templates")}</div>`;
@@ -2219,22 +2354,33 @@ function renderTemplatesSchedule(){
   }
   body.innerHTML=_templatesCache.map(t=>{
     const enabled=t.schedule_enabled;
-    const recLabel={weekly:"weekly",biweekly:"every 2 weeks",monthly:"monthly"}[t.recurrence_type]||t.recurrence_type;
+    const recLabel={daily:"daily",weekly:"weekly",biweekly:"every 2 weeks",monthly:"monthly"}[t.recurrence_type]||t.recurrence_type;
+    // A template with no recurring schedule can still have a pending
+    // one-time fire referencing it (the New Rollcall modal's Schedule ->
+    // Once path saves a template but never sets schedule_enabled) — cross-
+    // reference so it doesn't get mislabeled "Not scheduled" when it
+    // genuinely has something coming up.
+    const pendingOnce=!enabled&&(_scheduledOnceCache||[]).find(p=>p.title===t.name);
     const when=enabled
       ?`Opens ${t.recurrence_type==="monthly"
         ?`day ${esc(t.schedule_day)} of each month at ${esc(t.schedule_time)}`
-        :`${esc((t.schedule_day||"").replace(/^./,c=>c.toUpperCase()))} ${esc(t.schedule_time)} (${recLabel})`}`
-      :"Not scheduled";
+        :t.recurrence_type==="daily"
+          ?`every day at ${esc(t.schedule_time)}`
+          :`${esc((t.schedule_day||"").replace(/^./,c=>c.toUpperCase()))} ${esc(t.schedule_time)} (${recLabel})`}`
+      :pendingOnce
+        ?`One-time: ${esc(new Date(pendingOnce.scheduled_at).toLocaleString(undefined,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}))}`
+        :"Not scheduled";
     const closes=(t.event_day&&t.event_time)
       ?`Closes ${esc((t.event_day||"").replace(/^./,c=>c.toUpperCase()))} ${esc(t.event_time)}`
       :"";
+    const expires=(enabled&&t.schedule_expires_at)?`Until ${esc(t.schedule_expires_at)}`:"";
     const meta=[t.location,t.fee?`₹${t.fee}`:null,t.limit?`Cap ${t.limit}`:null].filter(Boolean).join(" · ");
     const editing=_templatesEditingName===t.name;
     return `<div class="sched-item" style="flex-direction:column;align-items:stretch">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%">
         <div class="sched-item-info">
           <div class="sched-item-title">${esc(t.title||t.name)}</div>
-          <div class="sched-item-time">${when}${closes?" · "+closes:""}</div>
+          <div class="sched-item-time">${when}${closes?" · "+closes:""}${expires?" · "+expires:""}</div>
           ${meta?`<div class="upcoming-meta">${esc(meta)}</div>`:""}
         </div>
         <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
@@ -2253,6 +2399,7 @@ function renderTemplatesSchedule(){
 
 function renderTemplateEditForm(t){
   const isMonthly=t.recurrence_type==="monthly";
+  const isDaily=t.recurrence_type==="daily";
   const safeName=esc(t.name);
   // For a monthly template, schedule_day holds a day-of-month number (e.g.
   // "15"), not a weekday name — it never matches an option below. Without
@@ -2285,18 +2432,30 @@ function renderTemplateEditForm(t){
 
     <div class="id-prompt-label" style="text-align:left;margin-bottom:0;margin-top:4px">🗓 Auto-start schedule</div>
     ${sublabel("When this template repeats and opens a new rollcall automatically — separate from the event time above.")}
+    <label style="font-size:.78rem;font-weight:600;color:var(--sub)">Repeat</label>
     <div style="display:flex;gap:8px">
       <select id="tsf-rec-${safeName}" onchange="_onTsfRecurrenceChange('${esc(escJsAttr(t.name))}')" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
+        <option value="daily" ${isDaily?"selected":""}>Daily</option>
         <option value="weekly" ${t.recurrence_type==="weekly"?"selected":""}>Weekly</option>
         <option value="biweekly" ${t.recurrence_type==="biweekly"?"selected":""}>Every 2 weeks</option>
         <option value="monthly" ${isMonthly?"selected":""}>Monthly</option>
       </select>
     </div>
     <div style="display:flex;gap:8px">
-      <select id="tsf-day-${safeName}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem;${isMonthly?"display:none":""}">${dayOpts}</select>
+      <select id="tsf-day-${safeName}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem;${isMonthly||isDaily?"display:none":""}">${dayOpts}</select>
       <input id="tsf-monthday-${safeName}" type="number" min="1" max="31" placeholder="Day (1-31)" value="${isMonthly?esc(t.schedule_day||""):""}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem;${isMonthly?"":"display:none"}"/>
       <input id="tsf-time-${safeName}" type="time" value="${esc(t.schedule_time||"09:00")}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem"/>
     </div>
+    <div class="id-prompt-label" style="text-align:left;margin-bottom:0;margin-top:4px">Auto-disable after</div>
+    <div style="display:flex;gap:8px">
+      <select id="tsf-expmode-${safeName}" onchange="document.getElementById('tsf-expdate-${safeName}').style.display=this.value==='custom'?'':'none'" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
+        <option value="12m">12 months from now</option>
+        <option value="6m">6 months from now</option>
+        <option value="custom" selected>Custom date</option>
+      </select>
+      <input id="tsf-expdate-${safeName}" type="date" value="${esc(t.schedule_expires_at||"")}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem"/>
+    </div>
+    ${sublabel("The template stays — only the recurring schedule turns off, and you can re-enable it anytime.")}
     <button class="btn btn-primary" style="padding:9px" onclick="saveTemplate('${esc(escJsAttr(t.name))}')">💾 Save</button>
   </div>`;
 }
@@ -2316,8 +2475,10 @@ window.startTemplateNow=async function(name){
 };
 
 window._onTsfRecurrenceChange=function(name){
-  const isMonthly=document.getElementById(`tsf-rec-${name}`).value==="monthly";
-  document.getElementById(`tsf-day-${name}`).style.display=isMonthly?"none":"";
+  const rec=document.getElementById(`tsf-rec-${name}`).value;
+  const isMonthly=rec==="monthly";
+  const isDaily=rec==="daily";
+  document.getElementById(`tsf-day-${name}`).style.display=(isMonthly||isDaily)?"none":"";
   document.getElementById(`tsf-monthday-${name}`).style.display=isMonthly?"":"none";
 };
 
@@ -2343,8 +2504,20 @@ window.saveTemplate=async function(name){
       const md=parseInt(document.getElementById(`tsf-monthday-${name}`).value,10);
       if(!md||md<1||md>31){toast("Enter a day of month (1-31).",2500);return;}
       scheduleBody.monthly_day=md;
-    }else{
+    }else if(recurrence_type!=="daily"){
       scheduleBody.schedule_day=document.getElementById(`tsf-day-${name}`).value;
+    }
+    const expMode=document.getElementById(`tsf-expmode-${name}`)?.value;
+    if(expMode==="custom"){
+      const expDate=document.getElementById(`tsf-expdate-${name}`)?.value;
+      if(!expDate){toast("Pick an auto-disable date, or choose 6/12 months.",2500);return;}
+      scheduleBody.expires_at=expDate;
+    }else if(expMode){
+      const months=expMode==="6m"?6:12;
+      const d=new Date();
+      d.setMonth(d.getMonth()+months);
+      const pad=n=>String(n).padStart(2,"0");
+      scheduleBody.expires_at=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
     }
   }
   const contentBody={

@@ -365,6 +365,7 @@ async def web_start_rollcall(
             limit=body.limit,
             event_day=body.event_day,
             event_time=body.event_time,
+            finalize_at=body.finalize_at,
         )
     rc = _mgr.get_rollcall(chat_id, result["rc_index"])
     if rc is None:
@@ -549,16 +550,21 @@ async def web_set_template_schedule(
         schedule_day=body.schedule_day,
         schedule_time=body.schedule_time,
         monthly_day=body.monthly_day,
+        expires_at=body.expires_at,
     )
     tmpl = tmpl_svc.get_one_template(chat_id, name)
 
-    recurrence_label = {"weekly": "weekly", "biweekly": "every 2 weeks", "monthly": "monthly"}.get(
+    recurrence_label = {"daily": "daily", "weekly": "weekly", "biweekly": "every 2 weeks", "monthly": "monthly"}.get(
         body.recurrence_type, body.recurrence_type)
-    when = (f"day {body.monthly_day} of each month at {body.schedule_time}"
-           if body.recurrence_type == "monthly"
-           else f"{(body.schedule_day or '').capitalize()} {body.schedule_time} ({recurrence_label})")
+    if body.recurrence_type == "monthly":
+        when = f"day {body.monthly_day} of each month at {body.schedule_time}"
+    elif body.recurrence_type == "daily":
+        when = f"every day at {body.schedule_time}"
+    else:
+        when = f"{(body.schedule_day or '').capitalize()} {body.schedule_time} ({recurrence_label})"
     await _send_event_notification(
-        chat_id, f"🗓 Schedule updated for '{name}' (via web): opens {when}."
+        chat_id, f"🗓 Schedule updated for '{name}' (via web): opens {when}, "
+                 f"until {result.get('schedule_expires_at')}."
     )
     return WebTemplateResponse(**{**tmpl, **result})
 
@@ -630,6 +636,7 @@ async def web_update_template(
         limit=body.limit,
         event_day=body.event_day if body.event_day is not None else "",
         event_time=body.event_time if body.event_time is not None else "",
+        offset_days=body.offset_days, offset_hours=body.offset_hours, offset_minutes=body.offset_minutes,
     )
     await _send_event_notification(chat_id, f"✏️ Template '{name}' updated (via web).")
     return WebTemplateResponse(**tmpl)
@@ -719,10 +726,8 @@ async def create_scheduled_rollcall(
     # first, then schedules by referencing its name here — no new column
     # needed to link them, see check_reminders.py's firing logic) — prefer
     # the template's actual title for the announcement when one matches.
-    import re as _re2
-    _dt_str = body.scheduled_at
-    _dt_match = _re2.match(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})", _dt_str)
-    _dt_label = _dt_match.group(1).replace("T", " ") if _dt_match else _dt_str
+    from functions import format_iso_utc_local
+    _dt_label = format_iso_utc_local(body.scheduled_at, chat.get("timezone") or "Asia/Kolkata")
     _display_title = body.title
     try:
         from db import get_template as _get_tmpl
@@ -755,25 +760,8 @@ async def list_scheduled_rollcalls(
     chat_id = int(chat["chat_id"])
     if not _db.is_web_admin(chat_id, actor_user_id):
         raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
-    rows = _db.get_upcoming_scheduled_rollcalls(chat_id)
-    items = []
-    for r in rows:
-        # `title` may reference a saved template rather than being a raw
-        # display title (see create_scheduled_rollcall) — resolve it so the
-        # list can show the template's real fields instead of the bare name.
-        tmpl = _db.get_template(chat_id, r["title"])
-        items.append(
-            ScheduledRollcallItem(
-                id=r["id"],
-                title=r["title"],
-                scheduled_at=r["scheduled_at"],
-                created_by_name=r["created_by_name"],
-                display_title=tmpl.get("title") if tmpl else None,
-                location=tmpl.get("location") if tmpl else None,
-                fee=tmpl.get("eventfee") if tmpl else None,
-                limit=tmpl.get("inlistlimit") if tmpl else None,
-            )
-        )
+    from services import templates as tmpl_svc
+    items = [ScheduledRollcallItem(**r) for r in tmpl_svc.list_pending_once(chat_id)]
     return ScheduledRollcallsResponse(items=items)
 
 

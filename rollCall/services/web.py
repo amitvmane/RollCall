@@ -15,6 +15,7 @@ import db
 from exceptions import incorrectParameter, parameterMissing
 from rollcall_manager import manager
 from services import proxy as proxy_svc
+from services import templates as _tmpl_svc
 from services.templates import list_templates as _list_templates
 
 
@@ -259,8 +260,29 @@ def get_rollcalls_by_group_token(group_token: str) -> dict:
             "limit": t.get("limit"),
         }
         for t in templates
-        if t.get("schedule_enabled") and t.get("schedule_day") and t.get("schedule_time")
+        # schedule_day is None for a daily recurring template (no weekday to
+        # match) — don't require it, only require schedule_enabled+time.
+        if t.get("schedule_enabled") and t.get("schedule_time")
+        and (t.get("schedule_day") or t.get("recurrence_type") == "daily")
     ]
+
+    # One-time entries (Schedule -> Once) — same shared resolver the web
+    # page's own "Scheduled (one-time)" section and /schedules use, so this
+    # list can't silently drift out of sync with either of them.
+    for p in _tmpl_svc.list_pending_once(chat_id):
+        upcoming.append({
+            "name": p["title"],
+            "title": p.get("display_title") or p["title"],
+            "schedule_day": None,
+            "schedule_time": None,
+            "recurrence_type": "once",
+            "event_day": None,
+            "event_time": None,
+            "location": p.get("location"),
+            "fee": p.get("fee"),
+            "limit": p.get("limit"),
+            "scheduled_at": p["scheduled_at"],
+        })
 
     return {
         "group_token": group_token,

@@ -539,6 +539,9 @@ def _is_due_now(schedule_time, schedule_day, last_date, now, recurrence_type):
             return False
         return True
 
+    if recurrence_type == "daily":
+        return True
+
     if today_name != (schedule_day or "").lower():
         return False
 
@@ -706,8 +709,11 @@ async def check_template_schedules():
                 schedule_day = tmpl.get("schedule_day")
                 schedule_time = tmpl.get("schedule_time")
                 last_date = tmpl.get("last_scheduled_date")
+                recurrence_type = tmpl.get("recurrence_type", "weekly") or "weekly"
 
-                if not chat_id or not schedule_day or not schedule_time:
+                if not chat_id or not schedule_time:
+                    continue
+                if recurrence_type != "daily" and not schedule_day:
                     continue
 
                 try:
@@ -719,7 +725,30 @@ async def check_template_schedules():
 
                 now = datetime.now(tz)
                 today_date = now.strftime("%Y-%m-%d")
-                recurrence_type = tmpl.get("recurrence_type", "weekly") or "weekly"
+
+                # Auto-disable a schedule once it's past its expiry — the
+                # template and its content are untouched, only the recurring
+                # schedule turns off (same as an admin toggling it off), so a
+                # schedule can never be silently left running for years past
+                # when it was set up. See services.templates.set_schedule.
+                expires_at = tmpl.get("schedule_expires_at")
+                if expires_at:
+                    try:
+                        if now.date() > datetime.strptime(expires_at, "%Y-%m-%d").date():
+                            from services.templates import disable_schedule as _disable_schedule
+                            try:
+                                _disable_schedule(chat_id, tmpl["name"], 0, "(scheduler — expired)")
+                                logging.info(
+                                    f"[scheduler] Auto-disabled expired schedule '{tmpl.get('name')}' "
+                                    f"for chat {chat_id} (expired {expires_at})"
+                                )
+                            except Exception:
+                                logging.exception(
+                                    f"Failed to auto-disable expired schedule '{tmpl.get('name')}' for chat {chat_id}"
+                                )
+                            continue
+                    except ValueError:
+                        pass
 
                 due = _is_due_now(schedule_time, schedule_day, last_date, now, recurrence_type)
                 if not due and recurrence_type == "weekly":

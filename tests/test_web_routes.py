@@ -840,6 +840,42 @@ class TestWebTemplateSchedule(unittest.TestCase):
         notify.assert_awaited_once()
         self.assertIn("SundayGame", notify.call_args[0][1])
 
+    def test_set_schedule_expires_at_passes_through(self):
+        import api.routes.web as _web_mod
+        updated = self._tmpl(schedule_day="thursday", schedule_time="18:00")
+        updated["schedule_expires_at"] = "2027-01-01"
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value={"first_name": "Amit"}), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.templates.set_schedule", return_value=updated) as svc, \
+             patch("services.templates.get_one_template", return_value=updated), \
+             patch.object(_web_mod, "_send_event_notification", new_callable=AsyncMock):
+            resp = _client().put(
+                "/api/v1/web/group/grp123/templates/SundayGame/schedule",
+                json={"id_token": "tok", "recurrence_type": "weekly",
+                      "schedule_day": "thursday", "schedule_time": "18:00",
+                      "expires_at": "2027-01-01"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(svc.call_args.kwargs["expires_at"], "2027-01-01")
+        self.assertEqual(resp.json()["schedule_expires_at"], "2027-01-01")
+
+    def test_set_schedule_daily_recurrence_accepted(self):
+        import api.routes.web as _web_mod
+        updated = self._tmpl(schedule_day=None, schedule_time="09:00", recurrence_type="daily")
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value={"first_name": "Amit"}), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.templates.set_schedule", return_value=updated) as svc, \
+             patch("services.templates.get_one_template", return_value=updated), \
+             patch.object(_web_mod, "_send_event_notification", new_callable=AsyncMock):
+            resp = _client().put(
+                "/api/v1/web/group/grp123/templates/SundayGame/schedule",
+                json={"id_token": "tok", "recurrence_type": "daily", "schedule_time": "09:00"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(svc.call_args.kwargs["recurrence_type"], "daily")
+
     def test_set_schedule_monthly_passes_monthly_day(self):
         import api.routes.web as _web_mod
         with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
@@ -954,6 +990,47 @@ class TestWebTemplateContentEditAndStart(unittest.TestCase):
         self.assertEqual(svc.call_args.kwargs["limit"], 20)
         notify.assert_awaited_once()
         self.assertIn("SundayGame", notify.call_args[0][1])
+
+    def test_update_content_offset_fields_pass_through(self):
+        """offset_days/hours/minutes — the New Rollcall modal's Schedule ->
+        Once path converts its exact "closes at" picker into an offset from
+        the opening time and sends it here (existing template columns,
+        see services.templates.start_template's offset fallback)."""
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value=None), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.templates.upsert_template", return_value=self._tmpl()) as svc, \
+             patch.object(_web_mod, "_send_event_notification", new_callable=AsyncMock):
+            resp = _client().put(
+                "/api/v1/web/group/grp123/templates/FridayMatch",
+                json={"id_token": "tok", "title": "Friday Match",
+                      "offset_days": 2, "offset_hours": 3, "offset_minutes": 30})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(svc.call_args.kwargs["offset_days"], 2)
+        self.assertEqual(svc.call_args.kwargs["offset_hours"], 3)
+        self.assertEqual(svc.call_args.kwargs["offset_minutes"], 30)
+
+    def test_update_content_offset_fields_default_none_when_omitted(self):
+        """Unlike title/location/fee/event_day/event_time, omitted offset
+        fields must NOT be translated to a clearing sentinel — the
+        Templates section's own edit form never sends them at all and must
+        not accidentally wipe out an offset set via the New Rollcall modal."""
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value=None), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.templates.upsert_template", return_value=self._tmpl()) as svc, \
+             patch.object(_web_mod, "_send_event_notification", new_callable=AsyncMock):
+            resp = _client().put(
+                "/api/v1/web/group/grp123/templates/FridayMatch",
+                json={"id_token": "tok", "title": "Friday Match"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertIsNone(svc.call_args.kwargs["offset_days"])
+        self.assertIsNone(svc.call_args.kwargs["offset_hours"])
+        self.assertIsNone(svc.call_args.kwargs["offset_minutes"])
 
     def test_update_content_blank_fields_clear_not_preserve(self):
         """This route always receives the whole form, not a sparse patch —
@@ -1204,6 +1281,26 @@ class TestWebStartRollcallFullFields(unittest.TestCase):
         self.assertEqual(svc.call_args.kwargs["event_day"], "friday")
         self.assertEqual(svc.call_args.kwargs["event_time"], "19:00")
 
+    def test_finalize_at_passes_through_to_service(self):
+        import api.routes.web as _web_mod
+        serialized = {"rollcall_id": 5, "title": "Match Day",
+                      "in": [], "out": [], "maybe": [], "waiting": []}
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value={"first_name": "Amit"}), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.rollcalls.start_rollcall", new_callable=AsyncMock,
+                   return_value={"rc_index": 0}) as svc, \
+             patch("services.web._serialize_web_rollcall", return_value=serialized), \
+             patch("rollcall_manager.manager.get_rollcall", return_value=MagicMock()), \
+             patch.object(_web_mod, "_mirror_panel_to_telegram", new_callable=AsyncMock):
+            resp = _client().post(
+                "/api/v1/web/group/grp123/start-rollcall",
+                json={"id_token": "tok", "title": "Match Day",
+                      "finalize_at": "2026-07-26T05:10:00.000Z"})
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(svc.call_args.kwargs["finalize_at"], "2026-07-26T05:10:00.000Z")
+
     def test_event_day_without_event_time_422(self):
         import api.routes.web as _web_mod
         with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
@@ -1281,8 +1378,8 @@ class TestWebScheduledRollcallsTemplateReference(unittest.TestCase):
         with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
              patch.object(_web_mod._db, "is_web_admin", return_value=True), \
              patch("api.identity.verify_identity_token", return_value=99), \
-             patch.object(_web_mod._db, "get_upcoming_scheduled_rollcalls", return_value=rows), \
-             patch.object(_web_mod._db, "get_template", return_value=tmpl):
+             patch("services.templates.get_upcoming_scheduled_rollcalls", return_value=rows), \
+             patch("services.templates.get_template", return_value=tmpl):
             resp = _client().get("/api/v1/web/group/grp123/scheduled-rollcalls?id_token=tok")
         self.assertEqual(resp.status_code, 200)
         item = resp.json()["items"][0]
@@ -1301,8 +1398,8 @@ class TestWebScheduledRollcallsTemplateReference(unittest.TestCase):
         with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
              patch.object(_web_mod._db, "is_web_admin", return_value=True), \
              patch("api.identity.verify_identity_token", return_value=99), \
-             patch.object(_web_mod._db, "get_upcoming_scheduled_rollcalls", return_value=rows), \
-             patch.object(_web_mod._db, "get_template", return_value=None):
+             patch("services.templates.get_upcoming_scheduled_rollcalls", return_value=rows), \
+             patch("services.templates.get_template", return_value=None):
             resp = _client().get("/api/v1/web/group/grp123/scheduled-rollcalls?id_token=tok")
         self.assertEqual(resp.status_code, 200)
         item = resp.json()["items"][0]
@@ -1329,6 +1426,31 @@ class TestWebScheduledRollcallsTemplateReference(unittest.TestCase):
         self.assertEqual(resp.status_code, 201)
         notify.assert_awaited_once()
         self.assertIn("Friday Match Night", notify.call_args[0][1])
+
+    def test_create_announcement_converts_to_chat_timezone(self):
+        """The announcement must show the chat's LOCAL time with a timezone
+        label, not a bare substring of the raw UTC ISO string — a prior bug
+        showed 10:40 IST as an unlabeled "5:10" (the UTC hour) because the
+        old code just regex-sliced scheduled_at without ever converting it."""
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token",
+                          return_value={"chat_id": -100, "timezone": "Asia/Kolkata"}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value=None), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch.object(_web_mod._db, "create_scheduled_rollcall", return_value=7), \
+             patch.object(_web_mod._db, "get_template", return_value=None), \
+             patch.object(_web_mod, "_send_event_notification", new_callable=AsyncMock) as notify:
+            resp = _client().post(
+                "/api/v1/web/group/grp123/scheduled-rollcalls",
+                # 05:10 UTC == 10:40 IST (+05:30)
+                json={"id_token": "tok", "title": "Sunday Cricket",
+                      "scheduled_at": "2026-07-26T05:10:00.000Z"})
+        self.assertEqual(resp.status_code, 201)
+        msg = notify.call_args[0][1]
+        self.assertIn("10:40", msg)
+        self.assertIn("IST", msg)
+        self.assertNotIn("05:10", msg)
 
     def test_create_announcement_falls_back_to_raw_title(self):
         import api.routes.web as _web_mod

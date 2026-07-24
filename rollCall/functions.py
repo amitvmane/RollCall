@@ -169,6 +169,38 @@ def get_next_weekday_datetime(tz, target_day: str, target_time: str):
     return candidate
 
 
+def format_local_datetime(dt: datetime, tzname: str = "Asia/Kolkata", fmt: str = "%A, %d %b at %H:%M %Z") -> str:
+    """Format a datetime into `tzname` with an explicit abbreviation label
+    (e.g. "IST", "UTC", "EDT") baked into the string via %Z, so the same
+    instant never displays ambiguously depending on which call site rendered
+    it. `dt` may be naive (treated as UTC — matches how scheduled_at/finalize
+    timestamps are stored) or already tz-aware (converted as-is).
+
+    This is the one shared place to format a user-facing date/time — every
+    call site used to do its own ad-hoc pytz dance, and one of them (the
+    scheduled-rollcall announcement) skipped the conversion entirely and
+    showed a bare UTC time with no label, which is exactly the kind of bug
+    this helper exists to prevent."""
+    try:
+        tz = pytz.timezone(tzname)
+    except Exception:
+        tz = pytz.timezone("Asia/Kolkata")
+    if dt.tzinfo is None:
+        dt = pytz.utc.localize(dt)
+    return dt.astimezone(tz).strftime(fmt)
+
+
+def format_iso_utc_local(iso_str: str, tzname: str = "Asia/Kolkata", fmt: str = "%A, %d %b at %H:%M %Z") -> str:
+    """Same as format_local_datetime, but takes a UTC ISO 8601 string (the
+    format the web frontend sends via JS `Date.toISOString()`, e.g.
+    "2026-07-24T05:10:00.000Z") instead of a datetime object."""
+    try:
+        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+    except ValueError:
+        return iso_str
+    return format_local_datetime(dt, tzname, fmt)
+
+
 def weekly_minutes(day: str, time_str: str):
     """Return minutes since Monday 00:00 for a weekday + HH:MM pair, or None if invalid."""
     day_idx = WEEKDAY_MAP.get(day.lower())

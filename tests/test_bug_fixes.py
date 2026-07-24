@@ -645,6 +645,119 @@ class TestFireScheduledRollcalls(unittest.TestCase):
         mark_fired.assert_called_once_with(1)
 
 
+class TestIsDueNowDaily(unittest.TestCase):
+    """_is_due_now's daily branch — fires every day at the configured time
+    regardless of schedule_day (which is None for daily schedules)."""
+
+    _load_real_module = TestCheckRemindersLogging._load_real_module
+
+    def test_daily_fires_at_scheduled_time_regardless_of_weekday(self):
+        import datetime
+        real_mod = self._load_real_module()
+        now = datetime.datetime(2026, 7, 24, 9, 1)  # a Friday
+        self.assertTrue(real_mod._is_due_now("09:00", None, None, now, "daily"))
+
+    def test_daily_not_due_before_scheduled_time(self):
+        import datetime
+        real_mod = self._load_real_module()
+        now = datetime.datetime(2026, 7, 24, 8, 59)
+        self.assertFalse(real_mod._is_due_now("09:00", None, None, now, "daily"))
+
+    def test_daily_not_due_twice_same_day(self):
+        import datetime
+        real_mod = self._load_real_module()
+        now = datetime.datetime(2026, 7, 24, 9, 1)
+        self.assertFalse(real_mod._is_due_now("09:00", None, "2026-07-24", now, "daily"))
+
+
+class TestScheduleExpiryAutoDisable(unittest.TestCase):
+    """check_template_schedules auto-disables (not deletes) a recurring
+    schedule once it's past schedule_expires_at — the template and its
+    content stay, only the schedule itself turns off. See
+    services.templates.set_schedule's expires_at default (1 year)."""
+
+    _load_real_module = TestCheckRemindersLogging._load_real_module
+
+    def _tmpl(self, **over):
+        row = {
+            "chatid": -100, "name": "sunday-game", "schedule_day": "monday",
+            "schedule_time": "09:00", "last_scheduled_date": None,
+            "recurrence_type": "weekly", "schedule_expires_at": "2020-01-01",
+        }
+        row.update(over)
+        return row
+
+    @staticmethod
+    def _controlled_sleep_after_one_pass():
+        """The alignment sleep before the while-loop (conditional on the
+        current second) is usually the first asyncio.sleep call — let it
+        (and only it) pass through so the loop body actually runs once,
+        then cancel on the loop's own end-of-iteration sleep(60)."""
+        calls = [0]
+
+        async def _sleep(seconds):
+            calls[0] += 1
+            if calls[0] >= 2:
+                raise asyncio.CancelledError()
+        return _sleep
+
+    def test_expired_schedule_is_disabled_not_fired(self):
+        import rollcall_manager as _rcm
+        import services.templates as _tmpl_mod
+
+        real_mod = self._load_real_module()
+        tmpl = self._tmpl()  # expires_at in the past
+        mgr = _rcm.manager
+
+        with patch.object(real_mod, 'get_all_scheduled_templates', return_value=[tmpl]), \
+             patch.object(real_mod, '_fire_scheduled_rollcalls', new_callable=AsyncMock), \
+             patch.object(mgr, 'get_chat', return_value={"timezone": "Asia/Kolkata"}), \
+             patch.object(_tmpl_mod, 'disable_schedule') as disable_sched, \
+             patch.object(real_mod, '_auto_start_from_template', new_callable=AsyncMock) as auto_start, \
+             patch.object(real_mod, 'update_template_last_scheduled_date') as update_last, \
+             patch('periodic_jobs.run_periodic_jobs', new_callable=AsyncMock, create=True), \
+             patch.object(real_mod.asyncio, 'sleep', side_effect=self._controlled_sleep_after_one_pass()):
+            loop = asyncio.new_event_loop()
+            try:
+                with self.assertRaises(asyncio.CancelledError):
+                    loop.run_until_complete(real_mod.check_template_schedules())
+            finally:
+                loop.close()
+
+        disable_sched.assert_called_once()
+        self.assertEqual(disable_sched.call_args.args[0], -100)
+        self.assertEqual(disable_sched.call_args.args[1], "sunday-game")
+        auto_start.assert_not_called()
+        update_last.assert_not_called()
+
+    def test_non_expired_schedule_not_disabled(self):
+        import rollcall_manager as _rcm
+        import services.templates as _tmpl_mod
+        import datetime
+
+        real_mod = self._load_real_module()
+        far_future = (datetime.datetime.now() + datetime.timedelta(days=30)).strftime("%Y-%m-%d")
+        tmpl = self._tmpl(schedule_expires_at=far_future)
+        mgr = _rcm.manager
+
+        with patch.object(real_mod, 'get_all_scheduled_templates', return_value=[tmpl]), \
+             patch.object(real_mod, '_fire_scheduled_rollcalls', new_callable=AsyncMock), \
+             patch.object(mgr, 'get_chat', return_value={"timezone": "Asia/Kolkata"}), \
+             patch.object(_tmpl_mod, 'disable_schedule') as disable_sched, \
+             patch.object(real_mod, '_auto_start_from_template', new_callable=AsyncMock), \
+             patch.object(real_mod, 'update_template_last_scheduled_date'), \
+             patch('periodic_jobs.run_periodic_jobs', new_callable=AsyncMock, create=True), \
+             patch.object(real_mod.asyncio, 'sleep', side_effect=self._controlled_sleep_after_one_pass()):
+            loop = asyncio.new_event_loop()
+            try:
+                with self.assertRaises(asyncio.CancelledError):
+                    loop.run_until_complete(real_mod.check_template_schedules())
+            finally:
+                loop.close()
+
+        disable_sched.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # SEC-1: cursor=None safety in db.py add_or_update_user
 # ---------------------------------------------------------------------------

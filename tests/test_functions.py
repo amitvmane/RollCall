@@ -104,5 +104,46 @@ class TestAutoCompleteTimezone(unittest.TestCase):
         self.assertIsNotNone(result)
 
 
+class TestFormatLocalDatetime(unittest.TestCase):
+    """The one shared place a UTC/naive datetime gets turned into a labeled
+    local-time string — added after a bug where the scheduled-rollcall
+    announcement showed a bare, unconverted UTC time (10:40 IST rendered as
+    an unlabeled "5:10")."""
+
+    def test_naive_datetime_treated_as_utc(self):
+        import datetime
+        dt = datetime.datetime(2026, 7, 26, 5, 10)  # naive == UTC
+        result = functions.format_local_datetime(dt, "Asia/Kolkata")
+        self.assertIn("10:40", result)
+        self.assertIn("IST", result)
+
+    def test_aware_datetime_converted(self):
+        import datetime, pytz
+        dt = pytz.utc.localize(datetime.datetime(2026, 7, 26, 5, 10))
+        result = functions.format_local_datetime(dt, "America/New_York")
+        # 05:10 UTC on 2026-07-26 is EDT (UTC-4) -> 01:10
+        self.assertIn("01:10", result)
+        self.assertIn("EDT", result)
+
+    def test_invalid_timezone_falls_back_to_kolkata(self):
+        import datetime
+        dt = datetime.datetime(2026, 7, 26, 5, 10)
+        result = functions.format_local_datetime(dt, "Not/ARealZone")
+        self.assertIn("10:40", result)
+        self.assertIn("IST", result)
+
+
+class TestFormatIsoUtcLocal(unittest.TestCase):
+
+    def test_iso_string_with_z_suffix(self):
+        result = functions.format_iso_utc_local("2026-07-26T05:10:00.000Z", "Asia/Kolkata")
+        self.assertIn("10:40", result)
+        self.assertIn("IST", result)
+
+    def test_malformed_string_returned_unchanged(self):
+        result = functions.format_iso_utc_local("not-a-date", "Asia/Kolkata")
+        self.assertEqual(result, "not-a-date")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

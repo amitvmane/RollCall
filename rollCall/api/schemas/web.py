@@ -37,6 +37,10 @@ class UpcomingRollcall(BaseModel):
     location: Optional[str] = None
     fee: Optional[str] = None
     limit: Optional[int] = None
+    # Set only for a one-time entry (Schedule -> Once) — a UTC ISO datetime,
+    # the exact fire time, as opposed to schedule_day/schedule_time's
+    # "next occurrence of this weekday" for a recurring template.
+    scheduled_at: Optional[str] = None
 
 
 class WebGroupResponse(BaseModel):
@@ -218,8 +222,9 @@ class WebStartRollcallRequest(BaseModel):
     location: Optional[str] = Field(None, max_length=200)
     fee: Optional[str] = Field(None, max_length=50)
     limit: Optional[int] = Field(None, ge=1, le=1000)
-    event_day: Optional[str] = Field(None, description="Weekday name the event happens on — used to auto-close (both-or-neither with event_time)")
-    event_time: Optional[str] = Field(None, description="HH:MM the event happens at — used to auto-close (both-or-neither with event_day)")
+    event_day: Optional[str] = Field(None, description="Weekday name the event happens on — used to auto-close (both-or-neither with event_time). Ignored if finalize_at is set.")
+    event_time: Optional[str] = Field(None, description="HH:MM the event happens at — used to auto-close (both-or-neither with event_day). Ignored if finalize_at is set.")
+    finalize_at: Optional[str] = Field(None, description="UTC ISO 8601 datetime — exact one-time close time, for a rollcall that doesn't recur. Takes precedence over event_day/event_time.")
     save_as_template: Optional[str] = Field(None, max_length=50, description="If set, also saves these fields as a reusable template under this name")
 
 
@@ -250,6 +255,7 @@ class WebTemplateResponse(BaseModel):
     event_day: Optional[str] = None
     event_time: Optional[str] = None
     last_scheduled_date: Optional[str] = None
+    schedule_expires_at: Optional[str] = None
 
 
 class WebSetScheduleRequest(BaseModel):
@@ -257,10 +263,11 @@ class WebSetScheduleRequest(BaseModel):
     WebUpdateTemplateRequest.event_day/event_time, which is when the game
     itself happens and is used to auto-close it."""
     id_token: str = Field(..., description="Signed identity token of the acting web admin")
-    recurrence_type: Literal["weekly", "biweekly", "monthly"] = "weekly"
-    schedule_day: Optional[str] = Field(None, description="Weekday name (weekly/biweekly) — ignored for monthly")
+    recurrence_type: Literal["daily", "weekly", "biweekly", "monthly"] = "weekly"
+    schedule_day: Optional[str] = Field(None, description="Weekday name (weekly/biweekly) — ignored for monthly/daily")
     schedule_time: str = Field(..., description="HH:MM local time")
     monthly_day: Optional[int] = Field(None, ge=1, le=31, description="Day of month (monthly only)")
+    expires_at: Optional[str] = Field(None, description="\"YYYY-MM-DD\" — schedule auto-disables after this date (template stays). Defaults to 1 year out if omitted.")
 
 
 class WebToggleScheduleRequest(BaseModel):
@@ -286,6 +293,16 @@ class WebUpdateTemplateRequest(BaseModel):
     limit: Optional[int] = Field(None, ge=0, le=1000, description="0 clears the cap (no valid real limit is 0)")
     event_day: Optional[str] = Field(None, description="Weekday name the event itself happens on (used for auto-close)")
     event_time: Optional[str] = Field(None, description="HH:MM the event itself happens at (used for auto-close)")
+    # Alternative to event_day/event_time for a one-time close time (the New
+    # Rollcall modal's Schedule -> Once path uses this instead of a weekday,
+    # since "next Xday" doesn't make sense for a single specific occurrence
+    # — see services.templates.start_template's offset fallback). Unlike the
+    # fields above, these follow plain None=leave-unchanged semantics rather
+    # than this route's blank-clears convention, since only one caller sets
+    # them today and always sends the full trio together when relevant.
+    offset_days: Optional[int] = Field(None, ge=0, description="Days after the rollcall opens that it should auto-close")
+    offset_hours: Optional[int] = Field(None, ge=0, le=23, description="Hours (in addition to offset_days) after opening that it should auto-close")
+    offset_minutes: Optional[int] = Field(None, ge=0, le=59, description="Minutes (in addition to offset_days/hours) after opening that it should auto-close")
 
 
 class WebStartTemplateRequest(BaseModel):

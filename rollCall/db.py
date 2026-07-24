@@ -8,7 +8,7 @@ import os
 import json
 import logging
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any
 
 
@@ -792,6 +792,7 @@ _RECONCILE_COLUMNS = {
         ("schedule_enabled",    "schedule_enabled TEXT DEFAULT 0",       "schedule_enabled BOOLEAN DEFAULT FALSE"),
         ("last_scheduled_date", "last_scheduled_date TEXT DEFAULT NULL", "last_scheduled_date TEXT DEFAULT NULL"),
         ("recurrence_type",     "recurrence_type TEXT DEFAULT 'weekly'", "recurrence_type TEXT DEFAULT 'weekly'"),
+        ("schedule_expires_at", "schedule_expires_at TEXT DEFAULT NULL", "schedule_expires_at TEXT DEFAULT NULL"),
     ],
     "ghost_events": [
         ("proxy_name", "proxy_name TEXT", "proxy_name TEXT"),
@@ -854,6 +855,30 @@ def _run_migrations(conn, cursor):
     # Reconcile any columns missing on databases created by older builds. Runs
     # first so the rest of startup can rely on the full schema being present.
     _reconcile_columns(conn, cursor)
+
+    # Backfill schedule_expires_at for templates whose recurring schedule was
+    # enabled before this column existed — defaults to one year out so an
+    # old schedule doesn't suddenly stop (or, worse, was never going to
+    # expire at all). Every schedule created/edited going forward always
+    # gets an explicit expiry from services.templates.set_schedule, so this
+    # only ever touches genuinely pre-existing rows; safe to run on every
+    # startup since it's scoped to NULL rows.
+    try:
+        ph = "%s" if db_type == "postgresql" else "?"
+        # schedule_enabled's stored representation varies (1/"1"/True depending
+        # on DB type and migration path — see _serialize_template's own note)
+        # so match the same broad truthy check rather than a literal TRUE/1
+        # comparison that could silently miss rows.
+        cursor.execute(
+            f"UPDATE templates SET schedule_expires_at = {ph} "
+            f"WHERE schedule_expires_at IS NULL AND schedule_enabled IS NOT NULL "
+            f"AND CAST(schedule_enabled AS TEXT) NOT IN ('0', 'False', 'false', 'None', '')",
+            ((datetime.now() + timedelta(days=365)).strftime("%Y-%m-%d"),),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logging.exception("Schema reconcile: could not backfill templates.schedule_expires_at")
 
     # Add ghost_tracking_enabled to chats (may not exist in older deployments)
     if db_type == 'postgresql':
@@ -2404,17 +2429,21 @@ def delete_template(chatid: int, name: str) -> bool:
         return False
 
 
-def set_template_schedule(chatid: int, name: str, schedule_day: str, schedule_time: str, recurrence_type: str = 'weekly') -> bool:
-    """Set schedule day/time and enable auto-start for a template."""
+def set_template_schedule(chatid: int, name: str, schedule_day: Optional[str], schedule_time: str, recurrence_type: str = 'weekly', schedule_expires_at: Optional[str] = None) -> bool:
+    """Set schedule day/time and enable auto-start for a template.
+    schedule_day is None for daily recurrence (no weekday to match).
+    schedule_expires_at ("YYYY-MM-DD") is when this auto-disables itself —
+    see check_template_schedules in check_reminders.py."""
     try:
         with _cursor(commit=True) as cursor:
             ph = "%s" if db_type == "postgresql" else "?"
             enabled = True if db_type == "postgresql" else 1
             cursor.execute(
                 f"UPDATE templates SET schedule_day = {ph}, schedule_time = {ph}, "
-                f"schedule_enabled = {ph}, last_scheduled_date = NULL, recurrence_type = {ph} "
+                f"schedule_enabled = {ph}, last_scheduled_date = NULL, recurrence_type = {ph}, "
+                f"schedule_expires_at = {ph} "
                 f"WHERE chatid = {ph} AND name = {ph}",
-                (schedule_day, schedule_time, enabled, recurrence_type, chatid, name),
+                (schedule_day, schedule_time, enabled, recurrence_type, schedule_expires_at, chatid, name),
             )
             return cursor.rowcount > 0
     except Exception as e:
@@ -3816,7 +3845,7 @@ def get_rollcall_history(chat_id: int, limit: int = 10, offset: int = 0) -> List
             ph = '%s' if db_type == 'postgresql' else '?'
             if db_type == 'postgresql':
                 cursor.execute(f"""
-                    SELECT r.id, r.title, r.ended_at,
+                    SELECT r.id, r.title, r.ended_at, r.finalize_date, r.created_at,
                         (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'in') +
                         (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND p.status = 'in') AS in_count,
                         (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'out') +
@@ -3831,7 +3860,7 @@ def get_rollcall_history(chat_id: int, limit: int = 10, offset: int = 0) -> List
                 """, (chat_id, limit, offset))
             else:
                 cursor.execute(f"""
-                    SELECT r.id, r.title, r.ended_at,
+                    SELECT r.id, r.title, r.ended_at, r.finalize_date, r.created_at,
                         (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'in') +
                         (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND p.status = 'in') AS in_count,
                         (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'out') +
@@ -3858,7 +3887,7 @@ def get_user_session_history(chat_id: int, user_id: int, limit: int = 15) -> Lis
             active_false = 'FALSE' if db_type == 'postgresql' else '0'
             cancel_false = 'FALSE' if db_type == 'postgresql' else '0'
             cursor.execute(f"""
-                SELECT r.id, r.title, r.ended_at,
+                SELECT r.id, r.title, r.ended_at, r.finalize_date, r.created_at,
                        CASE WHEN COALESCE(r.is_cancelled, {cancel_false}) != {cancel_false}
                             THEN 'cancelled'
                             ELSE COALESCE(u.status, 'miss')

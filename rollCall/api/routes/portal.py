@@ -13,6 +13,7 @@ from fastapi import APIRouter, Path, Query
 import db as _db
 from rollcall_manager import manager
 from api.identity import require_identity
+from services.stats import session_display_date
 from api.schemas.portal import (
     PortalGroupHistoryResponse,
     PortalGroupsResponse,
@@ -119,7 +120,7 @@ async def portal_group_history(
             PortalSessionEntry(
                 id=s.get("id"),
                 title=s.get("title"),
-                ended_at=str(s["ended_at"]) if s.get("ended_at") else None,
+                ended_at=session_display_date(s) or None,
                 status=s.get("status", "miss"),
             )
             for s in sessions

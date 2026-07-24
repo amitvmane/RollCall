@@ -196,6 +196,16 @@ def leaderboard(chat_id: int, limit: int = 10) -> dict:
     }
 
 
+def session_display_date(row: dict) -> str:
+    """The date shown to users for a session — prefer finalize_date (when the
+    game actually happened) over ended_at (when the bot got around to closing
+    it, which can lag by days if it was offline — e.g. a batch of rollcalls
+    all closing at once on the next boot, stamping all of them with that
+    boot's timestamp instead of their real dates). Falls back to created_at,
+    then ended_at, so there's always something to show."""
+    return str(row.get("finalize_date") or row.get("created_at") or row.get("ended_at") or "")
+
+
 def history(chat_id: int, limit: int = 10, offset: int = 0) -> list:
     """Return the last N ended rollcalls for the chat."""
     rows = get_rollcall_history(chat_id, limit=limit, offset=offset)
@@ -203,7 +213,7 @@ def history(chat_id: int, limit: int = 10, offset: int = 0) -> list:
         {
             "id": row.get("id"),
             "title": row.get("title"),
-            "ended_at": str(row.get("ended_at") or ""),
+            "ended_at": session_display_date(row),
             "in_count": int(row.get("in_count") or 0),
             "out_count": int(row.get("out_count") or 0),
             "maybe_count": int(row.get("maybe_count") or 0),
@@ -393,7 +403,7 @@ def web_group_stats(
             if kind == "real" and uid:
                 rows = get_user_session_history(chat_id, uid, limit=15)
                 p["recent_sessions"] = [
-                    {"status": r.get("status", "miss"), "ended_at": str(r.get("ended_at") or "")}
+                    {"status": r.get("status", "miss"), "ended_at": session_display_date(r)}
                     for r in rows
                 ]
             else:

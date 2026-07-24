@@ -608,9 +608,30 @@ async def _fire_scheduled_rollcalls():
                     pass
                 continue
 
-            rc = manager.add_rollcall(chat_id, title)
-            rc.save()
-            rc_index = len(manager.get_rollcalls(chat_id)) - 1
+            # One-time "Schedule" (web unified flow) always saves a template
+            # first, then repurposes this row's existing `title` column to
+            # hold that template's NAME rather than a bare display title —
+            # no new column needed. If one matches, start from it (full
+            # fields: location/fee/cap/event-time) via the same
+            # start_template every other template-start path already uses;
+            # otherwise fall back to the original bare-title behavior
+            # (covers rows created before this feature existed, or a
+            # template that was deleted after the entry was scheduled).
+            from db import get_template as _get_template
+            tmpl = _get_template(chat_id, title)
+            if tmpl:
+                from services import templates as _tmpl_svc
+                result = await _tmpl_svc.start_template(
+                    chat_id=chat_id, name=title,
+                    admin_user_id=row.get("created_by_uid") or 0,
+                    admin_name=row.get("created_by_name") or "(scheduled)",
+                )
+                rc = manager.get_rollcall(chat_id, result["rc_index"])
+                rc_index = result["rc_index"]
+            else:
+                rc = manager.add_rollcall(chat_id, title)
+                rc.save()
+                rc_index = len(manager.get_rollcalls(chat_id)) - 1
             rc_number = rc_index + 1
 
             try:

@@ -30,12 +30,25 @@ class TestRollCallManagerBasics(unittest.TestCase):
 
     def setUp(self):
         self.mgr = RollCallManager()
-        sys.modules['db'].get_or_create_chat.return_value = {
+        # patch.object + addCleanup (not a direct .return_value= mutation) so
+        # this reverts after the test — a direct assignment on the shared
+        # session-wide db mock leaks into every test that runs afterward and
+        # doesn't patch its own return value (see test_ghost_integration.py's
+        # setUpClass/tearDownClass for the same class of bug with sys.modules
+        # itself).
+        patcher1 = patch.object(sys.modules['db'], 'get_or_create_chat', return_value={
             "shh_mode": False,
             "admin_rights": False,
             "timezone": "Asia/Calcutta",
-        }
-        sys.modules['db'].get_active_rollcalls.return_value = []
+            "absent_limit": 1,
+            "ghost_tracking_enabled": True,
+            "group_web_token": "testgrouptoken00000000000000000",
+        })
+        patcher2 = patch.object(sys.modules['db'], 'get_active_rollcalls', return_value=[])
+        self.addCleanup(patcher1.stop)
+        self.addCleanup(patcher2.stop)
+        patcher1.start()
+        patcher2.start()
 
     def test_get_chat_creates_entry(self):
         chat = self.mgr.get_chat(1001)
@@ -91,12 +104,25 @@ class TestShhMode(unittest.TestCase):
 
     def setUp(self):
         self.mgr = RollCallManager()
-        sys.modules['db'].get_or_create_chat.return_value = {
+        # patch.object + addCleanup (not a direct .return_value= mutation) so
+        # this reverts after the test — a direct assignment on the shared
+        # session-wide db mock leaks into every test that runs afterward and
+        # doesn't patch its own return value (see test_ghost_integration.py's
+        # setUpClass/tearDownClass for the same class of bug with sys.modules
+        # itself).
+        patcher1 = patch.object(sys.modules['db'], 'get_or_create_chat', return_value={
             "shh_mode": False,
             "admin_rights": False,
             "timezone": "Asia/Calcutta",
-        }
-        sys.modules['db'].get_active_rollcalls.return_value = []
+            "absent_limit": 1,
+            "ghost_tracking_enabled": True,
+            "group_web_token": "testgrouptoken00000000000000000",
+        })
+        patcher2 = patch.object(sys.modules['db'], 'get_active_rollcalls', return_value=[])
+        self.addCleanup(patcher1.stop)
+        self.addCleanup(patcher2.stop)
+        patcher1.start()
+        patcher2.start()
 
     def test_shh_default_false(self):
         self.assertFalse(self.mgr.get_shh_mode(2001))
@@ -119,12 +145,25 @@ class TestAdminRights(unittest.TestCase):
 
     def setUp(self):
         self.mgr = RollCallManager()
-        sys.modules['db'].get_or_create_chat.return_value = {
+        # patch.object + addCleanup (not a direct .return_value= mutation) so
+        # this reverts after the test — a direct assignment on the shared
+        # session-wide db mock leaks into every test that runs afterward and
+        # doesn't patch its own return value (see test_ghost_integration.py's
+        # setUpClass/tearDownClass for the same class of bug with sys.modules
+        # itself).
+        patcher1 = patch.object(sys.modules['db'], 'get_or_create_chat', return_value={
             "shh_mode": False,
             "admin_rights": False,
             "timezone": "Asia/Calcutta",
-        }
-        sys.modules['db'].get_active_rollcalls.return_value = []
+            "absent_limit": 1,
+            "ghost_tracking_enabled": True,
+            "group_web_token": "testgrouptoken00000000000000000",
+        })
+        patcher2 = patch.object(sys.modules['db'], 'get_active_rollcalls', return_value=[])
+        self.addCleanup(patcher1.stop)
+        self.addCleanup(patcher2.stop)
+        patcher1.start()
+        patcher2.start()
 
     def test_admin_rights_default_false(self):
         self.assertFalse(self.mgr.get_admin_rights(3001))
@@ -142,12 +181,25 @@ class TestTimezone(unittest.TestCase):
 
     def setUp(self):
         self.mgr = RollCallManager()
-        sys.modules['db'].get_or_create_chat.return_value = {
+        # patch.object + addCleanup (not a direct .return_value= mutation) so
+        # this reverts after the test — a direct assignment on the shared
+        # session-wide db mock leaks into every test that runs afterward and
+        # doesn't patch its own return value (see test_ghost_integration.py's
+        # setUpClass/tearDownClass for the same class of bug with sys.modules
+        # itself).
+        patcher1 = patch.object(sys.modules['db'], 'get_or_create_chat', return_value={
             "shh_mode": False,
             "admin_rights": False,
             "timezone": "Asia/Calcutta",
-        }
-        sys.modules['db'].get_active_rollcalls.return_value = []
+            "absent_limit": 1,
+            "ghost_tracking_enabled": True,
+            "group_web_token": "testgrouptoken00000000000000000",
+        })
+        patcher2 = patch.object(sys.modules['db'], 'get_active_rollcalls', return_value=[])
+        self.addCleanup(patcher1.stop)
+        self.addCleanup(patcher2.stop)
+        patcher1.start()
+        patcher2.start()
 
     def test_set_timezone_updates_chat_cache(self):
         self.mgr.set_timezone(4001, "Europe/London")
@@ -168,12 +220,25 @@ class TestCacheManagement(unittest.TestCase):
 
     def setUp(self):
         self.mgr = RollCallManager()
-        sys.modules['db'].get_or_create_chat.return_value = {
+        # patch.object + addCleanup (not a direct .return_value= mutation) so
+        # this reverts after the test — a direct assignment on the shared
+        # session-wide db mock leaks into every test that runs afterward and
+        # doesn't patch its own return value (see test_ghost_integration.py's
+        # setUpClass/tearDownClass for the same class of bug with sys.modules
+        # itself).
+        patcher1 = patch.object(sys.modules['db'], 'get_or_create_chat', return_value={
             "shh_mode": False,
             "admin_rights": False,
             "timezone": "Asia/Calcutta",
-        }
-        sys.modules['db'].get_active_rollcalls.return_value = []
+            "absent_limit": 1,
+            "ghost_tracking_enabled": True,
+            "group_web_token": "testgrouptoken00000000000000000",
+        })
+        patcher2 = patch.object(sys.modules['db'], 'get_active_rollcalls', return_value=[])
+        self.addCleanup(patcher1.stop)
+        self.addCleanup(patcher2.stop)
+        patcher1.start()
+        patcher2.start()
 
     def test_clear_cache(self):
         self.mgr.get_chat(5001)

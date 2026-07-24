@@ -35,6 +35,7 @@ from api.schemas.web import (
     PushUnsubscribeRequest,
     ScheduledRollcallCreateResponse,
     ScheduledRollcallItem,
+    ScheduledRollcallRequest,
     ScheduledRollcallsResponse,
     VapidPublicKeyResponse,
     WebAdminStatusResponse,
@@ -326,6 +327,30 @@ async def web_start_rollcall(
             detail="You are not a web admin for this group. Run /weblink in Telegram first.",
         )
 
+    if bool(body.event_day) != bool(body.event_time):
+        raise HTTPException(status_code=422, detail="event_day and event_time must be set together (or both left unset).")
+
+    actor_name = await _actor_display_name(chat_id, actor_user_id)
+
+    # Optional — same fields, saved as a reusable template alongside starting
+    # the rollcall. Independent of the start itself: if this fails, the
+    # rollcall still starts (the template is a convenience, not a
+    # precondition), so it's best-effort and doesn't hold the write lock.
+    if body.save_as_template:
+        from services import templates as tmpl_svc
+        try:
+            tmpl_svc.upsert_template(
+                chat_id=chat_id, name=body.save_as_template,
+                admin_user_id=actor_user_id, admin_name=actor_name,
+                title=body.title, location=body.location, fee=body.fee,
+                limit=body.limit, event_day=body.event_day, event_time=body.event_time,
+            )
+        except Exception:
+            logging.warning(
+                "[web_start_rollcall] save_as_template failed chat=%s name=%s",
+                chat_id, body.save_as_template, exc_info=True,
+            )
+
     from services import rollcalls as rc_svc
     from services.web import _serialize_web_rollcall
     from rollcall_manager import manager as _mgr
@@ -334,7 +359,12 @@ async def web_start_rollcall(
             chat_id=chat_id,
             title=body.title,
             started_by_user_id=actor_user_id,
-            started_by_name="(web)",
+            started_by_name=actor_name,
+            location=body.location,
+            fee=body.fee,
+            limit=body.limit,
+            event_day=body.event_day,
+            event_time=body.event_time,
         )
     rc = _mgr.get_rollcall(chat_id, result["rc_index"])
     if rc is None:
@@ -649,10 +679,9 @@ async def web_start_template(
     summary="Schedule a one-shot rollcall to auto-start at a future time (admin only)",
 )
 async def create_scheduled_rollcall(
-    body: "ScheduledRollcallRequest",
+    body: ScheduledRollcallRequest,
     group_token: str = Path(...),
 ) -> ScheduledRollcallCreateResponse:
-    from api.schemas.web import ScheduledRollcallRequest as _Req
     chat = _db.get_chat_by_group_web_token(group_token)
     if not chat:
         raise HTTPException(status_code=404, detail="Invalid group token")
@@ -684,14 +713,27 @@ async def create_scheduled_rollcall(
         created_by_name=actor_name,
     )
 
-    # Non-blocking event log so the group knows a rollcall was scheduled via web
+    # Non-blocking event log so the group knows a rollcall was scheduled via web.
+    # body.title may be a template NAME rather than a display title (the
+    # unified "New Rollcall" flow's one-time path always saves a template
+    # first, then schedules by referencing its name here — no new column
+    # needed to link them, see check_reminders.py's firing logic) — prefer
+    # the template's actual title for the announcement when one matches.
     import re as _re2
     _dt_str = body.scheduled_at
     _dt_match = _re2.match(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})", _dt_str)
     _dt_label = _dt_match.group(1).replace("T", " ") if _dt_match else _dt_str
+    _display_title = body.title
+    try:
+        from db import get_template as _get_tmpl
+        _tmpl_row = _get_tmpl(chat_id, body.title)
+        if _tmpl_row and _tmpl_row.get("title"):
+            _display_title = _tmpl_row["title"]
+    except Exception:
+        pass
     await _send_event_notification(
         chat_id,
-        f"📅 Rollcall scheduled: \"{body.title}\" at {_dt_label} (by {actor_name}, via web)",
+        f"📅 Rollcall scheduled: \"{_display_title}\" at {_dt_label} (by {actor_name}, via web)",
     )
 
     return ScheduledRollcallCreateResponse(id=row_id, title=body.title, scheduled_at=body.scheduled_at)
@@ -714,17 +756,25 @@ async def list_scheduled_rollcalls(
     if not _db.is_web_admin(chat_id, actor_user_id):
         raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
     rows = _db.get_upcoming_scheduled_rollcalls(chat_id)
-    return ScheduledRollcallsResponse(
-        items=[
+    items = []
+    for r in rows:
+        # `title` may reference a saved template rather than being a raw
+        # display title (see create_scheduled_rollcall) — resolve it so the
+        # list can show the template's real fields instead of the bare name.
+        tmpl = _db.get_template(chat_id, r["title"])
+        items.append(
             ScheduledRollcallItem(
                 id=r["id"],
                 title=r["title"],
                 scheduled_at=r["scheduled_at"],
                 created_by_name=r["created_by_name"],
+                display_title=tmpl.get("title") if tmpl else None,
+                location=tmpl.get("location") if tmpl else None,
+                fee=tmpl.get("eventfee") if tmpl else None,
+                limit=tmpl.get("inlistlimit") if tmpl else None,
             )
-            for r in rows
-        ]
-    )
+        )
+    return ScheduledRollcallsResponse(items=items)
 
 
 @router.delete(

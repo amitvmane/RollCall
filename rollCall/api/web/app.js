@@ -1333,41 +1333,274 @@ window.toggleShhMode=async function(enabled){
   }
 };
 
-window.openStartModal=function(){
-  const m=document.getElementById("start-modal");
+// ── New Rollcall modal ───────────────────────────────────────────────────
+// Unifies the three previously-separate creation paths (title-only Start
+// modal, title-only Schedule modal, and the full-field Templates section)
+// into one form. No new storage: "Now" applies location/fee/limit/event
+// day+time directly onto the rollcalls table columns start_rollcall already
+// accepted (see services/rollcalls.py); "Schedule" always saves a template
+// first (existing templates table) and either references it once from a
+// scheduled_rollcalls row (its title column repurposed to hold the
+// template's name) or sets its existing recurring schedule columns —
+// exactly what the Templates section below already does.
+let _nrcState={timing:"now",recurrence:"once"};
+
+window.openNewRollcallModal=async function(){
+  const m=document.getElementById("nrc-modal");
   if(m){m.style.display="flex";m.classList.remove("hidden");}
-  const inp=document.getElementById("start-title");
-  if(inp){inp.value="";inp.focus();}
+  _nrcState={timing:"now",recurrence:"once"};
+  renderNewRollcallModalBody();
+  if(!_templatesCache)await loadTemplatesSchedule().catch(()=>{});
+  _nrcRenderTemplateOptions();
+  const t=document.getElementById("nrc-title");
+  if(t)setTimeout(()=>t.focus(),50);
 };
-window.closeStartModal=function(){
-  const m=document.getElementById("start-modal");
+window.closeNewRollcallModal=function(){
+  const m=document.getElementById("nrc-modal");
   if(m){m.style.display="none";}
 };
-window.submitStartRollcall=async function(){
+
+function renderNewRollcallModalBody(){
+  const body=document.getElementById("nrc-body");
+  if(!body)return;
+  const eventDayOpts='<option value="">No fixed day</option>'+WEEKDAYS.map(d=>`<option value="${d}">${d[0].toUpperCase()+d.slice(1)}</option>`).join("");
+  body.innerHTML=`
+    <div id="nrc-template-row" style="margin-bottom:14px">
+      <label style="font-size:.8rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">Start from a template (optional)</label>
+      <select id="nrc-template-select" onchange="_nrcOnTemplateSelect(this.value)" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem">
+        <option value="">— Start blank —</option>
+      </select>
+    </div>
+    <label style="font-size:.8rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">Title</label>
+    <input id="nrc-title" type="text" placeholder="e.g. Sunday Cricket" maxlength="200" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:.95rem;background:var(--card);color:var(--text);margin-bottom:12px"/>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <input id="nrc-location" type="text" placeholder="Location" maxlength="200" style="flex:1;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem"/>
+      <input id="nrc-fee" type="text" placeholder="Fee" maxlength="50" style="flex:1;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem"/>
+    </div>
+    <input id="nrc-limit" type="number" min="1" max="1000" placeholder="Capacity (max attendees)" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem;margin-bottom:12px"/>
+    <label style="font-size:.78rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">🏟 Event day &amp; time (when the game happens — closes voting)</label>
+    <div style="display:flex;gap:8px;margin-bottom:16px">
+      <select id="nrc-eventday" style="flex:1;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem">${eventDayOpts}</select>
+      <input id="nrc-eventtime" type="time" style="flex:1;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem"/>
+    </div>
+    <label style="font-size:.8rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">When should it start?</label>
+    <div class="nrc-seg" style="margin-bottom:12px">
+      <button type="button" class="nrc-seg-btn active" id="nrc-seg-now" onclick="_nrcSetTiming('now')">Now</button>
+      <button type="button" class="nrc-seg-btn" id="nrc-seg-schedule" onclick="_nrcSetTiming('schedule')">Schedule</button>
+    </div>
+    <div id="nrc-timing-body"></div>
+  `;
+  _nrcRenderTimingBody();
+}
+
+function _nrcRenderTimingBody(){
+  const el=document.getElementById("nrc-timing-body");
+  if(!el)return;
+  const btn=document.getElementById("nrc-submit-btn");
+  if(_nrcState.timing==="now"){
+    if(btn)btn.textContent="Start →";
+    el.innerHTML=`
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer">
+        <input type="checkbox" id="nrc-save-template-check" onchange="document.getElementById('nrc-save-template-row').classList.toggle('hidden',!this.checked)"/>
+        <span style="font-size:.85rem;font-weight:600">💾 Also save as a reusable template</span>
+      </label>
+      <div id="nrc-save-template-row" class="hidden" style="margin-bottom:4px">
+        <input id="nrc-template-name" type="text" placeholder="Template name (for reuse — not shown to voters)" maxlength="50" value="${esc(_nrcState.templateName||"")}" oninput="_nrcSetTemplateName(this.value)" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem"/>
+      </div>
+    `;
+    return;
+  }
+  if(btn)btn.textContent="Schedule →";
+  el.innerHTML=`
+    <div style="font-size:.75rem;color:var(--sub);margin-bottom:10px">Scheduling always saves these details as a template first, so it can repeat (or fire once) later.</div>
+    <label style="font-size:.78rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">Repeat</label>
+    <select id="nrc-recurrence" onchange="_nrcOnRecurrenceChange(this.value)" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem;margin-bottom:12px">
+      <option value="once">Just once</option>
+      <option value="weekly">Weekly</option>
+      <option value="biweekly">Every 2 weeks</option>
+      <option value="monthly">Monthly</option>
+    </select>
+    <div id="nrc-rec-once" style="margin-bottom:12px">
+      <label style="font-size:.78rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">Date &amp; time (your local time)</label>
+      <input id="nrc-sched-at" type="datetime-local" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:.95rem;background:var(--card);color:var(--text)"/>
+    </div>
+    <div id="nrc-rec-weekly" style="display:none;gap:8px;margin-bottom:12px">
+      <select id="nrc-rec-day" style="flex:1;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem">${WEEKDAYS.map(d=>`<option value="${d}">${d[0].toUpperCase()+d.slice(1)}</option>`).join("")}</select>
+      <input id="nrc-rec-time" type="time" style="flex:1;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem"/>
+    </div>
+    <div id="nrc-rec-monthly" style="display:none;gap:8px;margin-bottom:12px">
+      <input id="nrc-rec-monthday" type="number" min="1" max="31" placeholder="Day (1-31)" style="flex:1;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem"/>
+      <input id="nrc-rec-monthtime" type="time" style="flex:1;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem"/>
+    </div>
+    <label style="font-size:.8rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">Template name</label>
+    <input id="nrc-template-name" type="text" placeholder="e.g. sunday-cricket" maxlength="50" value="${esc(_nrcState.templateName||"")}" oninput="_nrcSetTemplateName(this.value)" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem"/>
+  `;
+  // Pre-fill the date picker default (1 hour from now) and the recurrence
+  // day/time defaults the same way the old modals did.
+  const atInp=document.getElementById("nrc-sched-at");
+  if(atInp){
+    const d=new Date(Date.now()+60*60*1000);
+    const pad=n=>String(n).padStart(2,"0");
+    atInp.value=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+  const recTime=document.getElementById("nrc-rec-time");
+  if(recTime)recTime.value="09:00";
+  const monthTime=document.getElementById("nrc-rec-monthtime");
+  if(monthTime)monthTime.value="09:00";
+}
+
+window._nrcSetTemplateName=function(v){
+  _nrcState.templateName=v;
+};
+
+window._nrcSetTiming=function(mode){
+  _nrcState.timing=mode;
+  document.getElementById("nrc-seg-now")?.classList.toggle("active",mode==="now");
+  document.getElementById("nrc-seg-schedule")?.classList.toggle("active",mode==="schedule");
+  _nrcRenderTimingBody();
+};
+
+window._nrcOnRecurrenceChange=function(value){
+  _nrcState.recurrence=value;
+  const show=(id,on)=>{const e=document.getElementById(id);if(e)e.style.display=on?"flex":"none";};
+  show("nrc-rec-once",value==="once");
+  show("nrc-rec-weekly",value==="weekly"||value==="biweekly");
+  show("nrc-rec-monthly",value==="monthly");
+};
+
+function _nrcRenderTemplateOptions(){
+  const sel=document.getElementById("nrc-template-select");
+  if(!sel)return;
+  const opts=(_templatesCache||[]).map(t=>`<option value="${esc(t.name)}">${esc(t.title||t.name)}</option>`).join("");
+  sel.innerHTML=`<option value="">— Start blank —</option>${opts}`;
+}
+
+window._nrcOnTemplateSelect=function(name){
+  const t=(_templatesCache||[]).find(x=>x.name===name);
+  const set=(id,val)=>{const e=document.getElementById(id);if(e)e.value=val||"";};
+  if(!t){
+    set("nrc-title","");set("nrc-location","");set("nrc-fee","");set("nrc-limit","");
+    set("nrc-eventday","");set("nrc-eventtime","");
+    _nrcState.templateName="";
+    const nameInp=document.getElementById("nrc-template-name");
+    if(nameInp)nameInp.value="";
+    return;
+  }
+  set("nrc-title",t.title||t.name);
+  set("nrc-location",t.location);
+  set("nrc-fee",t.fee);
+  set("nrc-limit",t.limit||"");
+  set("nrc-eventday",t.event_day||"");
+  set("nrc-eventtime",t.event_time||"");
+  _nrcState.templateName=name;
+  const nameInp=document.getElementById("nrc-template-name");
+  if(nameInp)nameInp.value=name;
+};
+
+window.submitNewRollcall=async function(){
   if(!_idToken){toast("Verify your Telegram identity first.",3500);return;}
-  const title=(document.getElementById("start-title")?.value||"").trim();
+  const title=(document.getElementById("nrc-title")?.value||"").trim();
   if(!title){toast("Enter a title for the rollcall.",2500);return;}
-  const btn=document.getElementById("start-submit-btn");
-  if(btn){btn.disabled=true;btn.textContent="Starting…";}
-  try{
-    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/start-rollcall`,{
-      method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({id_token:_idToken,title}),
-      signal:AbortSignal.timeout(10000),
-    });
-    if(!res.ok){
-      const d=await res.json().catch(()=>({}));
-      throw new Error(d.detail||"Failed to start rollcall");
+  const location=(document.getElementById("nrc-location")?.value||"").trim()||null;
+  const fee=(document.getElementById("nrc-fee")?.value||"").trim()||null;
+  const limitVal=document.getElementById("nrc-limit")?.value;
+  const limit=limitVal?parseInt(limitVal,10):null;
+  const eventDay=document.getElementById("nrc-eventday")?.value||null;
+  const eventTime=document.getElementById("nrc-eventtime")?.value||null;
+  if((eventDay&&!eventTime)||(!eventDay&&eventTime)){
+    toast("Set both event day and time, or leave both blank.",3000);
+    return;
+  }
+
+  const btn=document.getElementById("nrc-submit-btn");
+  if(_nrcState.timing==="now"){
+    const saveAsTemplate=document.getElementById("nrc-save-template-check")?.checked;
+    const templateName=(document.getElementById("nrc-template-name")?.value||"").trim();
+    if(saveAsTemplate&&!templateName){toast("Enter a name for the template.",2500);return;}
+    if(btn){btn.disabled=true;btn.textContent="Starting…";}
+    try{
+      const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/start-rollcall`,{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          id_token:_idToken,title,location,fee,limit,
+          event_day:eventDay,event_time:eventTime,
+          save_as_template:saveAsTemplate?templateName:null,
+        }),
+        signal:AbortSignal.timeout(10000),
+      });
+      if(!res.ok){const d=await res.json().catch(()=>({}));throw new Error(d.detail||"Failed to start rollcall");}
+      closeNewRollcallModal();
+      toast("✅ Rollcall started!",2500);
+      activeTabIdx=0;
+      await loadGroup();
+      if(saveAsTemplate){_templatesCache=null;await loadTemplatesSchedule().catch(()=>{});}
+    }catch(e){
+      toast(e.message||"Could not start rollcall",4000);
+    }finally{
+      if(btn){btn.disabled=false;btn.textContent="Start →";}
     }
-    closeStartModal();
-    toast("✅ Rollcall started!",2500);
-    // Reload group data to show the new rollcall
-    activeTabIdx=0;
-    await loadGroup();
+    return;
+  }
+
+  // Schedule path — always saves/updates a template first, then either
+  // fires it once (scheduled_rollcalls row referencing the template by
+  // name) or sets its recurring schedule (existing templates columns).
+  const templateName=(document.getElementById("nrc-template-name")?.value||"").trim();
+  if(!templateName){toast("Enter a template name — scheduling needs one to reuse.",3000);return;}
+  const recurrence=_nrcState.recurrence;
+
+  let scheduledAt=null,schedDay=null,schedTime=null,monthDay=null;
+  if(recurrence==="once"){
+    const atLocal=document.getElementById("nrc-sched-at")?.value;
+    if(!atLocal){toast("Pick a date and time.",2500);return;}
+    const localMs=new Date(atLocal).getTime();
+    if(isNaN(localMs)||localMs<=Date.now()){toast("Choose a future date and time.",3000);return;}
+    scheduledAt=new Date(localMs).toISOString();
+  }else if(recurrence==="monthly"){
+    monthDay=parseInt(document.getElementById("nrc-rec-monthday")?.value,10);
+    schedTime=document.getElementById("nrc-rec-monthtime")?.value;
+    if(!monthDay||monthDay<1||monthDay>31){toast("Enter a day of month (1-31).",2500);return;}
+    if(!schedTime){toast("Pick a time.",2500);return;}
+  }else{
+    schedDay=document.getElementById("nrc-rec-day")?.value;
+    schedTime=document.getElementById("nrc-rec-time")?.value;
+    if(!schedTime){toast("Pick a time.",2500);return;}
+  }
+
+  if(btn){btn.disabled=true;btn.textContent="Scheduling…";}
+  try{
+    const tmplRes=await fetch(`/api/v1/web/group/${URL_TOKEN}/templates/${encodeURIComponent(templateName)}`,{
+      method:"PUT",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({id_token:_idToken,title,location,fee,limit:limit||0,event_day:eventDay,event_time:eventTime}),
+      signal:AbortSignal.timeout(8000),
+    });
+    if(!tmplRes.ok)throw new Error((await tmplRes.json().catch(()=>({}))).detail||"Failed to save template");
+
+    if(recurrence==="once"){
+      const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/scheduled-rollcalls`,{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({id_token:_idToken,title:templateName,scheduled_at:scheduledAt}),
+        signal:AbortSignal.timeout(10000),
+      });
+      if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"Failed to schedule rollcall");
+    }else{
+      const schedBody={id_token:_idToken,recurrence_type:recurrence,schedule_time:schedTime};
+      if(recurrence==="monthly")schedBody.monthly_day=monthDay;
+      else schedBody.schedule_day=schedDay;
+      const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/templates/${encodeURIComponent(templateName)}/schedule`,{
+        method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(schedBody),
+        signal:AbortSignal.timeout(8000),
+      });
+      if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"Failed to set schedule");
+    }
+    closeNewRollcallModal();
+    toast(recurrence==="once"?"✅ Rollcall scheduled!":"✅ Recurring schedule set!",2500);
+    _templatesCache=null;
+    await Promise.all([loadTemplatesSchedule().catch(()=>{}),_loadScheduledOnceList().catch(()=>{})]);
   }catch(e){
-    toast(e.message||"Could not start rollcall",4000);
+    toast(e.message||"Could not schedule rollcall",4000);
   }finally{
-    if(btn){btn.disabled=false;btn.textContent="Start →";}
+    if(btn){btn.disabled=false;btn.textContent="Schedule →";}
   }
 };
 
@@ -1431,50 +1664,60 @@ window.doProxyVoteWeb=async function(voteType){
   }
 };
 
-// ── Schedule rollcall ────────────────────────────────────────────────────
-window.openScheduleModal=async function(){
-  const m=document.getElementById("schedule-modal");
-  if(m){m.style.display="flex";m.classList.remove("hidden");}
-  // Pre-fill date to 1 hour from now (local time)
-  const inp=document.getElementById("sched-at");
-  if(inp){
-    const d=new Date(Date.now()+60*60*1000);
-    // datetime-local needs "YYYY-MM-DDTHH:MM"
-    const pad=n=>String(n).padStart(2,"0");
-    inp.value=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  }
-  const titleInp=document.getElementById("sched-title");
-  if(titleInp)titleInp.value="";
-  await _loadScheduledList();
-};
-window.closeScheduleModal=function(){
-  const m=document.getElementById("schedule-modal");
-  if(m){m.style.display="none";}
+// ── Scheduled (one-time) list — promoted out of the old schedule modal
+// into its own persistent collapsible admin-card section. Only the one-off
+// entries created via New Rollcall's Schedule → Just once path; recurring
+// schedules live in the Templates section above. Items whose title
+// references a saved template (the unified flow's one-time path always
+// does) get the template's real fields from the backend for a richer row.
+let _scheduledOnceOpen=false,_scheduledOnceCache=null;
+
+window.toggleScheduledOnce=async function(){
+  _scheduledOnceOpen=!_scheduledOnceOpen;
+  const body=document.getElementById("scheduled-once-body");
+  const ch=document.getElementById("scheduled-once-chevron");
+  if(body)body.classList.toggle("hidden",!_scheduledOnceOpen);
+  if(ch)ch.textContent=_scheduledOnceOpen?"▲":"▼";
+  if(_scheduledOnceOpen)await _loadScheduledOnceList();
 };
 
-async function _loadScheduledList(){
-  const container=document.getElementById("sched-list");
-  if(!container||!_idToken)return;
+async function _loadScheduledOnceList(){
+  const body=document.getElementById("scheduled-once-body");
+  if(!body||!_idToken)return;
+  body.innerHTML='<div class="sched-empty">Loading…</div>';
   try{
     const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/scheduled-rollcalls?id_token=${encodeURIComponent(_idToken)}`,{signal:AbortSignal.timeout(5000)});
-    if(!res.ok){container.innerHTML="";return;}
+    if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"Failed to load");
     const d=await res.json();
-    if(!d.items||!d.items.length){container.innerHTML=`<div class="sched-empty">No scheduled rollcalls yet.</div>`;return;}
-    container.innerHTML=d.items.map(item=>{
-      const dt=new Date(item.scheduled_at);
-      const label=isNaN(dt)?item.scheduled_at:dt.toLocaleString(undefined,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
-      return `<div class="sched-item">
-        <div class="sched-item-info">
-          <div class="sched-item-title">${esc(item.title)}</div>
-          <div class="sched-item-time">📅 ${esc(label)}</div>
-        </div>
-        <button class="sched-cancel-btn" onclick="cancelScheduled(${item.id})">Cancel</button>
-      </div>`;
-    }).join("");
-  }catch(_){container.innerHTML="";}
+    _scheduledOnceCache=d.items||[];
+    _renderScheduledOnceList();
+  }catch(e){
+    body.innerHTML=`<div class="sched-empty">${esc(e.message||"Could not load")}</div>`;
+  }
 }
 
-window.cancelScheduled=async function(id){
+function _renderScheduledOnceList(){
+  const body=document.getElementById("scheduled-once-body");
+  if(!body)return;
+  const items=_scheduledOnceCache||[];
+  if(!items.length){body.innerHTML='<div class="sched-empty">No one-time rollcalls scheduled.</div>';return;}
+  body.innerHTML=items.map(item=>{
+    const dt=new Date(item.scheduled_at);
+    const label=isNaN(dt)?item.scheduled_at:dt.toLocaleString(undefined,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
+    const displayTitle=item.display_title||item.title;
+    const meta=[item.location,item.fee?`₹${item.fee}`:null,item.limit?`Cap ${item.limit}`:null].filter(Boolean).join(" · ");
+    return `<div class="sched-item">
+      <div class="sched-item-info">
+        <div class="sched-item-title">${esc(displayTitle)}</div>
+        <div class="sched-item-time">📅 ${esc(label)}</div>
+        ${meta?`<div class="upcoming-meta">${esc(meta)}</div>`:""}
+      </div>
+      <button class="sched-cancel-btn" onclick="cancelScheduledOnce(${item.id})">Cancel</button>
+    </div>`;
+  }).join("");
+}
+
+window.cancelScheduledOnce=async function(id){
   if(!_idToken)return;
   if(!confirm("Cancel this scheduled rollcall?"))return;
   try{
@@ -1483,37 +1726,8 @@ window.cancelScheduled=async function(id){
     });
     if(!res.ok&&res.status!==204){const d=await res.json().catch(()=>({}));throw new Error(d.detail||"Failed");}
     toast("Scheduled rollcall cancelled.",2000);
-    await _loadScheduledList();
+    await _loadScheduledOnceList();
   }catch(e){toast(e.message||"Could not cancel",3500);}
-};
-
-window.submitScheduleRollcall=async function(){
-  if(!_idToken){toast("Verify with Telegram first.",3500);return;}
-  const title=(document.getElementById("sched-title")?.value||"").trim();
-  if(!title){toast("Enter a title.",2500);return;}
-  const atLocal=document.getElementById("sched-at")?.value;
-  if(!atLocal){toast("Pick a date and time.",2500);return;}
-  // Convert datetime-local (local time, no zone) to UTC ISO string
-  const localMs=new Date(atLocal).getTime();
-  if(isNaN(localMs)||localMs<=Date.now()){toast("Choose a future date and time.",3000);return;}
-  const scheduledAt=new Date(localMs).toISOString();
-  const btn=document.getElementById("sched-submit-btn");
-  if(btn){btn.disabled=true;btn.textContent="Scheduling…";}
-  try{
-    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/scheduled-rollcalls`,{
-      method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({id_token:_idToken,title,scheduled_at:scheduledAt}),
-      signal:AbortSignal.timeout(10000),
-    });
-    if(!res.ok){const d=await res.json().catch(()=>({}));throw new Error(d.detail||"Failed to schedule rollcall");}
-    toast("✅ Rollcall scheduled!",2500);
-    document.getElementById("sched-title").value="";
-    await _loadScheduledList();
-  }catch(e){
-    toast(e.message||"Could not schedule rollcall",4000);
-  }finally{
-    if(btn){btn.disabled=false;btn.textContent="Schedule →";}
-  }
 };
 
 // ── Bookmark / share group URL ────────────────────────────────────────────

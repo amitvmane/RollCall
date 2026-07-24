@@ -67,6 +67,13 @@ class ScheduledRollcallItem(BaseModel):
     title: str
     scheduled_at: str
     created_by_name: str
+    # Populated when `title` references a saved template (the unified "New
+    # Rollcall" flow's one-time path always does) — the template's real
+    # display fields for a richer list item than the bare technical name.
+    display_title: Optional[str] = None
+    location: Optional[str] = None
+    fee: Optional[str] = None
+    limit: Optional[int] = None
 
 
 class ScheduledRollcallsResponse(BaseModel):
@@ -208,6 +215,12 @@ class VapidPublicKeyResponse(BaseModel):
 class WebStartRollcallRequest(BaseModel):
     id_token: str = Field(..., description="Signed identity token of the admin starting the rollcall")
     title: str = Field(..., min_length=1, max_length=200, description="Rollcall title")
+    location: Optional[str] = Field(None, max_length=200)
+    fee: Optional[str] = Field(None, max_length=50)
+    limit: Optional[int] = Field(None, ge=1, le=1000)
+    event_day: Optional[str] = Field(None, description="Weekday name the event happens on — used to auto-close (both-or-neither with event_time)")
+    event_time: Optional[str] = Field(None, description="HH:MM the event happens at — used to auto-close (both-or-neither with event_day)")
+    save_as_template: Optional[str] = Field(None, max_length=50, description="If set, also saves these fields as a reusable template under this name")
 
 
 class WebEndRollcallRequest(BaseModel):

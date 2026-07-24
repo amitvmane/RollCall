@@ -14,12 +14,15 @@ import asyncio
 import logging
 from datetime import datetime
 
+import pytz
+
 from exceptions import (
     amountOfRollCallsReached,
     incorrectParameter,
     insufficientPermissions,
     rollCallNotStarted,
 )
+from functions import get_next_weekday_datetime
 from rollcall_manager import manager
 from db import (
     increment_user_stat,
@@ -48,6 +51,11 @@ async def start_rollcall(
     started_by_user_id: int,
     started_by_name: str,
     started_by_username: str | None = None,
+    location: str | None = None,
+    fee: str | None = None,
+    limit: int | None = None,
+    event_day: str | None = None,
+    event_time: str | None = None,
 ) -> dict:
     """
     Create a new active rollcall for the chat.
@@ -56,6 +64,14 @@ async def start_rollcall(
       chat_id           — Telegram chat id (or platform-equivalent later)
       title             — title for the rollcall. `None` or empty falls back to '<Empty>'.
       started_by_*      — identity of the user starting it (for audit log)
+      location, fee, limit, event_day, event_time — optional, same vocabulary
+        and application logic as services.templates.start_template (applies
+        to the same rollcalls table columns — no new storage). event_day is
+        a weekday name; event_time is HH:MM. Together they compute
+        finalizeDate the identical way a template-started rollcall does —
+        this is "when does the game happen" (auto-close time), independent
+        of "when did voting open" (now, since this is the immediate-start
+        path).
 
     Returns:
       Dict with the created rollcall's serialized state, plus a `rc_index`
@@ -80,6 +96,28 @@ async def start_rollcall(
     clean_title = (title or "").strip() or "<Empty>"
     rc_index = len(rollcalls)
     rc = manager.add_rollcall(chat_id, clean_title)
+
+    if limit is not None:
+        rc.inListLimit = limit
+    if location:
+        rc.location = location
+    if fee:
+        rc.event_fee = fee
+
+    if event_day and event_time:
+        chat = manager.get_chat(chat_id)
+        tzname = chat.get("timezone", "Asia/Kolkata")
+        try:
+            tz = pytz.timezone(tzname)
+        except Exception:
+            tz = pytz.timezone("Asia/Kolkata")
+            tzname = "Asia/Kolkata"
+        rc.timezone = tzname
+        dt = get_next_weekday_datetime(tz, event_day, event_time)
+        if dt:
+            rc.finalizeDate = dt
+
+    rc.save()
 
     logging.info(
         f"[{_ts()}] [CHAT {chat_id}] Rollcall started: '{clean_title}' "

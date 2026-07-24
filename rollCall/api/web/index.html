@@ -46,32 +46,16 @@
   </div>
 </div>
 
-<!-- Start rollcall modal -->
-<div id="start-modal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;display:flex;align-items:flex-end;justify-content:center">
-  <div style="background:var(--card);border-radius:18px 18px 0 0;padding:20px 16px 32px;width:100%;max-width:480px">
-    <div style="font-size:1rem;font-weight:700;margin-bottom:16px">Start a Rollcall</div>
-    <label style="font-size:.8rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">Title</label>
-    <input id="start-title" type="text" placeholder="e.g. Sunday Cricket" maxlength="200" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:.95rem;background:var(--card);color:var(--text);margin-bottom:16px"/>
-    <div style="display:flex;gap:10px">
-      <button class="btn" id="start-cancel-btn" style="flex:1;padding:12px;background:var(--border);color:var(--text);border-radius:10px;font-weight:600" onclick="closeStartModal()">Cancel</button>
-      <button class="btn btn-primary" id="start-submit-btn" style="flex:1;padding:12px;border-radius:10px;font-weight:600" onclick="submitStartRollcall()">Start →</button>
-    </div>
-  </div>
-</div>
-
-<!-- Schedule rollcall modal -->
-<div id="schedule-modal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;display:flex;align-items:flex-end;justify-content:center">
-  <div style="background:var(--card);border-radius:18px 18px 0 0;padding:20px 16px 32px;width:100%;max-width:480px">
-    <div style="font-size:1rem;font-weight:700;margin-bottom:4px">📅 Schedule a Rollcall</div>
-    <div style="font-size:.8rem;color:var(--sub);margin-bottom:16px">The bot will auto-start this rollcall at the chosen time.</div>
-    <label style="font-size:.8rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">Title</label>
-    <input id="sched-title" type="text" placeholder="e.g. Friday Badminton" maxlength="200" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:.95rem;background:var(--card);color:var(--text);margin-bottom:14px"/>
-    <label style="font-size:.8rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">Date &amp; Time (your local time)</label>
-    <input id="sched-at" type="datetime-local" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:.95rem;background:var(--card);color:var(--text);margin-bottom:16px"/>
-    <div id="sched-list" style="margin-bottom:14px"></div>
-    <div style="display:flex;gap:10px">
-      <button class="btn" style="flex:1;padding:12px;background:var(--border);color:var(--text);border-radius:10px;font-weight:600" onclick="closeScheduleModal()">Cancel</button>
-      <button class="btn btn-primary" id="sched-submit-btn" style="flex:1;padding:12px;border-radius:10px;font-weight:600" onclick="submitScheduleRollcall()">Schedule →</button>
+<!-- New Rollcall modal — unified Start/Schedule/Template-create flow. Body
+     is rendered by renderNewRollcallModalBody() in app.js so the Now vs
+     Schedule (Once/Weekly/Biweekly/Monthly) sections can swap in place. -->
+<div id="nrc-modal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;display:flex;align-items:flex-end;justify-content:center">
+  <div style="background:var(--card);border-radius:18px 18px 0 0;padding:20px 16px 32px;width:100%;max-width:480px;max-height:88vh;overflow-y:auto">
+    <div style="font-size:1rem;font-weight:700;margin-bottom:16px">＋ New Rollcall</div>
+    <div id="nrc-body"></div>
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button class="btn" style="flex:1;padding:12px;background:var(--border);color:var(--text);border-radius:10px;font-weight:600" onclick="closeNewRollcallModal()">Cancel</button>
+      <button class="btn btn-primary" id="nrc-submit-btn" style="flex:1;padding:12px;border-radius:10px;font-weight:600" onclick="submitNewRollcall()">Start →</button>
     </div>
   </div>
 </div>
@@ -207,9 +191,8 @@
     <!-- Admin action — visible only to web admins -->
     <div id="admin-card" class="card hidden" style="border:1.5px dashed var(--border)">
       <div style="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:10px">Admin actions</div>
-      <div style="display:flex;gap:8px;margin-bottom:10px">
-        <button class="btn btn-primary" style="flex:1;padding:12px" onclick="openStartModal()">＋ Start Rollcall</button>
-        <button class="btn" id="sched-open-btn" style="flex:1;padding:12px;background:var(--border);color:var(--text);border-radius:10px;font-weight:600" onclick="openScheduleModal()">📅 Schedule</button>
+      <div style="margin-bottom:10px">
+        <button class="btn btn-primary" style="width:100%;padding:12px" onclick="openNewRollcallModal()">＋ New Rollcall</button>
       </div>
       <div id="end-rc-row" style="display:none;margin-bottom:10px">
         <button class="btn btn-danger" id="end-rc-btn" style="width:100%;padding:12px" onclick="doEndRcWeb()">⏹ End Active Rollcall</button>
@@ -271,6 +254,15 @@
           📋 Templates <span id="templates-chevron">▼</span>
         </div>
         <div id="templates-schedule-body" class="hidden"></div>
+      </div>
+      <!-- One-time future rollcalls created via the New Rollcall modal's
+           Schedule → Once path (recurring schedules live in Templates
+           above — this is only the one-off entries). -->
+      <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:12px">
+        <div class="dues-admin-section-hdr" onclick="toggleScheduledOnce()">
+          📅 Scheduled (one-time) <span id="scheduled-once-chevron">▼</span>
+        </div>
+        <div id="scheduled-once-body" class="hidden"></div>
       </div>
     </div>
 

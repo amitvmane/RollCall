@@ -146,20 +146,31 @@ class TestManagerGhostConfig(unittest.TestCase):
     """Manager get/set methods for absentLimit and ghostTrackingEnabled."""
 
     def setUp(self):
+        from unittest.mock import patch
         from rollcall_manager import RollCallManager
         import db as db_module
         self.db = db_module
 
-        # Patch get_or_create_chat and get_active_rollcalls for each manager call
-        self.db.get_or_create_chat.return_value = {
+        # Patch get_or_create_chat and get_active_rollcalls for each manager
+        # call — via patch.object + addCleanup, not a direct .return_value=
+        # mutation, so it reverts after the test instead of leaking into
+        # whichever test runs next and doesn't patch its own return value.
+        patcher1 = patch.object(self.db, 'get_or_create_chat', return_value={
             'shh_mode': False,
             'admin_rights': False,
             'timezone': 'Asia/Calcutta',
             'absent_limit': 1,
             'ghost_tracking_enabled': True,
-        }
-        self.db.get_active_rollcalls.return_value = []
-        self.db.update_chat_settings.return_value = True
+            'group_web_token': 'testgrouptoken00000000000000000',
+        })
+        patcher2 = patch.object(self.db, 'get_active_rollcalls', return_value=[])
+        patcher3 = patch.object(self.db, 'update_chat_settings', return_value=True)
+        self.addCleanup(patcher1.stop)
+        self.addCleanup(patcher2.stop)
+        self.addCleanup(patcher3.stop)
+        patcher1.start()
+        patcher2.start()
+        patcher3.start()
         self.manager = RollCallManager()
 
     def test_get_absent_limit_default(self):

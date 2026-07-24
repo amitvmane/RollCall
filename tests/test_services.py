@@ -257,6 +257,48 @@ class TestRollcallsService(unittest.IsolatedAsyncioTestCase):
 
         mgr.add_rollcall.assert_called_once_with(100, "<Empty>")
 
+    async def test_start_rollcall_applies_full_fields(self):
+        """location/fee/limit/event_day+event_time apply the same way
+        start_template does, onto the existing rollcalls table columns —
+        no new schema (see the unified New Rollcall flow)."""
+        mgr = self._mgr()
+        rc = _make_rc("Match Day")
+        mgr.add_rollcall.return_value = rc
+
+        with patch("services.rollcalls.manager", mgr), \
+             patch("services.rollcalls.log_admin_action"), \
+             patch("services.rollcalls.increment_user_stat"):
+            from services.rollcalls import start_rollcall
+            result = await start_rollcall(
+                100, "Match Day", 1, "Admin",
+                location="Court 3", fee="200", limit=10,
+                event_day="friday", event_time="19:00",
+            )
+
+        self.assertEqual(rc.location, "Court 3")
+        self.assertEqual(rc.event_fee, "200")
+        self.assertEqual(rc.inListLimit, 10)
+        self.assertIsNotNone(rc.finalizeDate)
+        rc.save.assert_called()
+        self.assertEqual(result["title"], "Match Day")
+
+    async def test_start_rollcall_no_fields_leaves_rc_untouched(self):
+        """Backward compat: the original title-only call path (bare Start/
+        Schedule modals, /src command) must not touch location/fee/limit."""
+        mgr = self._mgr()
+        rc = _make_rc("Plain")
+        mgr.add_rollcall.return_value = rc
+
+        with patch("services.rollcalls.manager", mgr), \
+             patch("services.rollcalls.log_admin_action"), \
+             patch("services.rollcalls.increment_user_stat"):
+            from services.rollcalls import start_rollcall
+            await start_rollcall(100, "Plain", 1, "Admin")
+
+        self.assertIsNone(rc.location)
+        self.assertIsNone(rc.event_fee)
+        self.assertIsNone(rc.finalizeDate)
+
     async def test_end_rollcall_happy_path(self):
         rc = _make_rc("Weekly")
         rc.id = 99

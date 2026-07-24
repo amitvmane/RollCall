@@ -299,6 +299,11 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .admin-toggle input:checked+.admin-toggle-slider{background:var(--accent)}
 .admin-toggle input:checked+.admin-toggle-slider::before{transform:translateX(20px)}
 
+/* ── New Rollcall modal: Now/Schedule segmented control ── */
+.nrc-seg{display:flex;gap:6px;background:var(--bg);border-radius:10px;padding:4px}
+.nrc-seg-btn{flex:1;padding:9px 10px;border:none;border-radius:8px;background:transparent;color:var(--sub);font-size:.85rem;font-weight:700;cursor:pointer;transition:all .15s;font-family:var(--font-body)}
+.nrc-seg-btn.active{background:var(--accent);color:#fff}
+
 /* ── Scheduled rollcall list inside modal ── */
 .sched-item{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:.83rem;gap:8px}
 .sched-item:last-child{border-bottom:none}

@@ -16,13 +16,26 @@ class TestGhostIntegrationSQLite(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        import importlib
-        import db as db_module
-        
+        # conftest.py installs a MagicMock at sys.modules['db'] for the whole
+        # session so unit tests never touch a real database. This class needs
+        # the real db.py for genuine SQLite integration coverage, so it swaps
+        # the entry out — but every other module that does a fresh
+        # `from db import X` inside a function body (not just at its own
+        # top-level `import db`) resolves against sys.modules['db'] at CALL
+        # time, not import time. If this swap isn't undone, every later test
+        # in the same session silently starts hitting a real (and by then
+        # closed/deleted) SQLite connection instead of the mock — save the
+        # mocked entries here and restore them in tearDownClass.
+        cls._saved_db_modules = {
+            name: sys.modules[name]
+            for name in list(sys.modules.keys())
+            if name == 'db' or name.startswith('db.')
+        }
+
         for mod_name in list(sys.modules.keys()):
             if mod_name == 'db' or mod_name.startswith('db.'):
                 del sys.modules[mod_name]
-        
+
         import db
         cls.db = db
         
@@ -56,6 +69,12 @@ class TestGhostIntegrationSQLite(unittest.TestCase):
             os.unlink(cls.db_path)
         except:
             pass
+        # Undo the setUpClass swap so later tests keep hitting the mock, not
+        # this class's now-closed-and-deleted real SQLite connection.
+        for mod_name in list(sys.modules.keys()):
+            if mod_name == 'db' or mod_name.startswith('db.'):
+                del sys.modules[mod_name]
+        sys.modules.update(cls._saved_db_modules)
 
     def setUp(self):
         self.db.db_conn.execute("DELETE FROM ghost_records")
@@ -253,8 +272,21 @@ class TestRollCallIntegrationSQLite(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        # See TestGhostIntegrationSQLite.setUpClass above — this class needs
+        # the real db.py too, and can't just `import db` and hope: conftest's
+        # session-wide mock (or another test's own real-db swap) may already
+        # be sitting at sys.modules['db']. Force a fresh real import and save
+        # what was there so tearDownClass can put it back.
+        cls._saved_db_modules = {
+            name: sys.modules[name]
+            for name in list(sys.modules.keys())
+            if name == 'db' or name.startswith('db.')
+        }
+        for mod_name in list(sys.modules.keys()):
+            if mod_name == 'db' or mod_name.startswith('db.'):
+                del sys.modules[mod_name]
         import db
-        
+
         db_path = tempfile.mktemp(suffix='_rc_integration.db')
         cls.db_path = db_path
         
@@ -275,6 +307,7 @@ class TestRollCallIntegrationSQLite(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        import db
         try:
             db.db_conn.close()
         except:
@@ -283,13 +316,17 @@ class TestRollCallIntegrationSQLite(unittest.TestCase):
             os.unlink(cls.db_path)
         except:
             pass
+        for mod_name in list(sys.modules.keys()):
+            if mod_name == 'db' or mod_name.startswith('db.'):
+                del sys.modules[mod_name]
+        sys.modules.update(cls._saved_db_modules)
 
     def test_create_and_end_rollcall(self):
         """Test: Create and end rollcall"""
         print("\n=== TEST: Create and end rollcall ===")
-        
+
         import db
-        
+
         rc_id = db.create_rollcall(self.chat_id, "Test Session")
         print(f"Created RC ID: {rc_id}")
         

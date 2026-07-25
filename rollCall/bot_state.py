@@ -188,6 +188,15 @@ async def reply_error(target, e):
 _buzz_cooldowns: dict = {}
 _BUZZ_COOLDOWN_SECONDS = 30
 
+# Cooldown for recurring background-loop warnings (e.g. the scheduler
+# repeatedly hitting "max 3 active rollcalls" on a template that fires
+# daily): (chat_id, condition_key) -> last-announced timestamp. Keeps a
+# genuinely-persistent condition from flooding the group with the same
+# message every time a periodic check re-evaluates it — see
+# _should_notify_group.
+_group_warning_cooldowns: dict = {}
+_GROUP_WARNING_COOLDOWN_SECONDS = 24 * 60 * 60
+
 # Panel message tracking: (chat_id, rc_1based) -> message_id of the active panel message
 _panel_msg_ids: dict = {}
 
@@ -313,6 +322,30 @@ def _is_buzz_rate_limited(chat_id: int) -> bool:
         return True
     _buzz_cooldowns[chat_id] = now
     return False
+
+
+def _should_notify_group(chat_id: int, condition_key: str) -> bool:
+    """Gate a background-loop warning message to the group: True on first
+    occurrence of this exact (chat, condition) pair, or once the cooldown
+    window has elapsed since it was last announced — False otherwise.
+
+    For a condition that resolves itself instantly (a one-off blip) this
+    never matters. It exists for conditions a periodic scheduler re-checks
+    on every tick and that only a human can actually resolve (e.g. "3
+    rollcalls already open" — clears when an admin runs /erc) — without
+    this gate, a daily-recurring template stuck on that condition posts the
+    identical warning to the group every single day forever.
+
+    Callers should always `logging.warning(...)` unconditionally regardless
+    of this return value, so every occurrence is still visible in the logs
+    even while the group-facing message is suppressed."""
+    key = (chat_id, condition_key)
+    now = datetime.now().timestamp()
+    last = _group_warning_cooldowns.get(key, 0)
+    if now - last < _GROUP_WARNING_COOLDOWN_SECONDS:
+        return False
+    _group_warning_cooldowns[key] = now
+    return True
 
 
 # ── User / mention helpers ────────────────────────────────────────────────────

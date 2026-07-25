@@ -758,6 +758,76 @@ class TestScheduleExpiryAutoDisable(unittest.TestCase):
         disable_sched.assert_not_called()
 
 
+class TestAutoStartMaxRollcallsCooldown(unittest.IsolatedAsyncioTestCase):
+    """_auto_start_from_template's "maximum 3 active rollcalls" warning used
+    to repost to the group on every single fire — for a daily template stuck
+    on a persistent condition (admin never ran /erc), that's the identical
+    message every day forever. Now gated by bot_state._should_notify_group:
+    every occurrence is still logged, but the group only hears about it
+    once per cooldown window."""
+
+    _load_real_module = TestCheckRemindersLogging._load_real_module
+
+    def setUp(self):
+        import bot_state
+        bot_state._group_warning_cooldowns.clear()
+
+    async def _call(self, real_mod, chat_id=-100, rollcalls_len=3):
+        import rollcall_manager as _rcm
+        mgr = _rcm.manager
+        with patch.object(mgr, 'get_chat', return_value={"timezone": "Asia/Kolkata"}), \
+             patch.object(mgr, 'get_rollcalls', return_value=[MagicMock()] * rollcalls_len), \
+             patch.object(real_mod.bot, 'send_message', new_callable=AsyncMock) as send:
+            await real_mod._auto_start_from_template(chat_id, {"name": "sunday-game"})
+        return send
+
+    async def test_first_call_notifies_group(self):
+        real_mod = self._load_real_module()
+        send = await self._call(real_mod)
+        send.assert_awaited_once()
+        self.assertIn("maximum 3 active rollcalls", send.call_args[0][1])
+
+    async def test_repeated_calls_suppressed_within_cooldown(self):
+        real_mod = self._load_real_module()
+        await self._call(real_mod)
+        send2 = await self._call(real_mod)
+        send2.assert_not_awaited()
+
+    async def test_different_templates_same_chat_still_each_notify_once(self):
+        """The cooldown key includes the template name, not just the chat —
+        two different daily templates both stuck on the cap must each get
+        their own first-occurrence notice."""
+        import rollcall_manager as _rcm
+        real_mod = self._load_real_module()
+        mgr = _rcm.manager
+        with patch.object(mgr, 'get_chat', return_value={"timezone": "Asia/Kolkata"}), \
+             patch.object(mgr, 'get_rollcalls', return_value=[MagicMock()] * 3), \
+             patch.object(real_mod.bot, 'send_message', new_callable=AsyncMock) as send:
+            await real_mod._auto_start_from_template(-100, {"name": "template-a"})
+            await real_mod._auto_start_from_template(-100, {"name": "template-b"})
+        self.assertEqual(send.await_count, 2)
+
+    async def test_below_cap_starts_normally_no_warning(self):
+        import rollcall_manager as _rcm
+        import handlers.lifecycle as _lifecycle_mod
+        real_mod = self._load_real_module()
+        mgr = _rcm.manager
+        rc = MagicMock()
+        rc.finalizeDate = None
+        mgr.add_rollcall = MagicMock(return_value=rc)
+        with patch.object(mgr, 'get_chat', return_value={"timezone": "Asia/Kolkata"}), \
+             patch.object(mgr, 'get_rollcalls', return_value=[]), \
+             patch.object(_lifecycle_mod, 'get_status_keyboard', new_callable=AsyncMock), \
+             patch.object(_lifecycle_mod, '_build_panel_text', return_value="panel"), \
+             patch.object(_lifecycle_mod, '_persist_panel_msg_id'), \
+             patch.object(real_mod, '_warn_unsettled_dues', new_callable=AsyncMock), \
+             patch.object(real_mod.bot, 'send_message', new_callable=AsyncMock) as send:
+            await real_mod._auto_start_from_template(-100, {"name": "sunday-game", "title": "Sunday Game"})
+        # A real start posts the panel — just must not be the cap warning.
+        for call in send.call_args_list:
+            self.assertNotIn("maximum 3 active rollcalls", call.args[1] if len(call.args) > 1 else "")
+
+
 # ---------------------------------------------------------------------------
 # SEC-1: cursor=None safety in db.py add_or_update_user
 # ---------------------------------------------------------------------------
@@ -913,6 +983,44 @@ class TestDbCursorSafety(unittest.TestCase):
         result = db_mod.get_all_chat_ids()
         # Mock returns default MagicMock — we just verify it doesn't raise
         self.assertIsNotNone(result)
+
+
+class TestShouldNotifyGroup(unittest.TestCase):
+    """bot_state._should_notify_group — cooldown gate for recurring
+    background-loop warnings, so a persistent condition (e.g. 3 stuck-open
+    rollcalls) doesn't storm the group with the identical message every
+    time a periodic check re-evaluates it."""
+
+    def setUp(self):
+        import bot_state
+        self.bot_state = bot_state
+        bot_state._group_warning_cooldowns.clear()
+
+    def test_first_call_returns_true(self):
+        self.assertTrue(self.bot_state._should_notify_group(-100, "max_rollcalls:t1"))
+
+    def test_second_call_within_cooldown_returns_false(self):
+        self.bot_state._should_notify_group(-100, "max_rollcalls:t1")
+        self.assertFalse(self.bot_state._should_notify_group(-100, "max_rollcalls:t1"))
+
+    def test_call_after_cooldown_expires_returns_true(self):
+        import datetime
+        key = (-100, "max_rollcalls:t1")
+        # Simulate a stale entry from just past the cooldown window instead
+        # of sleeping for real.
+        self.bot_state._group_warning_cooldowns[key] = (
+            datetime.datetime.now().timestamp()
+            - self.bot_state._GROUP_WARNING_COOLDOWN_SECONDS - 1
+        )
+        self.assertTrue(self.bot_state._should_notify_group(-100, "max_rollcalls:t1"))
+
+    def test_different_condition_key_same_chat_independent(self):
+        self.bot_state._should_notify_group(-100, "max_rollcalls:t1")
+        self.assertTrue(self.bot_state._should_notify_group(-100, "unsettled_dues"))
+
+    def test_different_chat_same_condition_independent(self):
+        self.bot_state._should_notify_group(-100, "unsettled_dues")
+        self.assertTrue(self.bot_state._should_notify_group(-200, "unsettled_dues"))
 
 
 # ---------------------------------------------------------------------------

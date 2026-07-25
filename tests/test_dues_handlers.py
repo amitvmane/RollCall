@@ -1151,6 +1151,14 @@ class TestPostEndSettleNudge(unittest.IsolatedAsyncioTestCase):
 class TestAutoStartUnsettledWarning(unittest.IsolatedAsyncioTestCase):
     """Scheduled-template auto-fire warns when earlier games sit unsettled."""
 
+    def setUp(self):
+        # _should_notify_group's cooldown dict is module-level global state
+        # in bot_state.py — clear it so an earlier test (in this file or a
+        # different one) that already "used up" chat_id 100's cooldown
+        # can't make this test's assertions depend on run order.
+        import bot_state
+        bot_state._group_warning_cooldowns.clear()
+
     def _load_real_module(self):
         import importlib.util
         module_path = os.path.join(
@@ -1190,6 +1198,30 @@ class TestAutoStartUnsettledWarning(unittest.IsolatedAsyncioTestCase):
         mod = self._load_real_module()
         with patch("db.get_or_create_chat", side_effect=Exception("db down")):
             await mod._warn_unsettled_dues(100)  # must not raise
+
+    async def test_repeated_calls_suppressed_within_cooldown(self):
+        """A daily template re-hitting the same unsettled condition must not
+        repost the picker every single time it fires — only the first call
+        within the cooldown window should reach _send_unsettled_picker."""
+        mod = self._load_real_module()
+        games = [{"id": 41, "title": "Last Sunday", "ended_at": "2026-07-12"}]
+        with patch("db.get_or_create_chat", return_value={"dues_enabled": 1}), \
+             patch("db.get_unsettled_rollcalls", return_value=games), \
+             patch("handlers.dues._send_unsettled_picker", new=AsyncMock()) as picker:
+            await mod._warn_unsettled_dues(100)
+            await mod._warn_unsettled_dues(100)
+            await mod._warn_unsettled_dues(100)
+        picker.assert_awaited_once()
+
+    async def test_different_chats_not_cross_suppressed(self):
+        mod = self._load_real_module()
+        games = [{"id": 41, "title": "Last Sunday", "ended_at": "2026-07-12"}]
+        with patch("db.get_or_create_chat", return_value={"dues_enabled": 1}), \
+             patch("db.get_unsettled_rollcalls", return_value=games), \
+             patch("handlers.dues._send_unsettled_picker", new=AsyncMock()) as picker:
+            await mod._warn_unsettled_dues(100)
+            await mod._warn_unsettled_dues(200)
+        self.assertEqual(picker.await_count, 2)
 
 
 if __name__ == "__main__":

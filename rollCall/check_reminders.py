@@ -362,8 +362,17 @@ async def _warn_unsettled_dues(chat_id: int):
         unsettled = _db.get_unsettled_rollcalls(chat_id)
         if not unsettled:
             return
-        from handlers.dues import _send_unsettled_picker
         n = len(unsettled)
+        # Persists until an admin settles up — a daily template would
+        # otherwise repost this every single day it fires. Log every
+        # occurrence; only post to the group at most once a day.
+        logging.warning(
+            "[scheduler] chat %s has %d unsettled game(s) at auto-start time", chat_id, n,
+        )
+        from bot_state import _should_notify_group
+        if not _should_notify_group(chat_id, "unsettled_dues"):
+            return
+        from handlers.dues import _send_unsettled_picker
         await _send_unsettled_picker(
             chat_id, unsettled,
             f"⚠️ {n} earlier game{'s have' if n != 1 else ' has'} unsettled dues "
@@ -388,10 +397,21 @@ async def _auto_start_from_template(chat_id: int, tmpl: dict):
 
     rollcalls = manager.get_rollcalls(chat_id)
     if len(rollcalls) >= 3:
-        await bot.send_message(
-            chat_id,
-            f"⚠️ Could not auto-start template '{tmpl['name']}': maximum 3 active rollcalls already open."
+        # Persistent condition an admin has to resolve (end one of the 3
+        # open rollcalls) — a daily/frequent template stuck on this would
+        # otherwise repost the identical warning every time it fires. Log
+        # every occurrence; only post to the group at most once a day.
+        logging.warning(
+            "[scheduler] Could not auto-start template '%s' for chat %s: "
+            "maximum 3 active rollcalls already open.", tmpl['name'], chat_id,
         )
+        from bot_state import _should_notify_group
+        if _should_notify_group(chat_id, f"max_rollcalls:{tmpl['name']}"):
+            await bot.send_message(
+                chat_id,
+                f"⚠️ Could not auto-start template '{tmpl['name']}': maximum 3 active rollcalls already open. "
+                "End one with /erc to let the next auto-start through."
+            )
         return
 
     title = tmpl.get("title") or tmpl["name"]

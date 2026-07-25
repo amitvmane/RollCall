@@ -406,11 +406,17 @@ async def memory_prune_loop(interval_seconds: int = 600):
         _rate_limits, _buzz_cooldowns, _pending_deletes, _pending_overrides,
         _pending_proxy_add, _pending_reconf, _pending_subsidy_input,
         _pending_payment_input, _prune_pending, _panel_msg_ids, _sched_selection,
+        _group_warning_cooldowns,
     )
     from services import presence as presence_svc
 
     RATE_LIMIT_AGE = 300   # individual vote rate-limit window is 2s; 5 min is well past stale
     BUZZ_COOLDOWN_AGE = 300  # /buzz cooldown is 30s; 5 min flushes any straggler
+    # Must stay well past _GROUP_WARNING_COOLDOWN_SECONDS (1 day) — pruning
+    # an entry before its own cooldown expires would just let the warning
+    # re-fire early, defeating the point. 7 days only cleans up chats whose
+    # underlying condition is long since resolved.
+    GROUP_WARNING_COOLDOWN_AGE = 7 * 24 * 60 * 60
     # _sched_selection entries are bare sets with no timestamp (unlike the
     # _pending_* dicts), so they can't use _prune_pending. An abandoned
     # /schedule_template multi-select panel leaves its entry forever — bound
@@ -426,6 +432,8 @@ async def memory_prune_loop(interval_seconds: int = 600):
                 _rate_limits.pop(k, None)
             for k in [k for k, ts in _buzz_cooldowns.items() if now - ts > BUZZ_COOLDOWN_AGE]:
                 _buzz_cooldowns.pop(k, None)
+            for k in [k for k, ts in _group_warning_cooldowns.items() if now - ts > GROUP_WARNING_COOLDOWN_AGE]:
+                _group_warning_cooldowns.pop(k, None)
 
             # Pending-action dicts (already have a 1h TTL)
             _prune_pending(_pending_deletes)
@@ -474,6 +482,7 @@ async def memory_prune_loop(interval_seconds: int = 600):
 
             logger.debug(
                 f"prune: rl={len(_rate_limits)} buzz={len(_buzz_cooldowns)} "
+                f"gwc={len(_group_warning_cooldowns)} "
                 f"pd={len(_pending_deletes)} po={len(_pending_overrides)} "
                 f"ppa={len(_pending_proxy_add)} pr={len(_pending_reconf)} "
                 f"panel={len(_panel_msg_ids)} erc_locks={len(manager._erc_locks)}"

@@ -1,9 +1,11 @@
 """
 Proxy-vote route: an admin marks a non-Telegram member as in/out/maybe.
 
-Requires the 'vote' scope (proxy votes are still votes; not a destructive
-action). The `admin_*` fields in the body MUST identify the human
-performing the action — these go into the audit log.
+Requires the 'admin' scope — this mutates another (non-Telegram) member's
+vote on someone else's behalf, matching the Telegram /sif /sof /smf
+handlers' admin_rights gate and the web portal's is_web_admin gate. The
+`admin_*` fields in the body MUST identify the human performing the
+action — these go into the audit log.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
@@ -28,7 +30,7 @@ async def cast_proxy_vote(
     body: ProxyVoteRequest,
     chat_id: int = Path(..., description="Telegram chat id"),
     rc_number: int = Path(..., ge=1, description="1-based rollcall number"),
-    _token: AuthedToken = Depends(require_scope("vote")),
+    _token: AuthedToken = Depends(require_scope("admin")),
 ) -> ProxyVoteResponse:
     common = dict(
         chat_id=chat_id,

@@ -31,6 +31,22 @@ async def cast_vote(
     rc_number: int = Path(..., ge=1, description="1-based rollcall number"),
     _token: AuthedToken = Depends(require_scope("vote")),
 ) -> VoteResponse:
+    # Self-service tokens (miniapp initData exchange) are bound to the
+    # Telegram user who authenticated — they must not be able to vote as
+    # someone else by putting a different user_id in the body. Tokens with
+    # no bound user (out-of-band service tokens) or the admin scope are
+    # trusted to vote on behalf of others, same as proxy votes.
+    if (
+        "admin" not in _token.scopes
+        and _token.issued_by_user_id is not None
+        and isinstance(body.user_id, int)
+        and body.user_id != _token.issued_by_user_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Token can only cast votes for its own issuing user",
+        )
+
     common_args = dict(
         chat_id=chat_id,
         user_id=body.user_id,

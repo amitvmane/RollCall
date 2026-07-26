@@ -256,23 +256,29 @@ async def help_commands(message):
 @bot.message_handler(func=lambda message: message.text.split(" ")[0].split("@")[0].lower() == "/set_admins")
 async def set_admins(message):
     cid = message.chat.id
-    member = await bot.get_chat_member(cid, message.from_user.id)
-    if member.status not in ['administrator', 'creator']:
-        await bot.send_message(cid, "You don't have permissions to use this command :(")
-        return
-    settings_svc.set_admin_rights(cid, True, message.from_user.id, message.from_user.first_name)
-    await bot.send_message(cid, 'Admin permissions activated')
+    try:
+        member = await bot.get_chat_member(cid, message.from_user.id)
+        if member.status not in ['administrator', 'creator']:
+            await bot.send_message(cid, "You don't have permissions to use this command :(")
+            return
+        settings_svc.set_admin_rights(cid, True, message.from_user.id, message.from_user.first_name)
+        await bot.send_message(cid, 'Admin permissions activated')
+    except Exception as e:
+        await reply_error(message, e)
 
 
 @bot.message_handler(func=lambda message: message.text.split(" ")[0].split("@")[0].lower() == "/unset_admins")
 async def unset_admins(message):
     cid = message.chat.id
-    member = await bot.get_chat_member(cid, message.from_user.id)
-    if member.status not in ['administrator', 'creator']:
-        await bot.send_message(cid, "You don't have permissions to use this command :(")
-        return
-    settings_svc.set_admin_rights(cid, False, message.from_user.id, message.from_user.first_name)
-    await bot.send_message(cid, 'Admin permissions disabled')
+    try:
+        member = await bot.get_chat_member(cid, message.from_user.id)
+        if member.status not in ['administrator', 'creator']:
+            await bot.send_message(cid, "You don't have permissions to use this command :(")
+            return
+        settings_svc.set_admin_rights(cid, False, message.from_user.id, message.from_user.first_name)
+        await bot.send_message(cid, 'Admin permissions disabled')
+    except Exception as e:
+        await reply_error(message, e)
 
 
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/broadcast" and message.from_user.id in ADMINS)

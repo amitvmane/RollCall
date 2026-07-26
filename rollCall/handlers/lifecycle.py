@@ -502,6 +502,9 @@ async def set_title(message):
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         title = " ".join(pmts)
+        if not title.strip():
+            await bot.send_message(message.chat.id, "Input title is missing")
+            return
 
         result = rollcalls_svc.set_title(
             cid, rc_number, title,
@@ -611,8 +614,18 @@ async def _cb_vote(call, cid: int, rc_number: int, action: str) -> None:
         await bot.answer_callback_query(call.id, str(e) or "You're already in this status!")
         return
 
-    # Re-fetch rc after service mutation for panel update
+    # Re-fetch rc after service mutation for panel update. The write lock was
+    # released inside vote_in/out/maybe, so a concurrent /erc could have ended
+    # (or renumbered) this rollcall in the meantime — guard against a stale
+    # or missing reference rather than crashing on rc.title below.
     rc = manager.get_rollcall(cid, rc_number - 1)
+    if rc is None:
+        logging.warning(
+            "Rollcall #%s in chat %s vanished between vote and panel refresh",
+            rc_number, cid,
+        )
+        await bot.answer_callback_query(call.id, "Vote recorded, but this rollcall has since ended.")
+        return
     user_d = svc_result["user"]
     user_id_v = user_d["user_id"]
     user_name_v = user_d["name"]

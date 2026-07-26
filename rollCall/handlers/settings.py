@@ -304,6 +304,8 @@ async def set_location(message):
             raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         place = " ".join(pmts)
+        if not place.strip():
+            raise incorrectParameter("The correct format is /location <place>")
         settings_svc.set_location(cid, place, message.from_user.id, message.from_user.first_name, rc_number)
         rc = manager.get_rollcall(cid, rc_number)
 
@@ -440,17 +442,23 @@ async def wait_limit(message):
 
 @bot.message_handler(func=lambda message: message.text.split(" ")[0].split("@")[0].lower() == "/shh")
 async def shh(message):
-    if not await admin_rights(message, manager):
-        await bot.send_message(message.chat.id, "You don't have permission to use this command.")
-        return
-    settings_svc.set_shh_mode(message.chat.id, True, message.from_user.id, message.from_user.first_name)
-    await bot.send_message(message.chat.id, "Ok, i will keep quiet!")
+    try:
+        if not await admin_rights(message, manager):
+            await bot.send_message(message.chat.id, "You don't have permission to use this command.")
+            return
+        settings_svc.set_shh_mode(message.chat.id, True, message.from_user.id, message.from_user.first_name)
+        await bot.send_message(message.chat.id, "Ok, i will keep quiet!")
+    except Exception as e:
+        await reply_error(message, e)
 
 
 @bot.message_handler(func=lambda message: message.text.split(" ")[0].split("@")[0].lower() == "/louder")
 async def louder(message):
-    if not await admin_rights(message, manager):
-        await bot.send_message(message.chat.id, "You don't have permission to use this command.")
-        return
-    settings_svc.set_shh_mode(message.chat.id, False, message.from_user.id, message.from_user.first_name)
-    await bot.send_message(message.chat.id, "Ok, i can hear you!")
+    try:
+        if not await admin_rights(message, manager):
+            await bot.send_message(message.chat.id, "You don't have permission to use this command.")
+            return
+        settings_svc.set_shh_mode(message.chat.id, False, message.from_user.id, message.from_user.first_name)
+        await bot.send_message(message.chat.id, "Ok, i can hear you!")
+    except Exception as e:
+        await reply_error(message, e)

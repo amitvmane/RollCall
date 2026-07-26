@@ -118,6 +118,34 @@ class TestPenaltyPanelTierExclusivity(unittest.IsolatedAsyncioTestCase):
         self.session.active_tier = "ditch"
         await self.pp.penalty_panel_callback(_call("pen_locked:1:0"))
         self.assertNotIn(0, self.session.selections.get("ditch", set()))
+
+    async def test_non_curated_mark_penalty_failure_does_not_leak_raw_exception(self):
+        # Regression: a non-curated exception from dues_svc.mark_penalty used
+        # to be interpolated verbatim (f"{m['member_name']}: {exc}") straight
+        # into a group-chat message. It must now be replaced with the same
+        # generic message reply_error() uses elsewhere.
+        with patch("handlers.penalty_panel.dues_svc.mark_penalty",
+                   side_effect=RuntimeError("db connection reset by peer")):
+            self.session.active_tier = "late"
+            self.session.selections["late"] = {0}
+            await self.pp.penalty_panel_callback(_call("pen_a:1"))
+
+        sent_texts = [c.args[1] for c in self.bot_state.bot.send_message.call_args_list]
+        joined = " ".join(sent_texts)
+        self.assertNotIn("db connection reset by peer", joined)
+        self.assertIn("logged", joined.lower())
+
+    async def test_curated_mark_penalty_failure_still_shown_verbatim(self):
+        from exceptions import incorrectParameter
+        with patch("handlers.penalty_panel.dues_svc.mark_penalty",
+                   side_effect=incorrectParameter("Tier 'late' no longer exists")):
+            self.session.active_tier = "late"
+            self.session.selections["late"] = {0}
+            await self.pp.penalty_panel_callback(_call("pen_a:1"))
+
+        sent_texts = [c.args[1] for c in self.bot_state.bot.send_message.call_args_list]
+        joined = " ".join(sent_texts)
+        self.assertIn("no longer exists", joined)
         self.bot_state.bot.answer_callback_query.assert_awaited()
 
 

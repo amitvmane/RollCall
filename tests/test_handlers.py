@@ -455,6 +455,29 @@ class TestListTemplates(HandlerTestBase):
 
 
 # ===========================================================================
+# /start_template
+# ===========================================================================
+
+class TestStartTemplate(HandlerTestBase):
+
+    async def test_max_rollcalls_reached_sends_error_not_silent(self):
+        # Regression: start_template only caught (incorrectParameter,
+        # parameterMissing), so amountOfRollCallsReached (raised when the
+        # chat already has MAX_ROLLCALLS_PER_CHAT active rollcalls) propagated
+        # uncaught out of the handler — telebot has no exception_handler
+        # configured, so the group got zero response.
+        from exceptions import amountOfRollCallsReached
+        msg = self._make_message("/start_template sunday")
+        with self._admin_ok(), self._patch_manager(), \
+             patch('handlers.templates.templates_svc.start_template',
+                   new_callable=AsyncMock,
+                   side_effect=amountOfRollCallsReached("max reached")):
+            await self.start_template(msg)
+        self.assertGreater(self._sent_count(), 0)
+        self.assertIn("max reached", self._sent_text().lower())
+
+
+# ===========================================================================
 # /schedules — recurring templates + one-time pending entries
 # ===========================================================================
 
@@ -925,12 +948,15 @@ class TestSetTitle(HandlerTestBase):
             await self.set_title(msg)
         self.assertGreater(self._sent_count(), 0)
 
-    async def test_empty_title_uses_placeholder(self):
-        # After stripping the ::N, title becomes empty → <Empty>
+    async def test_empty_title_after_suffix_strip_rejected(self):
+        # Regression: /set_title ::1 has a raw arg (the "::1" token) so the
+        # missing-arg check passes, but stripping the ::N suffix leaves an
+        # empty title. This must be rejected, not silently saved as <Empty>.
         msg = self._make_message("/set_title ::1")
-        with self._rc_started(), self._patch_manager():
+        with self._rc_started(), self._admin_ok(), self._patch_manager():
             await self.set_title(msg)
-        self.assertEqual(self.rc.title, "<Empty>")
+        self.assertNotEqual(self.rc.title, "<Empty>")
+        self.assertGreater(self._sent_count(), 0)
 
 
 # ===========================================================================
@@ -1066,6 +1092,19 @@ class TestDeleteUser(HandlerTestBase):
         with self._rc_started(), self._admin_ok(), self._patch_manager():
             await self.delete_user(msg)
         self.assertGreater(self._sent_count(), 0)
+
+    async def test_suffix_only_name_rejected(self):
+        # Regression: "/delete_user ::1" has a raw arg (the "::1" token) so
+        # the pre-suffix-strip missing-arg check used to pass, then stripping
+        # ::N left an empty name and silently prompted to delete "". (rc #1
+        # exists in the default single-rollcall manager fixture, so this
+        # exercises the empty-name check specifically, not the rc-range check.)
+        msg = self._make_message("/delete_user ::1")
+        with self._rc_started(), self._admin_ok(), self._patch_manager():
+            await self.delete_user(msg)
+        self.assertNotIn((100, 1), self.bot_state._pending_deletes)
+        sent = self._sent_text()
+        self.assertIn("missing", str(sent).lower())
 
     async def test_no_admin_rights_sends_error(self):
         msg = self._make_message("/delete_user Alice")
@@ -1220,6 +1259,17 @@ class TestSetLocation(HandlerTestBase):
         with self._rc_started(), self._patch_manager():
             await self.set_location(msg)
         self.assertGreater(self._sent_count(), 0)
+
+    async def test_suffix_only_location_rejected(self):
+        # Regression: "/location ::1" has a raw arg (the "::1" token) so the
+        # pre-suffix-strip missing-arg check used to pass; stripping ::N left
+        # an empty place string, which set_location() then silently saved as
+        # None instead of erroring with the usage message.
+        msg = self._make_message("/location ::1")
+        with self._rc_started(), self._patch_manager():
+            await self.set_location(msg)
+        self.rc.save.assert_not_called()
+        self.assertIn("format", self._sent_text().lower())
 
     async def test_no_rollcall_sends_error(self):
         msg = self._make_message("/location Park")

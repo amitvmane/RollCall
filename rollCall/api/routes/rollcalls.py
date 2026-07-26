@@ -36,7 +36,7 @@ router = APIRouter()
 async def start_rollcall(
     body: StartRollcallRequest,
     chat_id: int = Path(..., description="Telegram chat id"),
-    _token: AuthedToken = Depends(require_scope("vote")),
+    _token: AuthedToken = Depends(require_scope("admin")),
 ) -> RollcallResponse:
     result = await rc_svc.start_rollcall(
         chat_id=chat_id,

@@ -123,6 +123,8 @@ async def delete_user(message):
                 raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
 
         name = " ".join(arr[1:])
+        if not name.strip():
+            raise parameterMissing("Input username is missing")
         admin_id = message.from_user.id
 
         _prune_pending(_pending_deletes)

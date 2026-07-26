@@ -345,7 +345,15 @@ async def penalty_panel_callback(call):
                         applied_names.append(m["member_name"])
                         applied_idx.add(idx)
                     except Exception as exc:
-                        errors.append(f"{m['member_name']}: {exc}")
+                        from bot_state import _USER_FACING_EXCEPTIONS, _GENERIC_ERROR_MSG
+                        if isinstance(exc, _USER_FACING_EXCEPTIONS):
+                            errors.append(f"{m['member_name']}: {exc}")
+                        else:
+                            logging.exception(
+                                "mark_penalty failed for %s (chat=%s tier=%s)",
+                                m["member_name"], cid, tier_name,
+                            )
+                            errors.append(f"{m['member_name']}: {_GENERIC_ERROR_MSG}")
 
                 # Ghost tracking side-effects for ditch tier
                 if is_ditch and session.ghost_eligible:

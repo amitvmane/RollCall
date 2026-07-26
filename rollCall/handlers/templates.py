@@ -429,7 +429,7 @@ async def start_template(message):
             message.from_user.id, message.from_user.first_name,
             extra_title=extra or None,
         )
-    except (incorrectParameter, parameterMissing) as e:
+    except Exception as e:
         await reply_error(message, e)
         return
 

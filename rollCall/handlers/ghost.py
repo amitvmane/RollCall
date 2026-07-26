@@ -450,9 +450,10 @@ async def ghost_callback_handler(call):
             name = pending['name']
             rc_number = pending['rc_number']
             try:
-                admin_svc.delete_user_from_rollcall(
-                    cid, rc_number, name, admin_id, call.from_user.first_name
-                )
+                async with manager.get_chat_write_lock(cid):
+                    admin_svc.delete_user_from_rollcall(
+                        cid, rc_number, name, admin_id, call.from_user.first_name
+                    )
                 await bot.answer_callback_query(call.id, f"✅ Deleted {name}")
                 await safe_edit_text(cid, call.message.message_id, f"✅ *{_esc_md(name)}* removed from rollcall #{rc_number + 1}.", parse_mode="Markdown")
             except incorrectParameter:
@@ -479,37 +480,39 @@ async def ghost_callback_handler(call):
             user = pending['user']
             status = pending['new_status']
             rc_number = pending['rc_number']
-            rc = manager.get_rollcall(cid, rc_number)
-            if not rc:
-                await bot.answer_callback_query(call.id, "Rollcall not found")
-                await safe_edit_text(cid, call.message.message_id, "⚠️ Rollcall not found.")
-                return
 
-            try:
-                admin_svc.set_user_status(
-                    cid, rc_number, user.name, status, admin_id, call.from_user.first_name
-                )
-            except incorrectParameter:
-                # User may have been in a non-standard list (e.g. waitlist) so fall back
-                # to the direct manipulation path for waitlist entries.
-                from db import delete_user_by_id as _del_by_id
-                rc_db_id = get_rc_db_id(rc)
-                if rc_db_id is not None:
-                    _del_by_id(rc_db_id, user.user_id)
-                rc._load_users_from_db()
-                if status == 'in':
-                    rc.addIn(user)
-                elif status == 'out':
-                    rc.addOut(user)
-                else:
-                    rc.addMaybe(user)
-                rc.save()
-                log_admin_action(cid, admin_id, call.from_user.first_name, "set_status",
-                                 target_name=f"{user.name} → {status}",
-                                 rollcall_id=getattr(rc, 'db_id', None) or getattr(rc, 'id', None),
-                                 details=rc.title)
+            async with manager.get_chat_write_lock(cid):
+                rc = manager.get_rollcall(cid, rc_number)
+                if not rc:
+                    await bot.answer_callback_query(call.id, "Rollcall not found")
+                    await safe_edit_text(cid, call.message.message_id, "⚠️ Rollcall not found.")
+                    return
 
-            rc = manager.get_rollcall(cid, rc_number)
+                try:
+                    admin_svc.set_user_status(
+                        cid, rc_number, user.name, status, admin_id, call.from_user.first_name
+                    )
+                except incorrectParameter:
+                    # User may have been in a non-standard list (e.g. waitlist) so fall back
+                    # to the direct manipulation path for waitlist entries.
+                    from db import delete_user_by_id as _del_by_id
+                    rc_db_id = get_rc_db_id(rc)
+                    if rc_db_id is not None:
+                        _del_by_id(rc_db_id, user.user_id)
+                    rc._load_users_from_db()
+                    if status == 'in':
+                        rc.addIn(user)
+                    elif status == 'out':
+                        rc.addOut(user)
+                    else:
+                        rc.addMaybe(user)
+                    rc.save()
+                    log_admin_action(cid, admin_id, call.from_user.first_name, "set_status",
+                                     target_name=f"{user.name} → {status}",
+                                     rollcall_id=getattr(rc, 'db_id', None) or getattr(rc, 'id', None),
+                                     details=rc.title)
+
+                rc = manager.get_rollcall(cid, rc_number)
             if not manager.get_shh_mode(cid):
                 await bot.send_message(cid, f"✅ Done! {user.name}'s status for '{rc.title}' updated to {status.upper()}.")
 

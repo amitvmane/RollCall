@@ -212,6 +212,20 @@ class TestRollcallRoutes(unittest.TestCase):
             )
         self.assertEqual(resp.status_code, 409)
 
+    def test_start_rollcall_requires_admin_scope(self):
+        """Regression: a vote-only token must not be able to start a rollcall —
+        matches the Telegram /start_roll_call handler's admin_rights gate."""
+        auth_a, auth_b = _auth_patches(_VOTE_ROW)
+        with auth_a, auth_b, \
+             patch("services.rollcalls.start_rollcall", new_callable=AsyncMock, return_value=_RC_DICT):
+            client = TestClient(self._app(), raise_server_exceptions=False)
+            resp = client.post(
+                "/api/v1/chats/100/rollcalls",
+                headers=self._headers(),
+                json={"title": "Weekly Game", "started_by_user_id": 1, "started_by_name": "Admin"},
+            )
+        self.assertEqual(resp.status_code, 403)
+
     def test_end_rollcall_requires_admin_scope(self):
         """Token with vote-only scope should be rejected on DELETE."""
         auth_a, auth_b = _auth_patches(_VOTE_ROW)
@@ -356,6 +370,35 @@ class TestVoteRoutes(unittest.TestCase):
             )
         self.assertEqual(resp.status_code, 422)
 
+    def test_vote_as_other_user_rejected(self):
+        """Regression: a self-service (miniapp) token bound to user 1 must not be
+        able to cast a vote with a different user_id in the body — that would let
+        any group member flip another member's vote (IDOR)."""
+        auth_a, auth_b = _auth_patches(_VOTE_ROW)
+        with auth_a, auth_b, \
+             patch("services.voting.vote_in", new_callable=AsyncMock, return_value=_VOTE_RESULT):
+            client = TestClient(self._app(), raise_server_exceptions=False)
+            resp = client.post(
+                "/api/v1/chats/100/rollcalls/1/votes",
+                headers=self._headers(),
+                json={"vote": "in", "user_id": 999, "first_name": "Mallory"},
+            )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_vote_as_self_with_admin_scope_allowed_for_other_user(self):
+        """Admin-scoped tokens (e.g. the admin dashboard) may vote on behalf of
+        any user_id — this isn't a self-service miniapp token."""
+        auth_a, auth_b = _auth_patches(_ADMIN_ROW)
+        with auth_a, auth_b, \
+             patch("services.voting.vote_in", new_callable=AsyncMock, return_value=_VOTE_RESULT):
+            client = TestClient(self._app(), raise_server_exceptions=False)
+            resp = client.post(
+                "/api/v1/chats/100/rollcalls/1/votes",
+                headers=self._headers(),
+                json={"vote": "in", "user_id": 999, "first_name": "Bob"},
+            )
+        self.assertEqual(resp.status_code, 201)
+
     def test_vote_with_comment(self):
         """Comment field is optional but accepted."""
         with_comment = {**_VOTE_RESULT, "user": {**_USER_DICT, "comment": "bringing snacks"}}
@@ -391,7 +434,7 @@ class TestProxyVoteRoutes(unittest.TestCase):
             "was_in": None,
             "promoted": None,
         }
-        auth_a, auth_b = _auth_patches(_VOTE_ROW)
+        auth_a, auth_b = _auth_patches(_ADMIN_ROW)
         with auth_a, auth_b, \
              patch("services.proxy.set_in_for", new_callable=AsyncMock, return_value=prx_resp):
             client = TestClient(self._app(), raise_server_exceptions=False)
@@ -413,7 +456,7 @@ class TestProxyVoteRoutes(unittest.TestCase):
             "was_in": False,
             "promoted": None,
         }
-        auth_a, auth_b = _auth_patches(_VOTE_ROW)
+        auth_a, auth_b = _auth_patches(_ADMIN_ROW)
         with auth_a, auth_b, \
              patch("services.proxy.set_out_for", new_callable=AsyncMock, return_value=prx_resp):
             client = TestClient(self._app(), raise_server_exceptions=False)
@@ -426,7 +469,7 @@ class TestProxyVoteRoutes(unittest.TestCase):
 
     def test_proxy_duplicate_returns_409(self):
         from exceptions import duplicateProxy
-        auth_a, auth_b = _auth_patches(_VOTE_ROW)
+        auth_a, auth_b = _auth_patches(_ADMIN_ROW)
         with auth_a, auth_b, \
              patch("services.proxy.set_in_for",
                    new_callable=AsyncMock,
@@ -441,7 +484,7 @@ class TestProxyVoteRoutes(unittest.TestCase):
 
     def test_proxy_repeat_name_returns_409(self):
         from exceptions import repeatlyName
-        auth_a, auth_b = _auth_patches(_VOTE_ROW)
+        auth_a, auth_b = _auth_patches(_ADMIN_ROW)
         with auth_a, auth_b, \
              patch("services.proxy.set_in_for",
                    new_callable=AsyncMock,
@@ -453,6 +496,21 @@ class TestProxyVoteRoutes(unittest.TestCase):
                 json={"vote": "in", "admin_user_id": 1, "admin_name": "Admin", "proxy_name": "ProxyBob"},
             )
         self.assertEqual(resp.status_code, 409)
+
+    def test_proxy_vote_requires_admin_scope(self):
+        """Regression: a vote-only (non-admin) token must not be able to proxy-vote
+        on behalf of another member — this endpoint mutates someone else's vote and
+        must be gated the same as /sif /sof /smf and the web portal's is_web_admin."""
+        auth_a, auth_b = _auth_patches(_VOTE_ROW)
+        with auth_a, auth_b, \
+             patch("services.proxy.set_in_for", new_callable=AsyncMock):
+            client = TestClient(self._app(), raise_server_exceptions=False)
+            resp = client.post(
+                "/api/v1/chats/100/rollcalls/1/proxy-votes",
+                headers=self._headers(),
+                json={"vote": "in", "admin_user_id": 1, "admin_name": "Admin", "proxy_name": "ProxyBob"},
+            )
+        self.assertEqual(resp.status_code, 403)
 
 
 @unittest.skipUnless(FASTAPI_AVAILABLE, "fastapi not installed")

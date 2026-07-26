@@ -147,6 +147,14 @@ WEEKDAY_MAP = {
 }
 
 
+def _localize_safe(tz, naive_dt):
+    try:
+        return tz.localize(naive_dt, is_dst=None)
+    except Exception:
+        # DST gap — clocks spring forward past this time; use is_dst=False to land after the gap
+        return tz.localize(naive_dt, is_dst=False)
+
+
 def get_next_weekday_datetime(tz, target_day: str, target_time: str):
     """Return next datetime in tz with given weekday name and HH:MM time."""
     target_idx = WEEKDAY_MAP.get(target_day.lower())
@@ -157,15 +165,18 @@ def get_next_weekday_datetime(tz, target_day: str, target_time: str):
         hour, minute = map(int, target_time.split(":"))
     except ValueError:
         return None
-    try:
-        candidate = tz.localize(datetime(now.year, now.month, now.day, hour, minute), is_dst=None)
-    except Exception:
-        # DST gap — clocks spring forward past this time; use is_dst=False to land after the gap
-        candidate = tz.localize(datetime(now.year, now.month, now.day, hour, minute), is_dst=False)
-    days_ahead = (target_idx - candidate.weekday()) % 7
-    candidate = candidate + timedelta(days=days_ahead)
+
+    # Do the day-arithmetic on a NAIVE datetime and localize fresh for
+    # whichever date we land on — adding a timedelta directly to an
+    # already-localized pytz datetime keeps the UTC offset from the
+    # original date, which is wrong whenever the addition crosses a DST
+    # boundary (the classic pytz footgun: pytz.normalize() would only
+    # relabel that stale offset, not fix which instant it points to).
+    naive_today = datetime(now.year, now.month, now.day, hour, minute)
+    days_ahead = (target_idx - naive_today.weekday()) % 7
+    candidate = _localize_safe(tz, naive_today + timedelta(days=days_ahead))
     if candidate < now:
-        candidate = candidate + timedelta(days=7)
+        candidate = _localize_safe(tz, naive_today + timedelta(days=days_ahead + 7))
     return candidate
 
 

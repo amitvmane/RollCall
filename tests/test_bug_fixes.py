@@ -670,6 +670,46 @@ class TestIsDueNowDaily(unittest.TestCase):
         self.assertFalse(real_mod._is_due_now("09:00", None, "2026-07-24", now, "daily"))
 
 
+class TestIsDueNowMonthlyDayClamping(unittest.TestCase):
+    """_is_due_now's monthly branch — a schedule_day of 29/30/31 must still
+    fire (clamped to the month's last day) in short months instead of being
+    silently skipped for the entire month with no catch-up path."""
+
+    _load_real_module = TestCheckRemindersLogging._load_real_module
+
+    def test_day_31_fires_on_feb_28_in_non_leap_year(self):
+        import datetime
+        real_mod = self._load_real_module()
+        now = datetime.datetime(2026, 2, 28, 9, 1)  # 2026 is not a leap year
+        self.assertTrue(real_mod._is_due_now("09:00", "31", None, now, "monthly"))
+
+    def test_day_31_fires_on_feb_29_in_leap_year(self):
+        import datetime
+        real_mod = self._load_real_module()
+        now = datetime.datetime(2028, 2, 29, 9, 1)  # 2028 is a leap year
+        self.assertTrue(real_mod._is_due_now("09:00", "31", None, now, "monthly"))
+
+    def test_day_31_does_not_fire_on_feb_27(self):
+        import datetime
+        real_mod = self._load_real_module()
+        now = datetime.datetime(2026, 2, 27, 9, 1)
+        self.assertFalse(real_mod._is_due_now("09:00", "31", None, now, "monthly"))
+
+    def test_day_31_fires_on_apr_30(self):
+        import datetime
+        real_mod = self._load_real_module()
+        now = datetime.datetime(2026, 4, 30, 9, 1)  # April has only 30 days
+        self.assertTrue(real_mod._is_due_now("09:00", "31", None, now, "monthly"))
+
+    def test_day_15_unaffected_by_clamping(self):
+        import datetime
+        real_mod = self._load_real_module()
+        now = datetime.datetime(2026, 4, 15, 9, 1)
+        self.assertTrue(real_mod._is_due_now("09:00", "15", None, now, "monthly"))
+        now_wrong_day = datetime.datetime(2026, 4, 14, 9, 1)
+        self.assertFalse(real_mod._is_due_now("09:00", "15", None, now_wrong_day, "monthly"))
+
+
 class TestScheduleExpiryAutoDisable(unittest.TestCase):
     """check_template_schedules auto-disables (not deletes) a recurring
     schedule once it's past schedule_expires_at — the template and its
@@ -756,6 +796,148 @@ class TestScheduleExpiryAutoDisable(unittest.TestCase):
                 loop.close()
 
         disable_sched.assert_not_called()
+
+
+class TestCapReachedDoesNotStampSchedule(unittest.TestCase):
+    """Regression: when _auto_start_from_template skips creating a rollcall
+    (e.g. the 3-active-rollcalls cap), the caller must NOT stamp
+    last_scheduled_date — otherwise that day's/week's occurrence is silently
+    lost even though nothing was actually started, and a same-day /erc that
+    frees capacity has no way to trigger a retry."""
+
+    _load_real_module = TestCheckRemindersLogging._load_real_module
+
+    def _tmpl(self, **over):
+        row = {
+            "chatid": -100, "name": "sunday-game", "schedule_day": "monday",
+            "schedule_time": "09:00", "last_scheduled_date": None,
+            "recurrence_type": "weekly", "schedule_expires_at": None,
+        }
+        row.update(over)
+        return row
+
+    @staticmethod
+    def _controlled_sleep_after_one_pass():
+        calls = [0]
+
+        async def _sleep(seconds):
+            calls[0] += 1
+            if calls[0] >= 2:
+                raise asyncio.CancelledError()
+        return _sleep
+
+    def test_skip_does_not_stamp(self):
+        import rollcall_manager as _rcm
+
+        real_mod = self._load_real_module()
+        tmpl = self._tmpl()
+        mgr = _rcm.manager
+
+        with patch.object(real_mod, 'get_all_scheduled_templates', return_value=[tmpl]), \
+             patch.object(real_mod, '_fire_scheduled_rollcalls', new_callable=AsyncMock), \
+             patch.object(mgr, 'get_chat', return_value={"timezone": "Asia/Kolkata"}), \
+             patch.object(real_mod, '_is_due_now', return_value=True), \
+             patch.object(real_mod, '_auto_start_from_template',
+                          new=AsyncMock(return_value=False)) as auto_start, \
+             patch.object(real_mod, 'update_template_last_scheduled_date') as update_last, \
+             patch('periodic_jobs.run_periodic_jobs', new_callable=AsyncMock, create=True), \
+             patch.object(real_mod.asyncio, 'sleep', side_effect=self._controlled_sleep_after_one_pass()):
+            loop = asyncio.new_event_loop()
+            try:
+                with self.assertRaises(asyncio.CancelledError):
+                    loop.run_until_complete(real_mod.check_template_schedules())
+            finally:
+                loop.close()
+
+        auto_start.assert_called_once()
+        update_last.assert_not_called()
+
+    def test_started_does_stamp(self):
+        import rollcall_manager as _rcm
+
+        real_mod = self._load_real_module()
+        tmpl = self._tmpl()
+        mgr = _rcm.manager
+
+        with patch.object(real_mod, 'get_all_scheduled_templates', return_value=[tmpl]), \
+             patch.object(real_mod, '_fire_scheduled_rollcalls', new_callable=AsyncMock), \
+             patch.object(mgr, 'get_chat', return_value={"timezone": "Asia/Kolkata"}), \
+             patch.object(real_mod, '_is_due_now', return_value=True), \
+             patch.object(real_mod, '_auto_start_from_template',
+                          new=AsyncMock(return_value=True)) as auto_start, \
+             patch.object(real_mod, 'update_template_last_scheduled_date') as update_last, \
+             patch('periodic_jobs.run_periodic_jobs', new_callable=AsyncMock, create=True), \
+             patch.object(real_mod.asyncio, 'sleep', side_effect=self._controlled_sleep_after_one_pass()):
+            loop = asyncio.new_event_loop()
+            try:
+                with self.assertRaises(asyncio.CancelledError):
+                    loop.run_until_complete(real_mod.check_template_schedules())
+            finally:
+                loop.close()
+
+        auto_start.assert_called_once()
+        update_last.assert_called_once()
+
+
+class TestDueCheckIsolatedPerTemplate(unittest.TestCase):
+    """Regression: a single template row whose due-check raises must not
+    abort the whole tick — every other template must still be processed."""
+
+    _load_real_module = TestCheckRemindersLogging._load_real_module
+
+    @staticmethod
+    def _controlled_sleep_after_one_pass():
+        calls = [0]
+
+        async def _sleep(seconds):
+            calls[0] += 1
+            if calls[0] >= 2:
+                raise asyncio.CancelledError()
+        return _sleep
+
+    def test_bad_template_does_not_block_others(self):
+        import rollcall_manager as _rcm
+
+        real_mod = self._load_real_module()
+        bad_tmpl = {
+            "chatid": -100, "name": "broken", "schedule_day": "monday",
+            "schedule_time": "09:00", "last_scheduled_date": None,
+            "recurrence_type": "weekly", "schedule_expires_at": None,
+        }
+        good_tmpl = {
+            "chatid": -200, "name": "healthy", "schedule_day": "monday",
+            "schedule_time": "09:00", "last_scheduled_date": None,
+            "recurrence_type": "weekly", "schedule_expires_at": None,
+        }
+        mgr = _rcm.manager
+
+        def _is_due_now_side_effect(*args, **kwargs):
+            # First call (bad_tmpl) raises; second call (good_tmpl) is due.
+            if _is_due_now_side_effect.calls == 0:
+                _is_due_now_side_effect.calls += 1
+                raise TypeError("malformed schedule_time")
+            return True
+        _is_due_now_side_effect.calls = 0
+
+        with patch.object(real_mod, 'get_all_scheduled_templates', return_value=[bad_tmpl, good_tmpl]), \
+             patch.object(real_mod, '_fire_scheduled_rollcalls', new_callable=AsyncMock), \
+             patch.object(mgr, 'get_chat', return_value={"timezone": "Asia/Kolkata"}), \
+             patch.object(real_mod, '_is_due_now', side_effect=_is_due_now_side_effect), \
+             patch.object(real_mod, '_auto_start_from_template',
+                          new=AsyncMock(return_value=True)) as auto_start, \
+             patch.object(real_mod, 'update_template_last_scheduled_date'), \
+             patch('periodic_jobs.run_periodic_jobs', new_callable=AsyncMock, create=True), \
+             patch.object(real_mod.asyncio, 'sleep', side_effect=self._controlled_sleep_after_one_pass()):
+            loop = asyncio.new_event_loop()
+            try:
+                with self.assertRaises(asyncio.CancelledError):
+                    loop.run_until_complete(real_mod.check_template_schedules())
+            finally:
+                loop.close()
+
+        # good_tmpl must still have been auto-started despite bad_tmpl raising.
+        auto_start.assert_called_once()
+        self.assertEqual(auto_start.call_args.args[0], -200)
 
 
 class TestAutoStartMaxRollcallsCooldown(unittest.IsolatedAsyncioTestCase):
@@ -1001,6 +1183,7 @@ class TestShouldNotifyGroup(unittest.TestCase):
 
     def test_second_call_within_cooldown_returns_false(self):
         self.bot_state._should_notify_group(-100, "max_rollcalls:t1")
+        self.bot_state._mark_group_notified(-100, "max_rollcalls:t1")
         self.assertFalse(self.bot_state._should_notify_group(-100, "max_rollcalls:t1"))
 
     def test_call_after_cooldown_expires_returns_true(self):
@@ -1016,11 +1199,25 @@ class TestShouldNotifyGroup(unittest.TestCase):
 
     def test_different_condition_key_same_chat_independent(self):
         self.bot_state._should_notify_group(-100, "max_rollcalls:t1")
+        self.bot_state._mark_group_notified(-100, "max_rollcalls:t1")
         self.assertTrue(self.bot_state._should_notify_group(-100, "unsettled_dues"))
 
     def test_different_chat_same_condition_independent(self):
         self.bot_state._should_notify_group(-100, "unsettled_dues")
+        self.bot_state._mark_group_notified(-100, "unsettled_dues")
         self.assertTrue(self.bot_state._should_notify_group(-200, "unsettled_dues"))
+
+    def test_should_notify_group_does_not_stamp_by_itself(self):
+        # Regression: _should_notify_group must be a pure check — stamping
+        # must only happen via _mark_group_notified, called by the caller
+        # after a send actually succeeds. Otherwise a failed send silently
+        # arms the cooldown with nothing delivered.
+        self.bot_state._should_notify_group(-100, "max_rollcalls:t1")
+        self.assertTrue(self.bot_state._should_notify_group(-100, "max_rollcalls:t1"))
+
+    def test_mark_group_notified_arms_the_cooldown(self):
+        self.bot_state._mark_group_notified(-100, "max_rollcalls:t1")
+        self.assertFalse(self.bot_state._should_notify_group(-100, "max_rollcalls:t1"))
 
 
 # ---------------------------------------------------------------------------

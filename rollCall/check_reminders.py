@@ -1,4 +1,5 @@
 import asyncio
+import calendar
 import logging
 from datetime import datetime, timedelta
 
@@ -369,7 +370,7 @@ async def _warn_unsettled_dues(chat_id: int):
         logging.warning(
             "[scheduler] chat %s has %d unsettled game(s) at auto-start time", chat_id, n,
         )
-        from bot_state import _should_notify_group
+        from bot_state import _should_notify_group, _mark_group_notified
         if not _should_notify_group(chat_id, "unsettled_dues"):
             return
         from handlers.dues import _send_unsettled_picker
@@ -378,12 +379,24 @@ async def _warn_unsettled_dues(chat_id: int):
             f"⚠️ {n} earlier game{'s have' if n != 1 else ' has'} unsettled dues "
             "— settle before this new one piles on:",
         )
+        # Only stamp the cooldown once the send above actually succeeded —
+        # otherwise a failed send (network blip, Telegram outage) would
+        # silently arm the 24h window with nothing delivered.
+        _mark_group_notified(chat_id, "unsettled_dues")
     except Exception:
         logging.exception(f"[scheduler] unsettled-dues warning failed for chat {chat_id}")
 
 
-async def _auto_start_from_template(chat_id: int, tmpl: dict):
-    """Create a rollcall from a scheduled template and announce it to the group."""
+async def _auto_start_from_template(chat_id: int, tmpl: dict) -> bool:
+    """Create a rollcall from a scheduled template and announce it to the group.
+
+    Returns True if a rollcall was actually created, False if auto-start was
+    skipped (currently: the 3-active-rollcalls cap). The caller must only
+    stamp last_scheduled_date when this returns True — stamping on a skip
+    would mark today as "fired" even though no rollcall was created, losing
+    that occurrence until the next scheduled date instead of retrying once
+    the cap clears.
+    """
     from rollcall_manager import manager
     from functions import get_next_weekday_datetime
 
@@ -405,14 +418,22 @@ async def _auto_start_from_template(chat_id: int, tmpl: dict):
             "[scheduler] Could not auto-start template '%s' for chat %s: "
             "maximum 3 active rollcalls already open.", tmpl['name'], chat_id,
         )
-        from bot_state import _should_notify_group
+        from bot_state import _should_notify_group, _mark_group_notified
         if _should_notify_group(chat_id, f"max_rollcalls:{tmpl['name']}"):
-            await bot.send_message(
-                chat_id,
-                f"⚠️ Could not auto-start template '{tmpl['name']}': maximum 3 active rollcalls already open. "
-                "End one with /erc to let the next auto-start through."
-            )
-        return
+            try:
+                await bot.send_message(
+                    chat_id,
+                    f"⚠️ Could not auto-start template '{tmpl['name']}': maximum 3 active rollcalls already open. "
+                    "End one with /erc to let the next auto-start through."
+                )
+                # Only stamp on a successful send — see _should_notify_group's
+                # docstring for why this can't happen before the send.
+                _mark_group_notified(chat_id, f"max_rollcalls:{tmpl['name']}")
+            except Exception:
+                logging.exception(
+                    f"[scheduler] Failed to send max-rollcalls warning for chat {chat_id}"
+                )
+        return False
 
     title = tmpl.get("title") or tmpl["name"]
     rc = manager.add_rollcall(chat_id, title)
@@ -482,6 +503,8 @@ async def _auto_start_from_template(chat_id: int, tmpl: dict):
             if not t.cancelled() and t.exception():
                 logging.error(f"Reminder loop raised: {t.exception()}")
         asyncio.create_task(start(rollcalls, tzname, chat_id)).add_done_callback(_log_exc)
+
+    return True
 
 
 # Catch-up window: if the loop's iteration drifts past the exact scheduled
@@ -555,6 +578,12 @@ def _is_due_now(schedule_time, schedule_day, last_date, now, recurrence_type):
             target_day = int(schedule_day)
         except (ValueError, TypeError):
             return False
+        # Clamp to the last day of the current month — a schedule set for
+        # day 29/30/31 must still fire (on the month's last day) in months
+        # that don't have that many days, instead of being silently skipped
+        # for the entire month with no catch-up mechanism to recover it.
+        last_day_of_month = calendar.monthrange(now.year, now.month)[1]
+        target_day = min(target_day, last_day_of_month)
         if now.day != target_day:
             return False
         return True
@@ -770,21 +799,37 @@ async def check_template_schedules():
                     except ValueError:
                         pass
 
-                due = _is_due_now(schedule_time, schedule_day, last_date, now, recurrence_type)
-                if not due and recurrence_type == "weekly":
-                    due = _missed_within_days(
-                        schedule_day, schedule_time, last_date, now, SCHEDULE_CATCHUP_DAYS
+                try:
+                    due = _is_due_now(schedule_time, schedule_day, last_date, now, recurrence_type)
+                    if not due and recurrence_type == "weekly":
+                        due = _missed_within_days(
+                            schedule_day, schedule_time, last_date, now, SCHEDULE_CATCHUP_DAYS
+                        )
+                except Exception:
+                    # A single malformed template row must not abort this
+                    # tick's processing of every other template — skip just
+                    # this one and retry on the next tick.
+                    logging.exception(
+                        f"[scheduler] due-check failed for template '{tmpl.get('name')}' "
+                        f"chat {chat_id} — skipping this tick"
                     )
+                    continue
                 if not due:
                     continue
 
                 try:
-                    await _auto_start_from_template(chat_id, tmpl)
-                    update_template_last_scheduled_date(chat_id, tmpl["name"], today_date)
-                    logging.info(
-                        f"[scheduler] Auto-started template '{tmpl.get('name')}' for chat {chat_id} "
-                        f"(scheduled {schedule_day} {schedule_time}, fired at {now.strftime('%H:%M:%S')})"
-                    )
+                    started = await _auto_start_from_template(chat_id, tmpl)
+                    if started:
+                        update_template_last_scheduled_date(chat_id, tmpl["name"], today_date)
+                        logging.info(
+                            f"[scheduler] Auto-started template '{tmpl.get('name')}' for chat {chat_id} "
+                            f"(scheduled {schedule_day} {schedule_time}, fired at {now.strftime('%H:%M:%S')})"
+                        )
+                    else:
+                        logging.info(
+                            f"[scheduler] Skipped auto-start for template '{tmpl.get('name')}' "
+                            f"chat {chat_id} (e.g. rollcall cap) — not stamped, will retry next tick"
+                        )
                 except Exception:
                     logging.exception(
                         f"Failed to auto-start template '{tmpl.get('name')}' for chat {chat_id}"

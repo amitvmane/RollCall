@@ -325,9 +325,17 @@ def _is_buzz_rate_limited(chat_id: int) -> bool:
 
 
 def _should_notify_group(chat_id: int, condition_key: str) -> bool:
-    """Gate a background-loop warning message to the group: True on first
-    occurrence of this exact (chat, condition) pair, or once the cooldown
-    window has elapsed since it was last announced — False otherwise.
+    """Check whether a background-loop warning is due to be (re-)posted to
+    the group: True on first occurrence of this exact (chat, condition)
+    pair, or once the cooldown window has elapsed since it was last
+    announced — False otherwise.
+
+    This only *checks* the cooldown — it does not stamp it. Callers must
+    call `_mark_group_notified(chat_id, condition_key)` themselves, and only
+    after the send has actually succeeded. (Stamping unconditionally here,
+    before the caller even attempts the send, meant a failed send — a
+    network blip, a momentary Telegram outage — silently "used up" the
+    cooldown window with nothing having been delivered.)
 
     For a condition that resolves itself instantly (a one-off blip) this
     never matters. It exists for conditions a periodic scheduler re-checks
@@ -342,10 +350,14 @@ def _should_notify_group(chat_id: int, condition_key: str) -> bool:
     key = (chat_id, condition_key)
     now = datetime.now().timestamp()
     last = _group_warning_cooldowns.get(key, 0)
-    if now - last < _GROUP_WARNING_COOLDOWN_SECONDS:
-        return False
-    _group_warning_cooldowns[key] = now
-    return True
+    return now - last >= _GROUP_WARNING_COOLDOWN_SECONDS
+
+
+def _mark_group_notified(chat_id: int, condition_key: str) -> None:
+    """Record that the group was just successfully notified for (chat,
+    condition) — call this only after the send succeeds, right after a
+    `_should_notify_group` check returned True."""
+    _group_warning_cooldowns[(chat_id, condition_key)] = datetime.now().timestamp()
 
 
 # ── User / mention helpers ────────────────────────────────────────────────────

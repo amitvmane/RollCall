@@ -290,7 +290,13 @@
     {
         "Version": 9.5,
         "Description": "9.5 — Fresh Seasons, Zero Friction 🔄\n\n🏁 SEASON RESET (/new_season)\nClose the books and start clean: every balance goes to ₹0 via compensating ledger entries — history is never deleted, and every clearing is announced in the chat. You choose whether the group fund carries forward or resets too. Outstanding money is forgiven, not collected (the confirm card makes sure you know). Perfect after a trial period: experiment with dues, then /new_season for a clean start.\n\n🛡 SMARTER RE-ENABLE\nTurning dues off and on again is now completely safe: games played while dues was disabled (or before you ever enabled it) will never show up as \"waiting to be settled\" — no more risk of accidentally charging members for games already settled in cash.\n\n💳 COLLECTOR UPI MEMORY\nPick a returning collector and the bot remembers their UPI from last time: ✅ use it with one tap, ✏️ reply with a new one, or 🏦 route to the group UPI. Correct it once and every future game suggests the right one.\n\nType /help for all commands · /weblink for the group web page",
-        "DeployedOnProd": "Y",
+        "DeployedOnProd": "N",
         "DeployedDatetime": "17-07-2026 13:00 UTC"
+    },
+    {
+        "Version": 9.6,
+        "Description": "9.6 — Security & Reliability Audit 🔒\n\nA full autonomous audit across the Telegram bot, REST API, and scheduler, closing several gaps before they were ever exploited or hit in production:\n\n🔐 API HARDENING\nThe REST API (used by the Mini App) could let a group member vote as someone else, or add proxy votes / start rollcalls without admin rights — both now require the same permissions as their Telegram command equivalents.\n\n🔒 SAFER CONCURRENT ACTIONS\nTwo admin actions (delete-user confirm, status-override confirm) now correctly lock the rollcall while mutating it, preventing rare data races with a simultaneous vote or /erc.\n\n🩹 NO MORE SILENT FAILURES\n/start_template, /set_admins, /unset_admins, /shh, and /louder now always reply with an error instead of failing silently. Error messages never leak raw internals into the chat.\n\n🕐 SCHEDULER FIXES\nFixed a daylight-saving-time bug that could shift auto-close/reminder times by an hour twice a year. Fixed monthly schedules on the 29th/30th/31st being silently skipped in shorter months. Fixed the \"3 active rollcalls\" cap silently consuming a scheduled day even though nothing started. One bad scheduled template can no longer block every other template that tick.\n\nType /help for all commands · /weblink for the group web page",
+        "DeployedOnProd": "Y",
+        "DeployedDatetime": "26-07-2026 07:11 UTC"
     }
 ]

@@ -442,6 +442,13 @@ setInterval(()=>{
   if(activeRcData&&activeRcData.finalize_epoch)renderRcMeta(activeRcData);
 },30000);
 
+// Same idea for the templates/schedules list's countdown pills — only
+// re-renders while that section is actually open, and only touches its
+// own DOM subtree (no lists/vote state involved there either).
+setInterval(()=>{
+  if(_templatesScheduleOpen&&_templatesCache)renderTemplatesSchedule();
+},60000);
+
 function renderRollcall(rc){
   activeRcData=rc;
   const totalRc=IS_GROUP&&groupData?groupData.rollcalls.length:1;
@@ -1426,7 +1433,7 @@ function _nrcRenderTimingBody(){
   if(_nrcState.timing==="now"){
     if(btn)btn.textContent="Start →";
     el.innerHTML=`
-      <label style="font-size:.78rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">Closes at (optional)</label>
+      <label style="font-size:.78rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">🏟 Closes at (optional) — this is also when the event happens</label>
       <input id="nrc-close-at" type="datetime-local" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:.95rem;background:var(--card);color:var(--text);margin-bottom:4px"/>
       <div style="font-size:.72rem;color:var(--sub);margin-bottom:14px">Leave blank to auto-close at 11:59 PM today.</div>
       <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer">
@@ -1454,7 +1461,7 @@ function _nrcRenderTimingBody(){
     <div id="nrc-rec-once" style="margin-bottom:12px">
       <label style="font-size:.78rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">Opens for voting (your local time)</label>
       <input id="nrc-sched-at" type="datetime-local" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:.95rem;background:var(--card);color:var(--text);margin-bottom:12px"/>
-      <label style="font-size:.78rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">Closes at (optional)</label>
+      <label style="font-size:.78rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">🏟 Closes at (optional) — this is also when the event happens</label>
       <input id="nrc-close-at-once" type="datetime-local" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:.95rem;background:var(--card);color:var(--text);margin-bottom:4px"/>
       <div style="font-size:.72rem;color:var(--sub)">Leave blank to auto-close at 11:59 PM that day.</div>
     </div>
@@ -2345,6 +2352,36 @@ async function loadTemplatesSchedule(){
   }
 }
 
+// Next-fire epoch (seconds) for a recurring template's "Opens" schedule,
+// computed client-side in the browser's local time (same simplification
+// the admin console's admNextRun already makes). Only daily/weekly are
+// estimated reliably this way — biweekly depends on which of the two
+// weeks is "on" (server-side last_scheduled_date parity) and monthly can
+// land on a clamped day-of-month, so both return null (no countdown
+// pill) rather than show a guess that could be wrong.
+const _SCHED_DAYS_SUN_FIRST=["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
+function nextRecurrenceEpoch(t){
+  if(!t.schedule_enabled||!t.schedule_time)return null;
+  const[h,m]=(t.schedule_time||"00:00").split(":").map(Number);
+  const now=new Date();
+  if(t.recurrence_type==="daily"){
+    const d=new Date(now);
+    d.setHours(h,m,0,0);
+    if(d<=now)d.setDate(d.getDate()+1);
+    return d.getTime()/1000;
+  }
+  if((t.recurrence_type||"weekly")==="weekly"&&t.schedule_day){
+    const tgt=_SCHED_DAYS_SUN_FIRST.indexOf((t.schedule_day||"").toLowerCase());
+    if(tgt<0)return null;
+    let diff=(tgt-now.getDay()+7)%7;
+    if(diff===0&&(now.getHours()*60+now.getMinutes())>=h*60+m)diff=7;
+    const d=new Date(now);
+    d.setDate(now.getDate()+diff);d.setHours(h,m,0,0);
+    return d.getTime()/1000;
+  }
+  return null;
+}
+
 function renderTemplatesSchedule(){
   const body=document.getElementById("templates-schedule-body");
   if(!body)return;
@@ -2361,7 +2398,10 @@ function renderTemplatesSchedule(){
     // reference so it doesn't get mislabeled "Not scheduled" when it
     // genuinely has something coming up.
     const pendingOnce=!enabled&&(_scheduledOnceCache||[]).find(p=>p.title===t.name);
-    const when=enabled
+    const nextEpoch=enabled?nextRecurrenceEpoch(t):(pendingOnce?new Date(pendingOnce.scheduled_at).getTime()/1000:null);
+    const cd=nextEpoch?formatCountdown(nextEpoch):null;
+    const cdHtml=cd?` <span class="cd-pill${cd.includes("m")&&!cd.includes("h")?" soon":""}">${esc(cd)}</span>`:"";
+    const when=(enabled
       ?`Opens ${t.recurrence_type==="monthly"
         ?`day ${esc(t.schedule_day)} of each month at ${esc(t.schedule_time)}`
         :t.recurrence_type==="daily"
@@ -2369,7 +2409,7 @@ function renderTemplatesSchedule(){
           :`${esc((t.schedule_day||"").replace(/^./,c=>c.toUpperCase()))} ${esc(t.schedule_time)} (${recLabel})`}`
       :pendingOnce
         ?`One-time: ${esc(new Date(pendingOnce.scheduled_at).toLocaleString(undefined,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}))}`
-        :"Not scheduled";
+        :"Not scheduled")+cdHtml;
     const closes=(t.event_day&&t.event_time)
       ?`Closes ${esc((t.event_day||"").replace(/^./,c=>c.toUpperCase()))} ${esc(t.event_time)}`
       :"";
@@ -2390,6 +2430,7 @@ function renderTemplatesSchedule(){
             <span class="admin-toggle-slider"></span>
           </label>
           <button class="id-change" onclick="toggleTemplateEditForm('${esc(escJsAttr(t.name))}')">${editing?"✕":"✏️"}</button>
+          <button class="id-change" title="Delete this template" onclick="deleteTemplate('${esc(escJsAttr(t.name))}')">🗑</button>
         </div>
       </div>
       ${editing?renderTemplateEditForm(t):""}
@@ -2472,6 +2513,21 @@ window.startTemplateNow=async function(name){
     activeTabIdx=0;
     await loadGroup();
   }catch(e){toast(e.message||"Could not start rollcall",4000);}
+};
+
+window.deleteTemplate=async function(name){
+  if(!confirm(`Delete template "${name}"? This cannot be undone — any recurring schedule on it will stop too.`))return;
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/templates/${encodeURIComponent(name)}`,{
+      method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({id_token:_idToken}),
+      signal:AbortSignal.timeout(10000),
+    });
+    if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"Failed to delete template");
+    toast(`🗑 Deleted "${name}"`,2500);
+    _templatesEditingName=_templatesEditingName===name?null:_templatesEditingName;
+    _templatesCache=null;
+    await loadTemplatesSchedule();
+  }catch(e){toast(e.message||"Could not delete template",4000);}
 };
 
 window._onTsfRecurrenceChange=function(name){

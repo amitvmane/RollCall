@@ -453,6 +453,20 @@ class TestListTemplates(HandlerTestBase):
             await self.list_templates(msg)
         self.assertGreater(self._sent_count(), 0)
 
+    async def test_with_templates_includes_delete_button(self):
+        # Regression: /templates previously had no way to delete a template
+        # from Telegram except the raw /delete_template <name> command —
+        # each listed template now gets an inline delete button too.
+        templates = [{"name": "t1", "title": "T1", "schedule_enabled": False,
+                      "schedule_day": None, "schedule_time": None,
+                      "event_day": None, "event_time": None, "last_scheduled_date": None}]
+        msg = self._make_message("/templates")
+        with patch('handlers.templates.templates_svc.list_templates', return_value=templates), \
+             patch('handlers.templates.InlineKeyboardButton') as mock_btn:
+            await self.list_templates(msg)
+        callback_datas = [c.kwargs.get("callback_data") for c in mock_btn.call_args_list]
+        self.assertIn("tmpldel_ask_t1", callback_datas)
+
 
 # ===========================================================================
 # /start_template

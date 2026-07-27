@@ -831,6 +831,7 @@ function buildTmplPanel(cid,tmpls){
       <div style="display:flex;gap:6px;flex-shrink:0">
         <button class="btn btn-ghost btn-sm" onclick="toggleTmplEdit(${cid},'${escH(escJsAttr(t.name))}')">✎ Edit</button>
         <button class="btn btn-success btn-sm" onclick="doStartTmpl(${cid},'${escH(escJsAttr(t.name))}',this)">▶ Start</button>
+        <button class="btn btn-ghost btn-sm" onclick="doDeleteTmpl(${cid},'${escH(escJsAttr(t.name))}',this)">🗑 Delete</button>
       </div>
     </div>
     <div class="tmpl-edit-panel" id="tmpledit-${eid}" style="display:none">
@@ -924,6 +925,21 @@ window.saveTmplEdit=async function(cid,name,eid){
     const el=$id(`panel-${cidK(cid)}-1`);
     if(el)el.innerHTML=buildTmplPanel(cid,tmpls);
   }catch(e){toast("Error: "+e.message,"err",4000);}
+};
+
+window.doDeleteTmpl=async function(cid,name,btn){
+  if(!confirm(`Delete template "${name}"? This cannot be undone — any recurring schedule on it will stop too.`))return;
+  if(btn){btn.disabled=true;btn.textContent="Deleting…";}
+  try{
+    await api(`/chats/${cid}/templates/${encodeURIComponent(name)}`,{method:"DELETE",body:JSON.stringify({admin_user_id:0,admin_name:"Admin (web)"})});
+    toast("Template deleted.","ok");
+    const tmpls=await api(`/chats/${cid}/templates`);
+    const el=$id(`panel-${cidK(cid)}-1`);
+    if(el)el.innerHTML=buildTmplPanel(cid,tmpls);
+  }catch(e){
+    toast("Error: "+e.message,"err",4000);
+    if(btn){btn.disabled=false;btn.textContent="🗑 Delete";}
+  }
 };
 
 window.doStartTmpl=async function(cid,name,btn){

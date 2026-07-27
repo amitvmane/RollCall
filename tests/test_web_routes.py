@@ -1141,6 +1141,66 @@ class TestWebTemplateContentEditAndStart(unittest.TestCase):
         self.assertEqual(resp.status_code, 404)
 
 
+class TestWebTemplateDelete(unittest.TestCase):
+    """DELETE /web/group/{token}/templates/{name} — the web app and admin
+    console previously had no way to delete a template at all (only the
+    Telegram /delete_template command could); this is the web-portal route
+    for it, same id_token + is_web_admin gate as every other template route."""
+
+    def test_delete_calls_service_and_mirrors(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value={"first_name": "Amit"}), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.templates.delete_one_template",
+                   return_value={"name": "SundayGame", "deleted": True}) as svc, \
+             patch.object(_web_mod, "_send_event_notification", new_callable=AsyncMock) as notify:
+            resp = _client().request(
+                "DELETE", "/api/v1/web/group/grp123/templates/SundayGame",
+                json={"id_token": "tok"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["deleted"])
+        self.assertEqual(svc.call_args.args[0], -100)
+        self.assertEqual(svc.call_args.args[1], "SundayGame")
+        self.assertEqual(svc.call_args.args[2], 99)
+        self.assertEqual(svc.call_args.args[3], "Amit")
+        notify.assert_awaited_once()
+        self.assertIn("SundayGame", notify.call_args[0][1])
+
+    def test_delete_non_admin_403(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=False), \
+             patch("api.identity.verify_identity_token", return_value=77):
+            resp = _client().request(
+                "DELETE", "/api/v1/web/group/grp123/templates/SundayGame",
+                json={"id_token": "tok"})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_delete_invalid_group_token_404(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value=None):
+            resp = _client().request(
+                "DELETE", "/api/v1/web/group/badgrp/templates/SundayGame",
+                json={"id_token": "tok"})
+        self.assertEqual(resp.status_code, 404)
+
+    def test_delete_template_not_found_returns_422(self):
+        import api.routes.web as _web_mod
+        from exceptions import incorrectParameter
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value=None), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.templates.delete_one_template",
+                   side_effect=incorrectParameter("Template 'Ghost' not found.")):
+            resp = _client().request(
+                "DELETE", "/api/v1/web/group/grp123/templates/Ghost",
+                json={"id_token": "tok"})
+        self.assertEqual(resp.status_code, 422)
+
+
 class TestWebGroupSettingsTimezone(unittest.TestCase):
     """Browser-based timezone detect/set — /web/group/{token}/settings PATCH.
     Telegram exposes no location signal for a group, so this is the only

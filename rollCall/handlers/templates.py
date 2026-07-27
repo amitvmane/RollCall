@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot_state import bot, _sched_selection, _log_task_exc, _esc_md, reply_error
+from bot_state import bot, _sched_selection, _log_task_exc, _esc_md, reply_error, safe_edit_text
 from exceptions import insufficientPermissions, incorrectParameter, parameterMissing
 from functions import admin_rights, weekly_minutes, WEEKDAY_MAP
 from rollcall_manager import manager
@@ -78,7 +78,12 @@ async def list_templates(message):
 
         lines.append(f"- {t['name']}: {t_title}{sched_info}")
 
-    await bot.send_message(cid, "Templates:\n" + "\n".join(lines))
+    markup = InlineKeyboardMarkup(row_width=1)
+    for t in templates:
+        name = t.get("name", "")
+        markup.add(InlineKeyboardButton(f"🗑 Delete {name}", callback_data=f"tmpldel_ask_{name}"))
+
+    await bot.send_message(cid, "Templates:\n" + "\n".join(lines), reply_markup=markup)
 
 
 def _fmt_schedule_entry(t: dict) -> str:
@@ -666,6 +671,65 @@ async def schedules_toggle_callback(call):
             await bot.answer_callback_query(call.id, "Error updating schedule")
         except Exception:
             pass  # already logged above; nothing more useful to do if even the alert fails
+
+
+# ── Template delete (inline, from /templates) ─────────────────────────────────
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("tmpldel_"))
+async def template_delete_callback(call):
+    try:
+        cid = call.message.chat.id
+        data = call.data
+
+        # Same admin-gate pattern as ghost.py's ghost_ callbacks: only
+        # enforced when the group's restricted admin mode is on, matching
+        # admin_rights()'s default-open behavior.
+        if manager.get_admin_rights(cid):
+            member = await bot.get_chat_member(cid, call.from_user.id)
+            if member.status not in ("administrator", "creator"):
+                await bot.answer_callback_query(call.id, "⛔ Only admins can delete templates", show_alert=True)
+                return
+
+        if data.startswith("tmpldel_ask_"):
+            name = data[len("tmpldel_ask_"):]
+            confirm_markup = InlineKeyboardMarkup(row_width=2)
+            confirm_markup.add(
+                InlineKeyboardButton("✅ Yes, delete", callback_data=f"tmpldel_yes_{name}"),
+                InlineKeyboardButton("❌ Cancel", callback_data=f"tmpldel_no_{name}"),
+            )
+            await bot.answer_callback_query(call.id)
+            await bot.send_message(
+                cid,
+                f"Delete template '{name}'? This cannot be undone — any recurring schedule on it will stop too.",
+                reply_markup=confirm_markup,
+            )
+            return
+
+        if data.startswith("tmpldel_no_"):
+            await bot.answer_callback_query(call.id, "❌ Cancelled")
+            await safe_edit_text(cid, call.message.message_id, "❌ Delete cancelled.")
+            return
+
+        if data.startswith("tmpldel_yes_"):
+            name = data[len("tmpldel_yes_"):]
+            try:
+                templates_svc.delete_one_template(cid, name, call.from_user.id, call.from_user.first_name)
+                await bot.answer_callback_query(call.id, f"🗑 Deleted {name}")
+                await safe_edit_text(cid, call.message.message_id, f"🗑 Template '{name}' deleted.")
+            except incorrectParameter as e:
+                await bot.answer_callback_query(call.id, str(e), show_alert=True)
+            return
+
+    except Exception as e:
+        err_str = str(e)
+        if "query is too old" in err_str or "query ID is invalid" in err_str:
+            logging.warning(f"[{_ts()}] Stale template-delete callback ignored")
+            return
+        logging.exception("Error in template_delete_callback")
+        try:
+            await bot.answer_callback_query(call.id, "Error deleting template")
+        except Exception:
+            pass
 
 
 # ── Idle re-engagement callback ───────────────────────────────────────────────

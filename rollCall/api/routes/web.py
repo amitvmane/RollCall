@@ -677,6 +677,23 @@ async def web_start_template(
     return WebRollcallResponse(**_serialize_web_rollcall(rc))
 
 
+@router.delete(
+    "/web/group/{group_token}/templates/{name}",
+    summary="Delete a template (requires web-admin identity)",
+)
+async def web_delete_template(
+    body: WebToggleScheduleRequest,
+    group_token: str = Path(...),
+    name: str = Path(...),
+) -> dict:
+    chat_id, actor_user_id = _require_web_admin(group_token, body.id_token)
+    actor_name = await _actor_display_name(chat_id, actor_user_id)
+    from services import templates as tmpl_svc
+    result = tmpl_svc.delete_one_template(chat_id, name, actor_user_id, actor_name)
+    await _send_event_notification(chat_id, f"🗑 Template '{name}' deleted (via web).")
+    return result
+
+
 # ── Scheduled rollcalls ───────────────────────────────────────────────────────
 
 @router.post(

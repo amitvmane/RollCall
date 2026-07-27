@@ -591,6 +591,7 @@ class TestFireScheduledRollcalls(unittest.TestCase):
              patch.object(mgr, 'add_rollcall') as add_rollcall, \
              patch.object(_tmpl_mod, 'start_template',
                            side_effect=fake_start_template) as start_tmpl, \
+             patch.object(real_mod, 'start', new_callable=AsyncMock) as start_loop, \
              patch.object(_bot_state_mod.bot, 'send_message', new_callable=AsyncMock), \
              patch.object(_lifecycle_mod, 'get_status_keyboard', new_callable=AsyncMock), \
              patch.object(_lifecycle_mod, '_build_panel_text', return_value="panel text"), \
@@ -598,6 +599,9 @@ class TestFireScheduledRollcalls(unittest.TestCase):
             loop = asyncio.new_event_loop()
             try:
                 loop.run_until_complete(real_mod._fire_scheduled_rollcalls())
+                # Flush the fire-and-forget asyncio.create_task(start(...))
+                # so the mock actually gets invoked before the loop closes.
+                loop.run_until_complete(asyncio.sleep(0))
             finally:
                 loop.close()
 
@@ -609,6 +613,12 @@ class TestFireScheduledRollcalls(unittest.TestCase):
         self.assertEqual(start_tmpl.call_args.kwargs["admin_name"], "Amit")
         add_rollcall.assert_not_called()
         mark_fired.assert_called_once_with(1)
+        # Regression: a rollcall started from a matched template with a
+        # finalizeDate must get its auto-close/reminder loop started —
+        # previously this call site never did, so such rollcalls stayed
+        # open forever past their scheduled close time.
+        start_loop.assert_called_once()
+        self.assertEqual(start_loop.call_args.args[2], -100)
 
     def test_falls_back_to_bare_title_when_no_template_matches(self):
         import rollcall_manager as _rcm
@@ -620,6 +630,7 @@ class TestFireScheduledRollcalls(unittest.TestCase):
         real_mod = self._load_real_module()
         row = self._row(title="Just A Title")
         rc = MagicMock()
+        rc.finalizeDate = None  # bare-title fallback never sets a close time
         mgr = _rcm.manager
 
         with patch.object(real_mod, 'get_pending_scheduled_rollcalls', return_value=[row]), \

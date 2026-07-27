@@ -703,6 +703,25 @@ async def _fire_scheduled_rollcalls():
                 except Exception:
                     logging.exception("[scheduler] Fallback announce also failed for '%s'", title)
 
+            # Ensure the reminder/auto-close loop is running for this
+            # rollcall. Without this, a rollcall started here with a
+            # finalizeDate (event_day/event_time or offset_* from the
+            # matched template) would sit open forever past its scheduled
+            # close time — nothing else in the process ever re-checks it.
+            # start() is idempotent per chat_id (safe to call even if a
+            # loop for this chat is already running), matching the same
+            # call after _auto_start_from_template and after the
+            # /start_template command handler.
+            if rc.finalizeDate:
+                def _log_exc(t, _title=title, _chat_id=chat_id):
+                    if not t.cancelled() and t.exception():
+                        logging.error(
+                            f"Reminder loop raised for '{_title}' chat {_chat_id}: {t.exception()}"
+                        )
+                _rc_tz = rc.timezone or "Asia/Kolkata"
+                _reminder_task = asyncio.create_task(start(manager.get_rollcalls(chat_id), _rc_tz, chat_id))
+                _reminder_task.add_done_callback(_log_exc)
+
             mark_scheduled_rollcall_fired(row_id)
             logging.info("[scheduler] Fired scheduled rollcall '%s' for chat %s", title, chat_id)
         except Exception:

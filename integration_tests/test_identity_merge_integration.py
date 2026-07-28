@@ -222,3 +222,50 @@ def test_alphabetical_ordering_of_identities_and_groups():
 
     names = [i["display_name"] for i in identity.list_all_identities(chat)]
     assert names == sorted(names, key=str.lower)
+
+
+def test_case_and_whitespace_variants_auto_merge_permanently():
+    """Case/whitespace-only variants (e.g. "amit" / "Amit" / " Amit ") auto-
+    merge without any admin action, and this re-runs every time identities
+    are listed — so a NEW variant added later (simulating /sif at a later
+    date) gets swept up automatically too, not just a one-time cleanup.
+    A proxy name that happens to exactly match a real member's name is
+    NOT auto-merged (could be a coincidental shared first name)."""
+    chat = CHAT - 9
+    db.get_or_create_chat(chat)
+    db.upsert_chat_member(chat, 999, "Real", "realuser")
+    rid = _mk_rollcall(chat)
+    conn = db.get_connection()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO proxy_users (rollcall_id, name, status) VALUES (?, ?, ?)", (rid, "amit", "in"))
+    cur.execute("INSERT INTO proxy_users (rollcall_id, name, status) VALUES (?, ?, ?)", (rid, "Amit", "in"))
+    cur.execute("INSERT INTO proxy_users (rollcall_id, name, status) VALUES (?, ?, ?)", (rid, "Real", "in"))
+    conn.commit()
+    cur.close()
+
+    ids = identity.list_all_identities(chat)
+    proxies = {i["proxy_name"]: i["merged_into"] for i in ids if i["kind"] == "proxy"}
+    merged = [n for n, m in proxies.items() if n.lower() == "amit" and m is not None]
+    unmerged = [n for n, m in proxies.items() if n.lower() == "amit" and m is None]
+    assert len(merged) == 1 and len(unmerged) == 1
+    # "Real" exactly matches a real member's name but must stay unmerged.
+    assert proxies["Real"] is None
+
+    # Simulate a NEW case variant appearing later (e.g. /sif AMIT next month)
+    # — must also auto-merge the next time identities are listed, with no
+    # admin action, proving this isn't a one-time cleanup.
+    rid2 = _mk_rollcall(chat)
+    conn = db.get_connection()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO proxy_users (rollcall_id, name, status) VALUES (?, ?, ?)", (rid2, "AMIT", "in"))
+    conn.commit()
+    cur.close()
+
+    ids2 = identity.list_all_identities(chat)
+    proxies2 = {i["proxy_name"]: i["merged_into"] for i in ids2 if i["kind"] == "proxy"}
+    merged2 = [n for n, m in proxies2.items() if n.lower() == "amit" and m is not None]
+    assert "AMIT" in merged2
+
+    group = identity.list_identity_groups(chat)
+    amit_group = [g for g in group if g["display_name"].strip().lower() == "amit"][0]
+    assert set(a.lower() for a in amit_group["aliases"]) >= {"amit", "amit"}  # at least the lowercased forms present

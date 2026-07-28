@@ -68,17 +68,43 @@ class TestGetAliasGroup(unittest.TestCase):
 
 class TestListIdentityGroups(unittest.TestCase):
 
+    def _link_for(self, name):
+        links = {
+            "rex": {"canonical_user_id": 999, "canonical_proxy_name": None},
+            "aju": {"canonical_user_id": None, "canonical_proxy_name": "Ajay"},
+        }
+        return links.get(name.lower())
+
     def test_groups_sorted_alphabetically_by_display_name(self):
-        links = [
-            {"alias_proxy_name": "Rex", "canonical_user_id": 999, "canonical_proxy_name": None},
-            {"alias_proxy_name": "Aju", "canonical_user_id": None, "canonical_proxy_name": "Ajay"},
-        ]
-        with patch("services.identity.db.list_identity_links", return_value=links), \
+        with patch("services.identity.db.get_all_proxy_names", return_value=["Rex", "Aju", "Ajay"]), \
+             patch("services.identity.db.list_identity_links", return_value=[]), \
+             patch("services.identity.db.get_identity_link", side_effect=lambda chat_id, name: self._link_for(name)), \
              patch("services.identity.db.get_member_display_info",
                    return_value={"first_name": "Zara", "username": None}):
             result = identity.list_identity_groups(1)
         names = [g["display_name"] for g in result]
         self.assertEqual(names, ["Ajay", "Zara"])
+
+    def test_case_variant_alias_with_no_own_row_still_appears(self):
+        """"amit" and "Amit" both resolve to the same canonical via
+        case-insensitive lookup even though only ONE of them has its own
+        identity_links row (the alias-uniqueness index is case-insensitive,
+        so a second case variant can't get a separate row) — both must
+        still show up as aliases, not silently vanish."""
+        def link_for(chat_id, name):
+            # Only "Amit" (exact case) has a stored row; "amit" resolves to
+            # the same canonical purely via case-insensitive SQL matching,
+            # which this mock simulates by keying on the lowercased name.
+            if name.lower() == "amit":
+                return {"canonical_user_id": None, "canonical_proxy_name": "Zed"}
+            return None
+        with patch("services.identity.db.get_all_proxy_names", return_value=["amit", "Amit", "Zed"]), \
+             patch("services.identity.db.list_identity_links", return_value=[]), \
+             patch("services.identity.db.get_identity_link", side_effect=link_for):
+            result = identity.list_identity_groups(1)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(set(result[0]["aliases"]), {"amit", "Amit"})
+        self.assertEqual(result[0]["proxy_name"], "Zed")
 
 
 class TestLinkIdentities(unittest.TestCase):
@@ -231,6 +257,96 @@ class TestListAllIdentities(unittest.TestCase):
         names = {r["proxy_name"] for r in result}
         self.assertNotIn("Garbage2", names)
         self.assertIn("Solo", names)
+
+
+class TestAutoMergeExactDuplicates(unittest.TestCase):
+    """Case/whitespace-only variants of the same proxy name (e.g. "Amit" /
+    "amit" / " Amit ") are certainly the same person and merge without
+    requiring admin confirmation — unlike fuzzy Levenshtein suggestions.
+    Deliberately proxy<->proxy only (see module docstring on the function)."""
+
+    def test_case_variants_auto_merge(self):
+        with patch("services.identity.db.get_all_proxy_names", return_value=["amit", "Amit"]), \
+             patch("services.identity.db.get_active_members", return_value=[]), \
+             patch("services.identity.db.list_identity_links", return_value=[]), \
+             patch("services.identity.db.upsert_identity_link") as mock_upsert, \
+             patch("services.identity.db.repoint_links"), \
+             patch("services.identity.db.log_admin_action") as mock_log, \
+             patch("services.identity.db.get_identity_link", return_value=None), \
+             patch("services.identity.db.get_links_by_canonical", return_value=[]), \
+             patch("services.identity.db.get_member_display_info", return_value=None):
+            identity.list_all_identities(1)
+        mock_upsert.assert_called_once()
+        # Deterministic: alphabetically-first ("Amit" < "amit") is canonical.
+        self.assertEqual(mock_upsert.call_args.args[1], "amit")
+        self.assertEqual(mock_upsert.call_args.kwargs["canonical_proxy_name"], "Amit")
+        # System actor, not a real admin.
+        self.assertEqual(mock_log.call_args.args[1], 0)
+
+    def test_whitespace_variants_auto_merge(self):
+        with patch("services.identity.db.get_all_proxy_names", return_value=["Amit K", "Amit  K"]), \
+             patch("services.identity.db.get_active_members", return_value=[]), \
+             patch("services.identity.db.list_identity_links", return_value=[]), \
+             patch("services.identity.db.upsert_identity_link") as mock_upsert, \
+             patch("services.identity.db.repoint_links"), \
+             patch("services.identity.db.log_admin_action"), \
+             patch("services.identity.db.get_identity_link", return_value=None), \
+             patch("services.identity.db.get_links_by_canonical", return_value=[]), \
+             patch("services.identity.db.get_member_display_info", return_value=None):
+            identity.list_all_identities(1)
+        mock_upsert.assert_called_once()
+
+    def test_proxy_matching_real_user_name_not_auto_merged(self):
+        """A proxy exactly named like a real member is NOT auto-merged —
+        common first names could coincidentally collide; stays a
+        human-reviewed suggestion instead."""
+        with patch("services.identity.db.get_all_proxy_names", return_value=["Amit"]), \
+             patch("services.identity.db.get_active_members",
+                   return_value=[{"user_id": 1, "first_name": "Amit", "username": None}]), \
+             patch("services.identity.db.list_identity_links", return_value=[]), \
+             patch("services.identity.db.upsert_identity_link") as mock_upsert, \
+             patch("services.identity.db.get_identity_link", return_value=None), \
+             patch("services.identity.db.get_member_display_info", return_value=None):
+            identity.list_all_identities(1)
+        mock_upsert.assert_not_called()
+
+    def test_already_linked_name_not_reprocessed(self):
+        with patch("services.identity.db.get_all_proxy_names", return_value=["amit", "Amit"]), \
+             patch("services.identity.db.get_active_members", return_value=[]), \
+             patch("services.identity.db.list_identity_links",
+                   side_effect=lambda chat_id, status: [{"alias_proxy_name": "amit"}]
+                   if status == "linked" else []), \
+             patch("services.identity.db.upsert_identity_link") as mock_upsert, \
+             patch("services.identity.db.get_identity_link", return_value=None), \
+             patch("services.identity.db.get_links_by_canonical", return_value=[]), \
+             patch("services.identity.db.get_member_display_info", return_value=None):
+            identity.list_all_identities(1)
+        mock_upsert.assert_not_called()
+
+    def test_discarded_name_not_resurrected(self):
+        with patch("services.identity.db.get_all_proxy_names", return_value=["amit", "Amit"]), \
+             patch("services.identity.db.get_active_members", return_value=[]), \
+             patch("services.identity.db.list_identity_links",
+                   side_effect=lambda chat_id, status: [{"alias_proxy_name": "amit"}]
+                   if status == "discarded" else []), \
+             patch("services.identity.db.upsert_identity_link") as mock_upsert, \
+             patch("services.identity.db.get_identity_link", return_value=None), \
+             patch("services.identity.db.get_links_by_canonical", return_value=[]), \
+             patch("services.identity.db.get_member_display_info", return_value=None):
+            identity.list_all_identities(1)
+        mock_upsert.assert_not_called()
+
+    def test_list_suggestions_also_triggers_auto_merge(self):
+        with patch("services.identity.db.get_all_proxy_names", return_value=["amit", "Amit"]), \
+             patch("services.identity.db.get_active_members", return_value=[]), \
+             patch("services.identity.db.list_identity_links", return_value=[]), \
+             patch("services.identity.db.upsert_identity_link") as mock_upsert, \
+             patch("services.identity.db.repoint_links"), \
+             patch("services.identity.db.log_admin_action"), \
+             patch("services.identity.db.get_identity_link", return_value=None), \
+             patch("services.identity.db.get_links_by_canonical", return_value=[]):
+            identity.list_suggestions(1)
+        mock_upsert.assert_called_once()
 
 
 class TestDiscardIdentity(unittest.TestCase):

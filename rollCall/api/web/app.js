@@ -2804,7 +2804,7 @@ function renderIdentityMerge(){
   // first); TO picker excludes whatever's currently picked as FROM (see
   // _onImAliasChange) so the same identity can never appear on both sides.
   const aliasOptions=identities.filter(i=>i.kind==="proxy"&&!i.merged_into)
-    .map(i=>`<option value="${esc(i.proxy_name)}">${esc(i.display_name)}</option>`).join("");
+    .map(i=>`<option value="${esc(i.proxy_name)}">${esc(i.display_name)} (proxy)</option>`).join("");
 
   html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin:14px 0 6px">Merge manually</div>`;
   if(!aliasOptions){

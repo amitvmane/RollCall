@@ -119,21 +119,43 @@ def get_alias_group(chat_id: int, *, user_id: Optional[int] = None,
 
 def list_identity_groups(chat_id: int) -> list[dict]:
     """Every merge group currently active in a chat (canonical identities
-    that have >=1 alias), with a resolved display_name for the canonical."""
-    links = db.list_identity_links(chat_id, status="linked")
-    groups: dict[tuple, list[str]] = {}
-    proxy_casing: dict[str, str] = {}
-    for link in links:
-        if link["canonical_user_id"] is not None:
-            key = ("user", link["canonical_user_id"])
+    that have >=1 alias), with a resolved display_name for the canonical.
+
+    Derived by resolving every known proxy name individually rather than
+    reading identity_links rows directly: the alias-side uniqueness is
+    case-insensitive (matches how every lookup in this module resolves
+    names), so two case/whitespace variants of the same raw string (e.g.
+    "amit" and "Amit") collapse onto a single link row — the OTHER variant
+    still resolves correctly via case-insensitive lookup but has no row of
+    its own, so reading rows directly would silently omit it from its
+    group's alias list. Re-deriving per name keeps this complete."""
+    discarded_lower = {n.lower() for n in list_discarded(chat_id)}
+    groups: dict[tuple, dict] = {}
+    for name in db.get_all_proxy_names(chat_id):
+        if name.lower() in discarded_lower:
+            continue
+        canonical = resolve_canonical(chat_id, proxy_name=name)
+        # Deliberately an EXACT (case-sensitive) comparison, not .lower():
+        # the alias lookup itself is case-insensitive, so once "amit" is
+        # linked to canonical "Amit", resolving EITHER "Amit" or "amit"
+        # finds the very same row. Comparing lowercased strings can't tell
+        # "the canonical querying its own name" apart from "the alias
+        # querying via that same case-insensitive lookup" — they'd both
+        # say "amit"=="amit". Only an exact-string match confirms this
+        # query's raw spelling IS the literal stored canonical.
+        is_self = canonical["kind"] == "proxy" and canonical["proxy_name"] == name
+        if is_self:
+            continue  # canonical identities aren't their own alias
+        if canonical["kind"] == "user":
+            key = ("user", canonical["user_id"])
         else:
-            canon = link["canonical_proxy_name"] or ""
-            key = ("proxy", canon.lower())
-            proxy_casing.setdefault(canon.lower(), canon)
-        groups.setdefault(key, []).append(link["alias_proxy_name"])
+            key = ("proxy", (canonical["proxy_name"] or "").lower())
+        entry = groups.setdefault(key, {"canonical": canonical, "aliases": []})
+        entry["aliases"].append(name)
 
     result = []
-    for (kind, ident), aliases in groups.items():
+    for (kind, ident), data in groups.items():
+        aliases = data["aliases"]
         if kind == "user":
             result.append({
                 "kind": "user", "user_id": ident, "proxy_name": None,
@@ -141,7 +163,7 @@ def list_identity_groups(chat_id: int) -> list[dict]:
                 "display_name": _display_name_for_user(chat_id, ident),
             })
         else:
-            proxy_name = proxy_casing.get(ident, ident)
+            proxy_name = data["canonical"]["proxy_name"] or ident
             result.append({
                 "kind": "proxy", "user_id": None, "proxy_name": proxy_name,
                 "aliases": sorted(aliases), "display_name": proxy_name,
@@ -216,12 +238,62 @@ def unmerge_identity(chat_id: int, alias_proxy_name: str, *,
     return {"unmerged": deleted}
 
 
+def _auto_merge_exact_duplicates(chat_id: int) -> None:
+    """Silently auto-merge proxy names that are identical except for case/
+    whitespace (e.g. "Amit" / "amit" / " Amit "  / "Amit  K" vs "Amit K")
+    — these are certainly the same physical person typed slightly
+    differently, unlike the fuzzy Levenshtein suggestions which genuinely
+    need human review. Deliberately proxy<->proxy ONLY: a proxy name that
+    exactly matches a REAL member's name is NOT auto-merged (common first
+    names could coincidentally collide — that case still needs a human to
+    confirm via the suggestion list).
+
+    Runs as a cheap idempotent pre-pass every time identities/suggestions
+    are listed (once merged, the alias is filtered out of future passes).
+    Uses a system actor (admin_user_id=0) in the audit log, matching the
+    scheduler's "ended_by_user_id=0" sentinel convention for non-human-
+    initiated actions.
+
+    Deliberately calls db.upsert_identity_link directly rather than going
+    through link_identities: that function's self-merge guard is (by
+    design, and tested) case-insensitive — appropriate for a human-typed
+    manual merge, where "amit" vs "Amit" being treated as identical is
+    exactly what should block a confusing manual pick. Here it's the
+    opposite: we've already independently verified the two raw strings are
+    genuinely different (case/whitespace) with no existing link, so a
+    direct upsert is correct and avoids that guard rejecting the exact
+    case this function exists to handle. No chain-flattening/cascade is
+    needed either — both variants are confirmed unlinked, so there's
+    nothing to flatten."""
+    proxy_names = db.get_all_proxy_names(chat_id)
+    linked_lower = {l["alias_proxy_name"].lower() for l in db.list_identity_links(chat_id, status="linked")}
+    discarded_lower = {n.lower() for n in list_discarded(chat_id)}
+    groups: dict[str, list[str]] = {}
+    for name in proxy_names:
+        if name.lower() in linked_lower or name.lower() in discarded_lower:
+            continue
+        key = " ".join(name.split()).lower()
+        groups.setdefault(key, []).append(name)
+    for variants in groups.values():
+        if len(variants) < 2:
+            continue
+        variants = sorted(variants)  # deterministic canonical pick
+        canonical, aliases = variants[0], variants[1:]
+        for alias in aliases:
+            db.upsert_identity_link(chat_id, alias, canonical_proxy_name=canonical,
+                                     created_by=0, created_by_name="System (auto)")
+            db.log_admin_action(chat_id, 0, "System (auto)", "identity_merge",
+                                 target_name=alias,
+                                 details=f"proxy:{canonical} (auto, exact duplicate)")
+
+
 def list_all_identities(chat_id: int) -> list[dict]:
     """Every mergeable identity in the chat for the picker UI: active real
     members + every distinct proxy name ever used (excluding discarded
     ones), each tagged with its current resolution (so the UI can show
     "Ajya -> merged into Ajay" inline instead of listing an already-merged
     alias as free-standing). Sorted alphabetically by display_name."""
+    _auto_merge_exact_duplicates(chat_id)
     discarded_lower = {n.lower() for n in list_discarded(chat_id)}
     result = []
     for m in db.get_active_members(chat_id):
@@ -234,7 +306,15 @@ def list_all_identities(chat_id: int) -> list[dict]:
         if name.lower() in discarded_lower:
             continue
         canonical = resolve_canonical(chat_id, proxy_name=name)
-        is_self = canonical["kind"] == "proxy" and (canonical["proxy_name"] or "").lower() == name.lower()
+        # Deliberately an EXACT (case-sensitive) comparison, not .lower():
+        # the alias lookup itself is case-insensitive, so once "amit" is
+        # linked to canonical "Amit", resolving EITHER "Amit" or "amit"
+        # finds the very same row. Comparing lowercased strings can't tell
+        # "the canonical querying its own name" apart from "the alias
+        # querying via that same case-insensitive lookup" — they'd both
+        # say "amit"=="amit". Only an exact-string match confirms this
+        # query's raw spelling IS the literal stored canonical.
+        is_self = canonical["kind"] == "proxy" and canonical["proxy_name"] == name
         result.append({
             "kind": "proxy", "user_id": None, "proxy_name": name,
             "display_name": name,
@@ -296,6 +376,7 @@ def list_suggestions(chat_id: int, limit: int = 20) -> list[dict]:
     except ImportError:
         return []
 
+    _auto_merge_exact_duplicates(chat_id)
     proxy_names = db.get_all_proxy_names(chat_id)
     real_members = db.get_active_members(chat_id)
     linked_lower = {l["alias_proxy_name"].lower() for l in db.list_identity_links(chat_id, status="linked")}

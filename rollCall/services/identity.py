@@ -34,6 +34,7 @@ across an alias group.
 """
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 import db
@@ -55,6 +56,14 @@ def _norm(name: str) -> str:
     if len(name) > _MAX_ALIAS_LEN:
         raise parameterMissing(f"Name is too long (max {_MAX_ALIAS_LEN} characters).")
     return name
+
+
+def _normalize_for_match(name: str) -> str:
+    """Strip whitespace/punctuation noise and lowercase before fuzzy-
+    comparing two names, so "Amit K" vs "AmitK" (or "Amit-K") counts as
+    identical rather than the raw Levenshtein distance penalizing the
+    formatting difference as if it were a real spelling difference."""
+    return re.sub(r"[\s.\-_]+", "", (name or "").lower())
 
 
 def _pct(num: int, denom: int) -> Optional[float]:
@@ -137,6 +146,7 @@ def list_identity_groups(chat_id: int) -> list[dict]:
                 "kind": "proxy", "user_id": None, "proxy_name": proxy_name,
                 "aliases": sorted(aliases), "display_name": proxy_name,
             })
+    result.sort(key=lambda g: (g["display_name"] or "").lower())
     return result
 
 
@@ -208,9 +218,11 @@ def unmerge_identity(chat_id: int, alias_proxy_name: str, *,
 
 def list_all_identities(chat_id: int) -> list[dict]:
     """Every mergeable identity in the chat for the picker UI: active real
-    members + every distinct proxy name ever used, each tagged with its
-    current resolution (so the UI can show "Ajya -> merged into Ajay"
-    inline instead of listing an already-merged alias as free-standing)."""
+    members + every distinct proxy name ever used (excluding discarded
+    ones), each tagged with its current resolution (so the UI can show
+    "Ajya -> merged into Ajay" inline instead of listing an already-merged
+    alias as free-standing). Sorted alphabetically by display_name."""
+    discarded_lower = {n.lower() for n in list_discarded(chat_id)}
     result = []
     for m in db.get_active_members(chat_id):
         result.append({
@@ -219,6 +231,8 @@ def list_all_identities(chat_id: int) -> list[dict]:
             "merged_into": None,  # real users are always canonical, never an alias
         })
     for name in db.get_all_proxy_names(chat_id):
+        if name.lower() in discarded_lower:
+            continue
         canonical = resolve_canonical(chat_id, proxy_name=name)
         is_self = canonical["kind"] == "proxy" and (canonical["proxy_name"] or "").lower() == name.lower()
         result.append({
@@ -226,14 +240,54 @@ def list_all_identities(chat_id: int) -> list[dict]:
             "display_name": name,
             "merged_into": None if is_self else canonical,
         })
+    result.sort(key=lambda i: (i["display_name"] or "").lower())
     return result
+
+
+def list_discarded(chat_id: int) -> list[str]:
+    """Every proxy name marked invalid/garbage in this chat (hidden from
+    suggestions/picker/identities list, but reversible — see
+    discard_identity)."""
+    return sorted(l["alias_proxy_name"] for l in db.list_identity_links(chat_id, status="discarded"))
+
+
+def discard_identity(chat_id: int, alias_proxy_name: str, *,
+                      admin_user_id: int, admin_name: str) -> dict:
+    """Mark a garbage/invalid proxy name (a stray "2", "]", or other typo
+    from /sif) so it stops appearing in suggestions, the merge picker, and
+    the identities list. Nothing is deleted — its historical proxy_users
+    rows are untouched — so this is always reversible via undiscard_identity."""
+    alias_proxy_name = _norm(alias_proxy_name)
+    db.discard_identity_name(chat_id, alias_proxy_name,
+                              created_by=admin_user_id, created_by_name=admin_name)
+    db.log_admin_action(chat_id, admin_user_id, admin_name, "identity_discard",
+                         target_name=alias_proxy_name)
+    return {"discarded": True}
+
+
+def undiscard_identity(chat_id: int, alias_proxy_name: str, *,
+                        admin_user_id: int, admin_name: str) -> dict:
+    """Reverse discard_identity. Idempotent — a no-op if it wasn't discarded."""
+    alias_proxy_name = _norm(alias_proxy_name)
+    restored = db.undiscard_identity_name(chat_id, alias_proxy_name)
+    if restored:
+        db.log_admin_action(chat_id, admin_user_id, admin_name, "identity_undiscard",
+                             target_name=alias_proxy_name)
+    return {"restored": restored}
 
 
 def list_suggestions(chat_id: int, limit: int = 20) -> list[dict]:
     """Fuzzy "possible duplicates" — proxy names vs each other AND vs
     active real members' first_name/username. Reuses services/ghost.py's
     lazy-import Levenshtein pattern. Never real<->real. Excludes aliases
-    already linked and (alias, candidate) pairs already dismissed.
+    already linked, discarded, or (alias, candidate) pairs already
+    dismissed.
+
+    Names are normalized (whitespace/punctuation stripped) before
+    comparing, and each proxy name contributes at most ONE suggestion
+    (its single best-scoring match) — every candidate within threshold
+    for every name produced an unbounded, noisy list; capping per-name
+    keeps this to roughly one row per unmatched name, best-first.
 
     Returns [] (no Levenshtein) if the optional dependency isn't installed
     — same graceful degrade as find_ghost_record."""
@@ -245,21 +299,22 @@ def list_suggestions(chat_id: int, limit: int = 20) -> list[dict]:
     proxy_names = db.get_all_proxy_names(chat_id)
     real_members = db.get_active_members(chat_id)
     linked_lower = {l["alias_proxy_name"].lower() for l in db.list_identity_links(chat_id, status="linked")}
+    discarded_lower = {n.lower() for n in list_discarded(chat_id)}
     dismissed_pairs = set()
     for d in db.list_identity_links(chat_id, status="dismissed"):
         cand_key = (str(d["canonical_user_id"]) if d["canonical_user_id"] is not None
                     else (d["canonical_proxy_name"] or "").lower())
         dismissed_pairs.add((d["alias_proxy_name"].lower(), cand_key))
 
-    unlinked = [p for p in proxy_names if p.lower() not in linked_lower]
-    candidates = []
+    unlinked = [p for p in proxy_names if p.lower() not in linked_lower and p.lower() not in discarded_lower]
+    all_candidates = []
 
     for alias in unlinked:
         # proxy <-> proxy (each unordered pair emitted once)
         for other in unlinked:
             if alias.lower() >= other.lower():
                 continue
-            score = lev_distance(alias.lower(), other.lower())
+            score = lev_distance(_normalize_for_match(alias), _normalize_for_match(other))
             if score > _SUGGEST_THRESHOLD:
                 continue
             # A proxy<->proxy dismissal may have been recorded in either
@@ -269,7 +324,7 @@ def list_suggestions(chat_id: int, limit: int = 20) -> list[dict]:
             if (alias.lower(), other.lower()) in dismissed_pairs or \
                (other.lower(), alias.lower()) in dismissed_pairs:
                 continue
-            candidates.append({
+            all_candidates.append({
                 "alias_proxy_name": alias, "candidate_kind": "proxy",
                 "candidate_user_id": None, "candidate_proxy_name": other,
                 "candidate_display_name": other, "score": score,
@@ -279,20 +334,35 @@ def list_suggestions(chat_id: int, limit: int = 20) -> list[dict]:
             names = [n for n in (m.get("first_name"), m.get("username")) if n]
             if not names:
                 continue
-            best_score = min(lev_distance(alias.lower(), n.lower()) for n in names)
+            best_score = min(lev_distance(_normalize_for_match(alias), _normalize_for_match(n)) for n in names)
             if best_score > _SUGGEST_THRESHOLD:
                 continue
             if (alias.lower(), str(m["user_id"])) in dismissed_pairs:
                 continue
-            candidates.append({
+            all_candidates.append({
                 "alias_proxy_name": alias, "candidate_kind": "user",
                 "candidate_user_id": m["user_id"], "candidate_proxy_name": None,
                 "candidate_display_name": m.get("first_name") or m.get("username") or str(m["user_id"]),
                 "score": best_score,
             })
 
-    candidates.sort(key=lambda c: c["score"])
-    return candidates[:limit]
+    # Greedy cap: process best-scoring matches first, and once a name
+    # (whether as alias or as a proxy candidate) is "claimed" by a
+    # suggestion, skip any further weaker suggestion touching that same
+    # name — bounds the list to roughly one row per unmatched name instead
+    # of every pairwise match within threshold.
+    all_candidates.sort(key=lambda c: c["score"])
+    claimed: set[str] = set()
+    result = []
+    for c in all_candidates:
+        involved = {c["alias_proxy_name"].lower()}
+        if c["candidate_kind"] == "proxy":
+            involved.add(c["candidate_proxy_name"].lower())
+        if involved & claimed:
+            continue
+        claimed.update(involved)
+        result.append(c)
+    return result[:limit]
 
 
 def dismiss_suggestion(chat_id: int, alias_proxy_name: str, *,

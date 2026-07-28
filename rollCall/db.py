@@ -3207,6 +3207,51 @@ def delete_identity_link(chat_id: int, alias_proxy_name: str) -> bool:
         raise
 
 
+def discard_identity_name(chat_id: int, alias_proxy_name: str, *,
+                           created_by: int = None, created_by_name: str = None) -> None:
+    """Mark a proxy name as invalid/garbage (a stray "2" or "]" from a
+    typo'd /sif) so it stops showing up in suggestions, the merge picker,
+    and the identities list — without touching its historical proxy_users
+    rows (past attendance isn't deleted, just hidden from future merge
+    bookkeeping). Idempotent. Reversible via undiscard_identity_name."""
+    try:
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"""SELECT id FROM identity_links
+                    WHERE chat_id = {ph} AND LOWER(alias_proxy_name) = LOWER({ph}) AND status = 'discarded'""",
+                (chat_id, alias_proxy_name)
+            )
+            if cursor.fetchone() is not None:
+                return
+            cursor.execute(
+                f"""INSERT INTO identity_links
+                        (chat_id, alias_proxy_name, canonical_user_id, canonical_proxy_name,
+                         status, created_by, created_by_name, created_at)
+                    VALUES ({ph}, {ph}, NULL, NULL, 'discarded', {ph}, {ph}, CURRENT_TIMESTAMP)""",
+                (chat_id, alias_proxy_name, created_by, created_by_name)
+            )
+    except Exception:
+        logging.exception("discard_identity_name failed")
+        raise
+
+
+def undiscard_identity_name(chat_id: int, alias_proxy_name: str) -> bool:
+    """Reverse discard_identity_name. Returns True if a row was removed."""
+    try:
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"""DELETE FROM identity_links
+                    WHERE chat_id = {ph} AND LOWER(alias_proxy_name) = LOWER({ph}) AND status = 'discarded'""",
+                (chat_id, alias_proxy_name)
+            )
+            return (cursor.rowcount or 0) > 0
+    except Exception:
+        logging.exception("undiscard_identity_name failed")
+        raise
+
+
 def list_identity_links(chat_id: int, status: str = 'linked') -> List[Dict]:
     """All rows for a chat with the given status."""
     try:

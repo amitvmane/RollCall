@@ -289,6 +289,7 @@ class WebIdentityGroupResponse(BaseModel):
 class WebIdentityListResponse(BaseModel):
     identities: List[WebIdentityItem]
     groups: List[WebIdentityGroupResponse]
+    discarded: List[str] = Field(default_factory=list)
 
 
 class WebIdentitySuggestion(BaseModel):
@@ -329,6 +330,24 @@ class WebDismissSuggestionRequest(BaseModel):
 
 class WebDismissSuggestionResponse(BaseModel):
     dismissed: bool
+
+
+class WebDiscardIdentityRequest(BaseModel):
+    id_token: str = Field(..., description="Signed identity token of the acting web admin")
+    alias_proxy_name: str = Field(..., max_length=40, description="Invalid/garbage proxy name to hide")
+
+
+class WebDiscardIdentityResponse(BaseModel):
+    discarded: bool
+
+
+class WebUndiscardIdentityRequest(BaseModel):
+    id_token: str = Field(..., description="Signed identity token of the acting web admin")
+    alias_proxy_name: str = Field(..., max_length=40)
+
+
+class WebUndiscardIdentityResponse(BaseModel):
+    restored: bool
 
 
 class WebSetScheduleRequest(BaseModel):

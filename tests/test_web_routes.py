@@ -1364,6 +1364,58 @@ class TestWebIdentityMerge(unittest.TestCase):
                 json={"id_token": "tok", "alias_proxy_name": "Ajya", "candidate_proxy_name": "Ajay"})
         self.assertEqual(resp.status_code, 403)
 
+    def test_list_includes_discarded(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.identity.list_all_identities", return_value=[]), \
+             patch("services.identity.list_identity_groups", return_value=[]), \
+             patch("services.identity.list_discarded", return_value=["2", "]"]):
+            resp = _client().get("/api/v1/web/group/grp123/identities?id_token=tok")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["discarded"], ["2", "]"])
+
+    def test_discard_calls_service(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value=None), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.identity.discard_identity", return_value={"discarded": True}) as svc:
+            resp = _client().post(
+                "/api/v1/web/group/grp123/identities/discard",
+                json={"id_token": "tok", "alias_proxy_name": "2"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["discarded"])
+        self.assertEqual(svc.call_args.args[0], -100)
+        self.assertEqual(svc.call_args.args[1], "2")
+        self.assertEqual(svc.call_args.kwargs["admin_user_id"], 99)
+
+    def test_discard_non_admin_403(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=False), \
+             patch("api.identity.verify_identity_token", return_value=77):
+            resp = _client().post(
+                "/api/v1/web/group/grp123/identities/discard",
+                json={"id_token": "tok", "alias_proxy_name": "2"})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_undiscard_calls_service(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value=None), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.identity.undiscard_identity", return_value={"restored": True}) as svc:
+            resp = _client().post(
+                "/api/v1/web/group/grp123/identities/undiscard",
+                json={"id_token": "tok", "alias_proxy_name": "2"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["restored"])
+        svc.assert_called_once()
+
 
 class TestWebGroupSettingsTimezone(unittest.TestCase):
     """Browser-based timezone detect/set — /web/group/{token}/settings PATCH.

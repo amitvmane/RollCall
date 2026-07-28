@@ -66,6 +66,21 @@ class TestGetAliasGroup(unittest.TestCase):
         self.assertEqual(g["aliases"], ["Aju"])
 
 
+class TestListIdentityGroups(unittest.TestCase):
+
+    def test_groups_sorted_alphabetically_by_display_name(self):
+        links = [
+            {"alias_proxy_name": "Rex", "canonical_user_id": 999, "canonical_proxy_name": None},
+            {"alias_proxy_name": "Aju", "canonical_user_id": None, "canonical_proxy_name": "Ajay"},
+        ]
+        with patch("services.identity.db.list_identity_links", return_value=links), \
+             patch("services.identity.db.get_member_display_info",
+                   return_value={"first_name": "Zara", "username": None}):
+            result = identity.list_identity_groups(1)
+        names = [g["display_name"] for g in result]
+        self.assertEqual(names, ["Ajay", "Zara"])
+
+
 class TestLinkIdentities(unittest.TestCase):
 
     def _admin(self):
@@ -195,6 +210,68 @@ class TestListAllIdentities(unittest.TestCase):
             result = identity.list_all_identities(1)
         self.assertEqual(result[0]["merged_into"], {"kind": "user", "user_id": 999, "proxy_name": None})
 
+    def test_results_sorted_alphabetically_by_display_name(self):
+        members = [{"user_id": 1, "first_name": "Zara", "username": None}]
+        with patch("services.identity.db.get_active_members", return_value=members), \
+             patch("services.identity.db.get_all_proxy_names", return_value=["Amit", "Bala"]), \
+             patch("services.identity.db.get_identity_link", return_value=None), \
+             patch("services.identity.db.list_identity_links", return_value=[]):
+            result = identity.list_all_identities(1)
+        names = [r["display_name"] for r in result]
+        self.assertEqual(names, ["Amit", "Bala", "Zara"])
+
+    def test_discarded_proxy_excluded(self):
+        with patch("services.identity.db.get_active_members", return_value=[]), \
+             patch("services.identity.db.get_all_proxy_names", return_value=["Solo", "Garbage2"]), \
+             patch("services.identity.db.get_identity_link", return_value=None), \
+             patch("services.identity.db.list_identity_links",
+                   side_effect=lambda chat_id, status: [{"alias_proxy_name": "Garbage2"}]
+                   if status == "discarded" else []):
+            result = identity.list_all_identities(1)
+        names = {r["proxy_name"] for r in result}
+        self.assertNotIn("Garbage2", names)
+        self.assertIn("Solo", names)
+
+
+class TestDiscardIdentity(unittest.TestCase):
+
+    def test_discard_calls_db_and_logs(self):
+        with patch("services.identity.db.discard_identity_name") as mock_discard, \
+             patch("services.identity.db.log_admin_action") as mock_log:
+            r = identity.discard_identity(1, "Garbage2", admin_user_id=1, admin_name="Admin")
+        mock_discard.assert_called_once_with(1, "Garbage2", created_by=1, created_by_name="Admin")
+        mock_log.assert_called_once()
+        self.assertEqual(r, {"discarded": True})
+
+    def test_undiscard_calls_db_and_logs(self):
+        with patch("services.identity.db.undiscard_identity_name", return_value=True), \
+             patch("services.identity.db.log_admin_action") as mock_log:
+            r = identity.undiscard_identity(1, "Garbage2", admin_user_id=1, admin_name="Admin")
+        mock_log.assert_called_once()
+        self.assertEqual(r, {"restored": True})
+
+    def test_undiscard_idempotent_when_not_discarded(self):
+        with patch("services.identity.db.undiscard_identity_name", return_value=False), \
+             patch("services.identity.db.log_admin_action") as mock_log:
+            r = identity.undiscard_identity(1, "Solo", admin_user_id=1, admin_name="Admin")
+        mock_log.assert_not_called()
+        self.assertEqual(r, {"restored": False})
+
+    def test_list_discarded_returns_sorted_names(self):
+        rows = [{"alias_proxy_name": "Zulu"}, {"alias_proxy_name": "Alpha"}]
+        with patch("services.identity.db.list_identity_links", return_value=rows):
+            result = identity.list_discarded(1)
+        self.assertEqual(result, ["Alpha", "Zulu"])
+
+    def test_discarded_name_excluded_from_suggestions(self):
+        with patch("services.identity.db.get_all_proxy_names", return_value=["Ajya", "Ajay"]), \
+             patch("services.identity.db.get_active_members", return_value=[]), \
+             patch("services.identity.db.list_identity_links",
+                   side_effect=lambda chat_id, status: [{"alias_proxy_name": "Ajay"}]
+                   if status == "discarded" else []):
+            result = identity.list_suggestions(1)
+        self.assertEqual(result, [])
+
 
 class TestCombinedGhostCount(unittest.TestCase):
 
@@ -268,16 +345,51 @@ class TestListSuggestions(unittest.TestCase):
         self.assertEqual(result, [])
 
     def test_dismissed_pair_excluded_but_other_candidates_still_surface(self):
+        # Real-member candidates (unlike proxy<->proxy ones) don't compete
+        # for the greedy per-name cap, so this cleanly isolates "dismissed
+        # pair excluded" from the separate per-name capping behavior
+        # (covered by its own test below).
         dismissed = [{"alias_proxy_name": "Ajya", "canonical_user_id": None,
                       "canonical_proxy_name": "Ajay", "status": "dismissed"}]
-        with patch("services.identity.db.get_all_proxy_names", return_value=["Ajya", "Ajay", "Aju"]), \
-             patch("services.identity.db.get_active_members", return_value=[]), \
+        with patch("services.identity.db.get_all_proxy_names", return_value=["Ajya", "Ajay"]), \
+             patch("services.identity.db.get_active_members",
+                   return_value=[{"user_id": 5, "first_name": "Aju", "username": None}]), \
              patch("services.identity.db.list_identity_links",
                    side_effect=lambda chat_id, status: dismissed if status == "dismissed" else []):
             result = identity.list_suggestions(1)
-        pairs = {(s["alias_proxy_name"], s["candidate_proxy_name"]) for s in result}
+        pairs = {(s["alias_proxy_name"], s["candidate_proxy_name"]) for s in result
+                 if s["candidate_kind"] == "proxy"}
         self.assertNotIn(("Ajay", "Ajya"), pairs)
-        self.assertIn(("Aju", "Ajya"), pairs)
+        self.assertNotIn(("Ajya", "Ajay"), pairs)
+        # Ajya still gets its own (undismissed) suggestion against real user "Aju".
+        aliases_suggested = {s["alias_proxy_name"] for s in result}
+        self.assertIn("Ajya", aliases_suggested)
+
+    def test_per_name_cap_avoids_redundant_overlapping_suggestions(self):
+        """Three mutually-close proxy names must not all pairwise-suggest —
+        each name is claimed by at most one suggestion, so the list stays
+        bounded instead of showing every pair within threshold."""
+        with patch("services.identity.db.get_all_proxy_names",
+                   return_value=["Ajya", "Ajay", "Aju"]), \
+             patch("services.identity.db.get_active_members", return_value=[]), \
+             patch("services.identity.db.list_identity_links", return_value=[]):
+            result = identity.list_suggestions(1)
+        claimed_names = set()
+        for s in result:
+            claimed_names.add(s["alias_proxy_name"].lower())
+            if s["candidate_kind"] == "proxy":
+                claimed_names.add(s["candidate_proxy_name"].lower())
+        # All three names are mutually close, but each may only be claimed once.
+        self.assertLessEqual(len(result), 1)
+
+    def test_normalization_matches_whitespace_and_punctuation_variants(self):
+        with patch("services.identity.db.get_all_proxy_names",
+                   return_value=["Amit K", "AmitK"]), \
+             patch("services.identity.db.get_active_members", return_value=[]), \
+             patch("services.identity.db.list_identity_links", return_value=[]):
+            result = identity.list_suggestions(1)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["score"], 0)
 
 
 class TestDismissSuggestion(unittest.TestCase):

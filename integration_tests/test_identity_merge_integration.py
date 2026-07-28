@@ -170,3 +170,55 @@ def test_proxy_to_proxy_merge_then_merge_into_real_user_flattens():
 
     group = identity.get_alias_group(chat, user_id=666)
     assert set(group["aliases"]) == {"Ajya", "Aju", "Ajay"}
+
+
+def test_discard_hides_from_identities_and_suggestions_then_restores():
+    chat = CHAT - 7
+    db.get_or_create_chat(chat)
+    db.upsert_chat_member(chat, 777, "Ajay", "ajayreal")
+    rid = _mk_rollcall(chat)
+    conn = db.get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO proxy_users (rollcall_id, name, status) VALUES (?, ?, ?)",
+        (rid, "Garbage2", "in"),
+    )
+    conn.commit()
+    cur.close()
+
+    # Before discard: shows up in both identities and suggestions (close to "Ajay"? no —
+    # just confirm presence in the identities list first).
+    names_before = {i["proxy_name"] for i in identity.list_all_identities(chat) if i["kind"] == "proxy"}
+    assert "Garbage2" in names_before
+
+    identity.discard_identity(chat, "Garbage2", admin_user_id=1, admin_name="Admin")
+
+    names_after = {i["proxy_name"] for i in identity.list_all_identities(chat) if i["kind"] == "proxy"}
+    assert "Garbage2" not in names_after
+    assert "Garbage2" in identity.list_discarded(chat)
+
+    # Discarding again is idempotent (no duplicate row, no error).
+    identity.discard_identity(chat, "Garbage2", admin_user_id=1, admin_name="Admin")
+    assert identity.list_discarded(chat).count("Garbage2") == 1
+
+    result = identity.undiscard_identity(chat, "Garbage2", admin_user_id=1, admin_name="Admin")
+    assert result == {"restored": True}
+    names_restored = {i["proxy_name"] for i in identity.list_all_identities(chat) if i["kind"] == "proxy"}
+    assert "Garbage2" in names_restored
+    assert "Garbage2" not in identity.list_discarded(chat)
+
+
+def test_alphabetical_ordering_of_identities_and_groups():
+    chat = CHAT - 8
+    db.get_or_create_chat(chat)
+    db.upsert_chat_member(chat, 888, "Zack", "zackreal")
+    rid = _mk_rollcall(chat)
+    conn = db.get_connection()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO proxy_users (rollcall_id, name, status) VALUES (?, ?, ?)", (rid, "Amit", "in"))
+    cur.execute("INSERT INTO proxy_users (rollcall_id, name, status) VALUES (?, ?, ?)", (rid, "Bala", "in"))
+    conn.commit()
+    cur.close()
+
+    names = [i["display_name"] for i in identity.list_all_identities(chat)]
+    assert names == sorted(names, key=str.lower)

@@ -41,6 +41,8 @@ from api.schemas.web import (
     WebAdminStatusResponse,
     WebEndRollcallRequest,
     WebEndRollcallResponse,
+    WebDiscardIdentityRequest,
+    WebDiscardIdentityResponse,
     WebDismissSuggestionRequest,
     WebDismissSuggestionResponse,
     WebGroupResponse,
@@ -59,6 +61,8 @@ from api.schemas.web import (
     WebStartTemplateRequest,
     WebTemplateResponse,
     WebToggleScheduleRequest,
+    WebUndiscardIdentityRequest,
+    WebUndiscardIdentityResponse,
     WebUnmergeIdentityRequest,
     WebUnmergeIdentityResponse,
     WebUpdateTemplateRequest,
@@ -724,6 +728,7 @@ async def web_list_identities(
     return WebIdentityListResponse(
         identities=identity_svc.list_all_identities(chat_id),
         groups=identity_svc.list_identity_groups(chat_id),
+        discarded=identity_svc.list_discarded(chat_id),
     )
 
 
@@ -804,6 +809,40 @@ async def web_dismiss_identity_suggestion(
         admin_user_id=actor_user_id, admin_name=actor_name,
     )
     return WebDismissSuggestionResponse(dismissed=True)
+
+
+@router.post(
+    "/web/group/{group_token}/identities/discard",
+    response_model=WebDiscardIdentityResponse,
+    summary="Mark an invalid/garbage proxy name so it stops appearing in suggestions (requires web-admin identity)",
+)
+async def web_discard_identity(
+    body: WebDiscardIdentityRequest,
+    group_token: str = Path(...),
+) -> WebDiscardIdentityResponse:
+    chat_id, actor_user_id = _require_web_admin(group_token, body.id_token)
+    actor_name = await _actor_display_name(chat_id, actor_user_id)
+    from services import identity as identity_svc
+    identity_svc.discard_identity(chat_id, body.alias_proxy_name,
+                                   admin_user_id=actor_user_id, admin_name=actor_name)
+    return WebDiscardIdentityResponse(discarded=True)
+
+
+@router.post(
+    "/web/group/{group_token}/identities/undiscard",
+    response_model=WebUndiscardIdentityResponse,
+    summary="Restore a previously-discarded proxy name (requires web-admin identity)",
+)
+async def web_undiscard_identity(
+    body: WebUndiscardIdentityRequest,
+    group_token: str = Path(...),
+) -> WebUndiscardIdentityResponse:
+    chat_id, actor_user_id = _require_web_admin(group_token, body.id_token)
+    actor_name = await _actor_display_name(chat_id, actor_user_id)
+    from services import identity as identity_svc
+    result = identity_svc.undiscard_identity(chat_id, body.alias_proxy_name,
+                                              admin_user_id=actor_user_id, admin_name=actor_name)
+    return WebUndiscardIdentityResponse(**result)
 
 
 # ── Scheduled rollcalls ───────────────────────────────────────────────────────

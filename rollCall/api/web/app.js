@@ -2663,7 +2663,8 @@ async function refreshDues(){
 
 // ── Merge Identities (fold a fragmented proxy name into a real member or
 // another proxy so stats/dues/ghost-tracking count them once) ──────────────
-let _identityMergeOpen=false, _identitiesCache=null, _identityGroupsCache=null, _suggestionsCache=null;
+let _identityMergeOpen=false, _identitiesCache=null, _identityGroupsCache=null,
+    _suggestionsCache=null, _discardedCache=null;
 
 window.toggleIdentityMerge=async function(){
   _identityMergeOpen=!_identityMergeOpen;
@@ -2687,6 +2688,7 @@ async function loadIdentityMerge(){
     const idData=await idRes.json();
     _identitiesCache=idData.identities||[];
     _identityGroupsCache=idData.groups||[];
+    _discardedCache=idData.discarded||[];
     _suggestionsCache=sugRes.ok?(await sugRes.json()).suggestions||[]:[];
     renderIdentityMerge();
   }catch(e){
@@ -2703,12 +2705,44 @@ function _identityKey(kind,userId,proxyName){
   return kind==="user"?`u:${userId}`:`p:${proxyName||""}`;
 }
 
+// Case-insensitive variant used only for matching an identity to its group
+// of aliases — casing between get_all_proxy_names and a link's stored
+// canonical_proxy_name isn't guaranteed identical, so exact-match would
+// silently drop the alias list for some canonicals.
+function _identityMapKey(kind,userId,proxyName){
+  return kind==="user"?`u:${userId}`:`p:${(proxyName||"").toLowerCase()}`;
+}
+
+function _buildTargetOptions(excludeProxyNameLower){
+  // TO list: real users first (kept prominent, per feedback that actual
+  // members should anchor the target side), then canonical-eligible
+  // proxies — excluding whichever proxy is currently picked as FROM, so
+  // the same identity can never be selected on both sides (that's the
+  // only way a manual pick could look like a self-merge/cycle; the
+  // backend also rejects it, this just stops the UI from offering it).
+  const identities=_identitiesCache||[];
+  const users=identities.filter(i=>i.kind==="user");
+  const proxies=identities.filter(i=>i.kind==="proxy"&&i.proxy_name.toLowerCase()!==excludeProxyNameLower);
+  const opt=i=>`<option value="${_identityKey(i.kind,i.user_id,i.proxy_name)}">${esc(i.display_name)}${i.kind==="proxy"?" (proxy)":""}</option>`;
+  return users.map(opt).join("")+proxies.map(opt).join("");
+}
+
+window._onImAliasChange=function(){
+  const aliasSel=document.getElementById("im-alias-select");
+  const targetSel=document.getElementById("im-target-select");
+  if(!aliasSel||!targetSel)return;
+  const prevVal=targetSel.value;
+  targetSel.innerHTML=_buildTargetOptions(aliasSel.value.toLowerCase());
+  if([...targetSel.options].some(o=>o.value===prevVal))targetSel.value=prevVal;
+};
+
 function renderIdentityMerge(){
   const body=document.getElementById("identity-merge-body");
   if(!body)return;
   const identities=_identitiesCache||[];
   const groups=_identityGroupsCache||[];
   const suggestions=_suggestionsCache||[];
+  const discarded=_discardedCache||[];
 
   let html="";
 
@@ -2723,40 +2757,63 @@ function renderIdentityMerge(){
         <div style="display:flex;gap:6px;flex-shrink:0">
           <button class="id-change" title="Merge these" onclick="doMergeIdentity('${esc(escJsAttr(s.alias_proxy_name))}','${s.candidate_kind}',${s.candidate_user_id!=null?s.candidate_user_id:"null"},${s.candidate_proxy_name!=null?`'${esc(escJsAttr(s.candidate_proxy_name))}'`:"null"})">🔗</button>
           <button class="id-change" title="Not a match" onclick="doDismissSuggestion(${i})">✕</button>
+          <button class="id-change" title="'${esc(s.alias_proxy_name)}' is invalid/garbage — discard it" onclick="doDiscardIdentity('${esc(escJsAttr(s.alias_proxy_name))}')">🗑</button>
         </div>
       </div>`).join("");
   }
 
-  html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin:${suggestions.length?"14px":"0"} 0 6px">Current groups</div>`;
-  if(!groups.length){
-    html+=`<div class="sched-empty">No merges yet.</div>`;
+  // Compact table: left = every real user + every canonical proxy (not
+  // itself merged into something), right = its aliases (or a dash).
+  html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin:${suggestions.length?"14px":"0"} 0 6px">Identities</div>`;
+  const groupsByKey={};
+  groups.forEach(g=>{groupsByKey[_identityMapKey(g.kind,g.user_id,g.proxy_name)]=g.aliases;});
+  const leftRows=identities.filter(i=>i.kind==="user"||!i.merged_into);
+  if(!leftRows.length){
+    html+=`<div class="sched-empty">No identities yet — proxies appear here once someone's been /sif'd in.</div>`;
   }else{
-    html+=groups.map(g=>`
-      <div class="sched-item" style="flex-direction:column;align-items:stretch">
-        <div class="sched-item-title">${esc(g.display_name)}</div>
-        ${g.aliases.map(a=>`
-          <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0 4px 10px;font-size:.85rem;color:var(--sub)">
-            <span>↳ ${esc(a)}</span>
-            <button class="id-change" title="Unmerge" onclick="doUnmergeIdentity('${esc(escJsAttr(a))}')">✕</button>
-          </div>`).join("")}
+    html+=`<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden">`;
+    html+=leftRows.map((row,i)=>{
+      const aliases=groupsByKey[_identityMapKey(row.kind,row.user_id,row.proxy_name)]||[];
+      const rowBg=i%2?"":"background:var(--bg)";
+      const discardBtn=row.kind==="proxy"&&!aliases.length
+        ?`<button class="id-change" title="Discard invalid/garbage name" onclick="doDiscardIdentity('${esc(escJsAttr(row.proxy_name))}')">🗑</button>`
+        :"";
+      return `
+        <div style="display:flex;gap:8px;padding:8px 10px;${rowBg};border-bottom:1px solid var(--border)">
+          <div style="flex:1;min-width:0;font-weight:600;font-size:.85rem${row.kind==="proxy"?";font-style:italic":""}">${esc(row.display_name)}${row.kind==="proxy"?" <span style=\"opacity:.6;font-weight:400\">(proxy)</span>":""}</div>
+          <div style="flex:1;min-width:0;font-size:.82rem;color:var(--sub);display:flex;flex-wrap:wrap;gap:4px;align-items:center">
+            ${aliases.length?aliases.map(a=>`<span style="background:var(--border);border-radius:6px;padding:2px 6px;display:inline-flex;align-items:center;gap:4px">${esc(a)}<span style="cursor:pointer;opacity:.7" title="Unmerge" onclick="doUnmergeIdentity('${esc(escJsAttr(a))}')">✕</span></span>`).join(""):"—"}
+          </div>
+          ${discardBtn}
+        </div>`;
+    }).join("");
+    html+=`</div>`;
+  }
+
+  if(discarded.length){
+    html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin:14px 0 6px">🗑 Discarded (${discarded.length})</div>`;
+    html+=discarded.map(name=>`
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 10px;font-size:.85rem;color:var(--sub)">
+        <span>${esc(name)}</span>
+        <button class="id-change" title="Restore" onclick="doUndiscardIdentity('${esc(escJsAttr(name))}')">↩ Restore</button>
       </div>`).join("");
   }
 
-  // Manual merge: alias picker excludes anything already merged into
-  // something; target picker offers every identity (picking an
-  // already-merged one just folds into ITS canonical automatically,
-  // server-side, via link_identities' flattening).
+  // Manual merge: FROM picker only offers unmerged proxies (a proxy that's
+  // already an alias can't itself be re-picked as FROM without unmerging
+  // first); TO picker excludes whatever's currently picked as FROM (see
+  // _onImAliasChange) so the same identity can never appear on both sides.
   const aliasOptions=identities.filter(i=>i.kind==="proxy"&&!i.merged_into)
     .map(i=>`<option value="${esc(i.proxy_name)}">${esc(i.display_name)}</option>`).join("");
-  const targetOptions=identities
-    .map(i=>`<option value="${_identityKey(i.kind,i.user_id,i.proxy_name)}">${esc(i.display_name)}${i.kind==="proxy"?" (proxy)":""}</option>`).join("");
 
   html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin:14px 0 6px">Merge manually</div>`;
   if(!aliasOptions){
     html+=`<div class="sched-empty">No unmerged proxy names to merge.</div>`;
   }else{
+    const firstAlias=identities.find(i=>i.kind==="proxy"&&!i.merged_into);
+    const targetOptions=_buildTargetOptions((firstAlias&&firstAlias.proxy_name||"").toLowerCase());
     html+=`
-      <select id="im-alias-select" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem;margin-bottom:8px">${aliasOptions}</select>
+      <select id="im-alias-select" onchange="_onImAliasChange()" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem;margin-bottom:8px">${aliasOptions}</select>
       <div style="font-size:.75rem;color:var(--sub);margin-bottom:4px">merges into →</div>
       <select id="im-target-select" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem;margin-bottom:10px">${targetOptions}</select>
       <button class="btn btn-primary" style="width:100%;padding:9px" onclick="doMergeIdentityManual()">🔗 Merge</button>`;
@@ -2824,6 +2881,35 @@ window.doDismissSuggestion=async function(index){
     _suggestionsCache=_suggestionsCache.filter((_,i)=>i!==index);
     renderIdentityMerge();
   }catch(e){toast(e.message||"Could not dismiss",4000);}
+};
+
+window.doDiscardIdentity=async function(aliasProxyName){
+  if(!confirm(`Discard "${aliasProxyName}"? It won't show up in suggestions or the merge picker anymore (this is reversible).`))return;
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/identities/discard`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({id_token:_idToken,alias_proxy_name:aliasProxyName}),
+      signal:AbortSignal.timeout(8000),
+    });
+    if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"Failed to discard");
+    toast(`🗑 Discarded "${aliasProxyName}"`,2500);
+    _identitiesCache=null;
+    await loadIdentityMerge();
+  }catch(e){toast(e.message||"Could not discard",4000);}
+};
+
+window.doUndiscardIdentity=async function(aliasProxyName){
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/identities/undiscard`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({id_token:_idToken,alias_proxy_name:aliasProxyName}),
+      signal:AbortSignal.timeout(8000),
+    });
+    if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"Failed to restore");
+    toast(`↩ Restored "${aliasProxyName}"`,2500);
+    _identitiesCache=null;
+    await loadIdentityMerge();
+  }catch(e){toast(e.message||"Could not restore",4000);}
 };
 
 // ── Modal helper ──────────────────────────────────────────────────────────

@@ -86,6 +86,8 @@ db_mock.get_links_by_canonical.return_value = []
 db_mock.list_identity_links.return_value = []
 db_mock.get_all_proxy_names.return_value = []
 db_mock.get_identity_last_activity.return_value = None
+db_mock.discard_identity_name.return_value = None
+db_mock.undiscard_identity_name.return_value = False
 
 sys.modules["db"] = db_mock
 

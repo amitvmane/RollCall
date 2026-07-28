@@ -628,6 +628,61 @@ def create_tables():
                 )
             """)
 
+        # Identity merge: alias a proxy name to a canonical identity (another
+        # proxy name, or a real user) so stats/dues/ghost-tracking treat them
+        # as one person. Resolved at read time — never rewrites the historical
+        # rows in ghost_records/dues_entries/user_stats/proxy_stats etc. The
+        # 'dismissed' status records a rejected fuzzy-match suggestion (so it
+        # doesn't keep resurfacing) without acting as a real merge.
+        if db_type == 'postgresql':
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS identity_links (
+                    id SERIAL PRIMARY KEY,
+                    chat_id BIGINT NOT NULL,
+                    alias_proxy_name TEXT NOT NULL,
+                    canonical_user_id BIGINT,
+                    canonical_proxy_name TEXT,
+                    status TEXT NOT NULL DEFAULT 'linked',
+                    created_by BIGINT,
+                    created_by_name TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS identity_links_alias_linked_unique
+                ON identity_links (chat_id, LOWER(alias_proxy_name)) WHERE status = 'linked'
+            """)
+            cursor.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS identity_links_dismissed_pair_unique
+                ON identity_links (chat_id, LOWER(alias_proxy_name),
+                                    COALESCE(CAST(canonical_user_id AS TEXT), LOWER(canonical_proxy_name)))
+                WHERE status = 'dismissed'
+            """)
+        else:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS identity_links (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id INTEGER NOT NULL,
+                    alias_proxy_name TEXT NOT NULL,
+                    canonical_user_id INTEGER,
+                    canonical_proxy_name TEXT,
+                    status TEXT NOT NULL DEFAULT 'linked',
+                    created_by INTEGER,
+                    created_by_name TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS identity_links_alias_linked_unique
+                ON identity_links (chat_id, LOWER(alias_proxy_name)) WHERE status = 'linked'
+            """)
+            cursor.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS identity_links_dismissed_pair_unique
+                ON identity_links (chat_id, LOWER(alias_proxy_name),
+                                    COALESCE(CAST(canonical_user_id AS TEXT), LOWER(canonical_proxy_name)))
+                WHERE status = 'dismissed'
+            """)
+
         # Admin audit log table
         if db_type == 'postgresql':
             cursor.execute("""
@@ -2950,21 +3005,313 @@ def decrement_ghost_count(chat_id: int, user_id: int, proxy_name: str = None) ->
 
 
 def get_ghost_leaderboard(chat_id: int) -> List[Dict]:
-    """Return all users with ghost_count > 0 for a chat, sorted descending."""
+    """Return all users with ghost_count > 0 for a chat, combined across
+    any merged identity aliases (ghost_count summed, last_ghosted_at is the
+    most recent across the group), sorted descending."""
     try:
         with _cursor() as cursor:
             ph = '%s' if db_type == 'postgresql' else '?'
             cursor.execute(
                 f"""SELECT user_id, proxy_name, user_name, ghost_count, last_ghosted_at
                     FROM ghost_records
-                    WHERE chat_id = {ph} AND ghost_count > 0
-                    ORDER BY ghost_count DESC, last_ghosted_at DESC""",
+                    WHERE chat_id = {ph} AND ghost_count > 0""",
                 (chat_id,)
             )
-            return [dict(row) for row in cursor.fetchall()]
+            raw_rows = [dict(row) for row in cursor.fetchall()]
+
+        from services import identity as identity_svc
+        collapsed: Dict[tuple, Dict] = {}
+        for row in raw_rows:
+            is_proxy = row.get('proxy_name') is not None
+            canonical = (identity_svc.resolve_canonical(chat_id, proxy_name=row['proxy_name']) if is_proxy
+                         else identity_svc.resolve_canonical(chat_id, user_id=row['user_id']))
+            if canonical['kind'] == 'user':
+                key = ('user', canonical['user_id'])
+            else:
+                key = ('proxy', (canonical['proxy_name'] or '').lower())
+
+            if key not in collapsed:
+                collapsed[key] = {
+                    'user_id': canonical['user_id'] if canonical['kind'] == 'user' else -1,
+                    'proxy_name': canonical['proxy_name'],
+                    'user_name': None,
+                    'ghost_count': 0,
+                    'last_ghosted_at': None,
+                }
+            bucket = collapsed[key]
+            bucket['ghost_count'] += row.get('ghost_count') or 0
+            last = row.get('last_ghosted_at')
+            if last and (bucket['last_ghosted_at'] is None or last > bucket['last_ghosted_at']):
+                bucket['last_ghosted_at'] = last
+            # Prefer the canonical identity's OWN row's stored name over an
+            # alias's — only fall back to a synthesized name below if the
+            # canonical never had its own ghost_records row (it only exists
+            # in this leaderboard because an alias points at it).
+            is_canonical_own_row = (
+                (canonical['kind'] == 'user' and not is_proxy and row['user_id'] == canonical['user_id'])
+                or (canonical['kind'] == 'proxy' and is_proxy
+                    and (row['proxy_name'] or '').lower() == (canonical['proxy_name'] or '').lower())
+            )
+            if row.get('user_name') and (bucket['user_name'] is None or is_canonical_own_row):
+                bucket['user_name'] = row['user_name']
+
+        result = list(collapsed.values())
+        for bucket in result:
+            if not bucket['user_name']:
+                bucket['user_name'] = (bucket['proxy_name'] if bucket['proxy_name']
+                                        else _member_display_name(chat_id, bucket['user_id']))
+        result.sort(key=lambda r: (r['ghost_count'] or 0, r['last_ghosted_at'] or ''), reverse=True)
+        return result
     except Exception as e:
         logging.error(f"Error getting ghost leaderboard: {e}")
         return []
+
+
+def get_identity_link(chat_id: int, alias_proxy_name: str) -> Optional[Dict]:
+    """The active 'linked' row for this alias (case-insensitive), or None
+    if this proxy name isn't currently merged into anything."""
+    try:
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"""SELECT * FROM identity_links
+                    WHERE chat_id = {ph} AND LOWER(alias_proxy_name) = LOWER({ph}) AND status = 'linked'""",
+                (chat_id, alias_proxy_name)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+    except Exception as e:
+        logging.error(f"Error getting identity link: {e}")
+        return None
+
+
+def get_links_by_canonical(chat_id: int, canonical_user_id: int = None,
+                            canonical_proxy_name: str = None) -> List[Dict]:
+    """Every active 'linked' row whose canonical target is this identity —
+    i.e. every alias currently pointing here."""
+    try:
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            if canonical_user_id is not None:
+                cursor.execute(
+                    f"""SELECT * FROM identity_links
+                        WHERE chat_id = {ph} AND canonical_user_id = {ph} AND status = 'linked'""",
+                    (chat_id, canonical_user_id)
+                )
+            else:
+                cursor.execute(
+                    f"""SELECT * FROM identity_links
+                        WHERE chat_id = {ph} AND LOWER(canonical_proxy_name) = LOWER({ph}) AND status = 'linked'""",
+                    (chat_id, canonical_proxy_name or "")
+                )
+            return [dict(row) for row in cursor.fetchall()]
+    except Exception as e:
+        logging.error(f"Error getting links by canonical: {e}")
+        return []
+
+
+def upsert_identity_link(chat_id: int, alias_proxy_name: str, *,
+                          canonical_user_id: int = None,
+                          canonical_proxy_name: str = None,
+                          created_by: int = None, created_by_name: str = None) -> Dict:
+    """Create (or repoint, if already linked) the active link for this
+    alias. Exactly one of canonical_user_id/canonical_proxy_name should be
+    given — enforced by services/identity.py, not here."""
+    try:
+        with _cursor(commit=True) as cursor:
+            if db_type == 'postgresql':
+                cursor.execute(
+                    """INSERT INTO identity_links
+                           (chat_id, alias_proxy_name, canonical_user_id, canonical_proxy_name,
+                            status, created_by, created_by_name, created_at)
+                       VALUES (%s, %s, %s, %s, 'linked', %s, %s, CURRENT_TIMESTAMP)
+                       ON CONFLICT (chat_id, LOWER(alias_proxy_name)) WHERE status = 'linked'
+                       DO UPDATE SET canonical_user_id = EXCLUDED.canonical_user_id,
+                                     canonical_proxy_name = EXCLUDED.canonical_proxy_name,
+                                     created_by = EXCLUDED.created_by,
+                                     created_by_name = EXCLUDED.created_by_name,
+                                     created_at = CURRENT_TIMESTAMP
+                       RETURNING *""",
+                    (chat_id, alias_proxy_name, canonical_user_id, canonical_proxy_name,
+                     created_by, created_by_name)
+                )
+                return dict(cursor.fetchone())
+            else:
+                cursor.execute(
+                    "SELECT id FROM identity_links WHERE chat_id = ? AND LOWER(alias_proxy_name) = LOWER(?) AND status = 'linked'",
+                    (chat_id, alias_proxy_name)
+                )
+                existing = cursor.fetchone()
+                if existing:
+                    cursor.execute(
+                        """UPDATE identity_links
+                           SET canonical_user_id = ?, canonical_proxy_name = ?,
+                               created_by = ?, created_by_name = ?, created_at = CURRENT_TIMESTAMP
+                           WHERE id = ?""",
+                        (canonical_user_id, canonical_proxy_name, created_by, created_by_name, existing["id"])
+                    )
+                else:
+                    cursor.execute(
+                        """INSERT INTO identity_links
+                               (chat_id, alias_proxy_name, canonical_user_id, canonical_proxy_name,
+                                status, created_by, created_by_name, created_at)
+                           VALUES (?, ?, ?, ?, 'linked', ?, ?, CURRENT_TIMESTAMP)""",
+                        (chat_id, alias_proxy_name, canonical_user_id, canonical_proxy_name,
+                         created_by, created_by_name)
+                    )
+                cursor.execute(
+                    "SELECT * FROM identity_links WHERE chat_id = ? AND LOWER(alias_proxy_name) = LOWER(?) AND status = 'linked'",
+                    (chat_id, alias_proxy_name)
+                )
+                return dict(cursor.fetchone())
+    except Exception:
+        logging.exception("upsert_identity_link failed")
+        raise
+
+
+def repoint_links(chat_id: int, from_proxy_name: str, *,
+                   to_user_id: int = None, to_proxy_name: str = None) -> int:
+    """Cascade step: repoint every active alias currently targeting
+    from_proxy_name (i.e. from_proxy_name was itself a merge target with
+    its own aliases) to the new final target. Returns rows affected."""
+    try:
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"""UPDATE identity_links
+                    SET canonical_user_id = {ph}, canonical_proxy_name = {ph}
+                    WHERE chat_id = {ph} AND status = 'linked'
+                      AND LOWER(canonical_proxy_name) = LOWER({ph})""",
+                (to_user_id, to_proxy_name, chat_id, from_proxy_name)
+            )
+            return cursor.rowcount or 0
+    except Exception:
+        logging.exception("repoint_links failed")
+        raise
+
+
+def delete_identity_link(chat_id: int, alias_proxy_name: str) -> bool:
+    """Unmerge: delete this alias's active link row. Returns True if a row
+    was deleted, False if it wasn't linked to begin with."""
+    try:
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"""DELETE FROM identity_links
+                    WHERE chat_id = {ph} AND LOWER(alias_proxy_name) = LOWER({ph}) AND status = 'linked'""",
+                (chat_id, alias_proxy_name)
+            )
+            return (cursor.rowcount or 0) > 0
+    except Exception:
+        logging.exception("delete_identity_link failed")
+        raise
+
+
+def list_identity_links(chat_id: int, status: str = 'linked') -> List[Dict]:
+    """All rows for a chat with the given status."""
+    try:
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"SELECT * FROM identity_links WHERE chat_id = {ph} AND status = {ph}",
+                (chat_id, status)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+    except Exception as e:
+        logging.error(f"Error listing identity links: {e}")
+        return []
+
+
+def insert_dismissed_suggestion(chat_id: int, alias_proxy_name: str, *,
+                                 candidate_user_id: int = None,
+                                 candidate_proxy_name: str = None,
+                                 created_by: int = None, created_by_name: str = None) -> None:
+    """Record that this specific (alias, candidate) pairing was reviewed and
+    rejected, so list_suggestions doesn't keep proposing it. Idempotent —
+    a repeat dismissal of the same pair is a silent no-op."""
+    try:
+        with _cursor(commit=True) as cursor:
+            if db_type == 'postgresql':
+                cursor.execute(
+                    """INSERT INTO identity_links
+                           (chat_id, alias_proxy_name, canonical_user_id, canonical_proxy_name,
+                            status, created_by, created_by_name, created_at)
+                       VALUES (%s, %s, %s, %s, 'dismissed', %s, %s, CURRENT_TIMESTAMP)
+                       ON CONFLICT (chat_id, LOWER(alias_proxy_name),
+                                    COALESCE(CAST(canonical_user_id AS TEXT), LOWER(canonical_proxy_name)))
+                       WHERE status = 'dismissed' DO NOTHING""",
+                    (chat_id, alias_proxy_name, candidate_user_id, candidate_proxy_name,
+                     created_by, created_by_name)
+                )
+            else:
+                cursor.execute(
+                    """SELECT id FROM identity_links
+                       WHERE chat_id = ? AND LOWER(alias_proxy_name) = LOWER(?) AND status = 'dismissed'
+                         AND COALESCE(CAST(canonical_user_id AS TEXT), LOWER(canonical_proxy_name))
+                             = COALESCE(?, LOWER(?))""",
+                    (chat_id, alias_proxy_name,
+                     str(candidate_user_id) if candidate_user_id is not None else None,
+                     candidate_proxy_name)
+                )
+                if cursor.fetchone() is None:
+                    cursor.execute(
+                        """INSERT INTO identity_links
+                               (chat_id, alias_proxy_name, canonical_user_id, canonical_proxy_name,
+                                status, created_by, created_by_name, created_at)
+                           VALUES (?, ?, ?, ?, 'dismissed', ?, ?, CURRENT_TIMESTAMP)""",
+                        (chat_id, alias_proxy_name, candidate_user_id, candidate_proxy_name,
+                         created_by, created_by_name)
+                    )
+    except Exception:
+        logging.exception("insert_dismissed_suggestion failed")
+        raise
+
+
+def get_all_proxy_names(chat_id: int) -> List[str]:
+    """Every distinct proxy name ever recorded in this chat (active or
+    ended rollcalls) — powers the merge picker and suggestion engine.
+    (find_proxy_in_chat only checks existence of ONE specific name;
+    get_group_attendance_totals only returns a COUNT — neither returns
+    the actual name list.)"""
+    try:
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"""SELECT DISTINCT pu.name FROM proxy_users pu
+                    JOIN rollcalls r ON pu.rollcall_id = r.id
+                    WHERE r.chat_id = {ph}
+                    ORDER BY pu.name""",
+                (chat_id,)
+            )
+            return [row["name"] for row in cursor.fetchall()]
+    except Exception as e:
+        logging.error(f"Error getting all proxy names: {e}")
+        return []
+
+
+def get_identity_last_activity(chat_id: int, user_id: int = None,
+                                proxy_name: str = None) -> Optional[str]:
+    """updated_at from user_stats/proxy_stats for one identity — powers the
+    'current_streak belongs to whichever alias was most recently active'
+    merge heuristic. Returns None if the identity has no stats row yet."""
+    try:
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            if user_id is not None:
+                cursor.execute(
+                    f"SELECT updated_at FROM user_stats WHERE chat_id = {ph} AND user_id = {ph}",
+                    (chat_id, user_id)
+                )
+            else:
+                cursor.execute(
+                    f"SELECT updated_at FROM proxy_stats WHERE chat_id = {ph} AND proxy_name = {ph}",
+                    (chat_id, proxy_name)
+                )
+            row = cursor.fetchone()
+            return row["updated_at"] if row else None
+    except Exception as e:
+        logging.error(f"Error getting identity last activity: {e}")
+        return None
 
 
 def get_user_ghost_count_by_name(chat_id: int, user_name: str) -> Optional[Dict]:
@@ -3516,6 +3863,42 @@ def get_leaderboard_by_attendance(chat_id: int, limit: int = 10) -> List[Dict]:
                     'total_out':       int((r['total_out']   if isinstance(r, dict) else r[4]) or 0),
                     'total_maybe':     int((r['total_maybe'] if isinstance(r, dict) else r[5]) or 0),
                 })
+
+            # Fold merged identity aliases into one combined entry before
+            # ranking — a proxy merged into a real user (or into another
+            # proxy) must show as a single participant, not two. See
+            # services/identity.py.
+            from services import identity as identity_svc
+            collapsed: Dict[tuple, Dict] = {}
+            for entry in unified:
+                canonical = (identity_svc.resolve_canonical(chat_id, user_id=entry['user_id'])
+                             if entry['kind'] == 'real'
+                             else identity_svc.resolve_canonical(chat_id, proxy_name=entry['proxy_name']))
+                if canonical['kind'] == 'user':
+                    key = ('real', canonical['user_id'])
+                else:
+                    key = ('proxy', (canonical['proxy_name'] or '').lower())
+
+                if key not in collapsed:
+                    if canonical['kind'] == 'user':
+                        display_name = _member_display_name(chat_id, canonical['user_id'])
+                        username = name_map.get(canonical['user_id'], (None, None))[1]
+                    else:
+                        display_name = canonical['proxy_name']
+                        username = None
+                    collapsed[key] = {
+                        'kind': canonical['kind'] if canonical['kind'] == 'proxy' else 'real',
+                        'user_id': canonical['user_id'], 'proxy_name': canonical['proxy_name'],
+                        'display_name': display_name, 'username': username,
+                        'attended': 0, 'total_rollcalls': 0, 'total_in': 0, 'total_out': 0, 'total_maybe': 0,
+                    }
+                bucket = collapsed[key]
+                bucket['attended'] += entry['attended']
+                bucket['total_rollcalls'] += entry['total_rollcalls']
+                bucket['total_in'] += entry['total_in']
+                bucket['total_out'] += entry['total_out']
+                bucket['total_maybe'] += entry['total_maybe']
+            unified = list(collapsed.values())
 
             # Sort by attended DESC, total_rollcalls ASC (rewards consistency),
             # then deterministic tiebreak by display_name ASC.
@@ -5203,45 +5586,117 @@ def add_dues_entry(
 _DUES_MEMBER_KEY = "COALESCE(CAST(user_id AS TEXT), LOWER(member_name))"
 
 
+def _dues_identity_group(chat_id: int, user_id: int = None, member_name: str = None) -> List[tuple]:
+    """Every (user_id, member_name) key to query for one dues identity,
+    expanded through any active merge (services/identity.py) — canonical +
+    every alias. Returns just [that one identity] when unmerged. Lazy
+    import: services/identity.py imports db, so db.py can't import it back
+    at module level."""
+    from services import identity as identity_svc
+    group = identity_svc.get_alias_group(chat_id, user_id=user_id, proxy_name=member_name)
+    keys = [(group["user_id"], None)] if group["kind"] == "user" else [(None, group["proxy_name"])]
+    keys.extend((None, alias) for alias in group["aliases"])
+    return keys
+
+
+def _member_display_name(chat_id: int, user_id: int) -> str:
+    info = get_member_display_info(chat_id, user_id)
+    if info:
+        return info.get("first_name") or info.get("username") or str(user_id)
+    return str(user_id)
+
+
 def get_dues_balance(chat_id: int, user_id: int = None, member_name: str = None) -> int:
-    """Balance for one member: SUM(amount). Positive = owes."""
+    """Balance for one member's full alias group (canonical + every merged
+    alias, if any): SUM(amount). Positive = owes."""
     try:
-        with _cursor() as cursor:
-            ph = "%s" if db_type == "postgresql" else "?"
-            if user_id is not None:
-                cursor.execute(
-                    f"SELECT COALESCE(SUM(amount), 0) FROM dues_entries"
-                    f" WHERE chat_id = {ph} AND user_id = {ph}",
-                    (chat_id, user_id),
-                )
-            else:
-                cursor.execute(
-                    f"SELECT COALESCE(SUM(amount), 0) FROM dues_entries"
-                    f" WHERE chat_id = {ph} AND user_id IS NULL AND LOWER(member_name) = {ph}",
-                    (chat_id, (member_name or "").lower()),
-                )
-            row = cursor.fetchone()
-            return int(row[0] or 0)
+        ph = "%s" if db_type == "postgresql" else "?"
+        total = 0
+        for uid, mname in _dues_identity_group(chat_id, user_id=user_id, member_name=member_name):
+            with _cursor() as cursor:
+                if uid is not None:
+                    cursor.execute(
+                        f"SELECT COALESCE(SUM(amount), 0) FROM dues_entries"
+                        f" WHERE chat_id = {ph} AND user_id = {ph}",
+                        (chat_id, uid),
+                    )
+                else:
+                    cursor.execute(
+                        f"SELECT COALESCE(SUM(amount), 0) FROM dues_entries"
+                        f" WHERE chat_id = {ph} AND user_id IS NULL AND LOWER(member_name) = {ph}",
+                        (chat_id, (mname or "").lower()),
+                    )
+                row = cursor.fetchone()
+                total += int(row[0] or 0)
+        return total
     except Exception:
         logging.exception("get_dues_balance failed")
         return 0
 
 
 def get_all_dues_balances(chat_id: int, nonzero_only: bool = False) -> List[Dict]:
-    """Per-member balances for a chat. Each row: user_id, member_name (latest), balance."""
+    """Per-member balances for a chat, combined across any merged identity
+    aliases. Each row: user_id, member_name (canonical display name), balance.
+
+    Groups on the raw per-identity key first (as before), then folds rows
+    sharing a canonical identity in Python — mirrors get_leaderboard_by_
+    attendance's existing two-step SQL-then-Python-merge precedent.
+    nonzero_only is applied AFTER the fold, not via SQL HAVING, since two
+    aliases whose raw balances net to zero must not survive as two
+    separate nonzero-looking rows.
+    """
     try:
         with _cursor() as cursor:
             ph = "%s" if db_type == "postgresql" else "?"
-            having = "HAVING SUM(amount) != 0" if nonzero_only else ""
             cursor.execute(
                 f"SELECT MAX(user_id) AS user_id, MAX(member_name) AS member_name,"
                 f" SUM(amount) AS balance"
                 f" FROM dues_entries WHERE chat_id = {ph}"
-                f" GROUP BY {_DUES_MEMBER_KEY} {having}"
-                f" ORDER BY balance DESC",
+                f" GROUP BY {_DUES_MEMBER_KEY}",
                 (chat_id,),
             )
-            return [dict(r) for r in cursor.fetchall()]
+            raw_rows = [dict(r) for r in cursor.fetchall()]
+
+        from services import identity as identity_svc
+        merged: Dict[tuple, Dict] = {}
+        for row in raw_rows:
+            uid = row.get("user_id")
+            mname = row.get("member_name")
+            canonical = (identity_svc.resolve_canonical(chat_id, user_id=uid) if uid is not None
+                         else identity_svc.resolve_canonical(chat_id, proxy_name=mname))
+            if canonical["kind"] == "user":
+                key = ("user", canonical["user_id"])
+            else:
+                key = ("proxy", (canonical["proxy_name"] or "").lower())
+            existing = merged.get(key)
+            if existing is None:
+                existing = merged[key] = {
+                    "user_id": canonical["user_id"], "member_name": None,
+                    "balance": 0,
+                }
+            existing["balance"] = (existing["balance"] or 0) + (row.get("balance") or 0)
+            # Prefer the canonical identity's OWN raw row's stored
+            # member_name over an alias's — a real user's actual ledger
+            # name (or a canonical proxy's own name) beats a synthesized
+            # fallback, which only kicks in below if the canonical never
+            # had its own dues_entries row (it only appears here because
+            # an alias points at it).
+            is_canonical_own_row = (
+                (canonical["kind"] == "user" and uid == canonical["user_id"])
+                or (canonical["kind"] == "proxy" and uid is None
+                    and (mname or "").lower() == (canonical["proxy_name"] or "").lower())
+            )
+            if mname and (existing["member_name"] is None or is_canonical_own_row):
+                existing["member_name"] = mname
+
+        result = list(merged.values())
+        for row in result:
+            if not row["member_name"]:
+                row["member_name"] = _member_display_name(chat_id, row["user_id"])
+        if nonzero_only:
+            result = [r for r in result if (r["balance"] or 0) != 0]
+        result.sort(key=lambda r: r["balance"] or 0, reverse=True)
+        return result
     except Exception:
         logging.exception("get_all_dues_balances failed")
         return []
@@ -5251,25 +5706,38 @@ def get_dues_entries(
     chat_id: int, user_id: int = None, member_name: str = None,
     limit: int = 15, offset: int = 0,
 ) -> List[Dict]:
-    """Paginated ledger lines, newest first. Filter by member when key given."""
+    """Paginated ledger lines, newest first. When a member key is given,
+    combines the full alias group (canonical + every merged alias) into
+    one interleaved, correctly-paginated ledger."""
     try:
-        with _cursor() as cursor:
-            ph = "%s" if db_type == "postgresql" else "?"
-            where = f"chat_id = {ph}"
-            params = [chat_id]
-            if user_id is not None:
-                where += f" AND user_id = {ph}"
-                params.append(user_id)
-            elif member_name is not None:
-                where += f" AND user_id IS NULL AND LOWER(member_name) = {ph}"
-                params.append(member_name.lower())
-            params += [limit, offset]
-            cursor.execute(
-                f"SELECT * FROM dues_entries WHERE {where}"
-                f" ORDER BY id DESC LIMIT {ph} OFFSET {ph}",
-                params,
-            )
-            return [dict(r) for r in cursor.fetchall()]
+        ph = "%s" if db_type == "postgresql" else "?"
+        if user_id is None and member_name is None:
+            with _cursor() as cursor:
+                cursor.execute(
+                    f"SELECT * FROM dues_entries WHERE chat_id = {ph}"
+                    f" ORDER BY id DESC LIMIT {ph} OFFSET {ph}",
+                    (chat_id, limit, offset),
+                )
+                return [dict(r) for r in cursor.fetchall()]
+
+        rows = []
+        for uid, mname in _dues_identity_group(chat_id, user_id=user_id, member_name=member_name):
+            with _cursor() as cursor:
+                if uid is not None:
+                    cursor.execute(
+                        f"SELECT * FROM dues_entries WHERE chat_id = {ph} AND user_id = {ph}"
+                        f" ORDER BY id DESC",
+                        (chat_id, uid),
+                    )
+                else:
+                    cursor.execute(
+                        f"SELECT * FROM dues_entries WHERE chat_id = {ph} AND user_id IS NULL"
+                        f" AND LOWER(member_name) = {ph} ORDER BY id DESC",
+                        (chat_id, (mname or "").lower()),
+                    )
+                rows.extend(dict(r) for r in cursor.fetchall())
+        rows.sort(key=lambda r: r["id"], reverse=True)
+        return rows[offset:offset + limit]
     except Exception:
         logging.exception("get_dues_entries failed")
         return []

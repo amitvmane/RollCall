@@ -1460,7 +1460,7 @@ class TestSifDuplicateProxyGuard(unittest.IsolatedAsyncioTestCase):
              patch('rollcall_manager.manager', m), \
              patch('services.proxy.manager', m), \
              patch('handlers.proxy.admin_rights', new=AsyncMock(return_value=True)), \
-             patch('services.proxy.get_ghost_count_by_proxy_name', return_value=0):
+             patch('services.identity.combined_ghost_count', return_value=0):
             msg = self._make_message("/sif Charlie")
             await self.set_in_for(msg)
 
@@ -1492,7 +1492,7 @@ class TestSifDuplicateProxyGuard(unittest.IsolatedAsyncioTestCase):
              patch('rollcall_manager.manager', m), \
              patch('services.proxy.manager', m), \
              patch('handlers.proxy.admin_rights', new=AsyncMock(return_value=True)), \
-             patch('services.proxy.get_ghost_count_by_proxy_name', return_value=0):
+             patch('services.identity.combined_ghost_count', return_value=0):
             msg = self._make_message("/sif Dave")
             await self.set_in_for(msg)
 
@@ -1526,7 +1526,7 @@ class TestSifDuplicateProxyGuard(unittest.IsolatedAsyncioTestCase):
              patch('rollcall_manager.manager', m), \
              patch('services.proxy.manager', m), \
              patch('handlers.proxy.admin_rights', new=AsyncMock(return_value=True)), \
-             patch('services.proxy.get_ghost_count_by_proxy_name', return_value=0), \
+             patch('services.identity.combined_ghost_count', return_value=0), \
              patch('handlers.lifecycle.show_panel_for_rollcall', new=AsyncMock()):
             msg = self._make_message("/sif Eve")
             await self.set_in_for(msg)

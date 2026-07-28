@@ -22,7 +22,6 @@ from exceptions import (
 from models import User
 from rollcall_manager import manager
 from db import (
-    get_ghost_count_by_proxy_name,
     increment_rollcall_stat,
     increment_user_stat,
     log_admin_action,
@@ -63,7 +62,8 @@ def check_proxy_ghost_reconfirmation_needed(chat_id: int, proxy_name: str) -> di
     proxy_name = _validate_proxy_name(proxy_name)
     if not manager.get_ghost_tracking_enabled(chat_id):
         return {"needed": False, "ghost_count": 0, "absent_limit": 0, "proxy_name": proxy_name}
-    ghost_count = get_ghost_count_by_proxy_name(chat_id, proxy_name)
+    from services.identity import combined_ghost_count
+    ghost_count = combined_ghost_count(chat_id, proxy_name=proxy_name)
     absent_limit = manager.get_absent_limit(chat_id)
     return {
         "needed": ghost_count >= absent_limit and ghost_count > 0,

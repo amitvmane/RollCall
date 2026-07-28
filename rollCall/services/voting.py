@@ -26,7 +26,6 @@ from exceptions import (
 from models import User
 from rollcall_manager import manager
 from db import (
-    get_ghost_count,
     increment_rollcall_stat,
     increment_user_stat,
     upsert_chat_member,
@@ -77,7 +76,8 @@ def check_ghost_reconfirmation_needed(
                 "already_in": False, "rollcall_title": ""}
 
     rc = resolve_rollcall_or_raise(chat_id, rc_number)
-    ghost_count = get_ghost_count(chat_id, user_id)
+    from services.identity import combined_ghost_count
+    ghost_count = combined_ghost_count(chat_id, user_id=user_id)
     absent_limit = manager.get_absent_limit(chat_id)
     already_in = any(u.user_id == user_id for u in rc.inList)
     needed = (ghost_count >= absent_limit) and not already_in

@@ -77,6 +77,16 @@ db_mock.get_ghost_count_by_proxy_name.return_value = 0
 db_mock.get_game_closure.return_value = None
 db_mock.has_ever_been_collector.return_value = False
 db_mock.db_type = "sqlite"
+
+# Identity-merge defaults: "nothing is merged" unless a test says otherwise —
+# without this, MagicMock's default non-None return for get_identity_link
+# would make every proxy name look like it has an active merge link.
+db_mock.get_identity_link.return_value = None
+db_mock.get_links_by_canonical.return_value = []
+db_mock.list_identity_links.return_value = []
+db_mock.get_all_proxy_names.return_value = []
+db_mock.get_identity_last_activity.return_value = None
+
 sys.modules["db"] = db_mock
 
 # ---------------------------------------------------------------------------

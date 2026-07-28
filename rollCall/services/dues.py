@@ -96,7 +96,7 @@ def _resolve_member(
     ]
     if len(real_matches) == 1:
         m = real_matches[0]
-        return {"user_id": m["user_id"], "member_name": m.get("first_name") or token}
+        return _canonicalize_member(chat_id, m["user_id"], m.get("first_name") or token)
     if len(real_matches) > 1:
         names = ", ".join(m.get("first_name", str(m["user_id"])) for m in real_matches)
         raise incorrectParameter(f"'{token}' matches multiple members: {names}. Use a more specific name.")
@@ -106,7 +106,7 @@ def _resolve_member(
     hist_matches = [r for r in history if (r.get("member_name") or "").lower() == token_lower]
     if len(hist_matches) == 1:
         r = hist_matches[0]
-        return {"user_id": r.get("user_id"), "member_name": r["member_name"]}
+        return _canonicalize_member(chat_id, r.get("user_id"), r["member_name"])
     if len(hist_matches) > 1:
         names = ", ".join(r["member_name"] for r in hist_matches)
         raise incorrectParameter(f"'{token}' is ambiguous in dues history: {names}.")
@@ -115,13 +115,32 @@ def _resolve_member(
     if dues_names:
         proxy_matches = [n for n in dues_names if n.lower() == token_lower]
         if len(proxy_matches) == 1:
-            return {"user_id": None, "member_name": proxy_matches[0]}
+            return _canonicalize_member(chat_id, None, proxy_matches[0])
         if len(proxy_matches) > 1:
             raise incorrectParameter(f"'{token}' is ambiguous in dues history.")
 
     raise incorrectParameter(
         f"'{token}' not found. Use the exact first name, @username, or proxy name."
     )
+
+
+def _canonicalize_member(chat_id: int, user_id: int | None, member_name: str) -> dict:
+    """Resolve a raw (user_id, member_name) identity through any active
+    merge (see services/identity.py) before it's used for a dues write.
+
+    Real-user identities are always already canonical (a no-op). A merged
+    proxy name folds onto its canonical identity so `/mark_paid <old-alias>`
+    after a merge attributes the new ledger row to the merged person
+    instead of forking the ledger under a dead alias spelling — the one
+    deliberate write-path exception to "merges only affect reads" (voting
+    and ghost-increment stay untouched)."""
+    if user_id is not None:
+        return {"user_id": user_id, "member_name": member_name}
+    from services.identity import resolve_canonical
+    group = resolve_canonical(chat_id, proxy_name=member_name)
+    if group["kind"] == "user":
+        return {"user_id": group["user_id"], "member_name": member_name}
+    return {"user_id": None, "member_name": group["proxy_name"]}
 
 
 def _known_proxy_names(chat_id: int) -> list[str]:
@@ -966,9 +985,9 @@ def mark_penalty(
         )
     if known_identity is not None:
         if isinstance(known_identity, int):
-            member = {"user_id": known_identity, "member_name": token}
+            member = _canonicalize_member(chat_id, known_identity, token)
         else:
-            member = {"user_id": None, "member_name": known_identity}
+            member = _canonicalize_member(chat_id, None, known_identity)
     else:
         all_names = _known_proxy_names(chat_id)
         member = _resolve_member(chat_id, token, dues_names=all_names)
@@ -1243,9 +1262,9 @@ def mark_paid(
     """
     if known_identity is not None:
         if isinstance(known_identity, int):
-            member = {"user_id": known_identity, "member_name": token}
+            member = _canonicalize_member(chat_id, known_identity, token)
         else:
-            member = {"user_id": None, "member_name": known_identity}
+            member = _canonicalize_member(chat_id, None, known_identity)
     else:
         all_names = _known_proxy_names(chat_id)
         member = _resolve_member(chat_id, token, dues_names=all_names)

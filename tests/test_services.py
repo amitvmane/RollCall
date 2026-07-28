@@ -525,7 +525,7 @@ class TestVotingService(unittest.IsolatedAsyncioTestCase):
              patch("services.voting.upsert_chat_member"), \
              patch("services.voting.increment_user_stat"), \
              patch("services.voting.increment_rollcall_stat"), \
-             patch("services.voting.get_ghost_count", return_value=0):
+             patch("services.identity.combined_ghost_count", return_value=0):
             from services.voting import vote_in
             result = await vote_in(100, 1, "Alice", "alice", "hi")
 
@@ -543,7 +543,7 @@ class TestVotingService(unittest.IsolatedAsyncioTestCase):
              patch("services.voting.upsert_chat_member"), \
              patch("services.voting.increment_user_stat"), \
              patch("services.voting.increment_rollcall_stat"), \
-             patch("services.voting.get_ghost_count", return_value=0):
+             patch("services.identity.combined_ghost_count", return_value=0):
             from services.voting import vote_in
             result = await vote_in(100, 1, "Alice")
 
@@ -560,7 +560,7 @@ class TestVotingService(unittest.IsolatedAsyncioTestCase):
              patch("services.voting.upsert_chat_member"), \
              patch("services.voting.increment_user_stat"), \
              patch("services.voting.increment_rollcall_stat"), \
-             patch("services.voting.get_ghost_count", return_value=0):
+             patch("services.identity.combined_ghost_count", return_value=0):
             from services.voting import vote_in
             with self.assertRaises(alreadyInList):
                 await vote_in(100, 1, "Alice")
@@ -579,7 +579,7 @@ class TestVotingService(unittest.IsolatedAsyncioTestCase):
              patch("services.voting.upsert_chat_member"), \
              patch("services.voting.increment_user_stat") as inc, \
              patch("services.voting.increment_rollcall_stat"), \
-             patch("services.voting.get_ghost_count", return_value=0):
+             patch("services.identity.combined_ghost_count", return_value=0):
             from services.voting import vote_in
             with self.assertRaises(alreadyInList) as ctx:
                 await vote_in(100, 1, "Alice")
@@ -601,7 +601,7 @@ class TestVotingService(unittest.IsolatedAsyncioTestCase):
              patch("services.voting.upsert_chat_member"), \
              patch("services.voting.increment_user_stat"), \
              patch("services.voting.increment_rollcall_stat"), \
-             patch("services.voting.get_ghost_count", return_value=0):
+             patch("services.identity.combined_ghost_count", return_value=0):
             from services.voting import vote_in
             result = await vote_in(100, 1, "Alice", comment="new note")
 
@@ -679,7 +679,7 @@ class TestVotingService(unittest.IsolatedAsyncioTestCase):
         mgr = _make_manager([rc], ghost_on=True, absent_limit=3)
         with patch("services.voting.manager", mgr), \
              patch("rollcall_manager.manager", mgr), \
-             patch("services.voting.get_ghost_count", return_value=1):
+             patch("services.identity.combined_ghost_count", return_value=1):
             from services.voting import check_ghost_reconfirmation_needed
             result = check_ghost_reconfirmation_needed(100, 1)
         self.assertFalse(result["needed"])
@@ -689,7 +689,7 @@ class TestVotingService(unittest.IsolatedAsyncioTestCase):
         mgr = _make_manager([rc], ghost_on=True, absent_limit=2)
         with patch("services.voting.manager", mgr), \
              patch("rollcall_manager.manager", mgr), \
-             patch("services.voting.get_ghost_count", return_value=3):
+             patch("services.identity.combined_ghost_count", return_value=3):
             from services.voting import check_ghost_reconfirmation_needed
             result = check_ghost_reconfirmation_needed(100, 1)
         self.assertTrue(result["needed"])
@@ -702,7 +702,7 @@ class TestVotingService(unittest.IsolatedAsyncioTestCase):
         mgr = _make_manager([rc], ghost_on=True, absent_limit=1)
         with patch("services.voting.manager", mgr), \
              patch("rollcall_manager.manager", mgr), \
-             patch("services.voting.get_ghost_count", return_value=5):
+             patch("services.identity.combined_ghost_count", return_value=5):
             from services.voting import check_ghost_reconfirmation_needed
             result = check_ghost_reconfirmation_needed(100, 1)
         self.assertFalse(result["needed"])
@@ -951,7 +951,7 @@ class TestProxyService(unittest.IsolatedAsyncioTestCase):
     def test_check_proxy_ghost_needed(self):
         mgr = _make_manager(ghost_on=True, absent_limit=1)
         with patch("services.proxy.manager", mgr), \
-             patch("services.proxy.get_ghost_count_by_proxy_name", return_value=2):
+             patch("services.identity.combined_ghost_count", return_value=2):
             from services.proxy import check_proxy_ghost_reconfirmation_needed
             result = check_proxy_ghost_reconfirmation_needed(100, "Bob")
         self.assertTrue(result["needed"])

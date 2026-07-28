@@ -282,7 +282,7 @@ class TestInReconfirmation(GhostTestBase):
              patch('handlers.voting.manager', self.manager), \
              patch('rollcall_manager.manager', self.manager), \
              patch('services.voting.manager', self.manager), \
-             patch('services.voting.get_ghost_count', return_value=1):
+             patch('services.identity.combined_ghost_count', return_value=1):
             await self.in_user(self._make_message("/in"))
 
         self.assertEqual(self._sent_count(), 1)
@@ -295,7 +295,7 @@ class TestInReconfirmation(GhostTestBase):
              patch('handlers.voting.manager', self.manager), \
              patch('rollcall_manager.manager', self.manager), \
              patch('services.voting.manager', self.manager), \
-             patch('services.voting.get_ghost_count', return_value=0), \
+             patch('services.identity.combined_ghost_count', return_value=0), \
              patch('handlers.lifecycle._update_panel', return_value=False):
             await self.in_user(self._make_message("/in"))
 
@@ -319,7 +319,7 @@ class TestInReconfirmation(GhostTestBase):
              patch('handlers.voting.manager', self.manager), \
              patch('rollcall_manager.manager', self.manager), \
              patch('services.voting.manager', self.manager), \
-             patch('services.voting.get_ghost_count', return_value=2):
+             patch('services.identity.combined_ghost_count', return_value=2):
             await self.in_user(self._make_message("/in hello", user_id=1))
 
         self.assertIn((100, 1), self.bot_state._pending_reconf)

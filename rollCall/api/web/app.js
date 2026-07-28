@@ -2716,13 +2716,16 @@ function _identityMapKey(kind,userId,proxyName){
 function _buildTargetOptions(excludeProxyNameLower){
   // TO list: real users first (kept prominent, per feedback that actual
   // members should anchor the target side), then canonical-eligible
-  // proxies — excluding whichever proxy is currently picked as FROM, so
-  // the same identity can never be selected on both sides (that's the
-  // only way a manual pick could look like a self-merge/cycle; the
-  // backend also rejects it, this just stops the UI from offering it).
+  // proxies only — an already-merged proxy (merged_into set) is just an
+  // alias of some other identity, so listing it here too would show the
+  // same person twice (once as itself, once as whatever it resolves to).
+  // Also excludes whichever proxy is currently picked as FROM, so the
+  // same identity can never be selected on both sides (that's the only
+  // way a manual pick could look like a self-merge/cycle; the backend
+  // also rejects it, this just stops the UI from offering it).
   const identities=_identitiesCache||[];
   const users=identities.filter(i=>i.kind==="user");
-  const proxies=identities.filter(i=>i.kind==="proxy"&&i.proxy_name.toLowerCase()!==excludeProxyNameLower);
+  const proxies=identities.filter(i=>i.kind==="proxy"&&!i.merged_into&&i.proxy_name.toLowerCase()!==excludeProxyNameLower);
   const opt=i=>`<option value="${_identityKey(i.kind,i.user_id,i.proxy_name)}">${esc(i.display_name)}${i.kind==="proxy"?" (proxy)":""}</option>`;
   return users.map(opt).join("")+proxies.map(opt).join("");
 }

@@ -2765,8 +2765,10 @@ function renderIdentityMerge(){
       </div>`).join("");
   }
 
-  // Compact table: left = every real user + every canonical proxy (not
-  // itself merged into something), right = its aliases (or a dash).
+  // Compact grid: two identity cards per row (name + its aliases as a
+  // dropdown, not inline chips — a name with many aliases used to wrap
+  // across several lines; a <select> keeps every row the same height
+  // regardless of alias count).
   html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin:${suggestions.length?"14px":"0"} 0 6px">Identities</div>`;
   const groupsByKey={};
   groups.forEach(g=>{groupsByKey[_identityMapKey(g.kind,g.user_id,g.proxy_name)]=g.aliases;});
@@ -2774,20 +2776,24 @@ function renderIdentityMerge(){
   if(!leftRows.length){
     html+=`<div class="sched-empty">No identities yet — proxies appear here once someone's been /sif'd in.</div>`;
   }else{
-    html+=`<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden">`;
+    html+=`<div class="identity-grid">`;
     html+=leftRows.map((row,i)=>{
       const aliases=groupsByKey[_identityMapKey(row.kind,row.user_id,row.proxy_name)]||[];
-      const rowBg=i%2?"":"background:var(--bg)";
       const discardBtn=row.kind==="proxy"&&!aliases.length
         ?`<button class="id-change" title="Discard invalid/garbage name" onclick="doDiscardIdentity('${esc(escJsAttr(row.proxy_name))}')">🗑</button>`
         :"";
+      const selId=`im-unmerge-${i}`;
+      const aliasControl=aliases.length
+        ?`<select id="${selId}" style="flex:1;min-width:0;font-size:.8rem;padding:3px 4px;border-radius:6px;border:1px solid var(--border);background:var(--card);color:var(--text)">${aliases.map(a=>`<option value="${esc(a)}">${esc(a)}</option>`).join("")}</select>
+           <button class="id-change" title="Unmerge selected" onclick="doUnmergeSelected('${selId}')">✕</button>`
+        :`<span style="color:var(--sub);font-size:.82rem">—</span>`;
       return `
-        <div style="display:flex;gap:8px;padding:8px 10px;${rowBg};border-bottom:1px solid var(--border)">
-          <div style="flex:1;min-width:0;font-weight:600;font-size:.85rem${row.kind==="proxy"?";font-style:italic":""}">${esc(row.display_name)}${row.kind==="proxy"?" <span style=\"opacity:.6;font-weight:400\">(proxy)</span>":""}</div>
-          <div style="flex:1;min-width:0;font-size:.82rem;color:var(--sub);display:flex;flex-wrap:wrap;gap:4px;align-items:center">
-            ${aliases.length?aliases.map(a=>`<span style="background:var(--border);border-radius:6px;padding:2px 6px;display:inline-flex;align-items:center;gap:4px">${esc(a)}<span style="cursor:pointer;opacity:.7" title="Unmerge" onclick="doUnmergeIdentity('${esc(escJsAttr(a))}')">✕</span></span>`).join(""):"—"}
+        <div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px">
+          <div style="font-weight:600;font-size:.85rem${row.kind==="proxy"?";font-style:italic":""};margin-bottom:4px">${esc(row.display_name)}${row.kind==="proxy"?" <span style=\"opacity:.6;font-weight:400\">(proxy)</span>":""}</div>
+          <div style="display:flex;gap:6px;align-items:center">
+            ${aliasControl}
+            ${discardBtn}
           </div>
-          ${discardBtn}
         </div>`;
     }).join("");
     html+=`</div>`;
@@ -2850,6 +2856,12 @@ window.doMergeIdentityManual=async function(){
   const candidateUserId=candidateKind==="user"?parseInt(target.slice(2),10):null;
   const candidateProxyName=candidateKind==="proxy"?target.slice(2):null;
   await window.doMergeIdentity(alias,candidateKind,candidateUserId,candidateProxyName);
+};
+
+window.doUnmergeSelected=function(selectId){
+  const sel=document.getElementById(selectId);
+  if(!sel||!sel.value)return;
+  doUnmergeIdentity(sel.value);
 };
 
 window.doUnmergeIdentity=async function(aliasProxyName){

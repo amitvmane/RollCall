@@ -1201,6 +1201,170 @@ class TestWebTemplateDelete(unittest.TestCase):
         self.assertEqual(resp.status_code, 422)
 
 
+class TestWebIdentityMerge(unittest.TestCase):
+    """Merge Identities section on the group web page — fold a fragmented
+    proxy name into a real member or another proxy so stats/dues/
+    ghost-tracking count them once. Same id_token + is_web_admin gate as
+    every other admin-only web route. See services/identity.py."""
+
+    def test_list_requires_id_token(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch("api.identity.verify_identity_token", return_value=None):
+            resp = _client().get("/api/v1/web/group/grp123/identities?id_token=bad")
+        self.assertEqual(resp.status_code, 401)
+
+    def test_list_requires_web_admin(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=False), \
+             patch("api.identity.verify_identity_token", return_value=77):
+            resp = _client().get("/api/v1/web/group/grp123/identities?id_token=tok")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_list_invalid_group_token_404(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value=None):
+            resp = _client().get("/api/v1/web/group/badgrp/identities?id_token=tok")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_list_returns_identities_and_groups(self):
+        import api.routes.web as _web_mod
+        identities = [{"kind": "user", "user_id": 1, "proxy_name": None,
+                       "display_name": "Amit", "merged_into": None}]
+        groups = [{"kind": "user", "user_id": 1, "proxy_name": None,
+                   "aliases": ["Rex"], "display_name": "Amit"}]
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.identity.list_all_identities", return_value=identities), \
+             patch("services.identity.list_identity_groups", return_value=groups):
+            resp = _client().get("/api/v1/web/group/grp123/identities?id_token=tok")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["identities"][0]["display_name"], "Amit")
+        self.assertEqual(resp.json()["groups"][0]["aliases"], ["Rex"])
+
+    def test_list_suggestions(self):
+        import api.routes.web as _web_mod
+        suggestions = [{"alias_proxy_name": "Ajya", "candidate_kind": "proxy",
+                        "candidate_user_id": None, "candidate_proxy_name": "Ajay",
+                        "candidate_display_name": "Ajay", "score": 1}]
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.identity.list_suggestions", return_value=suggestions):
+            resp = _client().get("/api/v1/web/group/grp123/identities/suggestions?id_token=tok")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["suggestions"][0]["alias_proxy_name"], "Ajya")
+
+    def test_merge_calls_service_and_mirrors(self):
+        import api.routes.web as _web_mod
+        group = {"kind": "user", "user_id": 1, "proxy_name": None,
+                 "aliases": ["Rex"], "display_name": "Amit"}
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value={"first_name": "Amit"}), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.identity.link_identities", return_value=group) as svc, \
+             patch.object(_web_mod, "_send_event_notification", new_callable=AsyncMock) as notify:
+            resp = _client().post(
+                "/api/v1/web/group/grp123/identities/merge",
+                json={"id_token": "tok", "alias_proxy_name": "Rex", "canonical_user_id": 1})
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.json()["aliases"], ["Rex"])
+        self.assertEqual(svc.call_args.args[0], -100)
+        self.assertEqual(svc.call_args.args[1], "Rex")
+        self.assertEqual(svc.call_args.kwargs["canonical_user_id"], 1)
+        self.assertEqual(svc.call_args.kwargs["admin_user_id"], 99)
+        self.assertEqual(svc.call_args.kwargs["admin_name"], "Amit")
+        notify.assert_awaited_once()
+        self.assertIn("Rex", notify.call_args[0][1])
+
+    def test_merge_non_admin_403(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=False), \
+             patch("api.identity.verify_identity_token", return_value=77):
+            resp = _client().post(
+                "/api/v1/web/group/grp123/identities/merge",
+                json={"id_token": "tok", "alias_proxy_name": "Rex", "canonical_user_id": 1})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_merge_self_merge_returns_422(self):
+        import api.routes.web as _web_mod
+        from exceptions import incorrectParameter
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value=None), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.identity.link_identities",
+                   side_effect=incorrectParameter("Can't merge a name into itself.")):
+            resp = _client().post(
+                "/api/v1/web/group/grp123/identities/merge",
+                json={"id_token": "tok", "alias_proxy_name": "Rex", "canonical_proxy_name": "Rex"})
+        self.assertEqual(resp.status_code, 422)
+
+    def test_unmerge_calls_service_and_mirrors(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value=None), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.identity.unmerge_identity", return_value={"unmerged": True}) as svc, \
+             patch.object(_web_mod, "_send_event_notification", new_callable=AsyncMock) as notify:
+            resp = _client().post(
+                "/api/v1/web/group/grp123/identities/unmerge",
+                json={"id_token": "tok", "alias_proxy_name": "Rex"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["unmerged"])
+        self.assertEqual(svc.call_args.args[0], -100)
+        self.assertEqual(svc.call_args.args[1], "Rex")
+        notify.assert_awaited_once()
+
+    def test_unmerge_noop_does_not_mirror(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value=None), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.identity.unmerge_identity", return_value={"unmerged": False}), \
+             patch.object(_web_mod, "_send_event_notification", new_callable=AsyncMock) as notify:
+            resp = _client().post(
+                "/api/v1/web/group/grp123/identities/unmerge",
+                json={"id_token": "tok", "alias_proxy_name": "Ghost"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.json()["unmerged"])
+        notify.assert_not_awaited()
+
+    def test_dismiss_suggestion_does_not_mirror(self):
+        """Dismiss is silent admin housekeeping — never posted to the group,
+        unlike merge/unmerge which change what members see in stats."""
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value=None), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.identity.dismiss_suggestion", return_value={"dismissed": True}) as svc, \
+             patch.object(_web_mod, "_send_event_notification", new_callable=AsyncMock) as notify:
+            resp = _client().post(
+                "/api/v1/web/group/grp123/identities/suggestions/dismiss",
+                json={"id_token": "tok", "alias_proxy_name": "Ajya", "candidate_proxy_name": "Ajay"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["dismissed"])
+        svc.assert_called_once()
+        notify.assert_not_awaited()
+
+    def test_dismiss_non_admin_403(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=False), \
+             patch("api.identity.verify_identity_token", return_value=77):
+            resp = _client().post(
+                "/api/v1/web/group/grp123/identities/suggestions/dismiss",
+                json={"id_token": "tok", "alias_proxy_name": "Ajya", "candidate_proxy_name": "Ajay"})
+        self.assertEqual(resp.status_code, 403)
+
+
 class TestWebGroupSettingsTimezone(unittest.TestCase):
     """Browser-based timezone detect/set — /web/group/{token}/settings PATCH.
     Telegram exposes no location signal for a group, so this is the only

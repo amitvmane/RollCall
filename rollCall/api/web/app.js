@@ -2661,6 +2661,171 @@ async function refreshDues(){
   }catch(e){console.warn("refreshDues:",e.message);}
 }
 
+// ── Merge Identities (fold a fragmented proxy name into a real member or
+// another proxy so stats/dues/ghost-tracking count them once) ──────────────
+let _identityMergeOpen=false, _identitiesCache=null, _identityGroupsCache=null, _suggestionsCache=null;
+
+window.toggleIdentityMerge=async function(){
+  _identityMergeOpen=!_identityMergeOpen;
+  const body=document.getElementById("identity-merge-body");
+  const ch=document.getElementById("identity-merge-chevron");
+  if(body)body.classList.toggle("hidden",!_identityMergeOpen);
+  if(ch)ch.textContent=_identityMergeOpen?"▲":"▼";
+  if(_identityMergeOpen&&!_identitiesCache)await loadIdentityMerge();
+};
+
+async function loadIdentityMerge(){
+  const body=document.getElementById("identity-merge-body");
+  if(!body||!_idToken)return;
+  body.innerHTML='<div class="sched-empty">Loading…</div>';
+  try{
+    const[idRes,sugRes]=await Promise.all([
+      fetch(`/api/v1/web/group/${URL_TOKEN}/identities?id_token=${encodeURIComponent(_idToken)}`,{signal:AbortSignal.timeout(8000)}),
+      fetch(`/api/v1/web/group/${URL_TOKEN}/identities/suggestions?id_token=${encodeURIComponent(_idToken)}`,{signal:AbortSignal.timeout(8000)}),
+    ]);
+    if(!idRes.ok)throw new Error((await idRes.json().catch(()=>({}))).detail||"Failed to load identities");
+    const idData=await idRes.json();
+    _identitiesCache=idData.identities||[];
+    _identityGroupsCache=idData.groups||[];
+    _suggestionsCache=sugRes.ok?(await sugRes.json()).suggestions||[]:[];
+    renderIdentityMerge();
+  }catch(e){
+    body.innerHTML=`<div class="sched-empty">${esc(e.message||"Could not load identities")}</div>`;
+  }
+}
+
+function _identityKey(kind,userId,proxyName){
+  // Preserves the proxy name's original casing — this becomes the
+  // manual-merge target select's option value, submitted verbatim as
+  // canonical_proxy_name. Matching on the backend is case-insensitive
+  // (see services/identity.py), but the FIRST time a name becomes a
+  // canonical, whatever casing is sent here is what gets stored.
+  return kind==="user"?`u:${userId}`:`p:${proxyName||""}`;
+}
+
+function renderIdentityMerge(){
+  const body=document.getElementById("identity-merge-body");
+  if(!body)return;
+  const identities=_identitiesCache||[];
+  const groups=_identityGroupsCache||[];
+  const suggestions=_suggestionsCache||[];
+
+  let html="";
+
+  if(suggestions.length){
+    html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:6px">Suggested merges</div>`;
+    html+=suggestions.map((s,i)=>`
+      <div class="sched-item">
+        <div class="sched-item-info">
+          <div class="sched-item-title">${esc(s.alias_proxy_name)} ↔ ${esc(s.candidate_display_name)}</div>
+          <div class="sched-item-time">Possible duplicate</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0">
+          <button class="id-change" title="Merge these" onclick="doMergeIdentity('${esc(escJsAttr(s.alias_proxy_name))}','${s.candidate_kind}',${s.candidate_user_id!=null?s.candidate_user_id:"null"},${s.candidate_proxy_name!=null?`'${esc(escJsAttr(s.candidate_proxy_name))}'`:"null"})">🔗</button>
+          <button class="id-change" title="Not a match" onclick="doDismissSuggestion(${i})">✕</button>
+        </div>
+      </div>`).join("");
+  }
+
+  html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin:${suggestions.length?"14px":"0"} 0 6px">Current groups</div>`;
+  if(!groups.length){
+    html+=`<div class="sched-empty">No merges yet.</div>`;
+  }else{
+    html+=groups.map(g=>`
+      <div class="sched-item" style="flex-direction:column;align-items:stretch">
+        <div class="sched-item-title">${esc(g.display_name)}</div>
+        ${g.aliases.map(a=>`
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0 4px 10px;font-size:.85rem;color:var(--sub)">
+            <span>↳ ${esc(a)}</span>
+            <button class="id-change" title="Unmerge" onclick="doUnmergeIdentity('${esc(escJsAttr(a))}')">✕</button>
+          </div>`).join("")}
+      </div>`).join("");
+  }
+
+  // Manual merge: alias picker excludes anything already merged into
+  // something; target picker offers every identity (picking an
+  // already-merged one just folds into ITS canonical automatically,
+  // server-side, via link_identities' flattening).
+  const aliasOptions=identities.filter(i=>i.kind==="proxy"&&!i.merged_into)
+    .map(i=>`<option value="${esc(i.proxy_name)}">${esc(i.display_name)}</option>`).join("");
+  const targetOptions=identities
+    .map(i=>`<option value="${_identityKey(i.kind,i.user_id,i.proxy_name)}">${esc(i.display_name)}${i.kind==="proxy"?" (proxy)":""}</option>`).join("");
+
+  html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin:14px 0 6px">Merge manually</div>`;
+  if(!aliasOptions){
+    html+=`<div class="sched-empty">No unmerged proxy names to merge.</div>`;
+  }else{
+    html+=`
+      <select id="im-alias-select" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem;margin-bottom:8px">${aliasOptions}</select>
+      <div style="font-size:.75rem;color:var(--sub);margin-bottom:4px">merges into →</div>
+      <select id="im-target-select" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem;margin-bottom:10px">${targetOptions}</select>
+      <button class="btn btn-primary" style="width:100%;padding:9px" onclick="doMergeIdentityManual()">🔗 Merge</button>`;
+  }
+
+  body.innerHTML=html;
+}
+
+window.doMergeIdentity=async function(aliasProxyName,candidateKind,candidateUserId,candidateProxyName){
+  if(!confirm(`Merge "${aliasProxyName}" into this identity? Their stats and dues history will combine.`))return;
+  try{
+    const payload={id_token:_idToken,alias_proxy_name:aliasProxyName};
+    if(candidateKind==="user")payload.canonical_user_id=candidateUserId;
+    else payload.canonical_proxy_name=candidateProxyName;
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/identities/merge`,{
+      method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload),
+      signal:AbortSignal.timeout(10000),
+    });
+    if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"Failed to merge");
+    toast(`🔗 Merged "${aliasProxyName}"`,2500);
+    _identitiesCache=null;
+    await loadIdentityMerge();
+  }catch(e){toast(e.message||"Could not merge",4000);}
+};
+
+window.doMergeIdentityManual=async function(){
+  const alias=document.getElementById("im-alias-select").value;
+  const target=document.getElementById("im-target-select").value;
+  if(!alias||!target)return;
+  const candidateKind=target.startsWith("u:")?"user":"proxy";
+  const candidateUserId=candidateKind==="user"?parseInt(target.slice(2),10):null;
+  const candidateProxyName=candidateKind==="proxy"?target.slice(2):null;
+  await window.doMergeIdentity(alias,candidateKind,candidateUserId,candidateProxyName);
+};
+
+window.doUnmergeIdentity=async function(aliasProxyName){
+  if(!confirm(`Unmerge "${aliasProxyName}"? Its stats/dues will show separately again.`))return;
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/identities/unmerge`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({id_token:_idToken,alias_proxy_name:aliasProxyName}),
+      signal:AbortSignal.timeout(10000),
+    });
+    if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"Failed to unmerge");
+    toast(`✂️ Unmerged "${aliasProxyName}"`,2500);
+    _identitiesCache=null;
+    await loadIdentityMerge();
+  }catch(e){toast(e.message||"Could not unmerge",4000);}
+};
+
+window.doDismissSuggestion=async function(index){
+  const s=(_suggestionsCache||[])[index];
+  if(!s)return;
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/identities/suggestions/dismiss`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        id_token:_idToken,alias_proxy_name:s.alias_proxy_name,
+        candidate_user_id:s.candidate_kind==="user"?s.candidate_user_id:null,
+        candidate_proxy_name:s.candidate_kind==="proxy"?s.candidate_proxy_name:null,
+      }),
+      signal:AbortSignal.timeout(8000),
+    });
+    if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"Failed to dismiss");
+    _suggestionsCache=_suggestionsCache.filter((_,i)=>i!==index);
+    renderIdentityMerge();
+  }catch(e){toast(e.message||"Could not dismiss",4000);}
+};
+
 // ── Modal helper ──────────────────────────────────────────────────────────
 // opts: { confirmLabel?: string, hideInput?: bool }
 function _showDuesModal(title,sublabel,defaultVal,onConfirm,opts={}){

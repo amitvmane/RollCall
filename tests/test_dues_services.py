@@ -212,6 +212,45 @@ class TestResolveMember(unittest.TestCase):
         self.assertEqual(r["user_id"], 555)
         self.assertEqual(r["member_name"], "Bob")
 
+    def test_merged_proxy_canonicalizes_to_real_user(self):
+        """A proxy resolved via any tier that's since been merged into a
+        real user must attribute to that real user, not the dead alias
+        spelling — this is the one deliberate write-path exception (see
+        services/identity.py's module docstring): without it, /mark_paid
+        <old-alias> after a merge would keep forking the ledger."""
+        with self._mock_active([]), \
+             patch("services.identity.resolve_canonical",
+                   return_value={"kind": "user", "user_id": 777, "proxy_name": None}):
+            r = self._call(1, "Rex", dues_names=["Rex"])
+        self.assertEqual(r["user_id"], 777)
+        self.assertEqual(r["member_name"], "Rex")
+
+    def test_merged_proxy_canonicalizes_to_another_proxy(self):
+        with self._mock_active([]), \
+             patch("services.identity.resolve_canonical",
+                   return_value={"kind": "proxy", "user_id": None, "proxy_name": "Ajay"}):
+            r = self._call(1, "Ajya", dues_names=["Ajya"])
+        self.assertIsNone(r["user_id"])
+        self.assertEqual(r["member_name"], "Ajay")
+
+    def test_unmerged_proxy_resolves_to_itself(self):
+        with self._mock_active([]), \
+             patch("services.identity.resolve_canonical",
+                   return_value={"kind": "proxy", "user_id": None, "proxy_name": "Solo"}):
+            r = self._call(1, "Solo", dues_names=["Solo"])
+        self.assertIsNone(r["user_id"])
+        self.assertEqual(r["member_name"], "Solo")
+
+    def test_real_user_never_canonicalized(self):
+        """Real-user matches (tier 1) never even consult identity resolution
+        — a real user is always already canonical."""
+        members = [{"user_id": 42, "first_name": "Deb", "username": None}]
+        with self._mock_active(members), \
+             patch("services.identity.resolve_canonical") as mock_resolve:
+            r = self._call(1, "Deb")
+        self.assertEqual(r["user_id"], 42)
+        mock_resolve.assert_not_called()
+
     def test_ledger_history_ambiguous_raises(self):
         from exceptions import incorrectParameter
         history = [

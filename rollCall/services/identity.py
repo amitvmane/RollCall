@@ -94,7 +94,7 @@ def get_alias_group(chat_id: int, *, user_id: Optional[int] = None,
 
     Returns:
       {"kind": "user"|"proxy", "user_id": int|None, "proxy_name": str|None,
-       "aliases": list[str]}
+       "aliases": list[str], "display_name": str}
     """
     canonical = resolve_canonical(chat_id, user_id=user_id, proxy_name=proxy_name)
     links = db.get_links_by_canonical(
@@ -102,7 +102,10 @@ def get_alias_group(chat_id: int, *, user_id: Optional[int] = None,
         canonical_user_id=canonical["user_id"],
         canonical_proxy_name=canonical["proxy_name"],
     )
-    return {**canonical, "aliases": sorted(l["alias_proxy_name"] for l in links)}
+    display_name = (_display_name_for_user(chat_id, canonical["user_id"])
+                     if canonical["kind"] == "user" else canonical["proxy_name"])
+    return {**canonical, "aliases": sorted(l["alias_proxy_name"] for l in links),
+            "display_name": display_name}
 
 
 def list_identity_groups(chat_id: int) -> list[dict]:
@@ -259,7 +262,12 @@ def list_suggestions(chat_id: int, limit: int = 20) -> list[dict]:
             score = lev_distance(alias.lower(), other.lower())
             if score > _SUGGEST_THRESHOLD:
                 continue
-            if (alias.lower(), other.lower()) in dismissed_pairs:
+            # A proxy<->proxy dismissal may have been recorded in either
+            # direction (whichever one was "alias" at suggestion time) —
+            # this loop always emits the alphabetically-first name as
+            # alias, which might not match, so check both orderings.
+            if (alias.lower(), other.lower()) in dismissed_pairs or \
+               (other.lower(), alias.lower()) in dismissed_pairs:
                 continue
             candidates.append({
                 "alias_proxy_name": alias, "candidate_kind": "proxy",

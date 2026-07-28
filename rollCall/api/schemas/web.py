@@ -258,6 +258,79 @@ class WebTemplateResponse(BaseModel):
     schedule_expires_at: Optional[str] = None
 
 
+class WebCanonicalRef(BaseModel):
+    """A resolved canonical identity — either a real Telegram user or a
+    proxy name acting as the merge target for other aliases."""
+    kind: Literal["user", "proxy"]
+    user_id: Optional[int] = None
+    proxy_name: Optional[str] = None
+
+
+class WebIdentityItem(BaseModel):
+    """One mergeable identity in the chat: an active real member, or a
+    proxy name ever used. merged_into is None when this identity IS
+    itself canonical (unmerged, or the target other aliases point at)."""
+    kind: Literal["user", "proxy"]
+    user_id: Optional[int] = None
+    proxy_name: Optional[str] = None
+    display_name: str
+    merged_into: Optional[WebCanonicalRef] = None
+
+
+class WebIdentityGroupResponse(BaseModel):
+    """A canonical identity plus every alias currently merged into it."""
+    kind: Literal["user", "proxy"]
+    user_id: Optional[int] = None
+    proxy_name: Optional[str] = None
+    aliases: List[str] = Field(default_factory=list)
+    display_name: str = ""
+
+
+class WebIdentityListResponse(BaseModel):
+    identities: List[WebIdentityItem]
+    groups: List[WebIdentityGroupResponse]
+
+
+class WebIdentitySuggestion(BaseModel):
+    alias_proxy_name: str
+    candidate_kind: Literal["user", "proxy"]
+    candidate_user_id: Optional[int] = None
+    candidate_proxy_name: Optional[str] = None
+    candidate_display_name: str
+    score: int
+
+
+class WebIdentitySuggestionsResponse(BaseModel):
+    suggestions: List[WebIdentitySuggestion]
+
+
+class WebMergeIdentityRequest(BaseModel):
+    id_token: str = Field(..., description="Signed identity token of the acting web admin")
+    alias_proxy_name: str = Field(..., max_length=40, description="Proxy name being folded in")
+    canonical_user_id: Optional[int] = Field(None, description="Merge target: a real Telegram user")
+    canonical_proxy_name: Optional[str] = Field(None, max_length=40, description="Merge target: another proxy name")
+
+
+class WebUnmergeIdentityRequest(BaseModel):
+    id_token: str = Field(..., description="Signed identity token of the acting web admin")
+    alias_proxy_name: str = Field(..., max_length=40)
+
+
+class WebUnmergeIdentityResponse(BaseModel):
+    unmerged: bool
+
+
+class WebDismissSuggestionRequest(BaseModel):
+    id_token: str = Field(..., description="Signed identity token of the acting web admin")
+    alias_proxy_name: str = Field(..., max_length=40)
+    candidate_user_id: Optional[int] = None
+    candidate_proxy_name: Optional[str] = Field(None, max_length=40)
+
+
+class WebDismissSuggestionResponse(BaseModel):
+    dismissed: bool
+
+
 class WebSetScheduleRequest(BaseModel):
     """When the template auto-opens a new rollcall — distinct from
     WebUpdateTemplateRequest.event_day/event_time, which is when the game

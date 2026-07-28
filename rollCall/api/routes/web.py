@@ -41,10 +41,16 @@ from api.schemas.web import (
     WebAdminStatusResponse,
     WebEndRollcallRequest,
     WebEndRollcallResponse,
+    WebDismissSuggestionRequest,
+    WebDismissSuggestionResponse,
     WebGroupResponse,
     WebGroupSettingsRequest,
     WebGroupStatsResponse,
     WebHeartbeatRequest,
+    WebIdentityGroupResponse,
+    WebIdentityListResponse,
+    WebIdentitySuggestionsResponse,
+    WebMergeIdentityRequest,
     WebPresenceResponse,
     WebProxyVoteRequest,
     WebRollcallResponse,
@@ -53,6 +59,8 @@ from api.schemas.web import (
     WebStartTemplateRequest,
     WebTemplateResponse,
     WebToggleScheduleRequest,
+    WebUnmergeIdentityRequest,
+    WebUnmergeIdentityResponse,
     WebUpdateTemplateRequest,
     WebVoteRequest,
     UpcomingRollcall,
@@ -692,6 +700,110 @@ async def web_delete_template(
     result = tmpl_svc.delete_one_template(chat_id, name, actor_user_id, actor_name)
     await _send_event_notification(chat_id, f"🗑 Template '{name}' deleted (via web).")
     return result
+
+
+# ── Identity merge ────────────────────────────────────────────────────────────
+# Fold a fragmented proxy-name identity (an admin repeatedly /sif-ing the same
+# physically-present regular instead of having them vote themselves — often
+# under several differently-spelled names) into one real user or another
+# proxy, so stats/dues/ghost-tracking treat the aliases as one person. See
+# services/identity.py for the full design (alias/link table resolved at read
+# time, never rewrites history — unmerge is just deleting the link row).
+
+@router.get(
+    "/web/group/{group_token}/identities",
+    response_model=WebIdentityListResponse,
+    summary="List all mergeable identities + current groupings (requires web-admin identity)",
+)
+async def web_list_identities(
+    group_token: str = Path(...),
+    id_token: str = "",
+) -> WebIdentityListResponse:
+    chat_id, _ = _require_web_admin(group_token, id_token)
+    from services import identity as identity_svc
+    return WebIdentityListResponse(
+        identities=identity_svc.list_all_identities(chat_id),
+        groups=identity_svc.list_identity_groups(chat_id),
+    )
+
+
+@router.get(
+    "/web/group/{group_token}/identities/suggestions",
+    response_model=WebIdentitySuggestionsResponse,
+    summary="Fuzzy-match possible duplicate identities (requires web-admin identity)",
+)
+async def web_list_identity_suggestions(
+    group_token: str = Path(...),
+    id_token: str = "",
+) -> WebIdentitySuggestionsResponse:
+    chat_id, _ = _require_web_admin(group_token, id_token)
+    from services import identity as identity_svc
+    return WebIdentitySuggestionsResponse(suggestions=identity_svc.list_suggestions(chat_id))
+
+
+@router.post(
+    "/web/group/{group_token}/identities/merge",
+    response_model=WebIdentityGroupResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Merge an alias proxy name into a canonical identity (requires web-admin identity)",
+)
+async def web_merge_identity(
+    body: WebMergeIdentityRequest,
+    group_token: str = Path(...),
+) -> WebIdentityGroupResponse:
+    chat_id, actor_user_id = _require_web_admin(group_token, body.id_token)
+    actor_name = await _actor_display_name(chat_id, actor_user_id)
+    from services import identity as identity_svc
+    group = identity_svc.link_identities(
+        chat_id, body.alias_proxy_name,
+        canonical_user_id=body.canonical_user_id,
+        canonical_proxy_name=body.canonical_proxy_name,
+        admin_user_id=actor_user_id, admin_name=actor_name,
+    )
+    target = group.get("proxy_name") or group.get("user_id")
+    await _send_event_notification(
+        chat_id, f"🔗 '{body.alias_proxy_name}' merged into '{target}' (via web) — stats now combine."
+    )
+    return WebIdentityGroupResponse(**group)
+
+
+@router.post(
+    "/web/group/{group_token}/identities/unmerge",
+    response_model=WebUnmergeIdentityResponse,
+    summary="Undo a merge for one alias (requires web-admin identity)",
+)
+async def web_unmerge_identity(
+    body: WebUnmergeIdentityRequest,
+    group_token: str = Path(...),
+) -> WebUnmergeIdentityResponse:
+    chat_id, actor_user_id = _require_web_admin(group_token, body.id_token)
+    actor_name = await _actor_display_name(chat_id, actor_user_id)
+    from services import identity as identity_svc
+    result = identity_svc.unmerge_identity(chat_id, body.alias_proxy_name,
+                                            admin_user_id=actor_user_id, admin_name=actor_name)
+    if result["unmerged"]:
+        await _send_event_notification(chat_id, f"✂️ '{body.alias_proxy_name}' unmerged (via web).")
+    return WebUnmergeIdentityResponse(**result)
+
+
+@router.post(
+    "/web/group/{group_token}/identities/suggestions/dismiss",
+    response_model=WebDismissSuggestionResponse,
+    summary="Dismiss a possible-duplicate suggestion (requires web-admin identity)",
+)
+async def web_dismiss_identity_suggestion(
+    body: WebDismissSuggestionRequest,
+    group_token: str = Path(...),
+) -> WebDismissSuggestionResponse:
+    chat_id, actor_user_id = _require_web_admin(group_token, body.id_token)
+    actor_name = await _actor_display_name(chat_id, actor_user_id)
+    from services import identity as identity_svc
+    identity_svc.dismiss_suggestion(
+        chat_id, body.alias_proxy_name,
+        candidate_user_id=body.candidate_user_id, candidate_proxy_name=body.candidate_proxy_name,
+        admin_user_id=actor_user_id, admin_name=actor_name,
+    )
+    return WebDismissSuggestionResponse(dismissed=True)
 
 
 # ── Scheduled rollcalls ───────────────────────────────────────────────────────

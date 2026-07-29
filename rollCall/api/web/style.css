@@ -388,11 +388,35 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 
 #dues-balances-body,#dues-ledger-body{overflow-x:auto}
 
-.identity-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
 .discarded-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px 8px}
 
+/* Identities table: same dense conventions as .dues-tbl (7px/6px padding,
+   hairline row dividers, no card borders) — see identity-merge-preview
+   review artifact for the design rationale. */
+.identity-tbl-wrap{overflow-x:auto}
+.identity-tbl{width:100%;border-collapse:collapse;font-size:.82rem;table-layout:fixed;margin-top:6px}
+.identity-tbl th{text-align:left;color:var(--sub);font-weight:700;padding:4px 6px 8px;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em}
+.identity-tbl td{padding:7px 6px;border-bottom:1px solid var(--border);vertical-align:top}
+.identity-tbl tr:last-child td{border-bottom:none}
+.identity-tbl col.c-name{width:30%}
+.identity-tbl col.c-type{width:15%}
+.identity-tbl col.c-count{width:13%}
+.identity-tbl col.c-aliases{width:42%}
+.itn{font-weight:600}
+.itn-tag{display:inline-block;font-size:.71rem;font-weight:600;padding:1px 7px;border-radius:5px;background:var(--border);color:var(--sub)}
+.itn-tag.proxy{background:var(--accent-dim);color:var(--accent)}
+.itcount{font-family:var(--font-mono);color:var(--sub)}
+.itcount.hot{color:var(--accent);font-weight:700}
+.alias-pill{display:inline-flex;align-items:center;gap:4px;background:var(--border);border-radius:6px;padding:2px 7px;font-size:.77rem;margin:2px 4px 2px 0;line-height:1.5}
+.alias-pill-x{cursor:pointer;opacity:.65;font-size:.72rem}
+.alias-pill-x:hover{opacity:1;color:var(--danger)}
+.alias-extra.hidden{display:none}
+.alias-more-btn{background:none;border:none;color:var(--accent);font-size:.77rem;font-weight:600;cursor:pointer;padding:2px 4px}
+.pill-wrap{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+
 @media(max-width:480px){
-  .identity-grid{grid-template-columns:1fr}
+  .identity-tbl col.c-name{width:34%}
+  .identity-tbl th:nth-child(2),.identity-tbl td:nth-child(2){display:none}
   .discarded-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media(min-width:481px) and (max-width:600px){

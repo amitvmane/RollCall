@@ -255,16 +255,6 @@
         </div>
         <div id="templates-schedule-body" class="hidden"></div>
       </div>
-      <!-- Merge Identities: fold a proxy name (added repeatedly via /sif for
-           a regular sitting with the admin) into a real member or another
-           proxy name, so stats/dues/ghost-tracking count them once. Same
-           self-serve id_token + is_web_admin gate as Templates above. -->
-      <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:12px">
-        <div class="dues-admin-section-hdr" onclick="toggleIdentityMerge()">
-          🧬 Merge Identities <span id="identity-merge-chevron">▼</span>
-        </div>
-        <div id="identity-merge-body" class="hidden"></div>
-      </div>
       <!-- One-time future rollcalls created via the New Rollcall modal's
            Schedule → Once path (recurring schedules live in Templates
            above — this is only the one-off entries). -->
@@ -273,6 +263,19 @@
           📅 Scheduled (one-time) <span id="scheduled-once-chevron">▼</span>
         </div>
         <div id="scheduled-once-body" class="hidden"></div>
+      </div>
+      <!-- Merge Identities: fold a proxy name (added repeatedly via /sif for
+           a regular sitting with the admin) into a real member or another
+           proxy name, so stats/dues/ghost-tracking count them once. Same
+           self-serve id_token + is_web_admin gate as Templates above.
+           Occasional-use cleanup tool, not core daily admin flow — kept
+           collapsed and placed last so it doesn't compete with Start/
+           Schedule/Templates for attention. -->
+      <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:12px">
+        <div class="dues-admin-section-hdr" onclick="toggleIdentityMerge()">
+          🧬 Merge Identities <span id="identity-merge-chevron">▼</span>
+        </div>
+        <div id="identity-merge-body" class="hidden"></div>
       </div>
     </div>
 

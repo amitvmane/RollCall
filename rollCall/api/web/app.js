@@ -2667,7 +2667,24 @@ async function refreshDues(){
 // ── Merge Identities (fold a fragmented proxy name into a real member or
 // another proxy so stats/dues/ghost-tracking count them once) ──────────────
 let _identityMergeOpen=false, _identitiesCache=null, _identityGroupsCache=null,
-    _suggestionsCache=null, _discardedCache=null, _identityDiscardedOpen=false;
+    _suggestionsCache=null, _discardedCache=null, _identityDiscardedOpen=false,
+    _identityUnmatchedOpen=false;
+
+window._toggleExtraAliases=function(btn){
+  const extra=btn.previousElementSibling;
+  if(!extra)return;
+  const hidden=extra.classList.contains("hidden");
+  if(hidden){extra.classList.remove("hidden");btn.textContent="show less";}
+  else{extra.classList.add("hidden");btn.textContent=`+${extra.querySelectorAll(".alias-pill").length} more`;}
+};
+
+window.toggleIdentityUnmatched=function(){
+  _identityUnmatchedOpen=!_identityUnmatchedOpen;
+  const body=document.getElementById("im-unmatched-body");
+  const ch=document.getElementById("im-unmatched-chevron");
+  if(body)body.classList.toggle("hidden",!_identityUnmatchedOpen);
+  if(ch)ch.textContent=_identityUnmatchedOpen?"▲":"▼";
+};
 
 window.toggleIdentityMerge=async function(){
   _identityMergeOpen=!_identityMergeOpen;
@@ -2768,37 +2785,54 @@ function renderIdentityMerge(){
       </div>`).join("");
   }
 
-  // Compact grid: two identity cards per row (name + its aliases as a
-  // dropdown, not inline chips — a name with many aliases used to wrap
-  // across several lines; a <select> keeps every row the same height
-  // regardless of alias count).
+  // Dense 4-column table: Canonical | Type | Count | Aliases. Only rows
+  // that actually have ≥1 alias — never-merged real members and bare
+  // proxies have nothing to review here, so they're left out entirely
+  // instead of cluttering the table with empty rows. Aliases render as
+  // pills with their own inline ✕ (unmerge that one alias directly, no
+  // dropdown/selection step); past 3 pills the rest collapse behind a
+  // "+N more" toggle so one person with many aliases doesn't blow out
+  // their row's height, and Count is highlighted once it crosses that
+  // same threshold as a quick "worth a second look" signal.
   html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin:${suggestions.length?"14px":"0"} 0 6px">Identities</div>`;
   const groupsByKey={};
   groups.forEach(g=>{groupsByKey[_identityMapKey(g.kind,g.user_id,g.proxy_name)]=g.aliases;});
-  const leftRows=identities.filter(i=>i.kind==="user"||!i.merged_into);
-  if(!leftRows.length){
-    html+=`<div class="sched-empty">No identities yet — proxies appear here once someone's been /sif'd in.</div>`;
+  const canonicalRows=identities.filter(i=>i.kind==="user"||!i.merged_into);
+  const pill=a=>`<span class="alias-pill">${esc(a)}<span class="alias-pill-x" title="Unmerge" onclick="doUnmergeIdentity('${esc(escJsAttr(a))}')">✕</span></span>`;
+  const mergedRows=canonicalRows
+    .map(row=>({row,aliases:groupsByKey[_identityMapKey(row.kind,row.user_id,row.proxy_name)]||[]}))
+    .filter(x=>x.aliases.length>0);
+  if(!mergedRows.length){
+    html+=`<div class="sched-empty">No merges yet — use Suggested merges above or pick manually below.</div>`;
   }else{
-    html+=`<div class="identity-grid">`;
-    html+=leftRows.map((row,i)=>{
-      const aliases=groupsByKey[_identityMapKey(row.kind,row.user_id,row.proxy_name)]||[];
-      const discardBtn=row.kind==="proxy"&&!aliases.length
-        ?`<button class="id-change" title="Discard invalid/garbage name" onclick="doDiscardIdentity('${esc(escJsAttr(row.proxy_name))}')">🗑</button>`
-        :"";
-      const selId=`im-unmerge-${i}`;
-      const aliasControl=aliases.length
-        ?`<select id="${selId}" style="flex:1;min-width:0;font-size:.8rem;padding:3px 4px;border-radius:6px;border:1px solid var(--border);background:var(--card);color:var(--text)">${aliases.map(a=>`<option value="${esc(a)}">${esc(a)}</option>`).join("")}</select>
-           <button class="id-change" title="Unmerge selected" onclick="doUnmergeSelected('${selId}')">✕</button>`
-        :`<span style="color:var(--sub);font-size:.82rem">—</span>`;
-      return `
-        <div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px">
-          <div style="font-weight:600;font-size:.85rem${row.kind==="proxy"?";font-style:italic":""};margin-bottom:4px">${esc(row.display_name)}${row.kind==="proxy"?" <span style=\"opacity:.6;font-weight:400\">(proxy)</span>":""}</div>
-          <div style="display:flex;gap:6px;align-items:center">
-            ${aliasControl}
-            ${discardBtn}
-          </div>
-        </div>`;
+    html+=`<div class="identity-tbl-wrap"><table class="identity-tbl">
+      <colgroup><col class="c-name"><col class="c-type"><col class="c-count"><col class="c-aliases"></colgroup>
+      <thead><tr><th>Canonical</th><th>Type</th><th>Count</th><th>Aliases</th></tr></thead>
+      <tbody>`;
+    html+=mergedRows.map(({row,aliases})=>{
+      const vis=aliases.slice(0,3), extra=aliases.slice(3);
+      const cell=vis.map(pill).join("")
+        +(extra.length?`<span class="alias-extra hidden">${extra.map(pill).join("")}</span><button class="alias-more-btn" onclick="_toggleExtraAliases(this)">+${extra.length} more</button>`:"");
+      return `<tr>
+        <td class="itn">${esc(row.display_name)}</td>
+        <td><span class="itn-tag${row.kind==="proxy"?" proxy":""}">${row.kind==="proxy"?"Proxy":"Member"}</span></td>
+        <td class="itcount${aliases.length>3?" hot":""}">${aliases.length}</td>
+        <td>${cell}</td>
+      </tr>`;
     }).join("");
+    html+=`</tbody></table></div>`;
+  }
+
+  // Unmatched proxy names: never merged into anything — nothing to review,
+  // but still worth surfacing so obvious garbage (e.g. "2", "]") can be
+  // discarded even when no fuzzy suggestion ever caught it.
+  const unmatched=canonicalRows.filter(row=>row.kind==="proxy"&&!(groupsByKey[_identityMapKey(row.kind,row.user_id,row.proxy_name)]||[]).length);
+  if(unmatched.length){
+    html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin:14px 0 6px;cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none" onclick="toggleIdentityUnmatched()">
+      <span id="im-unmatched-chevron">${_identityUnmatchedOpen?"▲":"▼"}</span>Unmatched proxy names (${unmatched.length})
+    </div>`;
+    html+=`<div id="im-unmatched-body" class="pill-wrap ${_identityUnmatchedOpen?"":"hidden"}">`;
+    html+=unmatched.map(row=>`<span class="alias-pill">${esc(row.proxy_name)}<span class="alias-pill-x" title="Discard invalid/garbage name" onclick="doDiscardIdentity('${esc(escJsAttr(row.proxy_name))}')">🗑</span></span>`).join("");
     html+=`</div>`;
   }
 
@@ -2866,12 +2900,6 @@ window.doMergeIdentityManual=async function(){
   const candidateUserId=candidateKind==="user"?parseInt(target.slice(2),10):null;
   const candidateProxyName=candidateKind==="proxy"?target.slice(2):null;
   await window.doMergeIdentity(alias,candidateKind,candidateUserId,candidateProxyName);
-};
-
-window.doUnmergeSelected=function(selectId){
-  const sel=document.getElementById(selectId);
-  if(!sel||!sel.value)return;
-  doUnmergeIdentity(sel.value);
 };
 
 window.doUnmergeIdentity=async function(aliasProxyName){

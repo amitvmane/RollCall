@@ -389,9 +389,14 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 #dues-balances-body,#dues-ledger-body{overflow-x:auto}
 
 .identity-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.discarded-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px 8px}
 
 @media(max-width:480px){
   .identity-grid{grid-template-columns:1fr}
+  .discarded-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(min-width:481px) and (max-width:600px){
+  .discarded-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
 }
 @media(max-width:400px){
   .sp-mini-stats{grid-template-columns:repeat(2,1fr)}

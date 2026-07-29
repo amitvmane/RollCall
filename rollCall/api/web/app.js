@@ -2664,7 +2664,7 @@ async function refreshDues(){
 // ── Merge Identities (fold a fragmented proxy name into a real member or
 // another proxy so stats/dues/ghost-tracking count them once) ──────────────
 let _identityMergeOpen=false, _identitiesCache=null, _identityGroupsCache=null,
-    _suggestionsCache=null, _discardedCache=null;
+    _suggestionsCache=null, _discardedCache=null, _identityDiscardedOpen=false;
 
 window.toggleIdentityMerge=async function(){
   _identityMergeOpen=!_identityMergeOpen;
@@ -2800,12 +2800,19 @@ function renderIdentityMerge(){
   }
 
   if(discarded.length){
-    html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin:14px 0 6px">🗑 Discarded (${discarded.length})</div>`;
+    html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin:14px 0 6px;cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none" onclick="toggleIdentityDiscarded()">
+      <span id="im-discarded-chevron">${_identityDiscardedOpen?"▲":"▼"}</span>🗑 Discarded (${discarded.length})
+    </div>`;
+    html+=`<div id="im-discarded-body" class="${_identityDiscardedOpen?"":"hidden"}">`;
+    html+=`<div class="discarded-grid">`;
     html+=discarded.map(name=>`
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 10px;font-size:.85rem;color:var(--sub)">
-        <span>${esc(name)}</span>
-        <button class="id-change" title="Restore" onclick="doUndiscardIdentity('${esc(escJsAttr(name))}')">↩ Restore</button>
-      </div>`).join("");
+      <label style="display:flex;align-items:center;gap:5px;font-size:.8rem;color:var(--sub);min-width:0;padding:2px 0;cursor:pointer">
+        <input type="checkbox" class="im-discard-cb" value="${esc(escJsAttr(name))}" style="flex-shrink:0">
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(name)}">${esc(name)}</span>
+      </label>`).join("");
+    html+=`</div>`;
+    html+=`<button class="id-change" style="margin-top:8px" onclick="doUndiscardSelected()">↩ Restore selected</button>`;
+    html+=`</div>`;
   }
 
   // Manual merge: FROM picker only offers unmerged proxies (a proxy that's
@@ -2925,6 +2932,32 @@ window.doUndiscardIdentity=async function(aliasProxyName){
     _identitiesCache=null;
     await loadIdentityMerge();
   }catch(e){toast(e.message||"Could not restore",4000);}
+};
+
+window.toggleIdentityDiscarded=function(){
+  _identityDiscardedOpen=!_identityDiscardedOpen;
+  const body=document.getElementById("im-discarded-body");
+  const ch=document.getElementById("im-discarded-chevron");
+  if(body)body.classList.toggle("hidden",!_identityDiscardedOpen);
+  if(ch)ch.textContent=_identityDiscardedOpen?"▲":"▼";
+};
+
+window.doUndiscardSelected=async function(){
+  const names=[...document.querySelectorAll(".im-discard-cb:checked")].map(cb=>cb.value);
+  if(!names.length){toast("Select at least one to restore",2500);return;}
+  try{
+    const results=await Promise.all(names.map(name=>fetch(`/api/v1/web/group/${URL_TOKEN}/identities/undiscard`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({id_token:_idToken,alias_proxy_name:name}),
+      signal:AbortSignal.timeout(8000),
+    })));
+    const failed=results.filter(r=>!r.ok).length;
+    if(failed)toast(`Restored ${names.length-failed}/${names.length} — ${failed} failed`,3500);
+    else toast(`↩ Restored ${names.length}`,2500);
+    _identitiesCache=null;
+    _identityDiscardedOpen=true;
+    await loadIdentityMerge();
+  }catch(e){toast(e.message||"Could not restore selected",4000);}
 };
 
 // ── Modal helper ──────────────────────────────────────────────────────────

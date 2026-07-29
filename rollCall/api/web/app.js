@@ -225,6 +225,15 @@ function renderIdentity(){
       $("name-input-row").classList.remove("hidden");
     }
   }
+  // Login Widget: same visibility rule as the "Verify with Telegram" deep-
+  // link option above (needsVerify) — show it whenever verifying would
+  // still help, whether the visitor is mid-picker or already a guest.
+  const widgetWrap=$("tg-widget-wrap");
+  if(widgetWrap){
+    const showWidget=IS_GROUP&&!TG_NAME&&!_verifiedUserId;
+    widgetWrap.classList.toggle("hidden",!showWidget);
+    if(showWidget)_loadLoginWidget();
+  }
 }
 
 $("name-save-btn").addEventListener("click",saveName);
@@ -934,6 +943,28 @@ window.startTgVerify=async function(){
   }
 };
 
+// Shared by the deep-link poll and the Login Widget callback below — both
+// end up with the same {user_id,name,username,id_token} shape from the
+// server, just via a different verification path.
+function _adoptVerifiedIdentity(data){
+  _verifiedUserId=data.user_id;
+  _verifiedName=data.name;
+  _verifiedUsername=data.username||null;
+  _idToken=data.id_token||null;
+  localStorage.setItem(LS_TG_USER_ID,String(_verifiedUserId));
+  localStorage.setItem(LS_TG_NAME,_verifiedName);
+  if(_verifiedUsername)localStorage.setItem(LS_TG_USERNAME,_verifiedUsername);
+  if(_idToken)localStorage.setItem(LS_ID_TOKEN,_idToken);
+  // Auto-populate name from verified Telegram identity and lock it
+  currentName=_verifiedName;
+  localStorage.setItem(LS_NAME,currentName);
+  toast(`✅ Verified as ${data.name}! Your identity is now locked to your Telegram account.`,4500);
+  renderIdentity();detectCurrentVote();
+  _checkWebAdmin().catch(()=>{});
+  // Re-link any existing push subscription with the now-known user ID
+  _relinkPushSubscription(_verifiedUserId);
+}
+
 async function _pollVerify(){
   if(!_verifyCode)return;
   try{
@@ -953,22 +984,7 @@ async function _pollVerify(){
     // Re-enable name input (it was disabled during polling — now locked via identity)
     const nameInput=$("name-input");
     if(nameInput){nameInput.disabled=false;nameInput.placeholder="";}
-    _verifiedUserId=data.user_id;
-    _verifiedName=data.name;
-    _verifiedUsername=data.username||null;
-    _idToken=data.id_token||null;
-    localStorage.setItem(LS_TG_USER_ID,String(_verifiedUserId));
-    localStorage.setItem(LS_TG_NAME,_verifiedName);
-    if(_verifiedUsername)localStorage.setItem(LS_TG_USERNAME,_verifiedUsername);
-    if(_idToken)localStorage.setItem(LS_ID_TOKEN,_idToken);
-    // Auto-populate name from verified Telegram identity and lock it
-    currentName=_verifiedName;
-    localStorage.setItem(LS_NAME,currentName);
-    toast(`✅ Verified as ${data.name}! Your identity is now locked to your Telegram account.`,4500);
-    renderIdentity();detectCurrentVote();
-    _checkWebAdmin().catch(()=>{});
-    // Re-link any existing push subscription with the now-known user ID
-    _relinkPushSubscription(_verifiedUserId);
+    _adoptVerifiedIdentity(data);
   }catch(_){}
 }
 
@@ -976,6 +992,46 @@ function _stopVerifyPoll(){
   if(_verifyPollTimer){clearInterval(_verifyPollTimer);_verifyPollTimer=null;}
   _verifyCode=null;
 }
+
+// ── Telegram Login Widget — additional sign-in option for when Telegram
+// isn't on this device (the deep link above only helps if it is). Lazy
+// loaded the first time it needs to be visible; same backend endpoints
+// the portal already uses. ──
+let _tgWidgetLoaded=false;
+
+async function _loadLoginWidget(){
+  if(_tgWidgetLoaded)return;
+  _tgWidgetLoaded=true; // don't retry every render even if this attempt fails
+  try{
+    const res=await fetch("/api/v1/auth/tg-login/config",{signal:AbortSignal.timeout(6000)});
+    if(!res.ok)return;
+    const cfg=await res.json();
+    if(!cfg.bot_username)return;
+    const s=document.createElement("script");
+    s.async=true;
+    s.src="https://telegram.org/js/telegram-widget.js?22";
+    s.setAttribute("data-telegram-login",cfg.bot_username);
+    s.setAttribute("data-size","large");
+    s.setAttribute("data-onauth","onTelegramAuth(user)");
+    s.setAttribute("data-request-access","write");
+    const mount=$("tg-login-widget");
+    if(mount)mount.appendChild(s);
+  }catch(_){}
+}
+
+window.onTelegramAuth=async function(user){
+  try{
+    const res=await fetch("/api/v1/auth/tg-login",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(user),
+      signal:AbortSignal.timeout(8000),
+    });
+    if(!res.ok)throw new Error("Verification failed");
+    const data=await res.json();
+    if(!data.verified)throw new Error("Verification failed");
+    _adoptVerifiedIdentity(data);
+  }catch(e){toast("Telegram sign-in failed — try again",3500);}
+};
 
 async function _relinkPushSubscription(userId){
   try{

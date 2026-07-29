@@ -806,16 +806,19 @@ function renderStats(d){
     </div>`;
   }).join("");
 
-  // Attendance trend chart from recent_history (oldest→newest)
+  // Group session-turnout trend from recent_history: whole-group total IN
+  // count per recent session (oldest→newest) — NOT personal data, so it's
+  // labeled and placed under Group Stats, distinct from the "You" block's
+  // own per-session sparkline below.
   const histArr=(d.recent_history||[]).slice().reverse();
   const maxIn=histArr.length?Math.max(...histArr.map(h=>h.in_count||0),1):1;
   const trendHtml=histArr.length>=2?`
-  <div class="sp-trend-label">📈 Your recent attendance</div>
+  <div class="sp-trend-label">📈 Recent group turnout</div>
   <div class="sp-trend">
     ${histArr.map(h=>{
       const barH=Math.round((h.in_count||0)/maxIn*70)+10;
       const label=(h.ended_at||'').slice(5,10)||'';
-      return`<div class="sp-tbar-wrap" title="${esc(h.title||'')} · ${h.in_count} IN">
+      return`<div class="sp-tbar-wrap" title="${esc(h.title||'')} · ${h.in_count} total IN">
         <div class="sp-tbar-val">${h.in_count}</div>
         <div class="sp-tbar" style="height:${barH}%"></div>
         <div class="sp-tbar-lbl">${esc(label)}</div>

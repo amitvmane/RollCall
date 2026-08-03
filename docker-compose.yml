@@ -113,19 +113,6 @@ services:
         max-file: "2"
 
   # ---------------------------------------------------------------------------
-  # Cloudflare Tunnel sidecar — exposes port 8081 publicly without opening any
-  # host firewall port or revealing your server IP.
-  #
-  # Quick start (no account needed):
-  #   Set CLOUDFLARE_TUNNEL_TOKEN=quick in .env — the tunnel URL is printed in
-  #   the logs on first start. Copy it and set WEB_BASE_URL + MINIAPP_URL.
-  #
-  # Stable named tunnel (recommended for production):
-  #   1. Run: docker run cloudflare/cloudflared tunnel login
-  #   2. Run: docker run cloudflare/cloudflared tunnel create rollcall
-  #   3. Set CLOUDFLARE_TUNNEL_TOKEN=<token from step 2> in .env
-  # ---------------------------------------------------------------------------
-  # ---------------------------------------------------------------------------
   # Off-site backup sidecar — ships local SQLite snapshots to any rclone remote
   # (Google Drive, S3, Backblaze B2, etc.).
   #
@@ -176,22 +163,7 @@ services:
         max-size: "5m"
         max-file: "2"
 
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    container_name: rollcall-cloudflared
-    restart: unless-stopped
-    # Quick tunnel (random URL each restart) — remove this line and use the
-    # named-tunnel command below once you have a stable domain.
-    # Origin port follows REST_API_PORT so a custom port stays in sync.
-    command: tunnel --url http://rollcall-bot:${REST_API_PORT:-8081}
-    # Named tunnel command (stable URL — use after completing setup above):
-    # command: tunnel run --token ${CLOUDFLARE_TUNNEL_TOKEN}
-    depends_on:
-      - rollcall-bot
-    profiles:
-      - web  # only starts when: docker-compose --profile web up -d
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "5m"
-        max-file: "2"
+  # Cloudflare Tunnel is no longer run from here — the blobsystems infra repo
+  # now owns the tunnel (container blobsystems-cloudflared) and Nginx proxies
+  # rbot.blobsystems.xyz to this container's REST API (port 8081) over a
+  # shared Docker network. See ../blobsystems/docker-compose.yml.

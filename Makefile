@@ -1,10 +1,14 @@
 # RollCall — deployment manager
 # Run from: ~/RollCallDB/RollCall/
 # Usage:    make <target>
+#
+# The Cloudflare Tunnel is no longer managed by this repo — it now runs as
+# part of the blobsystems infra repo (container blobsystems-cloudflared),
+# which fronts this bot at the stable domain https://rbot.blobsystems.xyz.
+# See ../blobsystems/INFRA_PLAN.md.
 
-COMPOSE  := docker compose --profile web
+COMPOSE  := docker compose
 BOT      := rollcall-bot
-TUNNEL   := cloudflared
 DB       := ./data/rollcall.db
 
 # Read a value from .env, stripping surrounding quotes
@@ -13,6 +17,10 @@ _env = $(shell grep -m1 '^$(1)=' .env 2>/dev/null | cut -d= -f2- | tr -d '"' | t
 # Host port the health endpoint is published on (matches HEALTH_CHECK_HOST_PORT in .env)
 HC_PORT := $(or $(call _env,HEALTH_CHECK_HOST_PORT),8080)
 
+# Public URL for the bot's web app — the stable blobsystems.xyz domain, not an
+# auto-detected trycloudflare.com URL. Override via WEB_BASE_URL in .env.
+WEB_URL := $(or $(call _env,WEB_BASE_URL),https://rbot.blobsystems.xyz)
+
 .DEFAULT_GOAL := help
 
 .PHONY: help up down restart build rebuild logs logs-cf status url notify token group-token chats
@@ -20,16 +28,16 @@ HC_PORT := $(or $(call _env,HEALTH_CHECK_HOST_PORT),8080)
 help: ## Show this help
 	@printf "\n\033[1mRollCall — deployment manager\033[0m\n"
 	@printf "\n\033[4mLIFECYCLE\033[0m\n"
-	@printf "  \033[36m%-16s\033[0m %s\n" "make up"      "Start tunnel + bot; detect URL and update .env"
+	@printf "  \033[36m%-16s\033[0m %s\n" "make up"      "Start/recreate bot (tunnel is managed by the blobsystems repo)"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make down"    "Stop all containers"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make restart" "Restart bot (picks up .env changes)"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make build"   "Rebuild bot image and restart"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make rebuild" "Clean start: down, rebuild image, up (use after git pull)"
 	@printf "\n\033[4mOBSERVABILITY\033[0m\n"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make logs"    "Tail bot logs (Ctrl+C to stop)"
-	@printf "  \033[36m%-16s\033[0m %s\n" "make logs-cf" "Tail Cloudflare tunnel logs"
+	@printf "  \033[36m%-16s\033[0m %s\n" "make logs-cf" "Tail Cloudflare tunnel logs (blobsystems-cloudflared container)"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make status"  "Container status + external service reachability"
-	@printf "  \033[36m%-16s\033[0m %s\n" "make url"     "Current tunnel URL and all group voting links"
+	@printf "  \033[36m%-16s\033[0m %s\n" "make url"     "Public URL and all group voting links"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make notify"  "Send all voting links to Telegram admin"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make chats"   "List all known groups with their chat IDs"
 	@printf "\n\033[4mTOKENS\033[0m\n"
@@ -55,30 +63,11 @@ help: ## Show this help
 	@printf "      make group-token CHAT=-1001234567890 SCOPES=read,vote LABEL=\"Webapp\" DAYS=30\n"
 	@printf "\n"
 
-up: ## Start tunnel + bot; auto-detect URL and update .env
-	@echo "Starting Cloudflare tunnel..."
-	@$(COMPOSE) up -d $(TUNNEL)
-	@printf "Waiting for tunnel URL"
-	@URL=""; \
-	for i in $$(seq 1 20); do \
-	  URL=$$(docker compose logs $(TUNNEL) 2>/dev/null \
-	    | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1); \
-	  [ -n "$$URL" ] && break; \
-	  printf "."; sleep 2; \
-	done; \
-	echo ""; \
-	if [ -z "$$URL" ]; then echo "ERROR: timed out waiting for tunnel URL"; exit 1; fi; \
-	echo "Tunnel: $$URL"; \
-	if grep -q "^WEB_BASE_URL=" .env; then \
-	  sed -i "s|^WEB_BASE_URL=.*|WEB_BASE_URL=$$URL|" .env; \
-	else \
-	  echo "WEB_BASE_URL=$$URL" >> .env; \
-	fi; \
-	echo "Updated WEB_BASE_URL in .env"; \
-	echo "Starting bot..."; \
-	$(COMPOSE) up -d --force-recreate $(BOT); \
-	echo ""; \
-	$(MAKE) -s url
+up: ## Start/recreate bot (tunnel is managed by the blobsystems repo)
+	@echo "Starting bot..."
+	@$(COMPOSE) up -d --force-recreate $(BOT)
+	@echo ""
+	@$(MAKE) -s url
 
 down: ## Stop all containers
 	$(COMPOSE) down
@@ -90,7 +79,7 @@ restart: ## Restart bot (picks up .env changes)
 build: ## Rebuild bot image and restart
 	$(COMPOSE) up -d --build $(BOT)
 
-rebuild: ## Clean start: stop everything, rebuild image from current code, start tunnel + bot
+rebuild: ## Clean start: stop everything, rebuild image from current code, start bot
 	@echo "Stopping containers..."
 	@$(COMPOSE) down
 	@echo "Rebuilding bot image from current code..."
@@ -100,8 +89,8 @@ rebuild: ## Clean start: stop everything, rebuild image from current code, start
 logs: ## Tail bot logs (Ctrl+C to stop)
 	docker compose logs -f $(BOT)
 
-logs-cf: ## Tail Cloudflare tunnel logs (Ctrl+C to stop)
-	docker compose logs -f $(TUNNEL)
+logs-cf: ## Tail Cloudflare tunnel logs (blobsystems-cloudflared container)
+	docker logs -f blobsystems-cloudflared
 
 status: ## Show container status + external service reachability
 	@echo ""
@@ -117,16 +106,10 @@ status: ## Show container status + external service reachability
 	curl -sf --max-time 5 https://www.cloudflare.com > /dev/null 2>&1 \
 	  && echo "✅  reachable" \
 	  || echo "❌  unreachable"
-	@URL=$$(docker compose logs $(TUNNEL) 2>/dev/null \
-	  | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1); \
-	printf "  Tunnel endpoint:  "; \
-	if [ -z "$$URL" ]; then \
-	  echo "❌  no URL (tunnel not started — run: make up)"; \
-	else \
-	  curl -sf --max-time 8 "$$URL/api/v1/health" > /dev/null 2>&1 \
-	    && echo "✅  $$URL" \
-	    || echo "❌  $$URL (tunnel started but not reachable yet)"; \
-	fi
+	@printf "  Tunnel endpoint:  "; \
+	curl -sf --max-time 8 "$(WEB_URL)/api/v1/health" > /dev/null 2>&1 \
+	  && echo "✅  $(WEB_URL)" \
+	  || echo "❌  $(WEB_URL) (unreachable — check blobsystems-cloudflared and blobsystems-nginx on the other repo)"
 	@echo ""
 	@echo "=== Bot Health ==="
 	@HEALTH=$$(curl -sf --max-time 5 http://localhost:$(HC_PORT)/health 2>/dev/null); \
@@ -137,12 +120,10 @@ status: ## Show container status + external service reachability
 	fi
 	@echo ""
 
-url: ## Show current tunnel URL and all group voting links
-	@URL=$$(docker compose logs $(TUNNEL) 2>/dev/null \
-	  | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1); \
-	if [ -z "$$URL" ]; then echo "Tunnel not running — run: make up"; exit 0; fi; \
-	echo "Tunnel:   $$URL"; \
-	echo "API docs: $$URL/api/docs"; \
+url: ## Show public URL and all group voting links
+	@URL="$(WEB_URL)"; \
+	echo "Public URL: $$URL"; \
+	echo "API docs:   $$URL/api/docs"; \
 	echo ""; \
 	echo "Group voting links:"; \
 	sqlite3 $(DB) \
@@ -191,9 +172,7 @@ chats: ## List all known groups with chat IDs (use these with make group-token)
 	@echo ""
 
 notify: ## Send all voting links to Telegram admin (safe to run when banned — prints links if unreachable)
-	@URL=$$(docker compose logs $(TUNNEL) 2>/dev/null \
-	  | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1); \
-	if [ -z "$$URL" ]; then echo "Tunnel not running — run: make up first"; exit 1; fi; \
+	@URL="$(WEB_URL)"; \
 	API_KEY=$$(grep -m1 '^API_KEY=' .env | cut -d= -f2- | tr -d '"' | tr -d "'"); \
 	ADMIN1=$$(grep -m1 '^ADMIN1=' .env | cut -d= -f2- | tr -d '"' | tr -d "'"); \
 	LINKS=$$(sqlite3 $(DB) \

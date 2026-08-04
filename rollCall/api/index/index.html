@@ -32,11 +32,24 @@
   }
   .wrap { max-width: 760px; margin: 0 auto; padding: 0 20px; }
   header.hero {
+    position: relative;
     background: linear-gradient(160deg, var(--accent) 0%, var(--accent-dark) 100%);
     color: #fff;
     text-align: center;
     padding: 64px 20px 56px;
   }
+  .topnav {
+    position: absolute;
+    top: 18px;
+    right: 20px;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    font-size: .85rem;
+  }
+  .topnav a { color: rgba(255,255,255,.92); text-decoration: none; font-weight: 600; }
+  .topnav a.quiet { color: rgba(255,255,255,.6); font-weight: 500; }
+  .topnav a:hover { text-decoration: underline; }
   .logo { font-size: 52px; line-height: 1; }
   header.hero h1 { font-family: var(--font-display); font-size: 2.9rem; margin: 14px 0 6px; font-weight: 800; letter-spacing: -.01em; text-transform: uppercase; }
   header.hero p { font-size: 1.1rem; margin: 0 auto; max-width: 30em; opacity: .95; }
@@ -98,6 +111,10 @@
 </head>
 <body>
   <header class="hero">
+    <nav class="topnav">
+      <a href="/portal">Sign in</a>
+      <a href="/admin" class="quiet">Admin</a>
+    </nav>
     <div class="logo">📋</div>
     <h1>RollCall</h1>
     <p>Attendance for your Telegram group, made simple. Open a rollcall, let everyone vote <b>in</b>, <b>out</b> or <b>maybe</b>, and track who shows up.</p>

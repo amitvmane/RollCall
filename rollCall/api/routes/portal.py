@@ -70,6 +70,10 @@ async def portal_groups(
             ghost_count=int(row.get("ghost_count") or 0),
             rank=rank,
             has_active_rollcall=has_active,
+            # Cache-only check (no live Telegram call) — fine for a list
+            # view. The actual admin grant is live-reverified in
+            # /auth/admin/session when the user follows the link through.
+            is_web_admin=_db.is_web_admin(cid, tg_user_id),
         ))
 
     return PortalGroupsResponse(tg_user_id=tg_user_id, groups=groups)

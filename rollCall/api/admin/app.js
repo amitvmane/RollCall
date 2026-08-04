@@ -269,15 +269,22 @@ S.token=localStorage.getItem(LS)||"";
   const hp=new URLSearchParams((window.location.hash||"").replace(/^#/,""));
   const qp=new URLSearchParams(window.location.search);
   const t=hp.get("token")||qp.get("token");
+  // One-click handoff from the portal (same signed-in Telegram account,
+  // already proven there) — mints a session for this chat directly, no
+  // login screen shown at all. Carried in the hash for the same reason
+  // the /gentoken token link is: never reaches the server.
+  const handoffChat=hp.get("chat");
+  const handoffIdToken=hp.get("id_token");
   // doLogin() reads its token from the #ti input field, not from S.token —
   // populate the field so the one-click link actually signs in instead of
   // silently no-opping (doLogin's first line returns early on an empty
   // field, which is exactly what "click a link, S.token set programmatically,
   // input never touched" produces).
-  if(t&&!S.token){$id("ti").value=t;doLogin();}
+  if(handoffChat&&handoffIdToken&&!S.token){_mintAdminSession(handoffIdToken,parseInt(handoffChat,10));}
+  else if(t&&!S.token){$id("ti").value=t;doLogin();}
   else if(S.token)boot();
   else{_loadAdminWidget();}
-  if(t){
+  if(t||handoffChat){
     qp.delete("token");
     const u=window.location.pathname+(qp.toString()?"?"+qp:"");
     history.replaceState(null,"",u);

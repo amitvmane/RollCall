@@ -373,6 +373,16 @@ ${bestStreak>0?`<div class="milestone-box">🏆 Best streak ever: <strong>${best
     html+=`<a class="vote-btn" href="/web/group/${esc(g.group_web_token)}" target="_blank" style="margin:12px 0;display:block">Vote Now →</a>`;
   }
 
+  if(g.is_web_admin&&_idToken){
+    // Hands the already-established identity token to the admin console
+    // via the URL fragment (never reaches the server — same pattern
+    // /gentoken's one-click link already uses) so it can mint a session
+    // for this chat with zero extra sign-in, matching the same account
+    // that's already signed into the portal.
+    const adminUrl=`/admin/#chat=${g.chat_id}&id_token=${encodeURIComponent(_idToken)}`;
+    html+=`<a class="vote-btn vote-btn-secondary" href="${esc(adminUrl)}" style="margin:8px 0;display:block">⚙️ Manage in Admin Console →</a>`;
+  }
+
   if(g.group_web_token){
     const joinUrl=window.location.origin+"/join/"+g.group_web_token;
     html+=`

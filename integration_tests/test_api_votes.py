@@ -223,5 +223,64 @@ class TestCrossStateConsistency(VotesAPIBase):
         self.assertIn("Carol", in_names)
 
 
+class TestVoteScopeAuthorization(unittest.TestCase):
+    """A vote-scoped (non-admin) token must only ever cast a vote for the
+    Telegram user it was issued to — not for another real user_id, and not
+    for a fabricated proxy name. Proxy adds are admin-only (routes/proxy_votes.py)."""
+
+    @classmethod
+    def setUpClass(cls):
+        env = _import()
+        cls.app = env["app"]
+        cls.manager = env["manager"]
+        cls.client = TestClient(cls.app)
+
+    def setUp(self):
+        reset_db()
+        self.manager.clear_cache()
+        from api.rate_limit import reset_buckets_for_tests
+        reset_buckets_for_tests()
+        from db import _hash_token, generate_api_token, insert_api_token
+        admin_token = generate_api_token()
+        insert_api_token(_hash_token(admin_token), CHAT_ID, "read,vote,admin",
+                         label="admin", issued_by_user_id=ALICE["id"])
+        self.client.headers["Authorization"] = f"Bearer {admin_token}"
+        self.client.post(
+            f"/api/v1/chats/{CHAT_ID}/rollcalls",
+            json={
+                "title": "Match",
+                "started_by_user_id": ALICE["id"],
+                "started_by_name": ALICE["name"],
+                "started_by_username": ALICE["username"],
+            },
+        )
+        # Switch to a vote-only token bound to Alice for the actual test calls.
+        vote_token = generate_api_token()
+        insert_api_token(_hash_token(vote_token), CHAT_ID, "read,vote",
+                         label="miniapp", issued_by_user_id=ALICE["id"])
+        self.client.headers["Authorization"] = f"Bearer {vote_token}"
+
+    def test_self_vote_still_allowed(self):
+        r = self.client.post(
+            f"/api/v1/chats/{CHAT_ID}/rollcalls/1/votes",
+            json={"vote": "in", "user_id": ALICE["id"], "first_name": ALICE["name"]},
+        )
+        self.assertEqual(r.status_code, 201)
+
+    def test_voting_as_another_real_user_is_blocked(self):
+        r = self.client.post(
+            f"/api/v1/chats/{CHAT_ID}/rollcalls/1/votes",
+            json={"vote": "in", "user_id": BOB["id"], "first_name": BOB["name"]},
+        )
+        self.assertEqual(r.status_code, 403)
+
+    def test_injecting_a_fabricated_proxy_name_is_blocked(self):
+        r = self.client.post(
+            f"/api/v1/chats/{CHAT_ID}/rollcalls/1/votes",
+            json={"vote": "in", "user_id": "Fake Guest", "first_name": "Fake Guest"},
+        )
+        self.assertEqual(r.status_code, 403)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -33,13 +33,14 @@ async def cast_vote(
 ) -> VoteResponse:
     # Self-service tokens (miniapp initData exchange) are bound to the
     # Telegram user who authenticated — they must not be able to vote as
-    # someone else by putting a different user_id in the body. Tokens with
+    # someone else by putting a different user_id in the body, whether that's
+    # another real Telegram id (int) or a fabricated proxy name (str) — proxy
+    # adds are admin-only, same as /sif and routes/proxy_votes.py. Tokens with
     # no bound user (out-of-band service tokens) or the admin scope are
     # trusted to vote on behalf of others, same as proxy votes.
     if (
         "admin" not in _token.scopes
         and _token.issued_by_user_id is not None
-        and isinstance(body.user_id, int)
         and body.user_id != _token.issued_by_user_id
     ):
         raise HTTPException(

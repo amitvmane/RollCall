@@ -385,12 +385,18 @@ ${bestStreak>0?`<div class="milestone-box">🏆 Best streak ever: <strong>${best
 </div>`;
   }
 
-  html+=`<div class="section-label" style="margin-top:16px">RECENT SESSIONS</div>`;
-  html+=`<div id="history-body"><div style="color:var(--sub)">Loading…</div></div>`;
-  if(g.group_web_token){
-    html+=`<div class="section-label" style="margin-top:16px">DUES &amp; TREASURY</div>`;
-    html+=`<div id="dues-section"><div style="color:var(--sub);font-size:.85rem;padding:8px 0">Loading…</div></div>`;
-  }
+  const historyPane=`<div id="history-body"><div style="color:var(--sub)">Loading…</div></div>`;
+  const duesPane=g.group_web_token
+    ?`<div id="dues-section"><div style="color:var(--sub);font-size:.85rem;padding:24px 0;text-align:center">Loading…</div></div>`
+    :`<div class="empty" style="text-align:center;padding:24px 0">Dues aren't set up for this group.</div>`;
+
+  const tabs=["Overview","History","Dues"];
+  html=`<div class="tab-bar detail-tabs" id="detail-tabs">
+  ${tabs.map((t,i)=>`<button class="tab${i===0?" active":""}" onclick="switchDetailTab(${i})">${t}</button>`).join("")}
+</div>
+<div id="detail-pane-0">${html}</div>
+<div id="detail-pane-1" style="display:none">${historyPane}</div>
+<div id="detail-pane-2" style="display:none">${duesPane}</div>`;
   $id("detail-body").innerHTML=html;
 
   // Load history and dues in parallel
@@ -428,46 +434,46 @@ ${bestStreak>0?`<div class="milestone-box">🏆 Best streak ever: <strong>${best
   ]);
 };
 
+window.switchDetailTab=function(idx){
+  [0,1,2].forEach(i=>{
+    const p=$id(`detail-pane-${i}`);if(p)p.style.display=i===idx?"block":"none";
+  });
+  document.querySelectorAll("#detail-tabs .tab").forEach((t,i)=>t.classList.toggle("active",i===idx));
+};
+
+const DUES_EMPTY_HTML='<div class="empty" style="text-align:center;padding:24px 0">Dues aren\'t set up for this group.</div>';
+
 async function _loadDuesSection(g){
   const el=$id("dues-section");
   if(!el)return;
-  if(!g.group_web_token||!_idToken){el.innerHTML="";return;}
+  if(!g.group_web_token||!_idToken){el.innerHTML=DUES_EMPTY_HTML;return;}
 
   // Try user's own balance (always allowed for verified members)
   let myDues=null;
   try{
     myDues=await apiFetch(`/web/group/${encodeURIComponent(g.group_web_token)}/dues/my?id_token=${encodeURIComponent(_idToken)}`);
   }catch(e){
-    // 403 = dues not enabled, 404 = group not found — hide section silently
-    el.innerHTML="";
+    // 403 = dues not enabled, 404 = group not found
+    el.innerHTML=DUES_EMPTY_HTML;
     return;
   }
 
   let html="";
 
-  // Own balance
+  // Hero balance — the one number this tab exists to answer.
   const bal=myDues.balance||0;
   const upi=myDues.upi_vpa||null;
-  if(bal>0){
-    html+=`<div class="dues-balance-box dues-owed">
-  <span class="dues-balance-lbl">You owe</span>
-  <span class="dues-balance-val">₹${bal}</span>
+  const heroCls=bal>0?"dues-owed":bal<0?"dues-credit":"dues-settled";
+  const heroLbl=bal>0?"You owe":bal<0?"You have a credit":"✅ You're all settled";
+  html+=`<div class="dues-hero ${heroCls}">
+  <div class="dues-hero-lbl">${heroLbl}</div>
+  ${bal!==0?`<div class="dues-hero-val">₹${Math.abs(bal)}</div>`:""}
+  ${(bal>0&&upi)?`<div class="dues-hero-upi">💳 Pay to <code class="dues-upi">${esc(upi)}</code>
+    <button onclick="navigator.clipboard.writeText('${upi.replace(/'/g,"\\'")}').then(()=>toast('UPI copied!'))" class="copy-link-btn">Copy</button>
+  </div>`:""}
 </div>`;
-    if(upi){
-      html+=`<div class="dues-upi-row">💳 Pay to: <code class="dues-upi">${esc(upi)}</code>
-  <button onclick="navigator.clipboard.writeText('${upi.replace(/'/g,"\\'")}').then(()=>toast('UPI copied!'))" class="copy-link-btn">Copy</button>
-</div>`;
-    }
-  }else if(bal<0){
-    html+=`<div class="dues-balance-box dues-credit">
-  <span class="dues-balance-lbl">You have a credit</span>
-  <span class="dues-balance-val">₹${Math.abs(bal)}</span>
-</div>`;
-  }else{
-    html+=`<div class="dues-balance-box dues-settled">✅ You're all settled</div>`;
-  }
 
-  // Recent own entries (last 3)
+  // Recent own entries (last 3) — secondary to the hero, own subhead.
   const entries=(myDues.entries||[]).slice(0,3);
   if(entries.length){
     const entryRows=entries.map(e=>{
@@ -480,37 +486,40 @@ async function _loadDuesSection(g){
   <span class="${amtCls}">${sign}₹${Math.abs(e.amount)}</span>
 </div>`;
     }).join("");
-    html+=`<div class="dues-entries-box">${entryRows}</div>`;
+    html+=`<div class="dues-subhead">Your recent activity</div><div class="dues-entries-box">${entryRows}</div>`;
   }
 
-  // Admin view: full summary (try; skip if 403)
+  // Admin view: whole-group outstanding + fund, visually fenced off from the
+  // member's own numbers above so the two are never mistaken for each other.
   try{
     const summary=await apiFetch(`/web/group/${encodeURIComponent(g.group_web_token)}/dues/summary?id_token=${encodeURIComponent(_idToken)}&nonzero_only=true`);
     const balances=summary.balances||[];
     const fundBal=summary.fund_balance||0;
-    if(balances.length){
-      const memberRows=balances.map(b=>{
+    const memberRows=balances.length
+      ?balances.map(b=>{
         const cls=b.balance>0?"entry-debit":"entry-credit";
         return `<div class="dues-entry-row">
   <span class="dues-entry-type">${esc(b.member_name)}</span>
   <span class="${cls}">₹${Math.abs(b.balance)}</span>
 </div>`;
-      }).join("");
-      html+=`<div style="margin-top:12px"><div class="dues-admin-label">Outstanding (admin)</div>
-<div class="dues-entries-box">${memberRows}</div></div>`;
-    }
-    html+=`<div class="dues-fund-row">🏦 Fund balance: <strong>₹${fundBal}</strong></div>`;
+      }).join("")
+      :`<div class="empty" style="padding:6px 0">Nobody owes anything right now.</div>`;
+    html+=`<div class="dues-admin-card">
+  <div class="dues-admin-eyebrow">👁 Admin view — whole group</div>
+  <div class="dues-entries-box dues-entries-box--flush">${memberRows}</div>
+  <div class="dues-fund-row">🏦 Fund balance: <strong>₹${fundBal}</strong></div>
+</div>`;
   }catch(e){
-    // Non-admin or dues not configured — fund balance still visible
+    // Non-admin or dues not configured — fund balance still visible standalone
     try{
       const fund=await apiFetch(`/web/group/${encodeURIComponent(g.group_web_token)}/dues/fund?id_token=${encodeURIComponent(_idToken)}`);
-      html+=`<div class="dues-fund-row">🏦 Fund balance: <strong>₹${fund.fund_balance||0}</strong></div>`;
+      html+=`<div class="dues-fund-row" style="margin-top:12px">🏦 Fund balance: <strong>₹${fund.fund_balance||0}</strong></div>`;
     }catch(e2){
       // Fund endpoint failed — silently skip
     }
   }
 
-  el.innerHTML=html||'<div style="color:var(--sub);font-size:.85rem">No dues data.</div>';
+  el.innerHTML=html||DUES_EMPTY_HTML;
 }
 
 window.closeDetail=function(){

@@ -25,8 +25,9 @@
 }
 .detail-header h2{margin:0;font-size:1rem;font-weight:600;}
 .detail-close{
-  background:none;border:none;font-size:1.2rem;cursor:pointer;
-  color:var(--sub);padding:4px 8px;border-radius:6px;
+  display:inline-flex;align-items:center;justify-content:center;
+  background:none;border:none;cursor:pointer;
+  color:var(--sub);padding:6px 8px;border-radius:6px;
 }
 .detail-close:hover{background:var(--hover);}
 
@@ -181,28 +182,36 @@
   content:"";flex:1;height:1px;background:var(--border);
 }
 
-/* Dues section */
-.dues-balance-box{
-  display:flex;align-items:center;justify-content:space-between;
-  padding:10px 14px;border-radius:10px;margin-bottom:8px;font-size:.9rem;
+/* Detail panel tabs — reuses admin's .tab-bar/.tab, just without the
+   card/shadow wrapper since the panel itself is already on --card bg. */
+.detail-tabs{margin-bottom:16px;}
+
+/* Dues tab */
+.dues-hero{
+  text-align:center;border-radius:12px;padding:22px 16px;margin-bottom:4px;
 }
 .dues-owed{background:var(--danger-bg);color:var(--danger-fg);}
 .dues-credit{background:var(--success-bg);color:var(--success-fg);}
 .dues-settled{background:var(--hover);color:var(--sub);}
-.dues-balance-lbl{font-weight:500;}
-.dues-balance-val{font-weight:700;font-size:1.05rem;}
-.dues-upi-row{
-  display:flex;align-items:center;gap:8px;padding:6px 0 10px;
-  font-size:.83rem;color:var(--sub);flex-wrap:wrap;
+.dues-hero-lbl{font-weight:600;font-size:.85rem;opacity:.9;}
+.dues-hero-val{font-family:var(--font-mono);font-weight:700;font-size:2.1rem;margin-top:4px;}
+.dues-hero-upi{
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  margin-top:14px;font-size:.83rem;flex-wrap:wrap;
 }
 code.dues-upi{
   background:var(--hover);padding:2px 7px;border-radius:5px;
   font-size:.82rem;color:var(--text);user-select:all;
 }
+.dues-subhead{
+  font-size:.7rem;font-weight:700;color:var(--sub);letter-spacing:.06em;
+  text-transform:uppercase;margin:18px 0 8px;
+}
 .dues-entries-box{
   border:1px solid var(--border);border-radius:8px;
   padding:4px 10px;margin-bottom:8px;
 }
+.dues-entries-box--flush{border-color:transparent;background:var(--card);padding:0;margin-bottom:0;}
 .dues-entry-row{
   display:flex;align-items:center;gap:6px;padding:6px 0;
   border-bottom:1px solid var(--border);font-size:.82rem;
@@ -212,9 +221,21 @@ code.dues-upi{
 .dues-entry-date{color:var(--sub);font-size:.76rem;white-space:nowrap;}
 .entry-debit{color:var(--out);font-weight:600;white-space:nowrap;}
 .entry-credit{color:var(--in);font-weight:600;white-space:nowrap;}
-.dues-admin-label{font-size:.76rem;font-weight:600;color:var(--sub);margin-bottom:4px;letter-spacing:.05em;}
+
+/* Admin-only outstanding-balances card — visually fenced off (its own
+   border + tinted eyebrow) from the member's own numbers above it, so the
+   two are never mistaken for each other. */
+.dues-admin-card{
+  border:1px solid var(--accent);background:var(--accent-dim);
+  border-radius:10px;padding:12px 14px;margin-top:20px;
+}
+.dues-admin-eyebrow{
+  font-size:.7rem;font-weight:700;color:var(--accent);
+  letter-spacing:.06em;text-transform:uppercase;margin-bottom:10px;
+}
 .dues-fund-row{
-  margin-top:8px;padding:8px 14px;background:var(--hover);
+  margin-top:10px;padding:8px 14px;background:var(--hover);
   border-radius:8px;font-size:.85rem;color:var(--text);
 }
+.dues-admin-card .dues-fund-row{background:var(--card);}
 

@@ -4,6 +4,19 @@
 const API="/api/v1", LS="rc_admin_token";
 const S={token:"",groups:[],selCid:null,tabState:{},memberCache:{},groupNames:{},statsLoaded:{},telegramOk:null};
 
+// ─── Icon set — small stroke-based SVGs (currentColor) for chrome controls,
+// replacing emoji so the UI shell doesn't read as an ad-hoc prototype.
+// Content emoji elsewhere (💰📍👻🏆 etc.) are left as-is; those are
+// expressive labels, not interactive chrome, and swapping them is out of
+// scope for this pass. ──────────────────────────────────────────────────────
+const ICONS={
+  sun:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="4.5"/><line x1="12" y1="19.5" x2="12" y2="22"/><line x1="4.2" y1="4.2" x2="5.9" y2="5.9"/><line x1="18.1" y1="18.1" x2="19.8" y2="19.8"/><line x1="2" y1="12" x2="4.5" y2="12"/><line x1="19.5" y1="12" x2="22" y2="12"/><line x1="4.2" y1="19.8" x2="5.9" y2="18.1"/><line x1="18.1" y1="5.9" x2="19.8" y2="4.2"/></svg>',
+  moon:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5Z"/></svg>',
+  refresh:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg>',
+  close:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg>',
+};
+window.ICONS=ICONS;
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function $id(x){return document.getElementById(x)}
 window.$id=$id;
@@ -42,7 +55,7 @@ function fromInputDT(s){
 // ─── Theme toggle ─────────────────────────────────────────────────────────────
 function updateThemeBtn(){
   const btn=$id("theme-btn");if(!btn)return;
-  btn.textContent=document.documentElement.classList.contains("dark")?"☀":"🌙";
+  btn.innerHTML=document.documentElement.classList.contains("dark")?ICONS.sun:ICONS.moon;
   btn.title=document.documentElement.classList.contains("dark")?"Switch to light mode":"Switch to dark mode";
 }
 window.toggleTheme=function(){
@@ -246,7 +259,7 @@ function renderGDetail(settings,rcs,tmpls){
           <div class="card-sub" id="gsub-${cidK(cid)}">Chat ID: ${cid} &nbsp;·&nbsp; ${escH(settings.timezone)}</div>
         </div>
         <div class="btn-row">
-          <button class="btn btn-ghost btn-sm" onclick="loadGDetail(${cid})">↻ Refresh</button>
+          <button class="btn btn-ghost btn-sm" onclick="loadGDetail(${cid})">${ICONS.refresh} Refresh</button>
         </div>
       </div>
     </div>`;
@@ -504,7 +517,7 @@ function buildRcEditPanel(cid,num,rc,groupName){
         <div class="ep-title">${escH(groupName)} → #${num}: ${escH(rc.title||"Untitled")}</div>
         <div class="ep-sub">Edit rollcall details and manage votes</div>
       </div>
-      <button class="ep-close" onclick="closeEditPanel(${cid},${num})" title="Close">✕</button>
+      <button class="ep-close" onclick="closeEditPanel(${cid},${num})" title="Close">${ICONS.close}</button>
     </div>
     <div class="props-form">
       <div class="props-grid">
@@ -1050,7 +1063,7 @@ window.showGroupQr=async function(cid){
     <div class="qr-modal-box">
       <div class="qr-modal-hdr">
         <span>Group QR Code</span>
-        <button class="qr-close" aria-label="Close">✕</button>
+        <button class="qr-close" aria-label="Close">${ICONS.close}</button>
       </div>
       <div class="qr-body">
         <div class="qr-spinner"><div class="spinner"></div></div>
@@ -1266,7 +1279,7 @@ function buildStatsPanel(cid,gs,lb,hist,pres,rt){
   return `
   <div class="stats-panel">
     <div class="stats-reload-row">
-      <button class="btn btn-ghost btn-sm" onclick="reloadStats(${cid})">↻ Reload</button>
+      <button class="btn btn-ghost btn-sm" onclick="reloadStats(${cid})">${ICONS.refresh} Reload</button>
     </div>
     ${presHtml}
     <div class="stat-boxes">

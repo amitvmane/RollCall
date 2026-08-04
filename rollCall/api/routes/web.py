@@ -272,6 +272,21 @@ async def update_group_settings(
             f"🕐 Timezone set to {body.timezone} (by {actor_name}, via web)",
         )
 
+    # These three mirror what the admin console's bearer-token-gated PATCH
+    # already does via the same settings_svc.update_group_settings — no
+    # chat announcement for any of them there either, just an audit log
+    # entry (log_admin_action), so this stays consistent rather than
+    # inventing new behavior for the web path specifically.
+    if body.admin_rights is not None or body.ghost_tracking_enabled is not None or body.absent_limit is not None:
+        actor_name = await _actor_display_name(chat_id, actor_user_id)
+        from services import settings as settings_svc
+        settings_svc.update_group_settings(
+            chat_id, actor_user_id, actor_name,
+            admin_rights=body.admin_rights,
+            ghost_tracking_enabled=body.ghost_tracking_enabled,
+            absent_limit=body.absent_limit,
+        )
+
 
 @router.post(
     "/web/group/{group_token}/start-rollcall",

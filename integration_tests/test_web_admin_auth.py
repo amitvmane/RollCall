@@ -133,6 +133,66 @@ class TestWebAdminStatusEndpoint(WebAdminAuthBase):
         self.assertFalse(r.json()["is_admin"])
 
 
+class TestGroupSettingsExtendedFields(WebAdminAuthBase):
+    """admin_rights / ghost_tracking_enabled / absent_limit — same gap the
+    group web page's admin-card had that the admin console didn't."""
+
+    def setUp(self):
+        super().setUp()
+        self.db.set_web_admin(CHAT_ID, ALICE_ID, "Alice")
+        self.chat = self.db.get_or_create_chat(CHAT_ID)
+        self.token = self._id_token(ALICE_ID)
+
+    def test_group_response_includes_the_three_fields(self):
+        r = self.client.get(f"/api/v1/web/group/{self.chat['group_web_token']}")
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        for key in ("admin_rights", "ghost_tracking_enabled", "absent_limit"):
+            self.assertIn(key, body)
+
+    def test_patch_admin_rights(self):
+        r = self.client.patch(
+            f"/api/v1/web/group/{self.chat['group_web_token']}/settings",
+            json={"id_token": self.token, "admin_rights": True},
+        )
+        self.assertEqual(r.status_code, 204)
+        settings = self.db.get_or_create_chat(CHAT_ID)
+        self.assertTrue(settings["admin_rights"])
+
+    def test_patch_ghost_tracking(self):
+        r = self.client.patch(
+            f"/api/v1/web/group/{self.chat['group_web_token']}/settings",
+            json={"id_token": self.token, "ghost_tracking_enabled": False},
+        )
+        self.assertEqual(r.status_code, 204)
+        settings = self.db.get_or_create_chat(CHAT_ID)
+        self.assertFalse(settings["ghost_tracking_enabled"])
+
+    def test_patch_absent_limit(self):
+        r = self.client.patch(
+            f"/api/v1/web/group/{self.chat['group_web_token']}/settings",
+            json={"id_token": self.token, "absent_limit": 5},
+        )
+        self.assertEqual(r.status_code, 204)
+        settings = self.db.get_or_create_chat(CHAT_ID)
+        self.assertEqual(settings["absent_limit"], 5)
+
+    def test_absent_limit_below_one_rejected(self):
+        r = self.client.patch(
+            f"/api/v1/web/group/{self.chat['group_web_token']}/settings",
+            json={"id_token": self.token, "absent_limit": 0},
+        )
+        self.assertEqual(r.status_code, 422)
+
+    def test_non_admin_cannot_patch_settings(self):
+        bob_token = self._id_token(BOB_ID)
+        r = self.client.patch(
+            f"/api/v1/web/group/{self.chat['group_web_token']}/settings",
+            json={"id_token": bob_token, "admin_rights": True},
+        )
+        self.assertEqual(r.status_code, 403)
+
+
 class TestAdminGroupsEndpoint(WebAdminAuthBase):
 
     def test_lists_cached_admin_chats(self):

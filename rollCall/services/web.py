@@ -293,4 +293,7 @@ def get_rollcalls_by_group_token(group_token: str) -> dict:
         "dues_enabled": bool(chat.get("dues_enabled", False)),
         "bot_username": db.get_system_config("bot_username") or "",
         "timezone": chat.get("timezone") or "Asia/Kolkata",
+        "admin_rights": bool(chat.get("admin_rights", False)),
+        "ghost_tracking_enabled": bool(chat.get("ghost_tracking_enabled", True)),
+        "absent_limit": int(chat.get("absent_limit") or 1),
     }

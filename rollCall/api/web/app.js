@@ -1260,7 +1260,7 @@ async function _checkWebAdmin(){
     _isWebAdmin=!!d.is_admin;
     const card=document.getElementById("admin-card");
     if(card)card.classList.toggle("hidden",!_isWebAdmin);
-    if(_isWebAdmin){_syncShhToggle();_syncTimezoneDisplay();_renderWeekdayHint();_loadWeblogInMembers();}
+    if(_isWebAdmin){_syncShhToggle();_syncGroupSettingsCard();_syncTimezoneDisplay();_renderWeekdayHint();_loadWeblogInMembers();}
   }catch(_){}
   // Load dues after admin status is resolved — both member and admin sections
   loadDuesSection().catch(()=>{});
@@ -1270,6 +1270,16 @@ function _syncShhToggle(){
   const tog=document.getElementById("shh-toggle");
   if(!tog||!groupData)return;
   tog.checked=!!groupData.shh_mode;
+}
+
+function _syncGroupSettingsCard(){
+  if(!groupData)return;
+  const ghostTog=document.getElementById("ghost-toggle");
+  if(ghostTog)ghostTog.checked=groupData.ghost_tracking_enabled!==false;
+  const limitInp=document.getElementById("ghost-limit-input");
+  if(limitInp)limitInp.value=groupData.absent_limit||1;
+  const adminTog=document.getElementById("admin-rights-toggle");
+  if(adminTog)adminTog.checked=!!groupData.admin_rights;
 }
 
 function _syncTimezoneDisplay(){
@@ -1406,6 +1416,49 @@ window.toggleShhMode=async function(enabled){
     const tog=document.getElementById("shh-toggle");
     if(tog)tog.checked=!enabled;
   }
+};
+
+async function _patchGroupSetting(fields,revert){
+  if(!_idToken){toast("Verify with Telegram first.",3000);revert();return;}
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/settings`,{
+      method:"PATCH",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({id_token:_idToken,...fields}),
+      signal:AbortSignal.timeout(8000),
+    });
+    if(!res.ok){const d=await res.json().catch(()=>({}));throw new Error(d.detail||"Failed");}
+    if(groupData)Object.assign(groupData,fields);
+    return true;
+  }catch(e){
+    toast(e.message||"Could not save setting",3500);
+    revert();
+    return false;
+  }
+}
+
+window.toggleGhostTracking=async function(enabled){
+  const ok=await _patchGroupSetting({ghost_tracking_enabled:enabled},()=>{
+    const tog=document.getElementById("ghost-toggle");
+    if(tog)tog.checked=!enabled;
+  });
+  if(ok)toast(enabled?"👻 Ghost tracking ON":"👻 Ghost tracking OFF",2000);
+};
+
+window.toggleAdminRights=async function(enabled){
+  const ok=await _patchGroupSetting({admin_rights:enabled},()=>{
+    const tog=document.getElementById("admin-rights-toggle");
+    if(tog)tog.checked=!enabled;
+  });
+  if(ok)toast(enabled?"🔒 Admin-only mode ON":"🔒 Admin-only mode OFF",2000);
+};
+
+window.doSaveGhostLimit=async function(){
+  const inp=document.getElementById("ghost-limit-input");
+  const v=parseInt(inp?.value,10);
+  if(!v||v<1){toast("Limit must be ≥ 1",3000);return;}
+  const prev=groupData?.absent_limit||1;
+  const ok=await _patchGroupSetting({absent_limit:v},()=>{if(inp)inp.value=prev;});
+  if(ok)toast("Ghost limit saved.",2000);
 };
 
 // ── New Rollcall modal ───────────────────────────────────────────────────

@@ -225,6 +225,39 @@
           <span class="admin-toggle-slider"></span>
         </label>
       </div>
+      <!-- Ghost tracking -->
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border)">
+        <div>
+          <div style="font-size:.85rem;font-weight:600">👻 Ghost tracking</div>
+          <div style="font-size:.75rem;color:var(--sub)">Track members who RSVP IN but don't show up</div>
+        </div>
+        <label class="admin-toggle">
+          <input type="checkbox" id="ghost-toggle" onchange="toggleGhostTracking(this.checked)"/>
+          <span class="admin-toggle-slider"></span>
+        </label>
+      </div>
+      <!-- Ghost limit -->
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border);gap:8px">
+        <div>
+          <div style="font-size:.85rem;font-weight:600">🔢 Ghost limit</div>
+          <div style="font-size:.75rem;color:var(--sub)">Missed sessions before a warning triggers</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+          <input id="ghost-limit-input" type="number" min="1" max="99" inputmode="numeric" style="width:56px;padding:7px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg);color:var(--text);font-size:.85rem;text-align:center"/>
+          <button class="btn btn-secondary" style="padding:8px 12px" onclick="doSaveGhostLimit()">Save</button>
+        </div>
+      </div>
+      <!-- Admin-only mode -->
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border)">
+        <div>
+          <div style="font-size:.85rem;font-weight:600">🔒 Admin-only mode</div>
+          <div style="font-size:.75rem;color:var(--sub)">Only Telegram admins can use bot commands</div>
+        </div>
+        <label class="admin-toggle">
+          <input type="checkbox" id="admin-rights-toggle" onchange="toggleAdminRights(this.checked)"/>
+          <span class="admin-toggle-slider"></span>
+        </label>
+      </div>
       <!-- Timezone -->
       <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px">
         <div style="font-size:.82rem;font-weight:600;color:var(--sub);margin-bottom:2px">🕐 Timezone</div>

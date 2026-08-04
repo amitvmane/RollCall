@@ -52,12 +52,18 @@ class WebGroupResponse(BaseModel):
     dues_enabled: bool = False
     bot_username: str = ""
     timezone: str = "Asia/Kolkata"
+    admin_rights: bool = False
+    ghost_tracking_enabled: bool = True
+    absent_limit: int = 1
 
 
 class WebGroupSettingsRequest(BaseModel):
     id_token: str = Field(..., description="Signed identity token of the admin making the change")
     shh_mode: Optional[bool] = Field(None, description="Silent mode — suppresses per-vote bot notifications")
     timezone: Optional[str] = Field(None, description="IANA timezone, e.g. Asia/Kolkata — usually the admin's browser-detected zone")
+    admin_rights: Optional[bool] = Field(None, description="Admin-only mode — restricts bot commands to Telegram admins")
+    ghost_tracking_enabled: Optional[bool] = Field(None, description="Track members who RSVP IN but don't show up")
+    absent_limit: Optional[int] = Field(None, ge=1, le=99, description="Missed sessions before a ghost warning triggers")
 
 
 class ScheduledRollcallRequest(BaseModel):

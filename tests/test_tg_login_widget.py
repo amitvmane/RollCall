@@ -178,5 +178,42 @@ class TestTgLoginEndpoints(unittest.TestCase):
         self.assertEqual(res.status_code, 503)
 
 
+@unittest.skipUnless(FASTAPI_AVAILABLE, "fastapi not installed")
+class TestBotUsernameFallback(unittest.TestCase):
+    """_bot_username() must survive a restart-during-outage: if the
+    in-memory Telegram status was never populated (get_me() never ran),
+    it should fall back to the persisted system_config value instead of
+    permanently blocking sign-in until the bot reconnects."""
+
+    def setUp(self):
+        from api.routes.tg_verify import _telegram_status
+        self._status = _telegram_status
+        self._orig = dict(_telegram_status)
+
+    def tearDown(self):
+        self._status.clear()
+        self._status.update(self._orig)
+
+    def test_uses_live_status_when_present(self):
+        self._status["bot_username"] = "@live_bot"
+        from api.routes.tg_verify import _bot_username
+        with patch("api.routes.tg_verify._db.get_system_config") as mock_get:
+            self.assertEqual(_bot_username(), "live_bot")
+            mock_get.assert_not_called()
+
+    def test_falls_back_to_persisted_config_when_live_status_empty(self):
+        self._status["bot_username"] = None
+        from api.routes.tg_verify import _bot_username
+        with patch("api.routes.tg_verify._db.get_system_config", return_value="persisted_bot") as mock_get:
+            self.assertEqual(_bot_username(), "persisted_bot")
+            mock_get.assert_called_once_with("bot_username")
+
+    def test_empty_when_neither_source_has_it(self):
+        self._status["bot_username"] = None
+        from api.routes.tg_verify import _bot_username
+        with patch("api.routes.tg_verify._db.get_system_config", return_value=None):
+            self.assertEqual(_bot_username(), "")
+
+
 if __name__ == "__main__":
     unittest.main()

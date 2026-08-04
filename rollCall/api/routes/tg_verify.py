@@ -72,8 +72,19 @@ def _check_verify_rate(request: Request) -> None:
 
 
 def _bot_username() -> str:
-    """Return the bot @username (without @), or raise if not yet known."""
+    """Return the bot @username (without @), or "" if not yet known.
+
+    Falls back to the persisted system_config value when the in-memory
+    status is empty — that happens whenever the process restarts while
+    Telegram is unreachable (get_me() never runs, so _telegram_status is
+    never populated), which would otherwise permanently block the Login
+    Widget and deep-link sign-in flows for anyone without a prior
+    credential, even though neither flow actually needs live Telegram to
+    verify once the bot's own username is known.
+    """
     raw = _telegram_status.get("bot_username") or ""
+    if not raw:
+        raw = _db.get_system_config("bot_username") or ""
     return raw.lstrip("@")
 
 

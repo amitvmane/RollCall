@@ -175,6 +175,13 @@ def create_app() -> FastAPI:
         try:
             from bot_state import _telegram_status
             uname = (_telegram_status.get("bot_username") or "").lstrip("@")
+            if not uname:
+                # Falls back to the persisted value when the process
+                # restarted while Telegram was unreachable (get_me() never
+                # ran, so _telegram_status was never populated) — otherwise
+                # the "Add to Telegram" CTA silently breaks until reconnect.
+                from db import get_system_config
+                uname = (get_system_config("bot_username") or "").lstrip("@")
         except Exception:
             uname = ""
         add_url = f"https://t.me/{uname}?startgroup=true" if uname else "https://telegram.org"

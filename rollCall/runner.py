@@ -507,6 +507,7 @@ async def _post_connect_setup(me) -> None:
                 from telebot.types import MenuButtonWebApp, WebAppInfo
                 await bot.set_chat_menu_button(
                     menu_button=MenuButtonWebApp(
+                        type="web_app",
                         text="Open RollCall",
                         web_app=WebAppInfo(url=_miniapp_url),
                     )

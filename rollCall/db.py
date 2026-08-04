@@ -5121,6 +5121,24 @@ def set_web_admin(chat_id: int, tg_user_id: int, tg_name: str) -> None:
         logging.exception("set_web_admin failed")
 
 
+def get_web_admin_chats(tg_user_id: int) -> List[int]:
+    """Return every chat_id where this Telegram user is a cached web admin.
+
+    Used to offer a group picker on Telegram-based admin console sign-in
+    without needing a live Telegram call per candidate chat — the picker
+    list itself is allowed to trust the cache; the actual admin grant is
+    still live-verified (see api/web_admin.py) once a chat is selected.
+    """
+    try:
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(f"SELECT chat_id FROM web_admins WHERE tg_user_id={ph}", (tg_user_id,))
+            return [r[0] if not isinstance(r, dict) else r['chat_id'] for r in cursor.fetchall()]
+    except Exception:
+        logging.exception("get_web_admin_chats failed")
+        return []
+
+
 def is_web_admin(chat_id: int, tg_user_id: int) -> bool:
     """Return True if the user is a cached web admin for this chat."""
     try:

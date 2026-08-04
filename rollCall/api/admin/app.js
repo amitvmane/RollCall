@@ -146,6 +146,112 @@ async function doLogin(){
 }
 $id("login-btn").addEventListener("click",doLogin);
 $id("ti").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin()});
+
+// ─── Telegram-based sign-in — Login Widget → identity token → auto-mint an
+// admin bearer token via /auth/admin/session, skipping /gentoken entirely
+// for a returning admin. The token-paste flow above remains for first-time
+// bootstrap (see admin/index.html's <details>) and scripted/API use. ───────
+let _adminWidgetLoaded=false;
+async function _loadAdminWidget(){
+  if(_adminWidgetLoaded)return;
+  try{
+    const res=await fetch(API+"/auth/tg-login/config");
+    if(!res.ok)return;
+    const cfg=await res.json();
+    if(!cfg.bot_username)return;
+    const s=document.createElement("script");
+    s.async=true;
+    s.src="https://telegram.org/js/telegram-widget.js?22";
+    s.setAttribute("data-telegram-login",cfg.bot_username);
+    s.setAttribute("data-size","large");
+    s.setAttribute("data-onauth","onAdminTelegramAuth(user)");
+    s.setAttribute("data-request-access","write");
+    $id("admin-tg-login-widget").appendChild(s);
+    $id("admin-tg-widget-wrap").style.display="";
+    _adminWidgetLoaded=true;
+  }catch(e){
+    // Bot not connected yet or config endpoint unavailable — the token
+    // sign-in fallback still works, so just don't show the widget.
+  }
+}
+
+function _adminTgStatus(msg){
+  const el=$id("admin-tg-status");
+  if(msg){el.textContent=msg;el.style.display="block";}
+  else{el.style.display="none";}
+}
+function _adminTgError(msg){
+  const err=$id("login-error");
+  err.textContent=msg;err.style.display=msg?"block":"none";
+}
+
+window.onAdminTelegramAuth=async function(user){
+  $id("admin-group-picker").style.display="none";
+  _adminTgError("");
+  _adminTgStatus("Verifying…");
+  try{
+    const res=await fetch(API+"/auth/tg-login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(user)});
+    const body=await res.json();
+    if(!res.ok||!body.verified)throw new Error(body.detail||"Verification failed");
+    await _afterAdminIdentity(body.id_token);
+  }catch(e){
+    _adminTgStatus("");
+    _adminTgError("Login failed: "+e.message);
+  }
+};
+
+async function _afterAdminIdentity(idToken){
+  _adminTgStatus("Checking your groups…");
+  try{
+    const res=await fetch(API+"/auth/admin/groups?id_token="+encodeURIComponent(idToken));
+    const body=await res.json();
+    if(!res.ok)throw new Error(body.detail||"Could not load your groups");
+    const groups=body.groups||[];
+    _adminTgStatus("");
+    if(groups.length===0){
+      _adminTgError("No admin groups found for your account yet. Run /gentoken in your group once to get started, or sign in with an API token below.");
+      return;
+    }
+    if(groups.length===1){
+      await _mintAdminSession(idToken,groups[0].chat_id);
+      return;
+    }
+    _renderAdminGroupPicker(groups,idToken);
+  }catch(e){
+    _adminTgStatus("");
+    _adminTgError("Login failed: "+e.message);
+  }
+}
+
+function _renderAdminGroupPicker(groups,idToken){
+  const el=$id("admin-group-picker");
+  el.innerHTML=`<p class="sub" style="font-size:.8rem;text-align:center;margin-bottom:8px">You administer multiple groups — pick one:</p>`+
+    groups.map(g=>`<button type="button" class="admin-group-row" data-cid="${g.chat_id}">${escH(g.group_name)}</button>`).join("");
+  el.style.display="block";
+  el.querySelectorAll(".admin-group-row").forEach(btn=>{
+    btn.addEventListener("click",()=>{
+      el.style.display="none";
+      _mintAdminSession(idToken,parseInt(btn.dataset.cid,10));
+    });
+  });
+}
+
+async function _mintAdminSession(idToken,chatId){
+  _adminTgStatus("Signing in…");
+  try{
+    const res=await fetch(API+"/auth/admin/session",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id_token:idToken,chat_id:chatId})});
+    const body=await res.json();
+    if(!res.ok)throw new Error(body.detail||"Sign-in failed");
+    _adminTgStatus("");
+    S.token=body.token;
+    localStorage.setItem(LS,S.token);
+    boot();
+  }catch(e){
+    _adminTgStatus("");
+    _adminTgError("Login failed: "+e.message);
+  }
+}
+
 function boot(){
   $id("login-screen").style.display="none";$id("app").style.display="block";loadGroups();
   if(S.pollTimer)clearInterval(S.pollTimer);
@@ -170,6 +276,7 @@ S.token=localStorage.getItem(LS)||"";
   // input never touched" produces).
   if(t&&!S.token){$id("ti").value=t;doLogin();}
   else if(S.token)boot();
+  else{_loadAdminWidget();}
   if(t){
     qp.delete("token");
     const u=window.location.pathname+(qp.toString()?"?"+qp:"");

@@ -24,11 +24,30 @@
       <h1>RollCall Admin</h1>
     </div>
     <p class="sub">Manage your groups &amp; rollcalls</p>
-    <label for="ti">Admin API Token</label>
-    <input id="ti" type="password" placeholder="rc_live_…" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false"/>
-    <p id="login-error"></p>
-    <button class="btn btn-primary" id="login-btn" style="width:100%;padding:12px;justify-content:center">Sign in →</button>
-    <p class="login-scope-note">Use a <strong>global admin token</strong> (chat_id=0) for full multi-group access.<br/>Group-specific tokens can only edit their own group.</p>
+
+    <div id="admin-tg-widget-wrap" style="display:none">
+      <div id="admin-tg-login-widget" style="display:flex;justify-content:center;margin-top:4px;min-height:40px"></div>
+      <!-- Telegram's widget script is cross-origin — we can't detect from
+           here whether it actually rendered a working button or its own
+           "Bot domain invalid" error (happens whenever the domain hasn't
+           been set via /setdomain in BotFather). Always show this so a
+           silently-broken widget explains itself instead of leaving
+           instructional text pointing at nothing. -->
+      <p class="sub" style="font-size:.72rem;text-align:center;margin-top:6px;opacity:.75">Nothing above? This login method isn't set up for this domain yet — use an API token below instead.</p>
+    </div>
+    <div id="admin-tg-status" style="margin-top:6px;font-size:.85rem;color:var(--sub);text-align:center;display:none"></div>
+    <div id="admin-group-picker" style="display:none;margin-top:10px"></div>
+
+    <div class="login-divider"><span>or</span></div>
+
+    <details id="admin-token-details">
+      <summary style="cursor:pointer;font-size:.85rem;font-weight:600;color:var(--sub);margin-bottom:10px">Sign in with an API token instead</summary>
+      <label for="ti">Admin API Token</label>
+      <input id="ti" type="password" placeholder="rc_live_…" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false"/>
+      <p id="login-error"></p>
+      <button class="btn btn-primary" id="login-btn" style="width:100%;padding:12px;justify-content:center">Sign in →</button>
+      <p class="login-scope-note">Use a <strong>global admin token</strong> (chat_id=0) for full multi-group access.<br/>Group-specific tokens can only edit their own group.<br/>First time signing in? Run <code>/gentoken</code> in your group, or sign in with Telegram above.</p>
+    </details>
   </div>
 </div>
 

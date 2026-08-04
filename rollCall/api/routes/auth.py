@@ -20,14 +20,14 @@ import logging
 import os
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import List, Optional
 from urllib.parse import parse_qsl, unquote
 
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
-from db import _hash_token, generate_api_token, get_or_create_chat, insert_api_token, is_web_admin
+from db import _hash_token, generate_api_token, get_or_create_chat, get_web_admin_chats, insert_api_token, is_web_admin
 
 router = APIRouter()
 
@@ -217,6 +217,104 @@ async def miniapp_auth(body: MiniAppAuthRequest) -> MiniAppAuthResponse:
         group_token=group_token,
         is_web_admin=web_admin,
         timezone=chat_timezone,
+    )
+
+
+class AdminGroupSummary(BaseModel):
+    chat_id: int
+    group_name: str
+
+
+class AdminGroupsResponse(BaseModel):
+    groups: List[AdminGroupSummary]
+
+
+class AdminSessionRequest(BaseModel):
+    id_token: str
+    chat_id: int
+
+
+class AdminSessionResponse(BaseModel):
+    token: str
+    chat_id: int
+    group_name: str
+    expires_in: int
+
+
+_ADMIN_SESSION_TOKEN_TTL_SECONDS = 365 * 24 * 3600  # matches /gentoken's lifetime
+
+
+@router.get(
+    "/auth/admin/groups",
+    response_model=AdminGroupsResponse,
+    summary="List chats this verified Telegram user has cached web-admin status for",
+)
+async def admin_groups(id_token: str = "") -> AdminGroupsResponse:
+    """
+    Powers the admin console's Telegram-based sign-in: after the Login Widget
+    proves identity, the console calls this to find which group(s) to offer —
+    letting a returning admin skip /gentoken entirely. The list itself trusts
+    the web_admins cache (fast, no per-candidate Telegram call); the actual
+    grant is re-verified live in /auth/admin/session once a group is chosen.
+
+    Returns an empty list for a genuinely first-time admin who has never
+    triggered any web-admin cache write (no /weblink, no group web page
+    visit) — /gentoken remains the bootstrap path for that case.
+    """
+    from api.identity import verify_identity_token
+    tg_user_id = verify_identity_token(id_token)
+    if not tg_user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired identity token")
+
+    chat_ids = get_web_admin_chats(tg_user_id)
+    groups = []
+    for cid in chat_ids:
+        row = get_or_create_chat(cid)
+        groups.append(AdminGroupSummary(chat_id=cid, group_name=row.get("group_name") or f"Chat {cid}"))
+    return AdminGroupsResponse(groups=groups)
+
+
+@router.post(
+    "/auth/admin/session",
+    response_model=AdminSessionResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Exchange a verified Telegram identity for a chat-scoped admin bearer token",
+)
+async def admin_session(body: AdminSessionRequest) -> AdminSessionResponse:
+    """
+    Mints exactly the kind of token /gentoken does (scopes admin,read,vote,
+    365-day expiry) — existing admin console REST calls and the bearer-token
+    auth dependency need zero changes — but triggered by the Login Widget
+    instead of a bot command, and gated by a LIVE re-check (not just the
+    cache), so this can't be used to ride a stale grant.
+    """
+    from api.identity import verify_identity_token
+    tg_user_id = verify_identity_token(body.id_token)
+    if not tg_user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired identity token")
+
+    from api.web_admin import check_web_admin_live
+    if not await check_web_admin_live(body.chat_id, tg_user_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not an admin of this group")
+
+    chat_row = get_or_create_chat(body.chat_id)
+    raw_token = generate_api_token()
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=_ADMIN_SESSION_TOKEN_TTL_SECONDS)
+    insert_api_token(
+        token_hash=_hash_token(raw_token),
+        chat_id=body.chat_id,
+        scopes="admin,read,vote",
+        label=f"web-signin:user={tg_user_id}",
+        issued_by_user_id=tg_user_id,
+        expires_at=expires_at,
+    )
+    logging.info("[admin_session] issued token chat=%s user=%s expires=%s", body.chat_id, tg_user_id, expires_at.isoformat())
+
+    return AdminSessionResponse(
+        token=raw_token,
+        chat_id=body.chat_id,
+        group_name=chat_row.get("group_name") or f"Chat {body.chat_id}",
+        expires_in=_ADMIN_SESSION_TOKEN_TTL_SECONDS,
     )
 
 

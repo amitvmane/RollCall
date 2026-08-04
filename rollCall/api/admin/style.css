@@ -24,6 +24,13 @@ body{font-family:var(--font-body);background:var(--bg);color:var(--text);-webkit
 #login-error{color:var(--danger);font-size:.82rem;margin-bottom:10px;display:none;padding:8px 12px;background:var(--danger-dim);border-radius:6px}
 .login-scope-note{font-size:.75rem;color:var(--sub);margin-top:10px;text-align:center;line-height:1.5}
 
+/* Login Widget divider + group picker (Telegram-based admin sign-in) */
+.login-divider{display:flex;align-items:center;gap:10px;margin:18px 0 10px;color:var(--sub);font-size:.78rem;text-transform:uppercase;letter-spacing:.08em}
+.login-divider::before,.login-divider::after{content:"";flex:1;height:1px;background:var(--border)}
+.admin-group-row{width:100%;text-align:left;padding:10px 12px;margin-bottom:8px;background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:.88rem;font-weight:600;cursor:pointer;transition:border-color .15s,background .15s}
+.admin-group-row:hover{border-color:var(--accent);background:var(--accent-dim)}
+.admin-group-row:last-child{margin-bottom:0}
+
 /* ── Top bar — neutral surface, not a solid accent band. The accent is
    spent deliberately elsewhere (buttons, active states, the logo mark). ── */
 .topbar{background:var(--card);color:var(--text);padding:0 16px;height:54px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:200;border-bottom:1px solid var(--border)}

@@ -225,47 +225,8 @@ async def web_admin_status(
         return WebAdminStatusResponse(is_admin=False)
     chat_id = int(chat["chat_id"])
 
-    # Only live-check against Telegram when the group has actually locked
-    # itself down with /set_admins — same gate functions.admin_rights() uses
-    # for every Telegram-side admin command. In a default-open group (the
-    # default), Telegram admin/creator status was never the criterion for
-    # granting web-admin in the first place (/weblink hands it to anyone),
-    # so treating "not a Telegram admin" as "revoke" here would silently
-    # undo that grant for the common case the instant the page loads.
-    from rollcall_manager import manager as _mgr
-    if not _mgr.get_admin_rights(chat_id):
-        return WebAdminStatusResponse(is_admin=_db.is_web_admin(chat_id, tg_user_id))
-
-    # Live-check against Telegram on every load instead of trusting a
-    # snapshot forever: promotes a real Telegram admin automatically (no
-    # /weblink needed — that command still exists and still calls
-    # set_web_admin as a convenience for command-line users, but it's no
-    # longer the only way in) and revokes anyone who's lost their admin
-    # role since the cache was last set.
-    try:
-        from bot_state import bot
-        member = await bot.get_chat_member(chat_id, tg_user_id)
-        is_admin_now = member.status in ("administrator", "creator")
-    except Exception:
-        # Telegram unreachable, bot removed from the group, rate-limited,
-        # etc. — fall back to the cached flag rather than locking an admin
-        # out of the one surface that's supposed to keep working when
-        # Telegram itself is down.
-        logging.warning(
-            "[web_admin_status] live check failed chat=%s user=%s — using cached value",
-            chat_id, tg_user_id, exc_info=True,
-        )
-        return WebAdminStatusResponse(is_admin=_db.is_web_admin(chat_id, tg_user_id))
-
-    # Bookkeeping is intentionally outside the try above — a bug here
-    # shouldn't be silently reinterpreted as "Telegram is down" and masked
-    # by the cache fallback.
-    if is_admin_now:
-        name = getattr(getattr(member, "user", None), "first_name", None) or f"user{tg_user_id}"
-        _db.set_web_admin(chat_id, tg_user_id, name)
-    else:
-        _db.revoke_web_admin(chat_id, tg_user_id)
-    return WebAdminStatusResponse(is_admin=is_admin_now)
+    from api.web_admin import check_web_admin_live
+    return WebAdminStatusResponse(is_admin=await check_web_admin_live(chat_id, tg_user_id))
 
 
 @router.patch(

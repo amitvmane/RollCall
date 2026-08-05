@@ -1,7 +1,7 @@
 (function(){
 "use strict";
 
-const API="/api/v1", LS="rc_admin_token";
+const API="/api/v1", LS="rc_admin_token", LS_VERIFY_CODE="rc_admin_verify_code";
 const S={token:"",groups:[],selCid:null,tabState:{},memberCache:{},groupNames:{},statsLoaded:{},telegramOk:null};
 
 // ─── Icon set — small stroke-based SVGs (currentColor) for chrome controls,
@@ -151,6 +151,61 @@ $id("ti").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin()});
 // admin bearer token via /auth/admin/session, skipping /gentoken entirely
 // for a returning admin. The token-paste flow above remains for first-time
 // bootstrap (see admin/index.html's <details>) and scripted/API use. ───────
+
+// Deep-link verify — same /auth/tg-verify flow the portal uses, works with
+// just the Telegram app installed, no BotFather /setdomain widget setup
+// needed. Primary option, matching the portal's own ordering.
+let _adminVerifyPollTimer=null;
+window.startAdminVerify=async function(){
+  const btn=$id("admin-verify-btn");
+  _adminTgError("");
+  btn.disabled=true;btn.textContent="Starting…";
+  _adminTgStatus("");
+  try{
+    const res=await fetch(API+"/auth/tg-verify/start",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
+    const body=await res.json();
+    if(!res.ok)throw new Error(body.detail||"Could not start verification");
+    localStorage.setItem(LS_VERIFY_CODE,body.code);
+    window.open(body.deep_link,"_blank");
+    _adminTgStatus("Telegram opened — tap Start in the bot, then return here.");
+    btn.textContent="Waiting for verification…";
+    if(_adminVerifyPollTimer)clearInterval(_adminVerifyPollTimer);
+    _adminVerifyPollTimer=setInterval(()=>_checkAdminVerify(body.code),2000);
+  }catch(e){
+    btn.disabled=false;btn.textContent="Verify with Telegram →";
+    _adminTgError("Error: "+e.message);
+  }
+};
+
+async function _checkAdminVerify(code){
+  try{
+    const res=await fetch(API+"/auth/tg-verify/status/"+code);
+    if(!res.ok)return; // 404 = not yet verified, keep polling
+    const body=await res.json();
+    if(body.verified){
+      clearInterval(_adminVerifyPollTimer);_adminVerifyPollTimer=null;
+      localStorage.removeItem(LS_VERIFY_CODE);
+      const btn=$id("admin-verify-btn");
+      if(btn){btn.disabled=false;btn.textContent="Verify with Telegram →";}
+      await _afterAdminIdentity(body.id_token);
+    }
+  }catch(e){
+    // Network hiccup mid-poll — try again on the next tick rather than
+    // giving up on a single failed request.
+  }
+}
+
+// Resume polling if the tab was reloaded mid-verification (e.g. switching
+// back from the Telegram app closed the original tab's JS context on some
+// mobile browsers).
+(function _resumeAdminVerify(){
+  const code=localStorage.getItem(LS_VERIFY_CODE);
+  if(code&&!localStorage.getItem(LS)){
+    _adminTgStatus("Waiting for verification…");
+    _adminVerifyPollTimer=setInterval(()=>_checkAdminVerify(code),2000);
+  }
+})();
+
 let _adminWidgetLoaded=false;
 async function _loadAdminWidget(){
   if(_adminWidgetLoaded)return;

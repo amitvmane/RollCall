@@ -25,8 +25,17 @@
     </div>
     <p class="sub">Manage your groups &amp; rollcalls</p>
 
+    <!-- Same three sign-in options as the portal, same order: deep-link
+         verify (works with just the Telegram app, no widget setup needed),
+         Login Widget, then a fallback for scripts/first-time bootstrap. -->
+    <button class="btn btn-primary" id="admin-verify-btn" style="width:100%;padding:12px;justify-content:center" onclick="startAdminVerify()">Verify with Telegram →</button>
+    <div id="admin-tg-status" style="margin-top:10px;font-size:.85rem;color:var(--sub);text-align:center;display:none"></div>
+    <div id="admin-group-picker" style="display:none;margin-top:10px"></div>
+
     <div id="admin-tg-widget-wrap" style="display:none">
-      <div id="admin-tg-login-widget" style="display:flex;justify-content:center;margin-top:4px;min-height:40px"></div>
+      <div class="login-divider"><span>or</span></div>
+      <p class="sub" style="font-size:.8rem;text-align:center;margin-bottom:0">No Telegram app on this device? Log in with your Telegram account directly:</p>
+      <div id="admin-tg-login-widget" style="display:flex;justify-content:center;margin-top:8px;min-height:40px"></div>
       <!-- Telegram's widget script is cross-origin — we can't detect from
            here whether it actually rendered a working button or its own
            "Bot domain invalid" error (happens whenever the domain hasn't
@@ -35,8 +44,6 @@
            instructional text pointing at nothing. -->
       <p class="sub" style="font-size:.72rem;text-align:center;margin-top:6px;opacity:.75">Nothing above? This login method isn't set up for this domain yet — use an API token below instead.</p>
     </div>
-    <div id="admin-tg-status" style="margin-top:6px;font-size:.85rem;color:var(--sub);text-align:center;display:none"></div>
-    <div id="admin-group-picker" style="display:none;margin-top:10px"></div>
 
     <div class="login-divider"><span>or</span></div>
 

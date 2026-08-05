@@ -2520,7 +2520,7 @@ window.toggleAdminSection=function(name){
 // ── Recurring template schedules (self-serve — no server/API-token needed,
 // unlike the separate /admin/ console) ──────────────────────────────────
 const WEEKDAYS=["monday","tuesday","wednesday","thursday","friday","saturday","sunday"];
-let _templatesScheduleOpen=false, _templatesCache=null, _templatesEditingName=null;
+let _templatesScheduleOpen=false, _templatesCache=null, _templatesEditingName=null, _templatesCreatingNew=false;
 
 window.toggleTemplatesSchedule=async function(){
   _templatesScheduleOpen=!_templatesScheduleOpen;
@@ -2585,14 +2585,35 @@ function nextRecurrenceEpoch(t){
   return null;
 }
 
+// Blank stub for the "+ New Template" form — same shape renderTemplateEditForm
+// expects from a real template, just empty. Uses the "__new__" key instead
+// of a real name so form element ids stay stable while the name itself is
+// still being typed (a name isn't known — or valid as an id fragment —
+// until the admin enters one).
+function _blankNewTemplate(){
+  return {name:"__new__", title:"", location:"", fee:"", limit:null,
+    event_day:null, event_time:null, recurrence_type:"weekly",
+    schedule_day:null, schedule_time:"09:00", schedule_enabled:false, schedule_expires_at:null};
+}
+
+window.toggleNewTemplateForm=function(){
+  _templatesCreatingNew=!_templatesCreatingNew;
+  if(_templatesCreatingNew)_templatesEditingName=null; // one form open at a time
+  renderTemplatesSchedule();
+};
+
 function renderTemplatesSchedule(){
   const body=document.getElementById("templates-schedule-body");
   if(!body)return;
+  const newBtnRow=`<div style="margin-bottom:10px">
+    <button class="id-change" style="width:100%;padding:8px;text-align:center;border:1.5px dashed var(--border);border-radius:8px" onclick="toggleNewTemplateForm()">${_templatesCreatingNew?"✕ Cancel":"➕ New Template"}</button>
+    ${_templatesCreatingNew?renderTemplateEditForm(_blankNewTemplate(),true):""}
+  </div>`;
   if(!_templatesCache||!_templatesCache.length){
-    body.innerHTML='<div class="sched-empty">No templates yet — create one with /set_template in the group.</div>';
+    body.innerHTML=newBtnRow+'<div class="sched-empty">No templates yet — tap "New Template" above, or create one with /set_template in the group.</div>';
     return;
   }
-  body.innerHTML=_templatesCache.map(t=>{
+  body.innerHTML=newBtnRow+_templatesCache.map(t=>{
     const enabled=t.schedule_enabled;
     const recLabel={daily:"daily",weekly:"weekly",biweekly:"every 2 weeks",monthly:"monthly"}[t.recurrence_type]||t.recurrence_type;
     // A template with no recurring schedule can still have a pending
@@ -2641,7 +2662,7 @@ function renderTemplatesSchedule(){
   }).join("");
 }
 
-function renderTemplateEditForm(t){
+function renderTemplateEditForm(t,isNew){
   const isMonthly=t.recurrence_type==="monthly";
   const isDaily=t.recurrence_type==="daily";
   const safeName=esc(t.name);
@@ -2658,7 +2679,15 @@ function renderTemplateEditForm(t){
   const eventDayOpts='<option value="">No fixed day</option>'+WEEKDAYS.map(d=>`<option value="${d}" ${t.event_day===d?"selected":""}>${d[0].toUpperCase()+d.slice(1)}</option>`).join("");
   const inp=(id,val,ph)=>`<input id="${id}" type="text" placeholder="${ph}" value="${esc(val||"")}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem"/>`;
   const sublabel=text=>`<div style="font-size:.72rem;color:var(--sub);margin-top:-4px">${text}</div>`;
+  // A new template is created content-only, same as one made with the
+  // Telegram /set_template command — scheduling is already a separate,
+  // later step for existing templates too (the row's own enable toggle),
+  // so skipping the schedule section here avoids ambiguity about whether
+  // default values sitting in an unfilled section should actually save.
   return `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px">
+    ${isNew?`<div class="id-prompt-label" style="text-align:left;margin-bottom:0">Name</div>
+    ${sublabel("Internal identifier only — not shown to voters. Use the Title below for that.")}
+    <input id="tsf-name-__new__" type="text" placeholder="e.g. sunday-badminton" maxlength="50" style="padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem"/>`:""}
     <div class="id-prompt-label" style="text-align:left;margin-bottom:0">Details</div>
     ${inp(`tsf-title-${safeName}`,t.title,"Title")}
     <div style="display:flex;gap:8px">
@@ -2674,6 +2703,7 @@ function renderTemplateEditForm(t){
       <input id="tsf-eventtime-${safeName}" type="time" value="${esc(t.event_time||"")}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem"/>
     </div>
 
+    ${isNew?`${sublabel("You can set a recurring auto-start schedule after creating, from this list.")}`:`
     <div class="id-prompt-label" style="text-align:left;margin-bottom:0;margin-top:4px">🗓 Auto-start schedule</div>
     ${sublabel("When this template repeats and opens a new rollcall automatically — separate from the event time above.")}
     <label style="font-size:.78rem;font-weight:600;color:var(--sub)">Repeat</label>
@@ -2699,8 +2729,8 @@ function renderTemplateEditForm(t){
       </select>
       <input id="tsf-expdate-${safeName}" type="date" value="${esc(t.schedule_expires_at||"")}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem"/>
     </div>
-    ${sublabel("The template stays — only the recurring schedule turns off, and you can re-enable it anytime.")}
-    <button class="btn btn-primary" style="padding:9px" onclick="saveTemplate('${esc(escJsAttr(t.name))}')">💾 Save</button>
+    ${sublabel("The template stays — only the recurring schedule turns off, and you can re-enable it anytime.")}`}
+    <button class="btn btn-primary" style="padding:9px" onclick="saveTemplate('${esc(escJsAttr(t.name))}')">${isNew?"➕ Create":"💾 Save"}</button>
   </div>`;
 }
 
@@ -2743,32 +2773,49 @@ window._onTsfRecurrenceChange=function(name){
 
 window.toggleTemplateEditForm=function(name){
   _templatesEditingName=_templatesEditingName===name?null:name;
+  if(_templatesEditingName)_templatesCreatingNew=false; // one form open at a time
   renderTemplatesSchedule();
 };
 
-window.saveTemplate=async function(name){
+window.saveTemplate=async function(key){
+  // key is either an existing template's real name, or the "__new__"
+  // sentinel renderTemplateEditForm uses for the create form — resolve the
+  // actual name to save under, but keep using `key` to read form element
+  // ids (that's what they were rendered with).
+  const isNew=key==="__new__";
+  let name=key;
+  if(isNew){
+    name=(document.getElementById("tsf-name-__new__")?.value||"").trim();
+    if(!name){toast("Enter a name for the template.",2500);return;}
+    if((_templatesCache||[]).some(t=>t.name.toLowerCase()===name.toLowerCase())){
+      toast(`A template named "${name}" already exists.`,3000);
+      return;
+    }
+  }
   // Only push a schedule update if the schedule is already enabled for this
   // template — otherwise saving content-only edits would silently switch a
   // disabled schedule on using whatever defaults happen to sit in the form.
-  const current=(_templatesCache||[]).find(t=>t.name===name);
-  const scheduleWasEnabled=!!(current&&current.schedule_enabled);
+  // Always false for a new template — its create form has no schedule
+  // section (see renderTemplateEditForm), scheduling is a separate step.
+  const current=(_templatesCache||[]).find(t=>t.name===key);
+  const scheduleWasEnabled=!isNew&&!!(current&&current.schedule_enabled);
 
   let scheduleBody=null;
   if(scheduleWasEnabled){
-    const recurrence_type=document.getElementById(`tsf-rec-${name}`).value;
-    const schedule_time=document.getElementById(`tsf-time-${name}`).value;
+    const recurrence_type=document.getElementById(`tsf-rec-${key}`).value;
+    const schedule_time=document.getElementById(`tsf-time-${key}`).value;
     if(!schedule_time){toast("Pick a time first.",2500);return;}
     scheduleBody={id_token:_idToken,recurrence_type,schedule_time};
     if(recurrence_type==="monthly"){
-      const md=parseInt(document.getElementById(`tsf-monthday-${name}`).value,10);
+      const md=parseInt(document.getElementById(`tsf-monthday-${key}`).value,10);
       if(!md||md<1||md>31){toast("Enter a day of month (1-31).",2500);return;}
       scheduleBody.monthly_day=md;
     }else if(recurrence_type!=="daily"){
-      scheduleBody.schedule_day=document.getElementById(`tsf-day-${name}`).value;
+      scheduleBody.schedule_day=document.getElementById(`tsf-day-${key}`).value;
     }
-    const expMode=document.getElementById(`tsf-expmode-${name}`)?.value;
+    const expMode=document.getElementById(`tsf-expmode-${key}`)?.value;
     if(expMode==="custom"){
-      const expDate=document.getElementById(`tsf-expdate-${name}`)?.value;
+      const expDate=document.getElementById(`tsf-expdate-${key}`)?.value;
       if(!expDate){toast("Pick an auto-disable date, or choose 6/12 months.",2500);return;}
       scheduleBody.expires_at=expDate;
     }else if(expMode){
@@ -2781,21 +2828,21 @@ window.saveTemplate=async function(name){
   }
   const contentBody={
     id_token:_idToken,
-    title:document.getElementById(`tsf-title-${name}`).value||null,
-    location:document.getElementById(`tsf-location-${name}`).value||null,
-    fee:document.getElementById(`tsf-fee-${name}`).value||null,
+    title:document.getElementById(`tsf-title-${key}`).value||null,
+    location:document.getElementById(`tsf-location-${key}`).value||null,
+    fee:document.getElementById(`tsf-fee-${key}`).value||null,
   };
   // 0 is the backend's "explicitly clear the cap" sentinel (no real limit
   // is ever 0) — sent when the field is left blank, so clearing it here
   // actually removes the cap instead of silently preserving the old one.
-  const limitVal=document.getElementById(`tsf-limit-${name}`).value;
+  const limitVal=document.getElementById(`tsf-limit-${key}`).value;
   contentBody.limit=limitVal?parseInt(limitVal,10):0;
 
   // Event day/time (when the game happens — auto-closes the rollcall) is
   // separate from the schedule above (when the template auto-opens). Both
   // or neither — a lone value silently does nothing on the backend.
-  const eventDay=document.getElementById(`tsf-eventday-${name}`).value||null;
-  const eventTime=document.getElementById(`tsf-eventtime-${name}`).value||null;
+  const eventDay=document.getElementById(`tsf-eventday-${key}`).value||null;
+  const eventTime=document.getElementById(`tsf-eventtime-${key}`).value||null;
   if((eventDay&&!eventTime)||(!eventDay&&eventTime)){
     toast("Set both event day and time, or leave both blank.",3000);
     return;
@@ -2823,10 +2870,16 @@ window.saveTemplate=async function(name){
       updated=await schedRes.json();
     }
 
-    _templatesCache=_templatesCache.map(t=>t.name===name?updated:t);
-    _templatesEditingName=null;
+    if(isNew){
+      _templatesCache=[...(_templatesCache||[]),updated];
+      _templatesCreatingNew=false;
+      toast(`➕ Created ${name}`,2500);
+    }else{
+      _templatesCache=_templatesCache.map(t=>t.name===name?updated:t);
+      _templatesEditingName=null;
+      toast(`💾 Saved ${name}`,2500);
+    }
     renderTemplatesSchedule();
-    toast(`💾 Saved ${name}`,2500);
   }catch(e){toast(e.message||"Could not save template",4000);}
 };
 

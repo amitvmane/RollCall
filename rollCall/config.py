@@ -1,4 +1,5 @@
 import os
+import secrets
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -42,6 +43,19 @@ if not DATABASE_URL.startswith(("sqlite://", "postgresql://", "postgres://")):
 # Leave unset (or empty) to use long-polling (default).
 # Example: https://mybot.example.com/webhook
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "").strip() or None
+
+# Telegram echoes this back as the X-Telegram-Bot-Api-Secret-Token header on
+# every webhook POST — the only way for webhook_handler to verify a request
+# genuinely came from Telegram rather than anyone who discovers the webhook
+# URL (which is not itself a secret — it's documented in .env.example).
+# Only generated when webhook mode is actually enabled. No persistence is
+# required even when auto-generated: bot.set_webhook() re-registers it with
+# Telegram on every startup, so Telegram and this process always agree on
+# the current value regardless of restarts.
+WEBHOOK_SECRET_TOKEN = (
+    (os.environ.get("WEBHOOK_SECRET_TOKEN", "").strip() or secrets.token_urlsafe(32))
+    if WEBHOOK_URL else None
+)
 
 # Ghost tracking defaults
 DEFAULT_ABSENT_LIMIT = 1

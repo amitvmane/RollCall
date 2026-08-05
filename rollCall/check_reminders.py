@@ -387,15 +387,25 @@ async def _warn_unsettled_dues(chat_id: int):
         logging.exception(f"[scheduler] unsettled-dues warning failed for chat {chat_id}")
 
 
-async def _auto_start_from_template(chat_id: int, tmpl: dict) -> bool:
+async def _auto_start_from_template(chat_id: int, tmpl: dict, stamp_date: str = None) -> bool:
     """Create a rollcall from a scheduled template and announce it to the group.
 
     Returns True if a rollcall was actually created, False if auto-start was
-    skipped (currently: the 3-active-rollcalls cap). The caller must only
-    stamp last_scheduled_date when this returns True — stamping on a skip
-    would mark today as "fired" even though no rollcall was created, losing
+    skipped (currently: the 3-active-rollcalls cap). Skips never stamp —
+    marking today as "fired" when nothing was actually started would lose
     that occurrence until the next scheduled date instead of retrying once
     the cap clears.
+
+    If `stamp_date` is given, last_scheduled_date is recorded *before* the
+    rollcall is created (not by the caller afterward) — this is the
+    scheduler's idempotency claim. A crash between creating the rollcall and
+    stamping it "fired" would otherwise leave the row looking un-fired, so a
+    restart picks the same due template back up and double-fires it. Stamping
+    first means a mid-creation crash instead skips that one occurrence (fixed
+    at the next scheduled date) — a missed rollcall is recoverable by hand;
+    a silent duplicate is not. Callers that don't track scheduling (e.g. the
+    manual "start now" button) simply omit stamp_date and get the old
+    unstamped behavior.
     """
     from rollcall_manager import manager
     from functions import get_next_weekday_datetime
@@ -434,6 +444,9 @@ async def _auto_start_from_template(chat_id: int, tmpl: dict) -> bool:
                     f"[scheduler] Failed to send max-rollcalls warning for chat {chat_id}"
                 )
         return False
+
+    if stamp_date is not None:
+        update_template_last_scheduled_date(chat_id, tmpl["name"], stamp_date)
 
     title = tmpl.get("title") or tmpl["name"]
     rc = manager.add_rollcall(chat_id, title)
@@ -660,6 +673,15 @@ async def _fire_scheduled_rollcalls():
                     pass
                 continue
 
+            # Claim this row before creating anything: if the process
+            # crashes anywhere below (between creating the rollcall and the
+            # old end-of-function mark_scheduled_rollcall_fired call), a
+            # restart would previously re-fetch this same still-unfired row
+            # and create a second rollcall for it. Claiming first means a
+            # mid-fire crash instead skips the fire — recoverable by hand,
+            # unlike a silent duplicate rollcall.
+            mark_scheduled_rollcall_fired(row_id)
+
             # One-time "Schedule" (web unified flow) always saves a template
             # first, then repurposes this row's existing `title` column to
             # hold that template's NAME rather than a bare display title —
@@ -722,7 +744,6 @@ async def _fire_scheduled_rollcalls():
                 _reminder_task = asyncio.create_task(start(manager.get_rollcalls(chat_id), _rc_tz, chat_id))
                 _reminder_task.add_done_callback(_log_exc)
 
-            mark_scheduled_rollcall_fired(row_id)
             logging.info("[scheduler] Fired scheduled rollcall '%s' for chat %s", title, chat_id)
         except Exception:
             logging.exception(
@@ -837,9 +858,8 @@ async def check_template_schedules():
                     continue
 
                 try:
-                    started = await _auto_start_from_template(chat_id, tmpl)
+                    started = await _auto_start_from_template(chat_id, tmpl, stamp_date=today_date)
                     if started:
-                        update_template_last_scheduled_date(chat_id, tmpl["name"], today_date)
                         logging.info(
                             f"[scheduler] Auto-started template '{tmpl.get('name')}' for chat {chat_id} "
                             f"(scheduled {schedule_day} {schedule_time}, fired at {now.strftime('%H:%M:%S')})"

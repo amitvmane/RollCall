@@ -655,6 +655,51 @@ class TestFireScheduledRollcalls(unittest.TestCase):
         start_tmpl.assert_not_called()
         mark_fired.assert_called_once_with(1)
 
+    def test_claims_row_before_creating_rollcall(self):
+        """Idempotency fix: the row must be marked fired BEFORE the rollcall
+        is created, not after. A crash between "created" and "marked fired"
+        would otherwise leave the row looking pending, and a restart would
+        re-fetch and re-fire it — double-creating the rollcall. Claiming
+        first means a mid-fire crash instead skips the fire (recoverable by
+        hand), which is the safer failure mode."""
+        import rollcall_manager as _rcm
+        import services.templates as _tmpl_mod
+        import handlers.lifecycle as _lifecycle_mod
+        import bot_state as _bot_state_mod
+        import db as _db_mod
+
+        real_mod = self._load_real_module()
+        row = self._row(title="Just A Title")
+        rc = MagicMock()
+        rc.finalizeDate = None
+        mgr = _rcm.manager
+        order = []
+
+        def _fake_mark_fired(row_id):
+            order.append("claim")
+
+        def _fake_add_rollcall(chat_id, title):
+            order.append("create")
+            return rc
+
+        with patch.object(real_mod, 'get_pending_scheduled_rollcalls', return_value=[row]), \
+             patch.object(real_mod, 'mark_scheduled_rollcall_fired', side_effect=_fake_mark_fired), \
+             patch.object(_db_mod, 'get_template', return_value=None), \
+             patch.object(mgr, 'get_rollcalls', side_effect=[[], [rc]]), \
+             patch.object(mgr, 'add_rollcall', side_effect=_fake_add_rollcall), \
+             patch.object(_tmpl_mod, 'start_template'), \
+             patch.object(_bot_state_mod.bot, 'send_message', new_callable=AsyncMock), \
+             patch.object(_lifecycle_mod, 'get_status_keyboard', new_callable=AsyncMock), \
+             patch.object(_lifecycle_mod, '_build_panel_text', return_value="panel text"), \
+             patch.object(_lifecycle_mod, '_persist_panel_msg_id'):
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(real_mod._fire_scheduled_rollcalls())
+            finally:
+                loop.close()
+
+        self.assertEqual(order, ["claim", "create"])
+
 
 class TestIsDueNowDaily(unittest.TestCase):
     """_is_due_now's daily branch — fires every day at the configured time
@@ -811,10 +856,17 @@ class TestScheduleExpiryAutoDisable(unittest.TestCase):
 
 class TestCapReachedDoesNotStampSchedule(unittest.TestCase):
     """Regression: when _auto_start_from_template skips creating a rollcall
-    (e.g. the 3-active-rollcalls cap), the caller must NOT stamp
-    last_scheduled_date — otherwise that day's/week's occurrence is silently
-    lost even though nothing was actually started, and a same-day /erc that
-    frees capacity has no way to trigger a retry."""
+    (e.g. the 3-active-rollcalls cap), last_scheduled_date must NOT be
+    stamped — otherwise that day's/week's occurrence is silently lost even
+    though nothing was actually started, and a same-day /erc that frees
+    capacity has no way to trigger a retry.
+
+    Idempotency fix: the stamp now happens *inside* _auto_start_from_template
+    (via the stamp_date kwarg), before the rollcall is created, rather than
+    by the caller after the fact — see _auto_start_from_template's docstring.
+    check_template_schedules just has to pass stamp_date through and no
+    longer stamps anything itself, so these tests exercise the real function
+    directly instead of mocking it out."""
 
     _load_real_module = TestCheckRemindersLogging._load_real_module
 
@@ -847,10 +899,10 @@ class TestCapReachedDoesNotStampSchedule(unittest.TestCase):
         with patch.object(real_mod, 'get_all_scheduled_templates', return_value=[tmpl]), \
              patch.object(real_mod, '_fire_scheduled_rollcalls', new_callable=AsyncMock), \
              patch.object(mgr, 'get_chat', return_value={"timezone": "Asia/Kolkata"}), \
+             patch.object(mgr, 'get_rollcalls', return_value=[MagicMock()] * 3), \
              patch.object(real_mod, '_is_due_now', return_value=True), \
-             patch.object(real_mod, '_auto_start_from_template',
-                          new=AsyncMock(return_value=False)) as auto_start, \
              patch.object(real_mod, 'update_template_last_scheduled_date') as update_last, \
+             patch.object(real_mod.bot, 'send_message', new_callable=AsyncMock), \
              patch('periodic_jobs.run_periodic_jobs', new_callable=AsyncMock, create=True), \
              patch.object(real_mod.asyncio, 'sleep', side_effect=self._controlled_sleep_after_one_pass()):
             loop = asyncio.new_event_loop()
@@ -860,23 +912,30 @@ class TestCapReachedDoesNotStampSchedule(unittest.TestCase):
             finally:
                 loop.close()
 
-        auto_start.assert_called_once()
         update_last.assert_not_called()
 
     def test_started_does_stamp(self):
         import rollcall_manager as _rcm
+        import handlers.lifecycle as _lifecycle_mod
 
         real_mod = self._load_real_module()
         tmpl = self._tmpl()
         mgr = _rcm.manager
+        rc = MagicMock()
+        rc.finalizeDate = None
 
         with patch.object(real_mod, 'get_all_scheduled_templates', return_value=[tmpl]), \
              patch.object(real_mod, '_fire_scheduled_rollcalls', new_callable=AsyncMock), \
              patch.object(mgr, 'get_chat', return_value={"timezone": "Asia/Kolkata"}), \
+             patch.object(mgr, 'get_rollcalls', return_value=[]), \
+             patch.object(mgr, 'add_rollcall', return_value=rc), \
              patch.object(real_mod, '_is_due_now', return_value=True), \
-             patch.object(real_mod, '_auto_start_from_template',
-                          new=AsyncMock(return_value=True)) as auto_start, \
+             patch.object(real_mod, '_warn_unsettled_dues', new_callable=AsyncMock), \
              patch.object(real_mod, 'update_template_last_scheduled_date') as update_last, \
+             patch.object(_lifecycle_mod, 'get_status_keyboard', new_callable=AsyncMock), \
+             patch.object(_lifecycle_mod, '_build_panel_text', return_value="panel text"), \
+             patch.object(_lifecycle_mod, '_persist_panel_msg_id'), \
+             patch.object(real_mod.bot, 'send_message', new_callable=AsyncMock), \
              patch('periodic_jobs.run_periodic_jobs', new_callable=AsyncMock, create=True), \
              patch.object(real_mod.asyncio, 'sleep', side_effect=self._controlled_sleep_after_one_pass()):
             loop = asyncio.new_event_loop()
@@ -886,8 +945,80 @@ class TestCapReachedDoesNotStampSchedule(unittest.TestCase):
             finally:
                 loop.close()
 
-        auto_start.assert_called_once()
         update_last.assert_called_once()
+        self.assertEqual(update_last.call_args.args[0], -100)
+        self.assertEqual(update_last.call_args.args[1], "sunday-game")
+
+
+class TestAutoStartStampsBeforeCreating(unittest.IsolatedAsyncioTestCase):
+    """Idempotency fix: _auto_start_from_template must stamp
+    last_scheduled_date (when given stamp_date) BEFORE creating the
+    rollcall — not after, and not left to the caller. A crash between
+    "rollcall created" and "stamped fired" would otherwise leave the row
+    looking un-fired, so a restart re-fires the same template on top of the
+    one that already exists. Stamping first means a mid-creation crash
+    instead skips that one occurrence, which is recoverable by hand."""
+
+    _load_real_module = TestCheckRemindersLogging._load_real_module
+
+    async def test_stamp_happens_before_add_rollcall(self):
+        import rollcall_manager as _rcm
+        import handlers.lifecycle as _lifecycle_mod
+
+        real_mod = self._load_real_module()
+        mgr = _rcm.manager
+        rc = MagicMock()
+        rc.finalizeDate = None
+        order = []
+
+        def _fake_stamp(chatid, name, date_str):
+            order.append("stamp")
+
+        def _fake_add_rollcall(chat_id, title):
+            order.append("create")
+            return rc
+
+        with patch.object(mgr, 'get_chat', return_value={"timezone": "Asia/Kolkata"}), \
+             patch.object(mgr, 'get_rollcalls', return_value=[]), \
+             patch.object(mgr, 'add_rollcall', side_effect=_fake_add_rollcall), \
+             patch.object(real_mod, 'update_template_last_scheduled_date', side_effect=_fake_stamp), \
+             patch.object(real_mod, '_warn_unsettled_dues', new_callable=AsyncMock), \
+             patch.object(_lifecycle_mod, 'get_status_keyboard', new_callable=AsyncMock), \
+             patch.object(_lifecycle_mod, '_build_panel_text', return_value="panel text"), \
+             patch.object(_lifecycle_mod, '_persist_panel_msg_id'), \
+             patch.object(real_mod.bot, 'send_message', new_callable=AsyncMock):
+            started = await real_mod._auto_start_from_template(
+                -100, {"name": "sunday-game"}, stamp_date="2026-08-05",
+            )
+
+        self.assertTrue(started)
+        self.assertEqual(order, ["stamp", "create"])
+
+    async def test_no_stamp_date_means_no_stamp(self):
+        """Manual "start now" callers (e.g. the idle-reengagement button)
+        don't track scheduling and pass no stamp_date — behavior must be
+        unchanged: never touches last_scheduled_date."""
+        import rollcall_manager as _rcm
+        import handlers.lifecycle as _lifecycle_mod
+
+        real_mod = self._load_real_module()
+        mgr = _rcm.manager
+        rc = MagicMock()
+        rc.finalizeDate = None
+
+        with patch.object(mgr, 'get_chat', return_value={"timezone": "Asia/Kolkata"}), \
+             patch.object(mgr, 'get_rollcalls', return_value=[]), \
+             patch.object(mgr, 'add_rollcall', return_value=rc), \
+             patch.object(real_mod, 'update_template_last_scheduled_date') as update_last, \
+             patch.object(real_mod, '_warn_unsettled_dues', new_callable=AsyncMock), \
+             patch.object(_lifecycle_mod, 'get_status_keyboard', new_callable=AsyncMock), \
+             patch.object(_lifecycle_mod, '_build_panel_text', return_value="panel text"), \
+             patch.object(_lifecycle_mod, '_persist_panel_msg_id'), \
+             patch.object(real_mod.bot, 'send_message', new_callable=AsyncMock):
+            started = await real_mod._auto_start_from_template(-100, {"name": "sunday-game"})
+
+        self.assertTrue(started)
+        update_last.assert_not_called()
 
 
 class TestDueCheckIsolatedPerTemplate(unittest.TestCase):

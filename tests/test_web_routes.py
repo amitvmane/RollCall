@@ -629,6 +629,121 @@ class TestWebProxyVote(unittest.TestCase):
         self.assertEqual(svc.call_args.kwargs["admin_name"], "(web admin)")
 
 
+class TestWebRemoveUser(unittest.TestCase):
+    """Web parity for the admin console's Rollcalls-tab remove action —
+    part of admin-console retirement (live voter management)."""
+
+    def setUp(self):
+        from api.rate_limit import reset_buckets_for_tests
+        reset_buckets_for_tests()
+
+    def _body(self, **over):
+        body = {"id_token": "tok", "rollcall_num": 1, "name": "Ravi"}
+        body.update(over)
+        return body
+
+    def test_missing_id_token_returns_422(self):
+        resp = _client().post("/api/v1/web/group/grp123/rollcalls/remove-user",
+                              json={"rollcall_num": 1, "name": "x"})
+        self.assertEqual(resp.status_code, 422)
+
+    def test_invalid_group_token_returns_404(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value=None):
+            resp = _client().post("/api/v1/web/group/badgrp/rollcalls/remove-user", json=self._body())
+        self.assertEqual(resp.status_code, 404)
+
+    def test_invalid_id_token_returns_401(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch("api.identity.verify_identity_token", return_value=None):
+            resp = _client().post("/api/v1/web/group/grp123/rollcalls/remove-user", json=self._body())
+        self.assertEqual(resp.status_code, 401)
+
+    def test_non_admin_returns_403(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=False), \
+             patch("rollcall_manager.manager.get_admin_rights", return_value=False), \
+             patch("api.identity.verify_identity_token", return_value=77):
+            resp = _client().post("/api/v1/web/group/grp123/rollcalls/remove-user", json=self._body())
+        self.assertEqual(resp.status_code, 403)
+
+    def test_admin_remove_calls_service_and_mirrors(self):
+        import api.routes.web as _web_mod
+        serialized = {"rollcall_id": 5, "title": "Sunday",
+                      "in": [], "out": [], "maybe": [], "waiting": []}
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value={"first_name": "Amit"}), \
+             patch("rollcall_manager.manager.get_admin_rights", return_value=False), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.admin.delete_user_from_rollcall", return_value={}) as svc, \
+             patch.object(_web_mod, "_mirror_panel_to_telegram", new_callable=AsyncMock) as mirror, \
+             patch("services.web._serialize_web_rollcall", return_value=serialized), \
+             patch("rollcall_manager.manager.get_rollcall", return_value=MagicMock()):
+            resp = _client().post("/api/v1/web/group/grp123/rollcalls/remove-user", json=self._body())
+        self.assertEqual(resp.status_code, 200)
+        kwargs = svc.call_args.kwargs
+        self.assertEqual(kwargs["chat_id"], -100)
+        self.assertEqual(kwargs["admin_user_id"], 99)
+        self.assertEqual(kwargs["admin_name"], "Amit")
+        self.assertEqual(kwargs["name"], "Ravi")
+        self.assertEqual(kwargs["rc_number"], 0)  # 1-based → 0-based
+        mirror.assert_awaited_once()
+
+
+class TestWebMoveUser(unittest.TestCase):
+    """Web parity for the admin console's Rollcalls-tab move action."""
+
+    def setUp(self):
+        from api.rate_limit import reset_buckets_for_tests
+        reset_buckets_for_tests()
+
+    def _body(self, **over):
+        body = {"id_token": "tok", "rollcall_num": 1, "name": "Ravi", "new_status": "out"}
+        body.update(over)
+        return body
+
+    def test_unknown_status_returns_422(self):
+        resp = _client().post("/api/v1/web/group/grp123/rollcalls/move-user",
+                              json=self._body(new_status="banana"))
+        self.assertEqual(resp.status_code, 422)
+
+    def test_non_admin_returns_403(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=False), \
+             patch("rollcall_manager.manager.get_admin_rights", return_value=False), \
+             patch("api.identity.verify_identity_token", return_value=77):
+            resp = _client().post("/api/v1/web/group/grp123/rollcalls/move-user", json=self._body())
+        self.assertEqual(resp.status_code, 403)
+
+    def test_admin_move_calls_service_and_mirrors(self):
+        import api.routes.web as _web_mod
+        serialized = {"rollcall_id": 5, "title": "Sunday",
+                      "in": [], "out": [{"name": "Ravi"}], "maybe": [], "waiting": []}
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value=None), \
+             patch("rollcall_manager.manager.get_admin_rights", return_value=False), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.admin.set_user_status", return_value={}) as svc, \
+             patch.object(_web_mod, "_mirror_panel_to_telegram", new_callable=AsyncMock) as mirror, \
+             patch("services.web._serialize_web_rollcall", return_value=serialized), \
+             patch("rollcall_manager.manager.get_rollcall", return_value=MagicMock()):
+            resp = _client().post("/api/v1/web/group/grp123/rollcalls/move-user", json=self._body())
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["out"][0]["name"], "Ravi")
+        kwargs = svc.call_args.kwargs
+        self.assertEqual(kwargs["name"], "Ravi")
+        self.assertEqual(kwargs["new_status"], "out")
+        self.assertEqual(kwargs["rc_number"], 0)
+        # No display info → falls back to the generic actor label
+        self.assertEqual(kwargs["admin_name"], "(web admin)")
+        mirror.assert_awaited_once()
+
+
 class TestWebAdminStatusLiveCheck(unittest.TestCase):
     """admin-status now live-checks Telegram on every load instead of
     trusting the web_admins cache forever — auto-grants a real Telegram

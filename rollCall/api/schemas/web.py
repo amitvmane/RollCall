@@ -124,6 +124,21 @@ class WebProxyVoteRequest(BaseModel):
     comment: Optional[str] = Field(None, max_length=100, description="Optional note to attach to the vote")
 
 
+class WebRemoveUserRequest(BaseModel):
+    """Web parity for the admin console's per-voter remove action."""
+    id_token: str = Field(..., description="Signed identity token of the acting web admin")
+    rollcall_num: int = Field(..., ge=1, description="1-based rollcall number")
+    name: str = Field(..., min_length=1, max_length=64, description="Display name or @username of the user to remove")
+
+
+class WebMoveUserRequest(BaseModel):
+    """Web parity for the admin console's per-voter move-to-list action."""
+    id_token: str = Field(..., description="Signed identity token of the acting web admin")
+    rollcall_num: int = Field(..., ge=1, description="1-based rollcall number")
+    name: str = Field(..., min_length=1, max_length=64, description="Display name or @username to match")
+    new_status: Literal["in", "out", "maybe"]
+
+
 class WebHeartbeatRequest(BaseModel):
     session_id: str = Field(..., min_length=1, max_length=64, description="Client-generated session UUID (per browser tab)")
 

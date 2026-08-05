@@ -56,6 +56,8 @@ from api.schemas.web import (
     WebMergeIdentityRequest,
     WebPresenceResponse,
     WebProxyVoteRequest,
+    WebRemoveUserRequest,
+    WebMoveUserRequest,
     WebRollcallResponse,
     WebSetScheduleRequest,
     WebStartRollcallRequest,
@@ -467,6 +469,101 @@ async def web_proxy_vote(
     rc = _mgr.get_rollcall(chat_id, body.rollcall_num - 1)
     if rc is None:
         raise HTTPException(status_code=404, detail="Rollcall not found after vote")
+    return WebRollcallResponse(**_serialize_web_rollcall(rc))
+
+
+@router.post(
+    "/web/group/{group_token}/rollcalls/remove-user",
+    response_model=WebRollcallResponse,
+    summary="Remove a user from a rollcall (requires web-admin identity)",
+)
+async def web_remove_user(
+    body: WebRemoveUserRequest,
+    group_token: str = Path(...),
+) -> WebRollcallResponse:
+    """Web parity for the admin console's Rollcalls-tab remove action —
+    same services.admin function, same write-lock discipline, just gated
+    by identity token + check_web_admin_live instead of a bearer token."""
+    chat = _db.get_chat_by_group_web_token(group_token)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Invalid group token")
+
+    actor_user_id = require_identity(
+        body.id_token, detail="Verify with Telegram before managing voters."
+    )
+
+    chat_id = int(chat["chat_id"])
+    if not await check_web_admin_live(chat_id, actor_user_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not a web admin for this group.",
+        )
+
+    actor_name = await _actor_display_name(chat_id, actor_user_id)
+
+    from services import admin as admin_svc
+    from rollcall_manager import manager as _mgr
+    async with _mgr.get_chat_write_lock(chat_id):
+        admin_svc.delete_user_from_rollcall(
+            chat_id=chat_id,
+            rc_number=body.rollcall_num - 1,
+            name=body.name,
+            admin_user_id=actor_user_id,
+            admin_name=actor_name,
+        )
+    await _mirror_panel_to_telegram(chat_id, body.rollcall_num)
+
+    from services.web import _serialize_web_rollcall
+    rc = _mgr.get_rollcall(chat_id, body.rollcall_num - 1)
+    if rc is None:
+        raise HTTPException(status_code=404, detail="Rollcall not found after removing user")
+    return WebRollcallResponse(**_serialize_web_rollcall(rc))
+
+
+@router.post(
+    "/web/group/{group_token}/rollcalls/move-user",
+    response_model=WebRollcallResponse,
+    summary="Move a user to a different status list (requires web-admin identity)",
+)
+async def web_move_user(
+    body: WebMoveUserRequest,
+    group_token: str = Path(...),
+) -> WebRollcallResponse:
+    """Web parity for the admin console's Rollcalls-tab move action."""
+    chat = _db.get_chat_by_group_web_token(group_token)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Invalid group token")
+
+    actor_user_id = require_identity(
+        body.id_token, detail="Verify with Telegram before managing voters."
+    )
+
+    chat_id = int(chat["chat_id"])
+    if not await check_web_admin_live(chat_id, actor_user_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not a web admin for this group.",
+        )
+
+    actor_name = await _actor_display_name(chat_id, actor_user_id)
+
+    from services import admin as admin_svc
+    from rollcall_manager import manager as _mgr
+    async with _mgr.get_chat_write_lock(chat_id):
+        admin_svc.set_user_status(
+            chat_id=chat_id,
+            rc_number=body.rollcall_num - 1,
+            name=body.name,
+            new_status=body.new_status,
+            admin_user_id=actor_user_id,
+            admin_name=actor_name,
+        )
+    await _mirror_panel_to_telegram(chat_id, body.rollcall_num)
+
+    from services.web import _serialize_web_rollcall
+    rc = _mgr.get_rollcall(chat_id, body.rollcall_num - 1)
+    if rc is None:
+        raise HTTPException(status_code=404, detail="Rollcall not found after moving user")
     return WebRollcallResponse(**_serialize_web_rollcall(rc))
 
 

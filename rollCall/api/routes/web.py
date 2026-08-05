@@ -111,6 +111,9 @@ async def push_unsubscribe(
     body: PushUnsubscribeRequest,
     group_token: str = Path(...),
 ) -> None:
+    chat = _db.get_chat_by_group_web_token(group_token)
+    if not chat:
+        raise HTTPException(404, "Invalid group token")
     push_svc.unsubscribe(body.endpoint)
 
 

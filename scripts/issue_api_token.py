@@ -13,11 +13,18 @@ Usage:
         --scopes read,vote,admin \\
         --label "Webapp prod" \\
         [--expires-days 30] \\
+        [--no-expiry] \\
         [--issued-by 168415137]
 
 When scopes are omitted, defaults to 'read,vote' (no admin). Tokens with
-the 'admin' scope can DELETE rollcalls and (in future PRs) mutate chat
-settings, so issue them sparingly.
+the 'admin' scope can DELETE rollcalls and mutate chat settings, so issue
+them sparingly.
+
+Tokens expire after 365 days by default (same as /gentoken's Telegram-
+issued tokens) — pass --expires-days to change that, or --no-expiry for a
+genuinely permanent token (e.g. a long-lived server integration). A
+non-expiring admin-scoped token is real standing risk if it ever leaks,
+so --no-expiry is opt-in, never the default.
 """
 
 import argparse
@@ -34,11 +41,17 @@ def main() -> int:
                         help="Comma-separated scopes: read, vote, admin (default: read,vote)")
     parser.add_argument("--label", default=None,
                         help="Friendly name shown in token listings (e.g. 'Webapp prod')")
-    parser.add_argument("--expires-days", type=int, default=None,
-                        help="Token expires after this many days (default: no expiry)")
+    parser.add_argument("--expires-days", type=int, default=365,
+                        help="Token expires after this many days (default: 365, matching /gentoken)")
+    parser.add_argument("--no-expiry", action="store_true",
+                        help="Issue a token that never expires — opt-in only, overrides --expires-days")
     parser.add_argument("--issued-by", type=int, default=None,
                         help="Telegram user id of the issuer (audit only)")
     args = parser.parse_args()
+
+    if args.expires_days is not None and args.expires_days <= 0 and not args.no_expiry:
+        print("ERROR: --expires-days must be positive. Use --no-expiry for a permanent token.", file=sys.stderr)
+        return 2
 
     valid_scopes = {"read", "vote", "admin"}
     requested = [s.strip() for s in args.scopes.split(",") if s.strip()]
@@ -63,7 +76,7 @@ def main() -> int:
     token = generate_api_token()
     token_hash = _hash_token(token)
     expires_at = None
-    if args.expires_days is not None:
+    if not args.no_expiry:
         expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=args.expires_days)
 
     insert_api_token(
@@ -84,6 +97,8 @@ def main() -> int:
         print(f"  Label:      {args.label}")
     if expires_at:
         print(f"  Expires:    {expires_at.isoformat()} UTC")
+    else:
+        print("  Expires:    never (--no-expiry)")
     if args.issued_by:
         print(f"  Issued by:  {args.issued_by}")
     print()

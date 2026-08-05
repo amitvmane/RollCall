@@ -176,6 +176,14 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .list-items li{font-size:.9rem;padding:7px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
 .list-items li:last-child{border-bottom:none}
 .av{width:27px;height:27px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:.7rem;font-weight:800;flex-shrink:0}
+
+/* ── Roster admin actions (move/remove) — web parity for the admin
+   console's Rollcalls-tab controls, shown inline per row when signed in
+   as a web admin. ── */
+.li-admin-acts{margin-left:auto;display:flex;gap:4px;align-items:center;flex-shrink:0}
+.li-move-sel{font-size:.72rem;padding:3px 4px;border-radius:5px;border:1px solid var(--border);background:var(--card);color:var(--text);max-width:78px}
+.li-remove-btn{background:none;border:1px solid var(--border);border-radius:5px;color:var(--out);font-size:.72rem;width:22px;height:22px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;flex-shrink:0}
+.li-remove-btn:hover{background:var(--danger-dim)}
 .li-pos{font-size:.72rem;color:var(--sub);min-width:16px;text-align:right;flex-shrink:0;font-family:var(--font-mono)}
 .li-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
 .li-comment{color:var(--sub);font-size:.78rem;flex-shrink:0;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

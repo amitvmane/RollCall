@@ -483,18 +483,89 @@ function renderRollcall(rc){
   detectCurrentVote();renderLists();
 }
 
+// Admin-only per-row controls (move to another list / remove) — web parity
+// for the admin console's Rollcalls-tab actions. "waiting" has no manual
+// move target (it's a computed overflow list, same as the admin console).
+function _rowAdminActs(name,statusKey){
+  const moveOpts=["in","out","maybe"].filter(s=>s!==statusKey)
+    .map(s=>`<option value="${s}">${s.toUpperCase()}</option>`).join("");
+  return `<span class="li-admin-acts" data-name="${esc(name)}">
+    <select class="li-move-sel" title="Move to another list">
+      <option value="">Move→</option>${moveOpts}
+    </select>
+    <button type="button" class="li-remove-btn" title="Remove">✕</button>
+  </span>`;
+}
+
+function _wireRowAdminActs(){
+  document.querySelectorAll("#lists-container .li-admin-acts").forEach(el=>{
+    const name=el.dataset.name;
+    const sel=el.querySelector(".li-move-sel");
+    const delBtn=el.querySelector(".li-remove-btn");
+    sel.addEventListener("change",()=>{
+      if(!sel.value)return;
+      doMoveUser(name,sel.value);
+      sel.value="";
+    });
+    delBtn.addEventListener("click",()=>{
+      if(!confirm(`Remove ${name} from this rollcall?`))return;
+      doRemoveUser(name);
+    });
+  });
+}
+
+window.doMoveUser=async function(name,newStatus){
+  if(!_idToken){toast("Verify with Telegram first.",3000);return;}
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/rollcalls/move-user`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({id_token:_idToken,rollcall_num:activeTabIdx+1,name,new_status:newStatus}),
+      signal:AbortSignal.timeout(8000),
+    });
+    if(!res.ok){const d=await res.json().catch(()=>({}));throw new Error(d.detail||"Failed to move");}
+    const updated=await res.json();
+    activeRcData=updated;
+    if(IS_GROUP&&groupData)groupData.rollcalls[activeTabIdx]=updated;
+    toast(`Moved ${name} to ${newStatus.toUpperCase()}`,2200);
+    renderRollcall(updated);
+  }catch(e){
+    toast(e.message||"Could not move user",3500);
+  }
+};
+
+window.doRemoveUser=async function(name){
+  if(!_idToken){toast("Verify with Telegram first.",3000);return;}
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/rollcalls/remove-user`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({id_token:_idToken,rollcall_num:activeTabIdx+1,name}),
+      signal:AbortSignal.timeout(8000),
+    });
+    if(!res.ok){const d=await res.json().catch(()=>({}));throw new Error(d.detail||"Failed to remove");}
+    const updated=await res.json();
+    activeRcData=updated;
+    if(IS_GROUP&&groupData)groupData.rollcalls[activeTabIdx]=updated;
+    toast(`Removed ${name}`,2200);
+    renderRollcall(updated);
+  }catch(e){
+    toast(e.message||"Could not remove user",3500);
+  }
+};
+
 function renderLists(){
   if(!activeRcData)return;
   const{in:inL,out:outL,maybe:maybeL,waiting:waitL}=activeRcData;
-  function section(label,cls,items){
+  function section(label,cls,items,statusKey){
     const rows=items.length?items.map((u,i)=>{
       const isYou=currentName&&u.name.toLowerCase()===currentName.toLowerCase();
       const av=`<span class="av" style="background:${avColor(u.name)}">${(u.name[0]||"?").toUpperCase()}</span>`;
       const cm=u.comment?`<span class="li-comment">— ${esc(u.comment)}</span>`:"";
       const tgDot=u.is_proxy===false?'<span class="tg-dot" title="Telegram user"></span>':"";
+      const adminActs=(_isWebAdmin&&statusKey!=="waiting")?_rowAdminActs(u.name,statusKey):"";
       return `<li class="${isYou?"you":""}">
         <span class="li-pos">${i+1}</span>${av}
         <span class="li-name">${esc(u.name)}${tgDot}</span>${cm}
+        ${adminActs}
       </li>`;
     }).join(""):"";
     return`<div class="list-sect">
@@ -502,8 +573,9 @@ function renderLists(){
       ${items.length?`<ul class="list-items">${rows}</ul>`:'<p class="empty" style="margin:0;padding:2px 0">—</p>'}
     </div>`;
   }
-  const html=section("IN","in",inL)+section("OUT","out",outL)+section("MAYBE","maybe",maybeL)+(waitL.length?section("WAIT","wait",waitL):"");
+  const html=section("IN","in",inL,"in")+section("OUT","out",outL,"out")+section("MAYBE","maybe",maybeL,"maybe")+(waitL.length?section("WAIT","wait",waitL,"waiting"):"");
   $("lists-container").innerHTML=html||'<p class="empty">No votes yet.</p>';
+  if(_isWebAdmin)_wireRowAdminActs();
 }
 
 // ── Tabs ───────────────────────────────────────────────────────────────────
@@ -1260,7 +1332,7 @@ async function _checkWebAdmin(){
     _isWebAdmin=!!d.is_admin;
     const card=document.getElementById("admin-card");
     if(card)card.classList.toggle("hidden",!_isWebAdmin);
-    if(_isWebAdmin){_syncShhToggle();_syncGroupSettingsCard();_syncTimezoneDisplay();_renderWeekdayHint();_loadWeblogInMembers();_loadAdminGroupSwitcher();}
+    if(_isWebAdmin){_syncShhToggle();_syncGroupSettingsCard();_syncTimezoneDisplay();_renderWeekdayHint();_loadWeblogInMembers();_loadAdminGroupSwitcher();renderLists();}
   }catch(_){}
   // Load dues after admin status is resolved — both member and admin sections
   loadDuesSection().catch(()=>{});

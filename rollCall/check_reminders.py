@@ -106,6 +106,25 @@ def _ensure_aware(dt, tz):
         return tz.localize(dt, is_dst=False)
 
 
+def _now_truncated(tz):
+    """Current time in tz, truncated to the minute, without ever leaving
+    the tz-aware domain.
+
+    datetime.now(tz) is already correctly aware. The old code round-tripped
+    it through a naive string (strftime → strptime → tz.localize with no
+    is_dst argument, which pytz defaults to is_dst=False) just to drop
+    seconds/microseconds. During the one hour a year when clocks fall back,
+    that round-trip is lossy: the wall-clock string alone can't say which of
+    the two real occurrences "now" actually is, so re-localizing without
+    is_dst silently normalizes to the LATER (standard-time) one — off by up
+    to an hour from the real instant, which throws off every finalizeDate /
+    reminder-time comparison in check() during that hour. Truncating with
+    .replace() instead never leaves the aware domain, so there's nothing to
+    relocalize and no ambiguity to resolve.
+    """
+    return datetime.now(tz).replace(second=0, microsecond=0)
+
+
 async def check(rollcalls, timezone, chat_id):
     from rollcall_manager import manager
     while True:
@@ -131,9 +150,7 @@ async def check(rollcalls, timezone, chat_id):
                     continue
 
                 tz = pytz.timezone(timezone)
-                now_date_string = datetime.now(tz).strftime("%d-%m-%Y %H:%M")
-                now_date = datetime.strptime(now_date_string, "%d-%m-%Y %H:%M")
-                now_date = tz.localize(now_date)
+                now_date = _now_truncated(tz)
 
                 # BUG12: ensure finalizeDate is tz-aware before any comparison
                 finalize_dt = _ensure_aware(rollcall.finalizeDate, tz)

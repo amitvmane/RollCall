@@ -701,6 +701,52 @@ class TestFireScheduledRollcalls(unittest.TestCase):
         self.assertEqual(order, ["claim", "create"])
 
 
+class TestNowTruncatedDST(unittest.TestCase):
+    """check()'s _now_truncated must never re-localize through a naive
+    string round-trip. The old code (strftime → strptime → tz.localize with
+    no is_dst arg, which pytz defaults to is_dst=False) silently normalized
+    ambiguous fall-back times to the LATER (standard-time) occurrence
+    regardless of which one "now" really was — off by an hour from the real
+    instant, throwing off every finalizeDate/reminder-time comparison during
+    that one hour a year. See test_dst_cutover.py for the sibling coverage
+    of _ensure_aware, which handles the same class of bug for user-supplied
+    finalizeDate values rather than "now"."""
+
+    _load_real_module = TestCheckRemindersLogging._load_real_module
+
+    def test_preserves_earlier_occurrence_during_fallback_ambiguity(self):
+        import datetime as _dt_mod
+        import pytz
+
+        real_mod = self._load_real_module()
+        tz = pytz.timezone("America/New_York")
+        # 2026-11-01: US clocks fall back from 2:00 EDT (UTC-4) to 1:00 EST
+        # (UTC-5) — 1:30am occurs twice. This is the EARLIER (still-EDT)
+        # occurrence, i.e. the real current instant we're simulating.
+        earlier = tz.localize(_dt_mod.datetime(2026, 11, 1, 1, 30, 15), is_dst=True)
+
+        class _FixedDatetime(_dt_mod.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return earlier
+
+        with patch.object(real_mod, 'datetime', _FixedDatetime):
+            result = real_mod._now_truncated(tz)
+
+        # Must stay pinned to the EARLIER (EDT, UTC-4) occurrence — the old
+        # round-trip would silently produce the LATER (EST, UTC-5) one.
+        self.assertEqual(result.utcoffset(), earlier.utcoffset())
+        self.assertEqual(result, earlier.replace(second=0, microsecond=0))
+
+    def test_truncates_seconds_and_microseconds(self):
+        import pytz
+        real_mod = self._load_real_module()
+        tz = pytz.timezone("Asia/Kolkata")
+        result = real_mod._now_truncated(tz)
+        self.assertEqual(result.second, 0)
+        self.assertEqual(result.microsecond, 0)
+
+
 class TestIsDueNowDaily(unittest.TestCase):
     """_is_due_now's daily branch — fires every day at the configured time
     regardless of schedule_day (which is None for daily schedules)."""

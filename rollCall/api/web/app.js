@@ -907,6 +907,46 @@ function renderStats(d){
     }).join('')}
   </div>`:'';
 
+  // Session history — full list (title, date, in/out/maybe), web parity for
+  // the admin console's Stats tab. Newest-first, same order the backend
+  // returns (the trend chart above reverses its own copy for oldest→newest
+  // bars; this list intentionally doesn't).
+  const shistRows=(d.recent_history||[]).map(h=>{
+    const date=(h.ended_at||"").slice(0,10);
+    return `<div class="shist-row">
+      <span class="shist-title" title="${esc(h.title||"Untitled")}">${esc(h.title||"Untitled")}</span>
+      <span class="shist-date">${esc(date)}</span>
+      <span class="shist-pills">
+        <span class="sp-pill sp-in">${n(h.in_count)}</span>
+        <span class="sp-pill sp-out">${n(h.out_count)}</span>
+        ${h.maybe_count?`<span class="sp-pill sp-maybe">${n(h.maybe_count)}</span>`:""}
+      </span>
+    </div>`;
+  }).join("");
+
+  // Ghost leaderboard — who's ghosted (voted IN, didn't show), most first.
+  // Same "read"-scope data the admin console's Stats tab shows; kept public
+  // to all members here too, consistent with the leaderboard above already
+  // being group-visible rather than admin-only.
+  const ghostRows=(d.ghost_leaderboard||[]).map(g=>`<div class="ghost-row">
+    <span class="ghost-name">${esc(g.name||"—")}</span>
+    <span class="ghost-count">👻 ${n(g.ghost_count)}</span>
+  </div>`).join("");
+
+  // Response-time leaderboard — how quickly each member typically casts
+  // their first vote after a rollcall opens, fastest first.
+  const fmtSecs=s=>{
+    s=n(s);
+    if(s<60)return `${s}s`;
+    const m=Math.floor(s/60),r=s%60;
+    return r?`${m}m ${r}s`:`${m}m`;
+  };
+  const rtRows=(d.response_time_leaderboard||[]).map(r=>`<div class="rt-row">
+    <span class="rt-name">${esc(r.display_name||r.username||"—")}</span>
+    <span class="rt-avg">${fmtSecs(r.avg_response_seconds)} avg</span>
+    <span class="rt-best">best ${fmtSecs(r.best_response_seconds)}</span>
+  </div>`).join("");
+
   sc.innerHTML=`
   <div class="stats-section-hdr">📊 Group Stats</div>
   <div class="sp-group-row">
@@ -916,7 +956,10 @@ function renderStats(d){
   </div>
   ${trendHtml}
   ${personalHtml}
-  ${lbRows?`<div class="stats-section-hdr">🏆 Leaderboard</div><div class="slb-list">${lbRows}</div>`:""}`;
+  ${lbRows?`<div class="stats-section-hdr">🏆 Leaderboard</div><div class="slb-list">${lbRows}</div>`:""}
+  ${shistRows?`<div class="stats-section-hdr">🗓 Session History</div><div class="shist-list">${shistRows}</div>`:""}
+  ${rtRows?`<div class="stats-section-hdr">⚡ Fastest Voters</div><div class="rt-list">${rtRows}</div>`:""}
+  ${ghostRows?`<div class="stats-section-hdr">👻 Ghosts</div><div class="ghost-list">${ghostRows}</div>`:""}`;
 }
 
 // ── Presence / heartbeat ──────────────────────────────────────────────────

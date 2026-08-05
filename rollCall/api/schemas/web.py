@@ -200,6 +200,15 @@ class WebStatsGhostEntry(BaseModel):
     ghost_count: int = 0
 
 
+class WebStatsResponseTimeEntry(BaseModel):
+    user_id: int
+    display_name: Optional[str] = None
+    username: Optional[str] = None
+    avg_response_seconds: int = 0
+    best_response_seconds: int = 0
+    rollcall_count: int = 0
+
+
 class WebGroupStatsResponse(BaseModel):
     total_rollcalls: int = 0
     avg_attendance: float = 0.0
@@ -212,6 +221,7 @@ class WebGroupStatsResponse(BaseModel):
     leaderboard: List[WebStatsLeaderEntry] = Field(default_factory=list)
     ghost_leaderboard: List[WebStatsGhostEntry] = Field(default_factory=list)
     recent_history: List[WebStatsHistoryEntry] = Field(default_factory=list)
+    response_time_leaderboard: List[WebStatsResponseTimeEntry] = Field(default_factory=list)
     personal: Optional[WebStatsPersonal] = None
     weekday_stats: List[WebStatsWeekday] = Field(default_factory=list)
 

@@ -351,7 +351,8 @@ def web_group_stats(
 
     gs = group_stats(chat_id)               # same data as /stats group in Telegram
     lb_data = leaderboard(chat_id, limit=10)  # same as /stats top (top 10)
-    hist = history(chat_id, limit=5)
+    hist = history(chat_id, limit=10)  # 10 to match the admin console's own default
+    rt_lb = response_time_stats(chat_id, limit=10)
 
     # Badge chips per leaderboard entry (streak fire + games tier)
     for entry in lb_data["entries"]:
@@ -422,6 +423,7 @@ def web_group_stats(
         "leaderboard": lb_data["entries"],
         "ghost_leaderboard": gs["ghost_leaderboard"],
         "recent_history": hist,
+        "response_time_leaderboard": rt_lb,
         "personal": personal,
         "weekday_stats": weekday_attendance(chat_id),
     }

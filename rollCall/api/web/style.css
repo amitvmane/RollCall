@@ -282,6 +282,20 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .slb-fill{height:100%;background:var(--accent);border-radius:3px}
 .slb-pct{width:38px;text-align:right;color:var(--sub);flex-shrink:0;font-size:.78rem;font-family:var(--font-mono)}
 
+/* ── Session history / ghost / response-time lists — web parity for the
+   admin console's Stats tab. Share the same row rhythm as .slb-row. ── */
+.shist-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);font-size:.83rem}
+.shist-row:last-child{border-bottom:none}
+.shist-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.shist-date{color:var(--sub);font-size:.76rem;white-space:nowrap;font-family:var(--font-mono)}
+.shist-pills{display:flex;gap:4px;flex-shrink:0}
+.ghost-row,.rt-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);font-size:.85rem}
+.ghost-row:last-child,.rt-row:last-child{border-bottom:none}
+.ghost-name,.rt-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.ghost-count{color:var(--out);font-weight:700;font-size:.82rem;flex-shrink:0}
+.rt-avg{font-weight:700;color:var(--success);font-size:.82rem;flex-shrink:0;font-family:var(--font-mono)}
+.rt-best{color:var(--sub);font-size:.76rem;flex-shrink:0;font-family:var(--font-mono)}
+
 /* ── Attendance trend chart ── */
 .sp-trend-label{font-size:.78rem;font-weight:700;color:var(--sub);margin:12px 0 6px}
 .sp-trend{display:flex;align-items:flex-end;gap:5px;height:80px}

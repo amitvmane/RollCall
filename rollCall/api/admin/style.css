@@ -252,6 +252,12 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:12px 0}
 .scope-warn{background:var(--warn-bg);border:1px solid var(--warn);border-radius:var(--radius-sm);padding:10px 14px;font-size:.8rem;color:var(--warn-fg);margin-bottom:12px;display:none}
 .scope-warn strong{display:block;margin-bottom:2px}
 
+.deprecation-banner{display:flex;align-items:center;gap:10px;background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:10px 14px;font-size:.8rem;color:var(--text);margin-bottom:12px}
+.deprecation-banner span{flex:1}
+.deprecation-banner button{background:none;border:none;color:var(--sub);cursor:pointer;font-size:.85rem;padding:2px 6px;flex-shrink:0;line-height:1}
+.deprecation-banner button:hover{color:var(--text)}
+.deprecation-banner.hidden{display:none}
+
 @media(max-width:768px){
   .sidebar{position:fixed;left:0;top:54px;height:calc(100% - 54px);transform:translateX(-100%)}
   .sidebar.open{transform:translateX(0)}

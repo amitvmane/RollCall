@@ -309,12 +309,16 @@ async def gentoken_command(message):
         # reads it client-side from location.hash.
         login_url = f"{web_base}/admin/#token={token}"
         dashboard_line = (
-            f"\n🖥 <a href=\"{html.escape(login_url, quote=True)}\">One-click login</a>\n"
+            f"\n🖥 <a href=\"{html.escape(login_url, quote=True)}\">One-click login (legacy admin console)</a>\n"
             f"<i>(link logs you in directly — don't share it)</i>\n"
         )
     else:
         dashboard_line = ""
 
+    # The group web page (see /weblink) now covers everything day-to-day —
+    # voter management, templates, settings, stats — with a plain Telegram
+    # sign-in, no token needed. This token remains for the legacy admin
+    # console and scripted/API access, not the primary way in anymore.
     dm_text = (
         f"🔑 <b>API Token — {html.escape(chat_title)}</b>\n\n"
         f"<code>{html.escape(token)}</code>\n\n"
@@ -323,6 +327,7 @@ async def gentoken_command(message):
         f"<b>Scopes:</b> read, vote, admin\n"
         f"<b>Expires:</b> {expires_at.strftime('%d %b %Y')}\n"
         f"{dashboard_line}\n"
+        f"💡 <i>For everyday admin tasks, your group's web page (/weblink) now does it all — no token needed, just sign in with Telegram. This token is for the legacy admin console or API/script access.</i>\n\n"
         f"When it expires, run /gentoken in the group again."
     )
 

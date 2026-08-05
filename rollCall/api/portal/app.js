@@ -373,14 +373,14 @@ ${bestStreak>0?`<div class="milestone-box">🏆 Best streak ever: <strong>${best
     html+=`<a class="vote-btn" href="/web/group/${esc(g.group_web_token)}" target="_blank" style="margin:12px 0;display:block">Vote Now →</a>`;
   }
 
-  if(g.is_web_admin&&_idToken){
-    // Hands the already-established identity token to the admin console
-    // via the URL fragment (never reaches the server — same pattern
-    // /gentoken's one-click link already uses) so it can mint a session
-    // for this chat with zero extra sign-in, matching the same account
-    // that's already signed into the portal.
-    const adminUrl=`/admin/#chat=${g.chat_id}&id_token=${encodeURIComponent(_idToken)}`;
-    html+=`<a class="vote-btn vote-btn-secondary" href="${esc(adminUrl)}" style="margin:8px 0;display:block">⚙️ Manage in Admin Console →</a>`;
+  if(g.is_web_admin&&g.group_web_token){
+    // The group page now covers everything the separate admin console
+    // used to (voter management, templates, settings, stats) — and since
+    // portal and the group page share the same origin, the identity token
+    // already in localStorage carries over with no handoff needed; this
+    // is just a plain link, unlike the old admin-console link which had
+    // to pass the token through the URL fragment to mint a session there.
+    html+=`<a class="vote-btn vote-btn-secondary" href="/web/group/${esc(g.group_web_token)}" style="margin:8px 0;display:block">⚙️ Manage this group →</a>`;
   }
 
   if(g.group_web_token){

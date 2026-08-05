@@ -82,6 +82,10 @@
       <div id="glist"><div style="padding:16px;color:var(--sub);font-size:.88rem">Loading…</div></div>
     </aside>
     <main class="content" id="content">
+      <div class="deprecation-banner" id="deprecation-banner">
+        <span>💡 Everything here now works from your group's own web page too — open it from <strong>/weblink</strong> in Telegram, sign in with your Telegram account, no token needed. This console will eventually be retired.</span>
+        <button onclick="dismissDeprecationBanner()" aria-label="Dismiss" title="Dismiss">✕</button>
+      </div>
       <div class="no-sel" id="no-sel">
         <div class="icon">👥</div>
         <p style="font-weight:600">Select a group</p>

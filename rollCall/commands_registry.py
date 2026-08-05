@@ -460,7 +460,9 @@ COMMANDS = [
             "Issues a personal API token scoped to this group (read + vote + admin), "
             "valid for 1 year. The token is sent to you via private DM — never posted in the group.\n\n"
             "Only Telegram group admins (administrator or creator) can run this command.\n\n"
-            "Use the token to log in to the admin dashboard at /admin/ on the bot server.\n\n"
+            "For everyday admin tasks, your group's web page (/weblink) now does everything this "
+            "token can — no token needed there, just sign in with Telegram. This token is for the "
+            "legacy admin dashboard at /admin/ or scripted/API access.\n\n"
             "When your token expires, run /gentoken again to get a fresh one."
         ),
     },

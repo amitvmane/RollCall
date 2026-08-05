@@ -66,6 +66,23 @@ window.toggleTheme=function(){
 };
 document.addEventListener("DOMContentLoaded",updateThemeBtn);
 
+// ─── Deprecation notice — the group web page now covers everything this
+// console does; dismissible per-session (sessionStorage, not localStorage)
+// so it reappears next time rather than being silenced forever after one
+// click. ─────────────────────────────────────────────────────────────────
+const DEPRECATION_DISMISS_KEY="rc_admin_deprecation_dismissed";
+window.dismissDeprecationBanner=function(){
+  sessionStorage.setItem(DEPRECATION_DISMISS_KEY,"1");
+  const el=$id("deprecation-banner");
+  if(el)el.classList.add("hidden");
+};
+document.addEventListener("DOMContentLoaded",()=>{
+  if(sessionStorage.getItem(DEPRECATION_DISMISS_KEY)){
+    const el=$id("deprecation-banner");
+    if(el)el.classList.add("hidden");
+  }
+});
+
 // ─── Toast ────────────────────────────────────────────────────────────────────
 function toast(msg,type="info",ms=3000){
   const el=$id("toast");

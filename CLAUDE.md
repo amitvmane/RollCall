@@ -52,6 +52,7 @@ Consequences:
 | `TELEGRAM_TOKEN` / `API_KEY` | required | bot token |
 | `DATABASE_URL` | `sqlite:///rollcall.db` | sqlite or postgres dsn |
 | `WEBHOOK_URL` | unset (long-poll) | enable webhook mode |
+| `WEBHOOK_SECRET_TOKEN` | auto-generated when `WEBHOOK_URL` is set | verifies `/webhook` POSTs actually came from Telegram (checked against the `X-Telegram-Bot-Api-Secret-Token` header) — no persistence needed, re-registered with Telegram on every restart |
 | `HEALTH_CHECK_PORT` | `8080` | health server port |
 | `DB_POOL_MINCONN` | `1` | PG pool min |
 | `DB_POOL_MAXCONN` | `5` | PG pool max — raise if `/health` reports `db_pool_saturated` |
@@ -62,6 +63,7 @@ Consequences:
 | `REST_API_ENABLED` | unset | `true`/`1` → start FastAPI on `REST_API_PORT` |
 | `REST_API_PORT` | `8081` | port for REST API + Mini App static files |
 | `REST_API_HOST` | `127.0.0.1` | bind address for REST API |
+| `TRUSTED_PROXY_IPS` | `*` | direct peers trusted to set `X-Forwarded-For` (so `request.client`/rate-limit buckets see the real visitor IP, not the proxy's). `*` is safe only because `REST_API_PORT` is never published to the host in `docker-compose.yml` — tighten to the proxy's actual IP/CIDR if that ever changes |
 | `MINIAPP_URL` | unset | public URL of `/miniapp/` — sets Telegram menu button on startup |
 | `WEB_BASE_URL` | unset | public base URL (e.g. `https://yourdomain.com`) — enables magic-link web voting; if unset `/weblink` shows a config warning and no link is appended to panels |
 | `MEMORY_MODE` | unset | `true`/`1` → in-memory SQLite, all data lost on restart (original v1 behaviour); overrides `DATABASE_URL` |

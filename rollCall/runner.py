@@ -134,7 +134,7 @@ elif _sentry_status:
 
 # Import bot components
 try:
-    from config import TELEGRAM_TOKEN, DATABASE_URL, ADMINS, WEBHOOK_URL, MEMORY_MODE
+    from config import TELEGRAM_TOKEN, DATABASE_URL, ADMINS, WEBHOOK_URL, WEBHOOK_SECRET_TOKEN, MEMORY_MODE
     from telegram_helper import bot
     from rollcall_manager import manager
     from check_reminders import check_template_schedules, resume_reminder_loops
@@ -224,6 +224,21 @@ async def _run_rest_api_server():
 
     port = int(os.environ.get("REST_API_PORT", "8081"))
     host = os.environ.get("REST_API_HOST", "127.0.0.1")
+    # Without this, request.client.host is always the immediate TCP peer —
+    # in the documented deployment (docker-compose.yml: "Port 8081 is
+    # intentionally NOT exposed to the host, [the proxy] reaches it over
+    # the internal Docker network instead") that peer is the same internal
+    # proxy hop for every external visitor, so every anonymous rate-limit
+    # bucket (api/rate_limit.py's IP-keyed bucket, tg_verify.py's 5-req/60s
+    # login limiter) collapses onto one shared bucket for the whole user
+    # base. proxy_headers=True makes uvicorn parse X-Forwarded-For and
+    # rewrite request.client to the real visitor IP. forwarded_allow_ips
+    # controls which direct peers are trusted to set that header — "*" is
+    # safe ONLY because the port isn't host-exposed (nothing but the
+    # trusted proxy container can ever be the direct peer); if that
+    # topology changes (e.g. this port gets published to the host),
+    # TRUSTED_PROXY_IPS must be tightened to the proxy's actual container
+    # IP/CIDR or this becomes a client-spoofable rate-limit bypass.
     config = uvicorn.Config(
         api_app,
         host=host,
@@ -231,6 +246,8 @@ async def _run_rest_api_server():
         lifespan="on",
         log_level="info",
         access_log=False,  # the FastAPI app already logs; access log is noisy here
+        proxy_headers=True,
+        forwarded_allow_ips=os.environ.get("TRUSTED_PROXY_IPS", "*"),
     )
     server = uvicorn.Server(config)
     await server.serve()
@@ -306,9 +323,22 @@ async def ping(request):
 
 
 async def webhook_handler(request):
-    """Receive Telegram updates via webhook POST."""
+    """Receive Telegram updates via webhook POST.
+
+    Telegram echoes WEBHOOK_SECRET_TOKEN back as this header on every
+    genuine call (set via secret_token= on set_webhook) — without checking
+    it, anyone who discovers the webhook URL (not itself secret) could POST
+    a forged Update and have it processed as if Telegram sent it.
+    """
+    import hmac
     import telebot
     if request.content_type != 'application/json':
+        return web.Response(status=403)
+    if not hmac.compare_digest(
+        request.headers.get("X-Telegram-Bot-Api-Secret-Token", ""),
+        WEBHOOK_SECRET_TOKEN or "",
+    ):
+        logger.warning("Webhook handler: rejected request with missing/invalid secret token")
         return web.Response(status=403)
     try:
         json_body = await request.json()
@@ -588,7 +618,7 @@ async def _run_polling_or_webhook() -> None:
         logger.info("🚀 Bot is now running via webhook...")
         logger.info("=" * 60)
         await bot.remove_webhook()
-        await bot.set_webhook(url=WEBHOOK_URL)
+        await bot.set_webhook(url=WEBHOOK_URL, secret_token=WEBHOOK_SECRET_TOKEN)
         logger.info("✅ Webhook registered with Telegram")
         await asyncio.Event().wait()
     else:

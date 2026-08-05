@@ -87,7 +87,12 @@ services:
   # into ./data/backups/ on the host and prunes anything older than the
   # retention window. No-ops on Postgres / MEMORY_MODE (no DB file to copy).
   #
-  # Restore: gunzip a snapshot over ./data/rollcall.db while the bot is stopped.
+  # Restore: stop the bot, then run scripts/restore_db.sh <snapshot.db.gz> on
+  # the host. Don't gunzip a snapshot over ./data/rollcall.db by hand — the
+  # restored file inherits your host user's UID/umask, which the container
+  # (root, but cap_drop: ALL — no CAP_DAC_OVERRIDE — below) may not be able
+  # to write to; restore_db.sh sets the same permissive mode the data
+  # directory already gets at build time so this can't happen.
   # ---------------------------------------------------------------------------
   db-backup:
     image: rollcall-bot:local

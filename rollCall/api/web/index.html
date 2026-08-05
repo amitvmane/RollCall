@@ -208,6 +208,10 @@
     <!-- Admin action — visible only to web admins -->
     <div id="admin-card" class="card hidden" style="border:1.5px dashed var(--border)">
       <div style="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:10px">Admin actions</div>
+      <!-- Other-groups switcher — only rendered when this admin manages
+           more than one group, so a multi-group admin can move between
+           their groups' own pages without a separate admin app. -->
+      <div id="admin-group-switcher" class="hidden" style="margin-bottom:10px"></div>
       <div style="margin-bottom:10px">
         <button class="btn btn-primary" style="width:100%;padding:12px" onclick="openNewRollcallModal()">＋ New Rollcall</button>
       </div>

@@ -1260,7 +1260,7 @@ async function _checkWebAdmin(){
     _isWebAdmin=!!d.is_admin;
     const card=document.getElementById("admin-card");
     if(card)card.classList.toggle("hidden",!_isWebAdmin);
-    if(_isWebAdmin){_syncShhToggle();_syncGroupSettingsCard();_syncTimezoneDisplay();_renderWeekdayHint();_loadWeblogInMembers();}
+    if(_isWebAdmin){_syncShhToggle();_syncGroupSettingsCard();_syncTimezoneDisplay();_renderWeekdayHint();_loadWeblogInMembers();_loadAdminGroupSwitcher();}
   }catch(_){}
   // Load dues after admin status is resolved — both member and admin sections
   loadDuesSection().catch(()=>{});
@@ -1270,6 +1270,25 @@ function _syncShhToggle(){
   const tog=document.getElementById("shh-toggle");
   if(!tog||!groupData)return;
   tog.checked=!!groupData.shh_mode;
+}
+
+// Lets an admin who manages more than one group jump between their
+// groups' own pages — the "breadcrumb" a multi-group admin needs, without
+// a separate admin app to host it in. Reuses the same /auth/admin/groups
+// endpoint the admin console's sign-in group-picker uses.
+async function _loadAdminGroupSwitcher(){
+  const el=document.getElementById("admin-group-switcher");
+  if(!el||!_idToken)return;
+  try{
+    const res=await fetch(`/api/v1/auth/admin/groups?id_token=${encodeURIComponent(_idToken)}`,{signal:AbortSignal.timeout(5000)});
+    if(!res.ok)return;
+    const data=await res.json();
+    const groups=(data.groups||[]).filter(g=>g.group_web_token&&g.group_web_token!==URL_TOKEN);
+    if(!groups.length){el.classList.add("hidden");return;}
+    el.innerHTML=`<div style="font-size:.72rem;font-weight:600;color:var(--sub);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Your other groups</div>`+
+      groups.map(g=>`<a href="/web/group/${esc(g.group_web_token)}" style="display:block;padding:8px 10px;margin-bottom:4px;border-radius:8px;border:1px solid var(--border);font-size:.85rem;font-weight:600;text-decoration:none;color:var(--text)">${esc(g.group_name)}</a>`).join("");
+    el.classList.remove("hidden");
+  }catch(_){}
 }
 
 function _syncGroupSettingsCard(){

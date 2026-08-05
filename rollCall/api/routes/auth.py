@@ -223,6 +223,7 @@ async def miniapp_auth(body: MiniAppAuthRequest) -> MiniAppAuthResponse:
 class AdminGroupSummary(BaseModel):
     chat_id: int
     group_name: str
+    group_web_token: Optional[str] = None
 
 
 class AdminGroupsResponse(BaseModel):
@@ -270,7 +271,11 @@ async def admin_groups(id_token: str = "") -> AdminGroupsResponse:
     groups = []
     for cid in chat_ids:
         row = get_or_create_chat(cid)
-        groups.append(AdminGroupSummary(chat_id=cid, group_name=row.get("group_name") or f"Chat {cid}"))
+        groups.append(AdminGroupSummary(
+            chat_id=cid,
+            group_name=row.get("group_name") or f"Chat {cid}",
+            group_web_token=row.get("group_web_token"),
+        ))
     return AdminGroupsResponse(groups=groups)
 
 

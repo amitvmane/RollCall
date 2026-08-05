@@ -202,6 +202,7 @@ class TestAdminGroupsEndpoint(WebAdminAuthBase):
         self.assertEqual(r.status_code, 200)
         groups = r.json()["groups"]
         self.assertEqual(len(groups), 1)
+        self.assertTrue(groups[0]["group_web_token"])  # needed to link to /web/group/{token}
         self.assertEqual(groups[0]["chat_id"], CHAT_ID)
 
     def test_empty_for_never_cached_user(self):

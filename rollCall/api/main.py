@@ -121,8 +121,22 @@ def create_app() -> FastAPI:
         )
 
     # CORS — allow cross-origin requests from browser-based clients.
-    # Configure CORS_ALLOWED_ORIGINS (comma-separated) to restrict in production.
-    _cors_origins = os.environ.get("CORS_ALLOWED_ORIGINS", "*").split(",")
+    # Configure CORS_ALLOWED_ORIGINS (comma-separated) to restrict further.
+    # Default derives from WEB_BASE_URL (already required for web voting to
+    # work at all, so this tightens the out-of-the-box default without any
+    # extra operator action) rather than a blanket "*" — identity tokens are
+    # long-lived (30 days) and can end up in access logs/Referer headers via
+    # URL query params, so a wildcard origin means anyone who obtains a
+    # leaked token cross-origin can also read authenticated API responses
+    # with it, not just send the request. Falls back to "*" only when
+    # WEB_BASE_URL itself is also unset (no known origin to restrict to —
+    # local/dev use).
+    _web_base = os.environ.get("WEB_BASE_URL", "").strip().rstrip("/")
+    _cors_default = _web_base or "*"
+    # .strip() before the `or` so an empty-but-present value (e.g. a .env
+    # file with a blank "CORS_ALLOWED_ORIGINS=" line, left uncommented by
+    # habit) falls through to the default too, not just a truly absent key.
+    _cors_origins = (os.environ.get("CORS_ALLOWED_ORIGINS", "").strip() or _cors_default).split(",")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_cors_origins,

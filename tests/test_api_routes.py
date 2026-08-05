@@ -370,6 +370,31 @@ class TestVoteRoutes(unittest.TestCase):
             )
         self.assertEqual(resp.status_code, 422)
 
+    def test_oversized_first_name_rejected_422(self):
+        """Regression: VoteRequest.first_name had no max_length, unlike the
+        web-facing WebVoteRequest.name (max 64) — a bearer-token caller
+        could push an unbounded string into storage/rendering."""
+        auth_a, auth_b = _auth_patches(_VOTE_ROW)
+        with auth_a, auth_b:
+            client = TestClient(self._app(), raise_server_exceptions=False)
+            resp = client.post(
+                "/api/v1/chats/100/rollcalls/1/votes",
+                headers=self._headers(),
+                json={"vote": "in", "user_id": 1, "first_name": "A" * 65},
+            )
+        self.assertEqual(resp.status_code, 422)
+
+    def test_oversized_comment_rejected_422(self):
+        auth_a, auth_b = _auth_patches(_VOTE_ROW)
+        with auth_a, auth_b:
+            client = TestClient(self._app(), raise_server_exceptions=False)
+            resp = client.post(
+                "/api/v1/chats/100/rollcalls/1/votes",
+                headers=self._headers(),
+                json={"vote": "in", "user_id": 1, "first_name": "Alice", "comment": "x" * 101},
+            )
+        self.assertEqual(resp.status_code, 422)
+
     def test_vote_as_other_user_rejected(self):
         """Regression: a self-service (miniapp) token bound to user 1 must not be
         able to cast a vote with a different user_id in the body — that would let
@@ -511,6 +536,33 @@ class TestProxyVoteRoutes(unittest.TestCase):
                 json={"vote": "in", "admin_user_id": 1, "admin_name": "Admin", "proxy_name": "ProxyBob"},
             )
         self.assertEqual(resp.status_code, 403)
+
+    def test_oversized_admin_name_rejected_422(self):
+        """Regression: ProxyVoteRequest.admin_name and .comment had no
+        max_length, unlike proxy_name (already capped at 40)."""
+        auth_a, auth_b = _auth_patches(_ADMIN_ROW)
+        with auth_a, auth_b:
+            client = TestClient(self._app(), raise_server_exceptions=False)
+            resp = client.post(
+                "/api/v1/chats/100/rollcalls/1/proxy-votes",
+                headers=self._headers(),
+                json={"vote": "in", "admin_user_id": 1, "admin_name": "A" * 65, "proxy_name": "ProxyBob"},
+            )
+        self.assertEqual(resp.status_code, 422)
+
+    def test_oversized_proxy_comment_rejected_422(self):
+        auth_a, auth_b = _auth_patches(_ADMIN_ROW)
+        with auth_a, auth_b:
+            client = TestClient(self._app(), raise_server_exceptions=False)
+            resp = client.post(
+                "/api/v1/chats/100/rollcalls/1/proxy-votes",
+                headers=self._headers(),
+                json={
+                    "vote": "in", "admin_user_id": 1, "admin_name": "Admin",
+                    "proxy_name": "ProxyBob", "comment": "x" * 101,
+                },
+            )
+        self.assertEqual(resp.status_code, 422)
 
 
 @unittest.skipUnless(FASTAPI_AVAILABLE, "fastapi not installed")

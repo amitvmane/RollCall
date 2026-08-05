@@ -14,8 +14,8 @@ class ProxyVoteRequest(BaseModel):
     )
     proxy_name: str = Field(..., max_length=40)
     admin_user_id: int = Field(..., description="Telegram user id of the admin acting")
-    admin_name: str = Field(..., description="Display name of the admin")
-    comment: Optional[str] = None
+    admin_name: str = Field(..., max_length=64, description="Display name of the admin")
+    comment: Optional[str] = Field(None, max_length=100)
 
 
 class ProxyVoteResponse(BaseModel):

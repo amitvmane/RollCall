@@ -17,9 +17,9 @@ class VoteRequest(BaseModel):
         ...,
         description="Telegram user id for real users, name for proxies",
     )
-    first_name: str
-    username: Optional[str] = None
-    comment: Optional[str] = None
+    first_name: str = Field(..., min_length=1, max_length=64)
+    username: Optional[str] = Field(None, max_length=64)
+    comment: Optional[str] = Field(None, max_length=100)
 
 
 class VoteResponse(BaseModel):

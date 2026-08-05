@@ -192,6 +192,22 @@ class TestGroupSettingsExtendedFields(WebAdminAuthBase):
         )
         self.assertEqual(r.status_code, 403)
 
+    def test_admin_who_lost_telegram_admin_status_is_rejected_on_locked_group(self):
+        """The actual gap this fix closes: a stale web_admins cache entry
+        must not grant indefinite authority once a group has locked itself
+        down with /set_admins and the person is no longer a real Telegram
+        admin — checked live, not just trusted from the cache."""
+        self.manager.set_admin_rights(CHAT_ID, True)
+        mock_bot.get_chat_member.return_value.status = "member"  # demoted
+        try:
+            r = self.client.patch(
+                f"/api/v1/web/group/{self.chat['group_web_token']}/settings",
+                json={"id_token": self.token, "admin_rights": True},
+            )
+            self.assertEqual(r.status_code, 403)
+        finally:
+            mock_bot.get_chat_member.return_value.status = "administrator"
+
 
 class TestAdminGroupsEndpoint(WebAdminAuthBase):
 
@@ -258,6 +274,43 @@ class TestAdminSessionEndpoint(WebAdminAuthBase):
             json={"id_token": "garbage", "chat_id": CHAT_ID},
         )
         self.assertEqual(r.status_code, 401)
+
+
+class TestDuesAdminLiveReverify(WebAdminAuthBase):
+    """Same fix as TestGroupSettingsExtendedFields' revoke test, applied to
+    the dues/treasury routes (waive, reimburse, fund_topup, ...) — these
+    previously trusted the web_admins cache forever, so someone removed
+    from a group kept indefinite financial authority over it via the web
+    surface. Now live-reverified through the same check_web_admin_live
+    helper every other admin-gated route uses."""
+
+    def setUp(self):
+        super().setUp()
+        self.db.set_web_admin(CHAT_ID, ALICE_ID, "Alice")
+        self.chat = self.db.get_or_create_chat(CHAT_ID)
+        self.db.update_chat_settings(CHAT_ID, dues_enabled=True)
+        self.token = self._id_token(ALICE_ID)
+
+    def test_cached_admin_can_waive_on_open_group(self):
+        r = self.client.post(
+            f"/api/v1/web/group/{self.chat['group_web_token']}/dues/waive",
+            json={"id_token": self.token, "member_name": "Someone", "amount": 50, "reason": "test"},
+        )
+        # 200/201 (success) or a dues-domain error (e.g. no such member) —
+        # anything but a 403 proves the cached admin grant was honored.
+        self.assertNotEqual(r.status_code, 403)
+
+    def test_admin_who_lost_telegram_admin_status_cannot_waive_on_locked_group(self):
+        self.manager.set_admin_rights(CHAT_ID, True)
+        mock_bot.get_chat_member.return_value.status = "member"  # demoted
+        try:
+            r = self.client.post(
+                f"/api/v1/web/group/{self.chat['group_web_token']}/dues/waive",
+                json={"id_token": self.token, "member_name": "Someone", "amount": 50, "reason": "test"},
+            )
+            self.assertEqual(r.status_code, 403)
+        finally:
+            mock_bot.get_chat_member.return_value.status = "administrator"
 
 
 if __name__ == "__main__":

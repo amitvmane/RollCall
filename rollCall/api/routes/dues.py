@@ -25,6 +25,7 @@ from fastapi import APIRouter, HTTPException, Path, Query, status
 
 import db as _db
 from api.identity import require_identity
+from api.web_admin import check_web_admin_live
 from api.schemas.dues import (
     DuesAddAdhocRequest,
     DuesCancelGameRequest,
@@ -74,9 +75,9 @@ def _require_identity(id_token: str) -> int:
     )
 
 
-def _require_admin(chat_id: int, id_token: str) -> int:
+async def _require_admin(chat_id: int, id_token: str) -> int:
     user_id = _require_identity(id_token)
-    if not _db.is_web_admin(chat_id, user_id):
+    if not await check_web_admin_live(chat_id, user_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You are not an admin for this group.",
@@ -163,7 +164,7 @@ async def get_dues_summary(
     chat = _resolve_chat(group_token)
     _require_dues(chat)
     chat_id = int(chat["chat_id"])
-    _require_admin(chat_id, id_token)
+    await _require_admin(chat_id, id_token)
 
     result = dues_svc.all_dues(chat_id, nonzero_only=nonzero_only)
     fund = dues_svc.fund_summary(chat_id)
@@ -206,7 +207,7 @@ async def get_fund_history(
     chat = _resolve_chat(group_token)
     _require_dues(chat)
     chat_id = int(chat["chat_id"])
-    _require_admin(chat_id, id_token)
+    await _require_admin(chat_id, id_token)
 
     result = dues_svc.fund_history(chat_id, limit=limit, offset=offset)
     fund = dues_svc.fund_summary(chat_id)
@@ -231,7 +232,7 @@ async def get_tiers(
 ) -> DuesTiersResponse:
     chat = _resolve_chat(group_token)
     chat_id = int(chat["chat_id"])
-    _require_admin(chat_id, id_token)
+    await _require_admin(chat_id, id_token)
 
     result = dues_svc.list_penalty_tiers(chat_id)
     return DuesTiersResponse(tiers=[PenaltyTier(**t) for t in result["tiers"]])
@@ -248,7 +249,7 @@ async def get_settings(
 ) -> DuesSettingsResponse:
     chat = _resolve_chat(group_token)
     chat_id = int(chat["chat_id"])
-    _require_admin(chat_id, id_token)
+    await _require_admin(chat_id, id_token)
 
     settings = dues_svc.get_dues_settings(chat_id)
     return DuesSettingsResponse(
@@ -272,7 +273,7 @@ async def enable_dues(
 ) -> None:
     chat = _resolve_chat(group_token)
     chat_id = int(chat["chat_id"])
-    actor_uid = _require_admin(chat_id, body.id_token)
+    actor_uid = await _require_admin(chat_id, body.id_token)
     actor_name = _actor_name(chat_id, actor_uid)
 
     _db.update_chat_settings(chat_id, dues_enabled=1)
@@ -292,7 +293,7 @@ async def disable_dues(
 ) -> None:
     chat = _resolve_chat(group_token)
     chat_id = int(chat["chat_id"])
-    actor_uid = _require_admin(chat_id, body.id_token)
+    actor_uid = await _require_admin(chat_id, body.id_token)
     actor_name = _actor_name(chat_id, actor_uid)
 
     _db.update_chat_settings(chat_id, dues_enabled=0)
@@ -313,7 +314,7 @@ async def close_game(
     chat = _resolve_chat(group_token)
     _require_dues(chat)
     chat_id = int(chat["chat_id"])
-    actor_uid = _require_admin(chat_id, body.id_token)
+    actor_uid = await _require_admin(chat_id, body.id_token)
     actor_name = _actor_name(chat_id, actor_uid)
 
     async with _mgr.get_chat_write_lock(chat_id):
@@ -350,7 +351,7 @@ async def cancel_game_dues(
     chat = _resolve_chat(group_token)
     _require_dues(chat)
     chat_id = int(chat["chat_id"])
-    actor_uid = _require_admin(chat_id, body.id_token)
+    actor_uid = await _require_admin(chat_id, body.id_token)
     actor_name = _actor_name(chat_id, actor_uid)
 
     async with _mgr.get_chat_write_lock(chat_id):
@@ -380,7 +381,7 @@ async def mark_penalty(
     chat = _resolve_chat(group_token)
     _require_dues(chat)
     chat_id = int(chat["chat_id"])
-    actor_uid = _require_admin(chat_id, body.id_token)
+    actor_uid = await _require_admin(chat_id, body.id_token)
     actor_name = _actor_name(chat_id, actor_uid)
 
     async with _mgr.get_chat_write_lock(chat_id):
@@ -404,7 +405,7 @@ async def mark_paid(
     chat_id = int(chat["chat_id"])
     actor_uid = _require_identity(body.id_token)
     actor_name = _actor_name(chat_id, actor_uid)
-    is_admin = bool(_db.is_web_admin(chat_id, actor_uid))
+    is_admin = bool(await check_web_admin_live(chat_id, actor_uid))
 
     async with _mgr.get_chat_write_lock(chat_id):
         result = dues_svc.mark_paid(
@@ -426,7 +427,7 @@ async def waive(
     chat = _resolve_chat(group_token)
     _require_dues(chat)
     chat_id = int(chat["chat_id"])
-    actor_uid = _require_admin(chat_id, body.id_token)
+    actor_uid = await _require_admin(chat_id, body.id_token)
     actor_name = _actor_name(chat_id, actor_uid)
 
     async with _mgr.get_chat_write_lock(chat_id):
@@ -449,7 +450,7 @@ async def reimburse(
     chat = _resolve_chat(group_token)
     _require_dues(chat)
     chat_id = int(chat["chat_id"])
-    actor_uid = _require_admin(chat_id, body.id_token)
+    actor_uid = await _require_admin(chat_id, body.id_token)
     actor_name = _actor_name(chat_id, actor_uid)
 
     async with _mgr.get_chat_write_lock(chat_id):
@@ -472,7 +473,7 @@ async def add_adhoc(
     chat = _resolve_chat(group_token)
     _require_dues(chat)
     chat_id = int(chat["chat_id"])
-    actor_uid = _require_admin(chat_id, body.id_token)
+    actor_uid = await _require_admin(chat_id, body.id_token)
     actor_name = _actor_name(chat_id, actor_uid)
 
     async with _mgr.get_chat_write_lock(chat_id):
@@ -492,7 +493,7 @@ async def set_collector(
     chat = _resolve_chat(group_token)
     _require_dues(chat)
     chat_id = int(chat["chat_id"])
-    actor_uid = _require_admin(chat_id, body.id_token)
+    actor_uid = await _require_admin(chat_id, body.id_token)
     actor_name = _actor_name(chat_id, actor_uid)
 
     async with _mgr.get_chat_write_lock(chat_id):
@@ -518,7 +519,7 @@ async def log_expense(
     chat = _resolve_chat(group_token)
     _require_dues(chat)
     chat_id = int(chat["chat_id"])
-    actor_uid = _require_admin(chat_id, body.id_token)
+    actor_uid = await _require_admin(chat_id, body.id_token)
     actor_name = _actor_name(chat_id, actor_uid)
 
     async with _mgr.get_chat_write_lock(chat_id):
@@ -538,7 +539,7 @@ async def fund_topup(
     chat = _resolve_chat(group_token)
     _require_dues(chat)
     chat_id = int(chat["chat_id"])
-    actor_uid = _require_admin(chat_id, body.id_token)
+    actor_uid = await _require_admin(chat_id, body.id_token)
     actor_name = _actor_name(chat_id, actor_uid)
 
     async with _mgr.get_chat_write_lock(chat_id):
@@ -560,7 +561,7 @@ async def upsert_tier(
 ) -> dict:
     chat = _resolve_chat(group_token)
     chat_id = int(chat["chat_id"])
-    actor_uid = _require_admin(chat_id, body.id_token)
+    actor_uid = await _require_admin(chat_id, body.id_token)
     actor_name = _actor_name(chat_id, actor_uid)
 
     return dues_svc.add_penalty_tier(
@@ -580,7 +581,7 @@ async def delete_tier(
 ) -> None:
     chat = _resolve_chat(group_token)
     chat_id = int(chat["chat_id"])
-    actor_uid = _require_admin(chat_id, id_token)
+    actor_uid = await _require_admin(chat_id, id_token)
     actor_name = _actor_name(chat_id, actor_uid)
 
     dues_svc.remove_penalty_tier(chat_id, tier_name, actor_uid, actor_name)
@@ -599,7 +600,7 @@ async def update_settings(
 ) -> None:
     chat = _resolve_chat(group_token)
     chat_id = int(chat["chat_id"])
-    actor_uid = _require_admin(chat_id, body.id_token)
+    actor_uid = await _require_admin(chat_id, body.id_token)
     actor_name = _actor_name(chat_id, actor_uid)
 
     if body.upi_vpa is not None:
@@ -668,7 +669,7 @@ async def close_preview(
     chat = _resolve_chat(group_token)
     _require_dues(chat)
     chat_id = int(chat["chat_id"])
-    _require_admin(chat_id, id_token)
+    await _require_admin(chat_id, id_token)
 
     result = dues_svc.close_preview(chat_id)
     if not result.get("available"):

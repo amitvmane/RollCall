@@ -25,6 +25,7 @@ from pydantic import BaseModel
 
 import db as _db
 from api.identity import require_identity, verify_identity_token
+from api.web_admin import check_web_admin_live
 from api.telegram_mirror import mirror_panel_to_telegram as _mirror_panel_to_telegram, send_vote_notification as _send_vote_notification, send_event_notification as _send_event_notification
 from services import web as web_svc
 from services import stats as stats_svc
@@ -224,8 +225,6 @@ async def web_admin_status(
     if not chat or not tg_user_id:
         return WebAdminStatusResponse(is_admin=False)
     chat_id = int(chat["chat_id"])
-
-    from api.web_admin import check_web_admin_live
     return WebAdminStatusResponse(is_admin=await check_web_admin_live(chat_id, tg_user_id))
 
 
@@ -243,7 +242,7 @@ async def update_group_settings(
         raise HTTPException(status_code=404, detail="Invalid group token")
     actor_user_id = require_identity(body.id_token, detail="Verify with Telegram first.")
     chat_id = int(chat["chat_id"])
-    if not _db.is_web_admin(chat_id, actor_user_id):
+    if not await check_web_admin_live(chat_id, actor_user_id):
         raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
     if body.shh_mode is not None:
         from rollcall_manager import manager as _mgr
@@ -309,7 +308,7 @@ async def web_start_rollcall(
     )
 
     chat_id = int(chat["chat_id"])
-    if not _db.is_web_admin(chat_id, actor_user_id):
+    if not await check_web_admin_live(chat_id, actor_user_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You are not a web admin for this group. Run /weblink in Telegram first.",
@@ -385,7 +384,7 @@ async def web_end_rollcall(
     )
 
     chat_id = int(chat["chat_id"])
-    if not _db.is_web_admin(chat_id, actor_user_id):
+    if not await check_web_admin_live(chat_id, actor_user_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You are not a web admin for this group.",
@@ -430,7 +429,7 @@ async def web_proxy_vote(
     )
 
     chat_id = int(chat["chat_id"])
-    if not _db.is_web_admin(chat_id, actor_user_id):
+    if not await check_web_admin_live(chat_id, actor_user_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You are not a web admin for this group.",
@@ -480,7 +479,7 @@ async def web_proxy_vote(
 # server. Wraps the same services.templates functions the /schedule_template
 # Telegram command and the token-gated REST routes already call.
 
-def _require_web_admin(group_token: str, id_token: str) -> tuple[int, int]:
+async def _require_web_admin(group_token: str, id_token: str) -> tuple[int, int]:
     """Resolve + admin-check in one place for the schedule-editor routes.
     Returns (chat_id, actor_user_id). Raises 404/401/403 as appropriate."""
     chat = _db.get_chat_by_group_web_token(group_token)
@@ -488,7 +487,7 @@ def _require_web_admin(group_token: str, id_token: str) -> tuple[int, int]:
         raise HTTPException(status_code=404, detail="Invalid group token")
     actor_user_id = require_identity(id_token, detail="Verify with Telegram first.")
     chat_id = int(chat["chat_id"])
-    if not _db.is_web_admin(chat_id, actor_user_id):
+    if not await check_web_admin_live(chat_id, actor_user_id):
         raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
     return chat_id, actor_user_id
 
@@ -512,7 +511,7 @@ async def web_list_templates(
     group_token: str = Path(...),
     id_token: str = "",
 ) -> list[WebTemplateResponse]:
-    chat_id, _ = _require_web_admin(group_token, id_token)
+    chat_id, _ = await _require_web_admin(group_token, id_token)
     from services import templates as tmpl_svc
     return [WebTemplateResponse(**t) for t in tmpl_svc.list_templates(chat_id)]
 
@@ -527,7 +526,7 @@ async def web_set_template_schedule(
     group_token: str = Path(...),
     name: str = Path(...),
 ) -> WebTemplateResponse:
-    chat_id, actor_user_id = _require_web_admin(group_token, body.id_token)
+    chat_id, actor_user_id = await _require_web_admin(group_token, body.id_token)
     actor_name = await _actor_display_name(chat_id, actor_user_id)
 
     from services import templates as tmpl_svc
@@ -567,7 +566,7 @@ async def web_enable_template_schedule(
     group_token: str = Path(...),
     name: str = Path(...),
 ) -> WebTemplateResponse:
-    chat_id, actor_user_id = _require_web_admin(group_token, body.id_token)
+    chat_id, actor_user_id = await _require_web_admin(group_token, body.id_token)
     actor_name = await _actor_display_name(chat_id, actor_user_id)
     from services import templates as tmpl_svc
     tmpl_svc.enable_schedule(chat_id, name, actor_user_id, actor_name)
@@ -586,7 +585,7 @@ async def web_disable_template_schedule(
     group_token: str = Path(...),
     name: str = Path(...),
 ) -> WebTemplateResponse:
-    chat_id, actor_user_id = _require_web_admin(group_token, body.id_token)
+    chat_id, actor_user_id = await _require_web_admin(group_token, body.id_token)
     actor_name = await _actor_display_name(chat_id, actor_user_id)
     from services import templates as tmpl_svc
     tmpl_svc.disable_schedule(chat_id, name, actor_user_id, actor_name)
@@ -605,7 +604,7 @@ async def web_update_template(
     group_token: str = Path(...),
     name: str = Path(...),
 ) -> WebTemplateResponse:
-    chat_id, actor_user_id = _require_web_admin(group_token, body.id_token)
+    chat_id, actor_user_id = await _require_web_admin(group_token, body.id_token)
     actor_name = await _actor_display_name(chat_id, actor_user_id)
     from services import templates as tmpl_svc
     # This route always receives the whole form, not a sparse patch — unlike
@@ -641,7 +640,7 @@ async def web_start_template(
     group_token: str = Path(...),
     name: str = Path(...),
 ) -> WebRollcallResponse:
-    chat_id, actor_user_id = _require_web_admin(group_token, body.id_token)
+    chat_id, actor_user_id = await _require_web_admin(group_token, body.id_token)
     actor_name = await _actor_display_name(chat_id, actor_user_id)
     from services import templates as tmpl_svc
     from services.web import _serialize_web_rollcall
@@ -674,7 +673,7 @@ async def web_delete_template(
     group_token: str = Path(...),
     name: str = Path(...),
 ) -> dict:
-    chat_id, actor_user_id = _require_web_admin(group_token, body.id_token)
+    chat_id, actor_user_id = await _require_web_admin(group_token, body.id_token)
     actor_name = await _actor_display_name(chat_id, actor_user_id)
     from services import templates as tmpl_svc
     result = tmpl_svc.delete_one_template(chat_id, name, actor_user_id, actor_name)
@@ -699,7 +698,7 @@ async def web_list_identities(
     group_token: str = Path(...),
     id_token: str = "",
 ) -> WebIdentityListResponse:
-    chat_id, _ = _require_web_admin(group_token, id_token)
+    chat_id, _ = await _require_web_admin(group_token, id_token)
     from services import identity as identity_svc
     return WebIdentityListResponse(
         identities=identity_svc.list_all_identities(chat_id),
@@ -717,7 +716,7 @@ async def web_list_identity_suggestions(
     group_token: str = Path(...),
     id_token: str = "",
 ) -> WebIdentitySuggestionsResponse:
-    chat_id, _ = _require_web_admin(group_token, id_token)
+    chat_id, _ = await _require_web_admin(group_token, id_token)
     from services import identity as identity_svc
     return WebIdentitySuggestionsResponse(suggestions=identity_svc.list_suggestions(chat_id))
 
@@ -732,7 +731,7 @@ async def web_merge_identity(
     body: WebMergeIdentityRequest,
     group_token: str = Path(...),
 ) -> WebIdentityGroupResponse:
-    chat_id, actor_user_id = _require_web_admin(group_token, body.id_token)
+    chat_id, actor_user_id = await _require_web_admin(group_token, body.id_token)
     actor_name = await _actor_display_name(chat_id, actor_user_id)
     from services import identity as identity_svc
     group = identity_svc.link_identities(
@@ -757,7 +756,7 @@ async def web_unmerge_identity(
     body: WebUnmergeIdentityRequest,
     group_token: str = Path(...),
 ) -> WebUnmergeIdentityResponse:
-    chat_id, actor_user_id = _require_web_admin(group_token, body.id_token)
+    chat_id, actor_user_id = await _require_web_admin(group_token, body.id_token)
     actor_name = await _actor_display_name(chat_id, actor_user_id)
     from services import identity as identity_svc
     result = identity_svc.unmerge_identity(chat_id, body.alias_proxy_name,
@@ -776,7 +775,7 @@ async def web_dismiss_identity_suggestion(
     body: WebDismissSuggestionRequest,
     group_token: str = Path(...),
 ) -> WebDismissSuggestionResponse:
-    chat_id, actor_user_id = _require_web_admin(group_token, body.id_token)
+    chat_id, actor_user_id = await _require_web_admin(group_token, body.id_token)
     actor_name = await _actor_display_name(chat_id, actor_user_id)
     from services import identity as identity_svc
     identity_svc.dismiss_suggestion(
@@ -796,7 +795,7 @@ async def web_discard_identity(
     body: WebDiscardIdentityRequest,
     group_token: str = Path(...),
 ) -> WebDiscardIdentityResponse:
-    chat_id, actor_user_id = _require_web_admin(group_token, body.id_token)
+    chat_id, actor_user_id = await _require_web_admin(group_token, body.id_token)
     actor_name = await _actor_display_name(chat_id, actor_user_id)
     from services import identity as identity_svc
     identity_svc.discard_identity(chat_id, body.alias_proxy_name,
@@ -813,7 +812,7 @@ async def web_undiscard_identity(
     body: WebUndiscardIdentityRequest,
     group_token: str = Path(...),
 ) -> WebUndiscardIdentityResponse:
-    chat_id, actor_user_id = _require_web_admin(group_token, body.id_token)
+    chat_id, actor_user_id = await _require_web_admin(group_token, body.id_token)
     actor_name = await _actor_display_name(chat_id, actor_user_id)
     from services import identity as identity_svc
     result = identity_svc.undiscard_identity(chat_id, body.alias_proxy_name,
@@ -838,7 +837,7 @@ async def create_scheduled_rollcall(
         raise HTTPException(status_code=404, detail="Invalid group token")
     actor_user_id = require_identity(body.id_token, detail="Verify with Telegram first.")
     chat_id = int(chat["chat_id"])
-    if not _db.is_web_admin(chat_id, actor_user_id):
+    if not await check_web_admin_live(chat_id, actor_user_id):
         raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
 
     # Basic ISO datetime validation
@@ -902,7 +901,7 @@ async def list_scheduled_rollcalls(
         raise HTTPException(status_code=404, detail="Invalid group token")
     actor_user_id = require_identity(id_token, detail="Verify with Telegram first.")
     chat_id = int(chat["chat_id"])
-    if not _db.is_web_admin(chat_id, actor_user_id):
+    if not await check_web_admin_live(chat_id, actor_user_id):
         raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
     from services import templates as tmpl_svc
     items = [ScheduledRollcallItem(**r) for r in tmpl_svc.list_pending_once(chat_id)]
@@ -924,7 +923,7 @@ async def delete_scheduled_rollcall(
         raise HTTPException(status_code=404, detail="Invalid group token")
     actor_user_id = require_identity(id_token, detail="Verify with Telegram first.")
     chat_id = int(chat["chat_id"])
-    if not _db.is_web_admin(chat_id, actor_user_id):
+    if not await check_web_admin_live(chat_id, actor_user_id):
         raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
 
     # Grab title before deletion so we can include it in the notification
@@ -962,7 +961,7 @@ async def list_members_for_weblogin(
     group_token: str = Path(...),
     id_token: str = "",
 ) -> _MemberListResponse:
-    chat_id, _ = _require_web_admin(group_token, id_token)
+    chat_id, _ = await _require_web_admin(group_token, id_token)
     members = _db.get_active_members(chat_id)
     return _MemberListResponse(members=[
         _MemberListItem(first_name=m.get("first_name"), username=m.get("username"))
@@ -1001,7 +1000,7 @@ async def issue_weblogin(
     actor_user_id = require_identity(body.id_token, detail="Verify with Telegram first.")
 
     chat_id = int(chat["chat_id"])
-    if not _db.is_web_admin(chat_id, actor_user_id):
+    if not await check_web_admin_live(chat_id, actor_user_id):
         raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
 
     # Resolve member name against chat_members

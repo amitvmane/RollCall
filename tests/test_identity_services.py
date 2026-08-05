@@ -118,7 +118,7 @@ class TestLinkIdentities(unittest.TestCase):
              patch("services.identity.db.repoint_links") as mock_repoint, \
              patch("services.identity.db.log_admin_action") as mock_log, \
              patch("services.identity.db.get_links_by_canonical", return_value=[]), \
-             patch("services.identity.db.get_member_display_info", return_value=None):
+             patch("services.identity.db.get_member_display_info", return_value={"first_name": "Rex", "username": "rexreal"}):
             g = identity.link_identities(1, "Rex", canonical_user_id=999, **self._admin())
         mock_upsert.assert_called_once()
         self.assertEqual(mock_upsert.call_args.kwargs["canonical_user_id"], 999)
@@ -164,7 +164,7 @@ class TestLinkIdentities(unittest.TestCase):
              patch("services.identity.db.repoint_links") as mock_repoint, \
              patch("services.identity.db.log_admin_action"), \
              patch("services.identity.db.get_links_by_canonical", return_value=[]), \
-             patch("services.identity.db.get_member_display_info", return_value=None):
+             patch("services.identity.db.get_member_display_info", return_value={"first_name": "Ajay", "username": "ajayreal"}):
             identity.link_identities(1, "Ajay", canonical_user_id=555, **self._admin())
         mock_repoint.assert_called_once_with(1, "Ajay", to_user_id=555, to_proxy_name=None)
 

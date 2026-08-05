@@ -11,8 +11,11 @@ is ever rewritten, only a link row added/removed — see services/identity.py).
 
 import time
 
+import pytest
+
 import db
 import services.identity as identity
+from exceptions import incorrectParameter
 
 
 CHAT = -(int(time.time() * 1000) % 10**12) - 10**14
@@ -269,3 +272,21 @@ def test_case_and_whitespace_variants_auto_merge_permanently():
     group = identity.list_identity_groups(chat)
     amit_group = [g for g in group if g["display_name"].strip().lower() == "amit"][0]
     assert set(a.lower() for a in amit_group["aliases"]) >= {"amit", "amit"}  # at least the lowercased forms present
+
+
+def test_merge_into_non_member_user_id_rejected():
+    """canonical_user_id is caller-supplied — merging a proxy's dues/
+    attendance history onto an arbitrary Telegram id that has never been
+    seen in this chat (typo, or bad-faith) must be rejected, not silently
+    permanently combine two unrelated identities."""
+    chat = CHAT - 10
+    db.get_or_create_chat(chat)
+    db.add_dues_entry(chat, None, None, "SomeProxy", "game_share", 50, None, 1, "Admin")
+
+    with pytest.raises(incorrectParameter):
+        identity.link_identities(chat, "SomeProxy", canonical_user_id=424242424242,
+                                  admin_user_id=1, admin_name="Admin")
+
+    # Confirm nothing was actually linked.
+    assert db.get_dues_balance(chat, member_name="SomeProxy") == 50
+    assert db.get_dues_balance(chat, user_id=424242424242) == 0

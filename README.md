@@ -5,7 +5,7 @@ A feature-rich Telegram bot for tracking event attendance in group chats. Member
 [![CI](https://github.com/amitvmane/RollCall/actions/workflows/ci.yml/badge.svg)](https://github.com/amitvmane/RollCall/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-9.5-green)](rollCall/version.json)
+[![Version](https://img.shields.io/badge/version-9.9-green)](rollCall/version.json)
 
 ---
 
@@ -26,6 +26,8 @@ A feature-rich Telegram bot for tracking event attendance in group chats. Member
 - **Admin audit log** — every admin action recorded; viewable with `/audit_log`
 - **Admin controls** — restrict commands to designated group admins; manual status override with `/set_status`
 - **Web voting** — shareable browser links for non-Telegram users; permanent per-group bookmarkable URL that works even when Telegram is down; installable PWA with push notifications
+- **Manage your group from the web** — the group web page covers everything day-to-day: move/remove voters, create and edit templates, deep stats (session history, ghost leaderboard, response-time leaderboard), settings — sign in with Telegram, no token needed
+- **Merge identities** — fold a repeated proxy name into the real member (or another proxy) it belongs to; stats, dues, streaks and ghost tracking combine retroactively, and unmerging is always safe (nothing is deleted, only un-linked)
 - **User portal** — cross-group personal dashboard (`/portal/`): attendance, streaks, upcoming games, dues balance
 - **Flexible web login** — Telegram deep-link verify, Telegram Login Widget (no app needed), admin-issued single-use links (`/weblogin`), and personal login codes (`/mytoken`) that work even when Telegram itself is unreachable
 - **Telegram Mini App** — in-app voting interface via the Telegram menu button (no browser switch)
@@ -305,7 +307,7 @@ RollCall/
 │   │   ├── schemas/           # Pydantic request/response models
 │   │   ├── web/               # Group voting SPA (PWA: push, manifest, service worker)
 │   │   ├── portal/            # Cross-group user portal SPA
-│   │   ├── admin/             # Admin console SPA
+│   │   ├── admin/             # Admin console SPA (legacy — group page covers it now)
 │   │   ├── index/             # Public landing page
 │   │   └── miniapp/           # Telegram Mini App SPA
 │   ├── models.py              # RollCall and User data models
@@ -317,8 +319,8 @@ RollCall/
 │   ├── periodic_jobs.py       # Weekly dues nudges/reports, monthly wrap-up & treasury digest
 │   ├── exceptions.py          # Custom exception types
 │   └── version.json           # Version history
-├── tests/                     # Unit tests, fully mocked (900+)
-├── integration_tests/         # Real-DB + real-handler scenario tests (780+)
+├── tests/                     # Unit tests, fully mocked (1,190+)
+├── integration_tests/         # Real-DB + real-handler scenario tests (830+)
 ├── scripts/smoke_test.py      # Real-import boot check (run before dep bumps / handler refactors)
 ├── .github/workflows/         # GitHub Actions CI/CD
 ├── dockerfile
@@ -486,6 +488,10 @@ See [version.json](rollCall/version.json) for the full version history.
 
 | Version | Highlights |
 |---|---|
+| **9.9** | Group web page now does everything the admin console used to — voter management, template creation, deep stats (session history, ghost/response-time leaderboards); admin sign-in matches the portal (Telegram verify, widget, or code); multi-group switcher |
+| **9.8** | Security fix — Mini App proxy-vote endpoint enforced admin rights like `/sif`; landing page gained Sign in / Admin links; admin console sign-in via Telegram (no more `/gentoken` token paste); portal Dues tab promoted to its own tab |
+| **9.7** | Merge identities — fold a repeated proxy name into a real member/proxy, one tap on the group web page, with retroactive stats/dues/streak/ghost merge and safe unmerge; template delete from web/admin/Telegram; one-time "Schedule → Once" auto-close fix |
+| **9.6** | Security & reliability audit — REST API vote/proxy/start-rollcall permission gaps closed; concurrent-mutation locking on 2 more admin actions; silent-failure fixes on 5 commands; DST and monthly-schedule-clamping scheduler bugs fixed |
 | **9.5** | Dues season reset (`/new_season` — compensating entries, fund carry/zero choice); dues epoch (games played while dues was off never resurface as unsettled); collector UPI memory with one-tap reuse |
 | **9.4** | Panel button fix (critical); pinned settle nudge with Settle-now button; collector picker reaches non-playing members; guided `/enable_dues` setup card + `/dues_setup`; web proxy voting; emoji-grouped command menu; `/mytoken` personal web login codes |
 | **9.1–9.3** | 💰 Dues & Treasury — per-head fee split with UPI QR, penalty tiers, waivers, collector flow, group fund, append-only ledger; dues web UI (member card + admin console); weekly dues reports & reminders; Telegram Login Widget; monthly wrap-up card & treasury statement |

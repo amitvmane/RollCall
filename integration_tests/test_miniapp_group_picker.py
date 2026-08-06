@@ -23,6 +23,7 @@ BOT_TOKEN = "123456789:TEST_BOT_TOKEN_FOR_UNIT_TESTS_ONLY"
 CHAT_ID = -1001999000950
 ADMIN_ID = 3001   # web admin, never personally voted
 VOTER_ID = 3002   # real voting history, not a web admin
+LURKER_ID = 3003  # tracked chat activity (message/button tap), never voted, not an admin
 
 
 def _import():
@@ -64,6 +65,11 @@ class TestMiniAppGroupPicker(unittest.TestCase):
         asyncio.run(vote_in(CHAT_ID, VOTER_ID, "Voter", "votertg"))
         asyncio.run(end_rollcall(CHAT_ID, 0, ADMIN_ID, "Admin"))
 
+        # LURKER_ID: simulate what the member-tracking middleware does on
+        # any message/button tap in the group (bot_state.py) — no vote, no
+        # admin grant, just tracked presence.
+        self.db.upsert_chat_member(CHAT_ID, LURKER_ID, "Lurker", "lurkertg")
+
     def test_portal_groups_lists_the_chat_for_the_voter(self):
         tok = self.issue_identity_token(VOTER_ID)
         resp = self.client.get(f"/api/v1/portal/groups?id_token={tok}")
@@ -102,6 +108,31 @@ class TestMiniAppGroupPicker(unittest.TestCase):
             json={"id_token": tok, "chat_id": -999999999},
         )
         self.assertEqual(resp.status_code, 403)
+
+    def test_portal_groups_lists_the_chat_for_a_never_voted_lurker(self):
+        """The whole point of this feature: someone who's active in the
+        group but has never completed a vote must still see it in their
+        picker, not just the people who've voted before."""
+        tok = self.issue_identity_token(LURKER_ID)
+        resp = self.client.get(f"/api/v1/portal/groups?id_token={tok}")
+        self.assertEqual(resp.status_code, 200)
+        groups = resp.json()["groups"]
+        chat_ids = [g["chat_id"] for g in groups]
+        self.assertIn(CHAT_ID, chat_ids)
+        entry = next(g for g in groups if g["chat_id"] == CHAT_ID)
+        self.assertEqual(entry["sessions_attended"], 0)
+        self.assertIsNone(entry["attendance_rate"])
+
+    def test_switch_session_succeeds_for_never_voted_lurker(self):
+        tok = self.issue_identity_token(LURKER_ID)
+        resp = self.client.post(
+            "/api/v1/auth/telegram/miniapp/group",
+            json={"id_token": tok, "chat_id": CHAT_ID},
+        )
+        self.assertEqual(resp.status_code, 201)
+        body = resp.json()
+        self.assertEqual(body["chat_id"], CHAT_ID)
+        self.assertFalse(body["is_web_admin"])
 
     def test_switch_session_token_can_actually_fetch_rollcalls(self):
         """The whole point: the minted token must be a real, working

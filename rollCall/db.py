@@ -3760,6 +3760,36 @@ def get_chat_ended_rollcall_count(chat_id: int) -> int:
         return 0
 
 
+def get_chat_session_count(chat_id: int) -> int:
+    """Return the number of ended, non-cancelled rollcalls in this chat.
+
+    Same is_cancelled-excluding filter as the total_sessions subquery in
+    get_user_voted_chats — used for member-only rows in /portal/groups
+    (get_member_chats) that have no user_stats row to compute it inline
+    from, so the "N sessions" figure stays consistent across both sources.
+    """
+    try:
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            active_false = 'FALSE' if db_type == 'postgresql' else '0'
+            cancel_false = 'FALSE' if db_type == 'postgresql' else '0'
+            cursor.execute(
+                f"""SELECT COUNT(*) FROM rollcalls
+                    WHERE chat_id = {ph} AND is_active = {active_false}
+                    AND COALESCE(is_cancelled, {cancel_false}) = {cancel_false}""",
+                (chat_id,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return 0
+            if isinstance(row, dict):
+                return int(next(iter(row.values())) or 0)
+            return int(row[0] or 0)
+    except Exception as e:
+        logging.error(f"Error in get_chat_session_count: {e}")
+        return 0
+
+
 def get_user_attendance_count(chat_id: int, user_id: int) -> int:
     """Return the number of ENDED rollcalls in this chat where the user's
     final status was IN. This is the authoritative attendance number —
@@ -4374,6 +4404,36 @@ def get_user_voted_chats(tg_user_id: int) -> List[Dict]:
             return [dict(row) for row in cursor.fetchall()]
     except Exception as e:
         logging.error("Error in get_user_voted_chats: %s", e)
+        return []
+
+
+def get_member_chats(user_id: int) -> List[Dict]:
+    """Return chats where user_id is a currently-active tracked member —
+    broader than get_user_voted_chats: chat_members is populated by the
+    member-tracking middleware on ANY message or button tap in a group
+    (see bot_state.py), not just completed votes. Catches someone who's
+    active in a group's chat but hasn't (yet) cast a vote there.
+
+    Only chat_id/group_name/timezone/group_web_token — no per-user stats,
+    since none exist without a user_stats row (that's the whole point of
+    this being a separate, cheaper query rather than an outer join baked
+    into get_user_voted_chats).
+    """
+    try:
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            active_val = True if db_type == 'postgresql' else 1
+            cursor.execute(f"""
+                SELECT DISTINCT cm.chat_id, c.group_name,
+                       COALESCE(c.timezone, 'Asia/Kolkata') AS timezone,
+                       c.group_web_token
+                FROM chat_members cm
+                JOIN chats c ON c.chat_id = cm.chat_id
+                WHERE cm.user_id = {ph} AND cm.is_active = {ph}
+            """, (user_id, active_val))
+            return [dict(row) for row in cursor.fetchall()]
+    except Exception as e:
+        logging.error("Error in get_member_chats: %s", e)
         return []
 
 

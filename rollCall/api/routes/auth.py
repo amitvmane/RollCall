@@ -28,8 +28,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
 from db import (
-    _hash_token, generate_api_token, get_or_create_chat, get_user_voted_chats,
-    get_web_admin_chats, insert_api_token, is_web_admin,
+    _hash_token, generate_api_token, get_or_create_chat, get_member_chats,
+    get_user_voted_chats, get_web_admin_chats, insert_api_token, is_web_admin,
 )
 
 router = APIRouter()
@@ -269,14 +269,18 @@ async def miniapp_group_session(body: MiniAppGroupSessionRequest) -> MiniAppAuth
 
     chat_id is client-supplied and cannot be trusted on its own, so it must
     independently match a chat this identity actually has standing in —
-    voting history there, or a live web-admin grant — before a token gets
-    minted for it. This mirrors how /portal/groups itself decides what to
-    list in the first place.
+    voting history, tracked chat activity, or a live web-admin grant —
+    before a token gets minted for it. Mirrors the exact set of sources
+    /portal/groups itself unions to decide what to list in the first place;
+    a group visible in the picker must always be reachable here too.
     """
     from api.identity import require_identity
     user_id = require_identity(body.id_token, detail="Verify with Telegram to switch groups.")
 
-    known = any(row["chat_id"] == body.chat_id for row in get_user_voted_chats(user_id))
+    known = (
+        any(row["chat_id"] == body.chat_id for row in get_user_voted_chats(user_id))
+        or any(row["chat_id"] == body.chat_id for row in get_member_chats(user_id))
+    )
     if not known and not is_web_admin(body.chat_id, user_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

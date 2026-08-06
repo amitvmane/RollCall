@@ -120,6 +120,71 @@ class TestPortalGroups(unittest.TestCase):
         self.assertIsNone(g["attendance_rate"])
         self.assertIsNone(g["voting_rate"])
 
+    def test_member_only_chat_appears_with_zero_stats(self):
+        """A chat where the user is a tracked member (message/button-tap
+        activity, see db.get_member_chats) but has never completed a vote
+        must still show up — with zero/None stats rather than being
+        omitted entirely, since it has no user_stats row to compute
+        anything from."""
+        tok = _good_token(7)
+        member_rows = [{
+            "chat_id": -300,
+            "group_name": "Lurker Group",
+            "timezone": "Asia/Kolkata",
+            "group_web_token": "tok300",
+        }]
+        with patch("api.routes.portal._db.get_user_voted_chats", return_value=[]), \
+             patch("api.routes.portal._db.get_member_chats", return_value=member_rows), \
+             patch("api.routes.portal._db.get_chat_session_count", return_value=4), \
+             patch("api.routes.portal._db.is_web_admin", return_value=False):
+            resp = _client().get(f"/api/v1/portal/groups?id_token={tok}")
+        self.assertEqual(resp.status_code, 200)
+        groups = resp.json()["groups"]
+        self.assertEqual(len(groups), 1)
+        g = groups[0]
+        self.assertEqual(g["chat_id"], -300)
+        self.assertEqual(g["group_name"], "Lurker Group")
+        self.assertEqual(g["total_sessions"], 4)
+        self.assertEqual(g["sessions_attended"], 0)
+        self.assertEqual(g["total_voted"], 0)
+        self.assertIsNone(g["attendance_rate"])
+        self.assertIsNone(g["voting_rate"])
+        self.assertIsNone(g["rank"])
+
+    def test_member_chat_not_duplicated_when_already_voted(self):
+        """A chat present in both get_user_voted_chats and get_member_chats
+        (the normal case for anyone who's actually voted — voting also
+        makes them a tracked member) must appear exactly once, using the
+        richer voted-chat stats, not the zero-stat member-only version."""
+        tok = _good_token(8)
+        voted_rows = [{
+            "chat_id": -400,
+            "group_name": "Active Group",
+            "timezone": "Asia/Kolkata",
+            "group_web_token": "tok400",
+            "current_streak": 2,
+            "best_streak": 5,
+            "total_voted": 3,
+            "sessions_attended": 3,
+            "total_sessions": 3,
+            "ghost_count": 0,
+        }]
+        member_rows = [{
+            "chat_id": -400,
+            "group_name": "Active Group",
+            "timezone": "Asia/Kolkata",
+            "group_web_token": "tok400",
+        }]
+        with patch("api.routes.portal._db.get_user_voted_chats", return_value=voted_rows), \
+             patch("api.routes.portal._db.get_member_chats", return_value=member_rows), \
+             patch("api.routes.portal._db.get_user_rank_in_chat", return_value=1), \
+             patch("api.routes.portal._db.is_web_admin", return_value=False):
+            resp = _client().get(f"/api/v1/portal/groups?id_token={tok}")
+        self.assertEqual(resp.status_code, 200)
+        groups = resp.json()["groups"]
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0]["sessions_attended"], 3)
+
 
 # ── /portal/upcoming ─────────────────────────────────────────────────────────
 

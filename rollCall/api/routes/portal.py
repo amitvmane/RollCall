@@ -36,7 +36,7 @@ def _require_identity(id_token: str) -> int:
 @router.get(
     "/portal/groups",
     response_model=PortalGroupsResponse,
-    summary="All groups where this Telegram user has voted, with per-group stats",
+    summary="All groups this Telegram user is active in, with per-group stats",
 )
 async def portal_groups(
     id_token: str = Query(..., description="Signed identity token (from tg-verify / Mini App auth)"),
@@ -45,8 +45,10 @@ async def portal_groups(
 
     chats = _db.get_user_voted_chats(tg_user_id)
     groups = []
+    voted_ids = set()
     for row in chats:
         cid = int(row["chat_id"])
+        voted_ids.add(cid)
         attended = int(row.get("sessions_attended") or 0)
         total = int(row.get("total_sessions") or 0)
         total_voted = int(row.get("total_voted") or 0)
@@ -73,6 +75,37 @@ async def portal_groups(
             # Cache-only check (no live Telegram call) — fine for a list
             # view. The actual admin grant is live-reverified in
             # /auth/admin/session when the user follows the link through.
+            is_web_admin=_db.is_web_admin(cid, tg_user_id),
+        ))
+
+    # Chats where this user is a tracked member (sent a message / tapped a
+    # button — see db.get_member_chats) but has no user_stats row, i.e. has
+    # never completed a vote there. Telegram gives bots no way to learn
+    # about a member who's never interacted at all, so this is the ceiling
+    # of "groups this user is in" the bot can actually know about — but it's
+    # strictly more than voting history alone, which used to be the entire
+    # list.
+    for row in _db.get_member_chats(tg_user_id):
+        cid = int(row["chat_id"])
+        if cid in voted_ids:
+            continue
+        has_active = len(manager.get_rollcalls(cid)) > 0
+        total = _db.get_chat_session_count(cid)
+        groups.append(PortalGroupSummary(
+            chat_id=cid,
+            group_name=row.get("group_name"),
+            timezone=row.get("timezone") or "Asia/Kolkata",
+            group_web_token=row.get("group_web_token"),
+            sessions_attended=0,
+            total_sessions=total,
+            total_voted=0,
+            attendance_rate=None,
+            voting_rate=None,
+            current_streak=0,
+            best_streak=0,
+            ghost_count=0,
+            rank=None,
+            has_active_rollcall=has_active,
             is_web_admin=_db.is_web_admin(cid, tg_user_id),
         ))
 

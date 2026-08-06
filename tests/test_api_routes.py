@@ -1009,10 +1009,33 @@ class TestMiniAppGroupSessionRoute(unittest.TestCase):
             )
         self.assertEqual(resp.status_code, 201)
 
+    def test_switch_to_group_known_only_via_member_chats_succeeds(self):
+        """Regression: /portal/groups lists chats from get_member_chats too
+        (tracked activity, no vote yet) — this endpoint must accept the
+        exact same set, or a group visible in the picker would 403 the
+        moment someone taps it."""
+        tok = self._id_token(11)
+        with patch.dict(os.environ, {"TELEGRAM_TOKEN": "123:TEST"}), \
+             patch("api.routes.auth.generate_api_token", return_value="rawtoken111"), \
+             patch("api.routes.auth._hash_token", return_value="hashedtoken"), \
+             patch("api.routes.auth.insert_api_token"), \
+             patch("api.routes.auth.get_user_voted_chats", return_value=[]), \
+             patch("api.routes.auth.get_member_chats", return_value=[{"chat_id": -600}]), \
+             patch("api.routes.auth.is_web_admin", return_value=False), \
+             patch("api.routes.auth.get_or_create_chat",
+                   return_value={"group_web_token": "grp600", "timezone": "Asia/Kolkata"}):
+            client = TestClient(self._app(), raise_server_exceptions=False)
+            resp = client.post(
+                "/api/v1/auth/telegram/miniapp/group",
+                json={"id_token": tok, "chat_id": -600},
+            )
+        self.assertEqual(resp.status_code, 201)
+
     def test_switch_to_unrelated_group_returns_403(self):
         tok = self._id_token(42)
         with patch.dict(os.environ, {"TELEGRAM_TOKEN": "123:TEST"}), \
              patch("api.routes.auth.get_user_voted_chats", return_value=[{"chat_id": -500}]), \
+             patch("api.routes.auth.get_member_chats", return_value=[]), \
              patch("api.routes.auth.is_web_admin", return_value=False):
             client = TestClient(self._app(), raise_server_exceptions=False)
             resp = client.post(

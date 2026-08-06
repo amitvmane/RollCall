@@ -25,6 +25,13 @@ const state = {
   groupToken: null,
   isWebAdmin: false,
   timezone: 'Asia/Kolkata',
+  // True only when Telegram actually told us which group this launch came
+  // from (see MiniAppAuthResponse.chat_is_group server-side). The button
+  // this app ships with today (a private-chat-only default menu button)
+  // never gets that — so this is normally false, and the cross-group
+  // picker below is the everyday path, not a fallback for an edge case.
+  chatIsGroup: false,
+  groups: [],      // GET /portal/groups results, when chatIsGroup is false
 };
 
 // ── DOM refs ─────────────────────────────────────────────────────────────────
@@ -41,6 +48,9 @@ const $emptyState  = $('empty-state');
 const $settingsBtn = $('settings-btn');
 const $settingsPanel = $('settings-panel');
 const $tzCurrent   = $('tz-current');
+const $backBtn     = $('back-btn');
+const $groupPicker = $('group-picker');
+const $groupsEmpty = $('groups-empty');
 
 // ── API helpers ──────────────────────────────────────────────────────────────
 const API = window.location.origin + '/api/v1';
@@ -84,6 +94,7 @@ async function auth() {
   state.groupToken = data.group_token || null;
   state.isWebAdmin = !!data.is_web_admin;
   state.timezone = data.timezone || 'Asia/Kolkata';
+  state.chatIsGroup = !!data.chat_is_group;
 }
 
 // ── Data loading ─────────────────────────────────────────────────────────────
@@ -91,6 +102,39 @@ async function loadRollcalls() {
   const data = await apiFetch(`/chats/${state.chatId}/rollcalls`);
   // API returns a plain array of rollcall objects
   state.rollcalls = Array.isArray(data) ? data : (data.rollcalls || []);
+}
+
+// ── Cross-group picker ──────────────────────────────────────────────────────
+// Used whenever the launch didn't come with real chat context (the normal
+// case for the current entry point — see state.chatIsGroup above). Lists
+// every group this Telegram user is known in (same source the portal's
+// dashboard uses) so they can pick which one to vote in.
+async function loadGroups() {
+  if (!state.idToken) {
+    throw new Error("Couldn't verify your identity — try reopening from Telegram.");
+  }
+  const data = await apiFetch(`/portal/groups?id_token=${encodeURIComponent(state.idToken)}`);
+  state.groups = data.groups || [];
+}
+
+async function switchToGroup(chatId) {
+  const data = await apiFetch('/auth/telegram/miniapp/group', {
+    method: 'POST',
+    body: JSON.stringify({ id_token: state.idToken, chat_id: chatId }),
+  });
+  state.token = data.token;
+  state.chatId = data.chat_id;
+  state.idToken = data.id_token || state.idToken;
+  state.groupToken = data.group_token || null;
+  state.isWebAdmin = !!data.is_web_admin;
+  state.timezone = data.timezone || 'Asia/Kolkata';
+  state.activeIdx = 0;
+
+  await loadRollcalls();
+  const picked = state.groups.find(g => g.chat_id === chatId);
+  $chatTitle.textContent = picked?.group_name || `Chat ${chatId}`;
+  showGroupView();
+  render();
 }
 
 // ── Voting ───────────────────────────────────────────────────────────────────
@@ -222,7 +266,87 @@ function render() {
   renderActive();
 }
 
+// ── Cross-group picker rendering ────────────────────────────────────────────
+function groupCardHtml(g) {
+  const name = g.group_name || `Chat ${g.chat_id}`;
+  const badge = g.has_active_rollcall
+    ? `<span class="group-pick-badge badge-live">● Live</span>`
+    : `<span class="group-pick-badge badge-idle">${g.total_sessions || 0} sessions</span>`;
+  return `
+<div class="group-pick-card" onclick="openGroup(${g.chat_id})">
+  <div>
+    <div class="group-pick-name">${escHtml(name)}</div>
+    <div class="group-pick-meta">${g.attendance_rate != null ? g.attendance_rate.toFixed(0) + '% attendance' : 'No stats yet'}</div>
+  </div>
+  ${badge}
+</div>`;
+}
+
+function renderPicker() {
+  if (!state.groups.length) {
+    $groupPicker.innerHTML = '';
+    $groupPicker.classList.add('hidden');
+    $groupsEmpty.classList.remove('hidden');
+    return;
+  }
+  $groupsEmpty.classList.add('hidden');
+  $groupPicker.classList.remove('hidden');
+  // Groups with a live rollcall first — that's what someone opening the
+  // app right now most likely wants to act on.
+  const sorted = [...state.groups].sort((a, b) => {
+    if (a.has_active_rollcall && !b.has_active_rollcall) return -1;
+    if (!a.has_active_rollcall && b.has_active_rollcall) return 1;
+    return (a.group_name || '').localeCompare(b.group_name || '');
+  });
+  $groupPicker.innerHTML = sorted.map(groupCardHtml).join('');
+}
+
+function showPickerView() {
+  $chatTitle.textContent = 'Your groups';
+  $backBtn.classList.add('hidden');
+  $settingsBtn.classList.add('hidden');
+  $settingsPanel.classList.add('hidden');
+  $rcTabs.classList.add('hidden');
+  $rcTabs.innerHTML = '';
+  $rcList.innerHTML = '';
+  $emptyState.classList.add('hidden');
+  renderPicker();
+}
+
+function showGroupView() {
+  $groupPicker.classList.add('hidden');
+  $groupsEmpty.classList.add('hidden');
+  // Only a picker-reached session can navigate back — a genuine group
+  // launch (chat_is_group) never had a groups list to go back to.
+  if (!state.chatIsGroup) $backBtn.classList.remove('hidden');
+  if (state.isWebAdmin) $settingsBtn.classList.remove('hidden');
+  if ($tzCurrent) $tzCurrent.textContent = state.timezone;
+}
+
 // ── Public event handlers (called from inline onclick) ───────────────────────
+window.openGroup = async function(chatId) {
+  $groupPicker.innerHTML = '<p class="hint" style="padding:16px 0">Opening…</p>';
+  try {
+    await switchToGroup(chatId);
+  } catch (err) {
+    tg.showPopup?.({
+      title: "Couldn't open group",
+      message: err.message || 'Please try again.',
+      buttons: [{ type: 'ok' }],
+    });
+    renderPicker();
+  }
+};
+
+window.backToGroups = async function() {
+  showPickerView();
+  try {
+    await loadGroups();
+    renderPicker();
+  } catch (err) {
+    $groupPicker.innerHTML = `<p class="hint" style="padding:16px 0">${escHtml(err.message || 'Failed to load groups.')}</p>`;
+  }
+};
 window.switchTab = function(idx) {
   state.activeIdx = idx;
   renderTabs();
@@ -328,17 +452,23 @@ async function boot() {
 
   try {
     await auth();
-    await loadRollcalls();
 
-    // Set header title from chat info if available
-    const chat = tg.initDataUnsafe?.chat;
-    if (chat?.title) $chatTitle.textContent = chat.title;
-
-    showMain();
-    render();
-    if (state.isWebAdmin && $settingsBtn) {
-      $settingsBtn.classList.remove('hidden');
-      if ($tzCurrent) $tzCurrent.textContent = state.timezone;
+    if (state.chatIsGroup) {
+      // Real chat context from Telegram — go straight to this group's
+      // rollcalls, same as before.
+      await loadRollcalls();
+      const chat = tg.initDataUnsafe?.chat;
+      if (chat?.title) $chatTitle.textContent = chat.title;
+      showMain();
+      showGroupView();
+      render();
+    } else {
+      // No reliable chat context (the normal case for today's private-chat
+      // menu button) — show every group this user is known in and let
+      // them pick one.
+      await loadGroups();
+      showMain();
+      showPickerView();
     }
 
     // Telegram WebApp back button — go back if user navigates to a tab

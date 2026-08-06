@@ -27,7 +27,10 @@ from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
-from db import _hash_token, generate_api_token, get_or_create_chat, get_web_admin_chats, insert_api_token, is_web_admin
+from db import (
+    _hash_token, generate_api_token, get_or_create_chat, get_user_voted_chats,
+    get_web_admin_chats, insert_api_token, is_web_admin,
+)
 
 router = APIRouter()
 
@@ -38,11 +41,25 @@ class MiniAppAuthRequest(BaseModel):
     init_data: str
 
 
+class MiniAppGroupSessionRequest(BaseModel):
+    id_token: str
+    chat_id: int
+
+
 class MiniAppAuthResponse(BaseModel):
     token: str
     expires_in: int
     user_id: int
     chat_id: int
+    # True only when initData actually carried a real chat object (Telegram
+    # only populates this for attachment-menu-style launches). The button
+    # this app currently ships with (a private-chat-only default menu
+    # button, see runner.py) never gets one — chat_id in that case is a
+    # last-resort fallback (the user's own id, i.e. their DM with the bot),
+    # never a group with rollcalls in it. The client uses this flag to
+    # decide whether to jump straight into that chat or show the
+    # cross-group picker instead.
+    chat_is_group: bool = False
     # Signed identity proof (see api/identity.py) for endpoints that key off
     # the user rather than a chat-scoped bearer token.
     id_token: Optional[str] = None
@@ -102,10 +119,16 @@ def _validate_init_data(init_data: str, bot_token: str) -> dict:
     return pairs
 
 
-def _extract_ids(pairs: dict) -> tuple[int, Optional[int]]:
-    """Return (user_id, chat_id) extracted from initData fields."""
+def _extract_ids(pairs: dict) -> tuple[int, Optional[int], bool]:
+    """Return (user_id, chat_id, chat_is_group) extracted from initData fields.
+
+    chat_is_group is True only when a real `chat` object was present in
+    initData — i.e. chat_id is trustworthy as an actual group/supergroup,
+    not a fallback guess (receiver, or the user's own id for a private
+    chat with the bot)."""
     user_id: Optional[int] = None
     chat_id: Optional[int] = None
+    chat_is_group = False
 
     user_str = pairs.get("user")
     if user_str:
@@ -120,6 +143,7 @@ def _extract_ids(pairs: dict) -> tuple[int, Optional[int]]:
         try:
             chat_obj = json.loads(unquote(chat_str))
             chat_id = int(chat_obj["id"])
+            chat_is_group = True
         except Exception:
             pass
 
@@ -142,7 +166,58 @@ def _extract_ids(pairs: dict) -> tuple[int, Optional[int]]:
     if chat_id is None:
         raise ValueError("Could not extract chat_id from initData")
 
-    return user_id, chat_id
+    return user_id, chat_id, chat_is_group
+
+
+def _mint_miniapp_session(chat_id: int, user_id: int, chat_is_group: bool) -> MiniAppAuthResponse:
+    """Shared by both /auth/telegram/miniapp (initData) and
+    /auth/telegram/miniapp/group (picking a group from the cross-group
+    list) — everything past "we know the (chat_id, user_id) pair is
+    legitimate" is identical between the two."""
+    raw_token = generate_api_token()
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=_TOKEN_TTL_SECONDS)
+
+    insert_api_token(
+        token_hash=_hash_token(raw_token),
+        chat_id=chat_id,
+        scopes="read,vote",
+        label=f"miniapp:user={user_id}",
+        issued_by_user_id=user_id,
+        expires_at=expires_at,
+    )
+
+    # A verified initData HMAC or a verified id_token just proved this
+    # user's Telegram identity — mint a signed identity token alongside the
+    # chat-scoped bearer token.
+    from api.identity import issue_identity_token, IdentityError
+    try:
+        id_token = issue_identity_token(user_id)
+    except IdentityError:
+        id_token = None
+
+    # Local var deliberately not named `timezone` — shadows the datetime.timezone
+    # imported at module level (used just above for expires_at).
+    chat_row = get_or_create_chat(chat_id)
+    group_token = chat_row.get("group_web_token")
+    chat_timezone = chat_row.get("timezone") or "Asia/Kolkata"
+    web_admin = bool(is_web_admin(chat_id, user_id))
+
+    logging.info(
+        "[miniapp_auth] issued token chat=%s user=%s expires=%s",
+        chat_id, user_id, expires_at.isoformat(),
+    )
+
+    return MiniAppAuthResponse(
+        token=raw_token,
+        expires_in=_TOKEN_TTL_SECONDS,
+        user_id=user_id,
+        chat_id=chat_id,
+        chat_is_group=chat_is_group,
+        id_token=id_token,
+        group_token=group_token,
+        is_web_admin=web_admin,
+        timezone=chat_timezone,
+    )
 
 
 @router.post(
@@ -169,55 +244,46 @@ async def miniapp_auth(body: MiniAppAuthRequest) -> MiniAppAuthResponse:
 
     try:
         pairs = _validate_init_data(body.init_data, bot_token)
-        user_id, chat_id = _extract_ids(pairs)
+        user_id, chat_id, chat_is_group = _extract_ids(pairs)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(exc),
         )
 
-    raw_token = generate_api_token()
-    expires_at = datetime.now(timezone.utc) + timedelta(seconds=_TOKEN_TTL_SECONDS)
+    return _mint_miniapp_session(chat_id, user_id, chat_is_group)
 
-    insert_api_token(
-        token_hash=_hash_token(raw_token),
-        chat_id=chat_id,
-        scopes="read,vote",
-        label=f"miniapp:user={user_id}",
-        issued_by_user_id=user_id,
-        expires_at=expires_at,
-    )
 
-    # initData HMAC just proved this user's Telegram identity — mint a signed
-    # identity token alongside the chat-scoped bearer token.
-    from api.identity import issue_identity_token, IdentityError
-    try:
-        id_token = issue_identity_token(user_id)
-    except IdentityError:
-        id_token = None
+@router.post(
+    "/auth/telegram/miniapp/group",
+    response_model=MiniAppAuthResponse,
+    summary="Switch the Mini App's session into one of the user's groups",
+    status_code=status.HTTP_201_CREATED,
+)
+async def miniapp_group_session(body: MiniAppGroupSessionRequest) -> MiniAppAuthResponse:
+    """
+    Mint a chat-scoped bearer token for a group the Mini App didn't open
+    with real chat context for (see MiniAppAuthResponse.chat_is_group) —
+    the client picked chat_id from the cross-group list at GET /portal/groups,
+    keyed off the id_token /auth/telegram/miniapp already issued it.
 
-    # Local var deliberately not named `timezone` — shadows the datetime.timezone
-    # imported at module level (used just above for expires_at).
-    chat_row = get_or_create_chat(chat_id)
-    group_token = chat_row.get("group_web_token")
-    chat_timezone = chat_row.get("timezone") or "Asia/Kolkata"
-    web_admin = bool(is_web_admin(chat_id, user_id))
+    chat_id is client-supplied and cannot be trusted on its own, so it must
+    independently match a chat this identity actually has standing in —
+    voting history there, or a live web-admin grant — before a token gets
+    minted for it. This mirrors how /portal/groups itself decides what to
+    list in the first place.
+    """
+    from api.identity import require_identity
+    user_id = require_identity(body.id_token, detail="Verify with Telegram to switch groups.")
 
-    logging.info(
-        "[miniapp_auth] issued token chat=%s user=%s expires=%s",
-        chat_id, user_id, expires_at.isoformat(),
-    )
+    known = any(row["chat_id"] == body.chat_id for row in get_user_voted_chats(user_id))
+    if not known and not is_web_admin(body.chat_id, user_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to that group.",
+        )
 
-    return MiniAppAuthResponse(
-        token=raw_token,
-        expires_in=_TOKEN_TTL_SECONDS,
-        user_id=user_id,
-        chat_id=chat_id,
-        id_token=id_token,
-        group_token=group_token,
-        is_web_admin=web_admin,
-        timezone=chat_timezone,
-    )
+    return _mint_miniapp_session(body.chat_id, user_id, chat_is_group=True)
 
 
 class AdminGroupSummary(BaseModel):

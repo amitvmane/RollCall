@@ -81,9 +81,16 @@ h1 {
   font-family: var(--font-display, inherit);
   font-size: 22px; font-weight: 700; letter-spacing: .01em;
   padding-bottom: 8px;
+  flex: 1;
+  /* Keeps the title's position stable whether or not back-btn is shown,
+     instead of drifting under justify-content:space-between. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.settings-btn {
+.settings-btn, .back-btn {
   background: none;
   border: none;
   font-size: 20px;
@@ -94,7 +101,7 @@ h1 {
   border-radius: 8px;
   flex-shrink: 0;
 }
-.settings-btn:active { background: var(--tg-secondary-bg); }
+.settings-btn:active, .back-btn:active { background: var(--tg-secondary-bg); }
 
 .settings-panel {
   padding: 12px 16px;
@@ -285,3 +292,43 @@ h1 {
   transition: width 0.3s;
 }
 .limit-fill.full { background: #e74c3c; }
+
+/* ── Cross-group picker ──────────────────────────────────────── */
+/* Shown when the app opens without real chat context (see boot() in
+   app.js) — normal for the current entry point (Telegram's private-chat
+   menu button), not an edge case. */
+#group-picker { padding: 12px 16px 80px; }
+
+.group-pick-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  background: var(--tg-secondary-bg);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+.group-pick-card:active { transform: scale(0.98); }
+
+.group-pick-name {
+  font-weight: 600;
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.group-pick-meta { font-size: 12px; color: var(--tg-hint); margin-top: 2px; }
+
+.group-pick-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 20px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.badge-live { background: var(--in, #2ecc71); color: #fff; }
+.badge-idle { background: var(--tg-bg); color: var(--tg-hint); border: 1px solid var(--tg-hint); }

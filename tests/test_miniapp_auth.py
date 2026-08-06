@@ -96,24 +96,27 @@ class TestExtractIds(unittest.TestCase):
         user_obj = json.dumps({"id": 42, "first_name": "Bob"})
         chat_obj = json.dumps({"id": -100300, "title": "Group"})
         pairs = {"user": quote(user_obj), "chat": quote(chat_obj)}
-        uid, cid = self._call(pairs)
+        uid, cid, chat_is_group = self._call(pairs)
         self.assertEqual(uid, 42)
         self.assertEqual(cid, -100300)
+        self.assertTrue(chat_is_group, "a real chat object was present — must be trustworthy")
 
     def test_private_chat_fallback_to_receiver(self):
         user_obj = json.dumps({"id": 7, "first_name": "X"})
         receiver_obj = json.dumps({"id": 7, "first_name": "X"})
         pairs = {"user": quote(user_obj), "receiver": quote(receiver_obj)}
-        uid, cid = self._call(pairs)
+        uid, cid, chat_is_group = self._call(pairs)
         self.assertEqual(uid, 7)
         self.assertEqual(cid, 7)
+        self.assertFalse(chat_is_group, "receiver fallback is not a real group chat")
 
     def test_fallback_uses_user_id_when_no_chat(self):
         user_obj = json.dumps({"id": 99, "first_name": "Y"})
         pairs = {"user": quote(user_obj)}
-        uid, cid = self._call(pairs)
+        uid, cid, chat_is_group = self._call(pairs)
         self.assertEqual(uid, 99)
         self.assertEqual(cid, 99)
+        self.assertFalse(chat_is_group, "user-id fallback is not a real group chat")
 
     def test_missing_user_raises(self):
         chat_obj = json.dumps({"id": -1, "title": "G"})

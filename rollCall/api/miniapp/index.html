@@ -28,6 +28,7 @@
     <div id="main" class="hidden">
       <header class="app-header">
         <div class="app-header-row">
+          <button id="back-btn" class="back-btn hidden" onclick="backToGroups()" title="Back to groups" aria-label="Back to groups">←</button>
           <h1 id="chat-title">RollCall</h1>
           <button id="settings-btn" class="settings-btn hidden" onclick="toggleSettings()" title="Settings" aria-label="Settings">⚙️</button>
         </div>
@@ -41,6 +42,18 @@
           <button class="btn btn-primary" onclick="detectTimezone()">📍 Detect</button>
         </div>
       </div>
+
+      <!-- Shown when the app was opened without real chat context (see
+           app.js boot()/state.chatIsGroup) — Telegram's private-chat menu
+           button never carries a group with it, so this is the normal
+           entry path, not a fallback for an edge case. -->
+      <div id="group-picker"></div>
+      <div id="groups-empty" class="center-fill hidden">
+        <div class="empty-icon">👥</div>
+        <p>No groups yet.</p>
+        <p class="hint">Vote at least once in a group — from a rollcall panel or its web link — and it'll show up here.</p>
+      </div>
+
       <div id="rollcall-list"></div>
       <div id="empty-state" class="center-fill hidden">
         <div class="empty-icon">📋</div>

@@ -853,6 +853,10 @@ class TestMiniAppAuthRoute(unittest.TestCase):
         self.assertEqual(body["user_id"], 1)
         self.assertEqual(body["chat_id"], -100)
         self.assertEqual(body["expires_in"], 3600)
+        # A real `chat` object was present in initData (see _make_init_data) —
+        # the client uses this to decide whether to trust chat_id directly
+        # or fall back to the cross-group picker.
+        self.assertTrue(body["chat_is_group"])
         mock_insert.assert_called_once()
         # Verify scopes include both read and vote
         insert_kwargs = mock_insert.call_args.kwargs
@@ -944,6 +948,86 @@ class TestMiniAppAuthRoute(unittest.TestCase):
             )
         self.assertEqual(resp.status_code, 401)
         self.assertIn("24 hours", resp.json()["detail"])
+
+
+@unittest.skipUnless(FASTAPI_AVAILABLE, "fastapi not installed")
+class TestMiniAppGroupSessionRoute(unittest.TestCase):
+    """Tests for POST /api/v1/auth/telegram/miniapp/group — mints a
+    chat-scoped session for a group picked from the Mini App's cross-group
+    list (GET /portal/groups), used when the app was opened without real
+    chat context (see TestMiniAppAuthRoute's chat_is_group)."""
+
+    def _app(self):
+        from api.main import create_app
+        return create_app()
+
+    def _id_token(self, user_id, bot_token="123:TEST"):
+        with patch.dict(os.environ, {"TELEGRAM_TOKEN": bot_token}):
+            from api import identity
+            return identity.issue_identity_token(user_id)
+
+    def test_switch_to_known_group_succeeds(self):
+        tok = self._id_token(42)
+        with patch.dict(os.environ, {"TELEGRAM_TOKEN": "123:TEST"}), \
+             patch("api.routes.auth.generate_api_token", return_value="rawtoken456"), \
+             patch("api.routes.auth._hash_token", return_value="hashedtoken"), \
+             patch("api.routes.auth.insert_api_token") as mock_insert, \
+             patch("api.routes.auth.get_user_voted_chats", return_value=[{"chat_id": -500}]), \
+             patch("api.routes.auth.is_web_admin", return_value=False), \
+             patch("api.routes.auth.get_or_create_chat",
+                   return_value={"group_web_token": "grp999", "timezone": "Asia/Kolkata"}):
+            client = TestClient(self._app(), raise_server_exceptions=False)
+            resp = client.post(
+                "/api/v1/auth/telegram/miniapp/group",
+                json={"id_token": tok, "chat_id": -500},
+            )
+        self.assertEqual(resp.status_code, 201)
+        body = resp.json()
+        self.assertEqual(body["token"], "rawtoken456")
+        self.assertEqual(body["chat_id"], -500)
+        self.assertEqual(body["user_id"], 42)
+        self.assertTrue(body["chat_is_group"])
+        mock_insert.assert_called_once()
+
+    def test_switch_to_group_admins_even_without_voting_history(self):
+        """A web admin who hasn't personally voted yet must still be able
+        to open their own group — matches how /portal/groups itself
+        exposes is_web_admin independent of voting history."""
+        tok = self._id_token(7)
+        with patch.dict(os.environ, {"TELEGRAM_TOKEN": "123:TEST"}), \
+             patch("api.routes.auth.generate_api_token", return_value="rawtoken789"), \
+             patch("api.routes.auth._hash_token", return_value="hashedtoken"), \
+             patch("api.routes.auth.insert_api_token"), \
+             patch("api.routes.auth.get_user_voted_chats", return_value=[]), \
+             patch("api.routes.auth.is_web_admin", return_value=True), \
+             patch("api.routes.auth.get_or_create_chat",
+                   return_value={"group_web_token": "grp1", "timezone": "Asia/Kolkata"}):
+            client = TestClient(self._app(), raise_server_exceptions=False)
+            resp = client.post(
+                "/api/v1/auth/telegram/miniapp/group",
+                json={"id_token": tok, "chat_id": -900},
+            )
+        self.assertEqual(resp.status_code, 201)
+
+    def test_switch_to_unrelated_group_returns_403(self):
+        tok = self._id_token(42)
+        with patch.dict(os.environ, {"TELEGRAM_TOKEN": "123:TEST"}), \
+             patch("api.routes.auth.get_user_voted_chats", return_value=[{"chat_id": -500}]), \
+             patch("api.routes.auth.is_web_admin", return_value=False):
+            client = TestClient(self._app(), raise_server_exceptions=False)
+            resp = client.post(
+                "/api/v1/auth/telegram/miniapp/group",
+                json={"id_token": tok, "chat_id": -999999},
+            )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_switch_with_invalid_id_token_returns_401(self):
+        client = TestClient(self._app(), raise_server_exceptions=False)
+        resp = client.post(
+            "/api/v1/auth/telegram/miniapp/group",
+            json={"id_token": "not.a.validtoken", "chat_id": -500},
+        )
+        self.assertEqual(resp.status_code, 401)
 
 
 @unittest.skipUnless(FASTAPI_AVAILABLE, "fastapi not installed")

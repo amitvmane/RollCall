@@ -142,8 +142,16 @@ def _extract_ids(pairs: dict) -> tuple[int, Optional[int], bool]:
     if chat_str:
         try:
             chat_obj = json.loads(unquote(chat_str))
-            chat_id = int(chat_obj["id"])
-            chat_is_group = True
+            # Some clients (observed on Telegram iOS) populate `chat` even
+            # for a plain private-chat menu-button launch, with type
+            # "private" — that's the user's own DM with the bot, not a
+            # group with rollcalls in it. Only a group/supergroup `chat`
+            # is trustworthy real context; anything else must fall through
+            # to the receiver/user_id fallbacks below, same as if `chat`
+            # had been absent (as it correctly is on Telegram Desktop).
+            if chat_obj.get("type") in ("group", "supergroup"):
+                chat_id = int(chat_obj["id"])
+                chat_is_group = True
         except Exception:
             pass
 

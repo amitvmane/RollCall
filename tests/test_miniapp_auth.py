@@ -94,12 +94,29 @@ class TestExtractIds(unittest.TestCase):
 
     def test_extracts_user_and_chat_ids(self):
         user_obj = json.dumps({"id": 42, "first_name": "Bob"})
-        chat_obj = json.dumps({"id": -100300, "title": "Group"})
+        chat_obj = json.dumps({"id": -100300, "title": "Group", "type": "group"})
         pairs = {"user": quote(user_obj), "chat": quote(chat_obj)}
         uid, cid, chat_is_group = self._call(pairs)
         self.assertEqual(uid, 42)
         self.assertEqual(cid, -100300)
-        self.assertTrue(chat_is_group, "a real chat object was present — must be trustworthy")
+        self.assertTrue(chat_is_group, "a real group chat object was present — must be trustworthy")
+
+    def test_private_type_chat_is_not_treated_as_group(self):
+        # Regression: observed on Telegram iOS — the plain private-chat
+        # menu-button launch populates `chat` with the user's own DM with
+        # the bot (type "private"), unlike Telegram Desktop which omits
+        # `chat` entirely for that same launch. Trusting any `chat`
+        # presence (regardless of type) skipped the cross-group picker and
+        # stranded iOS users in an always-empty DM "chat", since the vote
+        # endpoints were then queried against the DM chat_id instead of
+        # any group with actual rollcalls in it.
+        user_obj = json.dumps({"id": 55, "first_name": "Zoe"})
+        chat_obj = json.dumps({"id": 55, "type": "private", "first_name": "Zoe"})
+        pairs = {"user": quote(user_obj), "chat": quote(chat_obj)}
+        uid, cid, chat_is_group = self._call(pairs)
+        self.assertEqual(uid, 55)
+        self.assertEqual(cid, 55)
+        self.assertFalse(chat_is_group, "a private DM chat object must not be treated as real group context")
 
     def test_private_chat_fallback_to_receiver(self):
         user_obj = json.dumps({"id": 7, "first_name": "X"})

@@ -81,9 +81,12 @@ docker-compose down
 
 ### Using the Makefile (recommended)
 
-The bundled `Makefile` wraps Docker Compose (with the `web` profile) into a
-one-command workflow — it also **auto-detects the Cloudflare tunnel URL and
-writes it into `.env`** for you, so you don't have to copy it by hand.
+The bundled `Makefile` wraps Docker Compose into a one-command workflow for
+the bot itself. **It does not manage a Cloudflare Tunnel** — the maintainer's
+own deployment fronts this bot from a separate private repo, and a few
+targets below (marked ⚠️) default to that maintainer's own domain/containers
+and won't do anything useful on a fresh clone. Everything else works for
+anyone. For your own tunnel, see [Web App](#2-web-app-browser-voting-for-non-telegram-users) below.
 
 **Prerequisites:** Docker with the Compose plugin (`docker compose`), a
 configured `.env` (`cp .env.example .env` and fill in `API_KEY`/`ADMIN1`), and
@@ -91,8 +94,8 @@ configured `.env` (`cp .env.example .env` and fill in `API_KEY`/`ADMIN1`), and
 
 ```bash
 make            # or `make help` — list every target
-make up         # start tunnel + bot, detect the URL, update .env, print links
-make status     # container status + Telegram/Cloudflare/health reachability
+make up         # start/recreate the bot container
+make status     # container status + Telegram/health reachability
 make logs       # tail bot logs (Ctrl+C to stop)
 make restart    # restart the bot to pick up .env changes
 make down       # stop all containers
@@ -100,21 +103,22 @@ make down       # stop all containers
 
 | Group | Target | What it does |
 |---|---|---|
-| **Lifecycle** | `make up` | Start tunnel + bot, auto-detect tunnel URL into `.env`, show voting links |
+| **Lifecycle** | `make up` | Start/recreate the bot container |
 | | `make down` | Stop all containers |
 | | `make restart` | Restart the bot (picks up `.env` changes) |
 | | `make build` | Rebuild the bot image and restart |
-| **Observability** | `make logs` / `make logs-cf` | Tail bot / Cloudflare tunnel logs |
-| | `make status` | Container status + external-service reachability + `/health` |
-| | `make url` | Current tunnel URL, API docs link, and per-group voting links |
+| **Observability** | `make logs` | Tail bot logs |
+| | `make logs-cf` ⚠️ | Tails the maintainer's own tunnel container — not present on a fresh clone |
+| | `make status` | Container status + `/health`; the "Cloudflare" line ⚠️ checks the maintainer's own tunnel/proxy |
+| | `make url` ⚠️ | Prints `WEB_BASE_URL` if you've set it, otherwise the maintainer's own domain |
 | | `make chats` | List known groups with their chat IDs |
 | | `make notify` | DM all voting links to `ADMIN1` (prints them if Telegram is unreachable) |
 | **Tokens** | `make token [LABEL="..."] [DAYS=N]` | Issue a **global** admin API token (all groups) |
 | | `make group-token CHAT=<id> [SCOPES=read,vote] [LABEL="..."] [DAYS=N]` | Issue a token scoped to one group (`make chats` for the ID) |
 
-> `make up` starts the Cloudflare tunnel (the `web` profile), so it's the path
-> for web/Mini-App deployments. For a Telegram-only bot, `docker compose up -d`
-> is enough. The daily DB-backup sidecar starts automatically with either.
+> `make up`/`down`/`restart`/`build`/`logs`/`chats`/`notify`/`token`/`group-token`
+> are plain, generic wrappers — safe to use regardless of how you're exposing
+> the bot. The daily DB-backup sidecar starts automatically with `make up`.
 
 ---
 
@@ -335,7 +339,7 @@ RollCall/
 - **Async throughout** — uses `AsyncTeleBot` (pyTelegramBotAPI) with `asyncio` for non-blocking Telegram API calls and the health check server.
 - **Dual DB backend** — the same `db.py` layer supports both SQLite (zero-config) and PostgreSQL (production-scale) via a `DATABASE_URL` environment variable.
 - **In-place panel editing** — votes update the panel message rather than posting a new one, keeping the chat clean.
-- **Cloudflare Tunnel** — the recommended public-access pattern: `cloudflared` sidecar in Docker Compose makes an outbound connection to Cloudflare; port 8081 is never opened on the host firewall and the server IP is never exposed.
+- **Cloudflare Tunnel** — the recommended public-access pattern: a `cloudflared` container (added via `docker-compose.override.yml`, see [Web App](#2-web-app-browser-voting-for-non-telegram-users)) makes an outbound connection to Cloudflare; port 8081 is never opened on the host firewall and the server IP is never exposed.
 
 ---
 
@@ -410,28 +414,69 @@ Lets anyone vote via a link — no Telegram account required. Works even when Te
 - `/weblink` in any group shows a permanent bookmarkable group URL that never expires.
 - Opening the link shows an IN/OUT/MAYBE voting page that auto-refreshes every 30s.
 
-**Setup — using Cloudflare Tunnel (recommended, free, hides your server IP):**
+**Setup — Cloudflare Tunnel (recommended, free, hides your server IP):**
 
-> **Shortcut:** `make up` performs all three steps below automatically — it starts
-> the tunnel, detects the URL, writes `WEB_BASE_URL` into `.env`, and restarts the
-> bot. The manual steps are shown here for reference.
+`cloudflared` isn't bundled in this repo's `docker-compose.yml` — add it as its own
+service via a `docker-compose.override.yml` (Compose merges override files
+automatically, no need to edit `docker-compose.yml` itself). It talks to the bot
+over the internal Docker network by service name, so port 8081 is never
+published to the host or the public internet directly.
+
+> The `Makefile`'s `make up`/`make logs-cf`/`make url` targets front a specific
+> maintainer's own tunnel running in a separate private repo — they won't work
+> for a fresh clone. Use the steps below instead; `make token`/`make group-token`/
+> `make chats` work fine regardless.
+
+**Option A — quick tunnel** (fastest way to try it; URL changes every restart):
 
 ```bash
 # Step 1 — add to .env
 REST_API_ENABLED=true
-WEB_BASE_URL=https://<your-tunnel-url>   # fill in after step 3
 
-# Step 2 — start bot + tunnel together
-docker-compose --profile web up -d
+# Step 2 — add the tunnel as its own service
+cat > docker-compose.override.yml <<'EOF'
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: rollcall-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://rollcall-bot:8081
+    depends_on:
+      - rollcall-bot
+EOF
 
-# Step 3 — get your tunnel URL from the cloudflared logs
-docker-compose logs cloudflared | grep "https://"
-# Copy the URL (e.g. https://abc123.trycloudflare.com)
-# Paste it as WEB_BASE_URL in .env, then restart:
-docker-compose --profile web up -d
+# Step 3 — start everything and read back the generated URL
+docker-compose up -d
+docker-compose logs cloudflared | grep "trycloudflare.com"
+# Paste the URL (e.g. https://abc123.trycloudflare.com) as WEB_BASE_URL in
+# .env, then restart:
+docker-compose up -d
 ```
 
-> The tunnel URL changes on every restart with the quick-tunnel method. For a **stable URL**, set up a named Cloudflare Tunnel — see comments in `docker-compose.yml`.
+**Option B — named tunnel** (stable domain; needs a free Cloudflare account with your domain added to Cloudflare DNS):
+
+1. Cloudflare dashboard → Zero Trust → Networks → Tunnels → create a tunnel, copy its token.
+2. On the tunnel, add a **Public Hostname** pointing to `http://rollcall-bot:8081`.
+3. Add to `.env`:
+   ```env
+   REST_API_ENABLED=true
+   WEB_BASE_URL=https://your-chosen-subdomain.yourdomain.com
+   CLOUDFLARE_TUNNEL_TOKEN=<token from step 1>
+   ```
+4. Use the same override file as Option A, but swap the `command` for a token-based run:
+   ```yaml
+   services:
+     cloudflared:
+       image: cloudflare/cloudflared:latest
+       container_name: rollcall-cloudflared
+       restart: unless-stopped
+       command: tunnel --no-autoupdate run
+       environment:
+         - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+       depends_on:
+         - rollcall-bot
+   ```
+5. `docker-compose up -d` — the URL is fixed this time, no log-grepping needed.
 
 **Verify:** open `https://<your-tunnel-url>/web/group/<token>` in a browser. Start a rollcall in your Telegram group — the panel will show a `🔗 Web:` link.
 
@@ -448,7 +493,7 @@ Adds a menu button inside Telegram that opens the voting interface directly in-a
 MINIAPP_URL=https://<your-tunnel-url>/miniapp/
 
 # Step 2 — restart
-docker-compose --profile web up -d
+docker-compose up -d
 ```
 
 On startup the bot automatically sets the Telegram menu button to open `MINIAPP_URL`. Members tap the button icon in any group chat to vote.
@@ -477,8 +522,10 @@ STRUCTURED_LOGS=true
 ```
 
 ```bash
-docker-compose --profile web up -d
+docker-compose up -d
 ```
+
+(Plus whichever `docker-compose.override.yml` from the Cloudflare Tunnel setup above.)
 
 ---
 

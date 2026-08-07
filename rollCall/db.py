@@ -26,7 +26,13 @@ logging.basicConfig(
 # Try PostgreSQL first, fall back to SQLite
 try:
     import psycopg2
-    from psycopg2.extras import RealDictCursor
+    # DictCursor, not RealDictCursor: DictRow subclasses list (so row[0]
+    # positional access — used throughout this file's `isinstance(row, dict)`
+    # dual-branch call sites for the Postgres path — keeps working) while
+    # ALSO implementing the mapping protocol (keys/items/values/get), so
+    # dict(row) and row["column_name"] both work too. RealDictRow only
+    # supports the mapping side, which would break the positional sites.
+    from psycopg2.extras import DictCursor
     from psycopg2.pool import SimpleConnectionPool
     HAS_POSTGRES = True
 except ImportError:
@@ -108,7 +114,13 @@ def init_postgresql():
     if maxconn < minconn:
         maxconn = minconn
     try:
-        db_pool = SimpleConnectionPool(minconn=minconn, maxconn=maxconn, dsn=DATABASE_URL)
+        # cursor_factory=DictCursor: forwarded by SimpleConnectionPool to every
+        # psycopg2.connect() call it makes, so every connection it hands out
+        # already returns DictRow rows — no per-cursor wiring needed anywhere
+        # else in this file. See the import comment above for why DictCursor
+        # specifically (not RealDictCursor).
+        db_pool = SimpleConnectionPool(minconn=minconn, maxconn=maxconn, dsn=DATABASE_URL,
+                                        cursor_factory=DictCursor)
         _pool_max = maxconn
         logging.info(f"PostgreSQL connection pool created (min={minconn}, max={maxconn})")
     except Exception as e:
@@ -3020,10 +3032,16 @@ def get_ghost_leaderboard(chat_id: int) -> List[Dict]:
             raw_rows = [dict(row) for row in cursor.fetchall()]
 
         from services import identity as identity_svc
+        # Batch-fetched once instead of one get_identity_link query per
+        # proxy row below (real-user rows are already O(1) in-memory via
+        # resolve_canonical's early return) — see get_canonical_map.
+        canonical_map = identity_svc.get_canonical_map(chat_id)
         collapsed: Dict[tuple, Dict] = {}
         for row in raw_rows:
             is_proxy = row.get('proxy_name') is not None
-            canonical = (identity_svc.resolve_canonical(chat_id, proxy_name=row['proxy_name']) if is_proxy
+            canonical = (canonical_map.get((row['proxy_name'] or '').lower(),
+                                            {"kind": "proxy", "user_id": None, "proxy_name": row['proxy_name']})
+                         if is_proxy
                          else identity_svc.resolve_canonical(chat_id, user_id=row['user_id']))
             if canonical['kind'] == 'user':
                 key = ('user', canonical['user_id'])
@@ -3969,11 +3987,15 @@ def get_leaderboard_by_attendance(chat_id: int, limit: int = 10) -> List[Dict]:
             # proxy) must show as a single participant, not two. See
             # services/identity.py.
             from services import identity as identity_svc
+            # Batch-fetched once instead of one get_identity_link query per
+            # proxy row below — see get_canonical_map.
+            canonical_map = identity_svc.get_canonical_map(chat_id)
             collapsed: Dict[tuple, Dict] = {}
             for entry in unified:
                 canonical = (identity_svc.resolve_canonical(chat_id, user_id=entry['user_id'])
                              if entry['kind'] == 'real'
-                             else identity_svc.resolve_canonical(chat_id, proxy_name=entry['proxy_name']))
+                             else canonical_map.get((entry['proxy_name'] or '').lower(),
+                                                     {"kind": "proxy", "user_id": None, "proxy_name": entry['proxy_name']}))
                 if canonical['kind'] == 'user':
                     key = ('real', canonical['user_id'])
                 else:
@@ -5806,12 +5828,16 @@ def get_all_dues_balances(chat_id: int, nonzero_only: bool = False) -> List[Dict
             raw_rows = [dict(r) for r in cursor.fetchall()]
 
         from services import identity as identity_svc
+        # Batch-fetched once instead of one get_identity_link query per
+        # proxy row below — see get_canonical_map.
+        canonical_map = identity_svc.get_canonical_map(chat_id)
         merged: Dict[tuple, Dict] = {}
         for row in raw_rows:
             uid = row.get("user_id")
             mname = row.get("member_name")
             canonical = (identity_svc.resolve_canonical(chat_id, user_id=uid) if uid is not None
-                         else identity_svc.resolve_canonical(chat_id, proxy_name=mname))
+                         else canonical_map.get((mname or "").lower(),
+                                                 {"kind": "proxy", "user_id": None, "proxy_name": mname}))
             if canonical["kind"] == "user":
                 key = ("user", canonical["user_id"])
             else:

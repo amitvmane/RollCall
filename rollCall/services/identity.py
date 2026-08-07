@@ -97,6 +97,35 @@ def resolve_canonical(chat_id: int, *, user_id: Optional[int] = None,
     return {"kind": "proxy", "user_id": None, "proxy_name": link["canonical_proxy_name"]}
 
 
+def get_canonical_map(chat_id: int) -> dict[str, dict]:
+    """Batch version of resolve_canonical for proxy names — one query
+    (list_identity_links) instead of one get_identity_link call per row.
+    Built for hot aggregators (get_ghost_leaderboard,
+    get_leaderboard_by_attendance, get_all_dues_balances) that used to call
+    resolve_canonical once per proxy row — each such call hit the DB, so a
+    chat with a long ghost/proxy history turned one leaderboard render into
+    1 query + N. Real users never need this (resolve_canonical is already
+    O(1) in-memory for them via its early return), so this only replaces
+    the proxy-row DB hit.
+
+    Returns {lower(alias_proxy_name): canonical_dict} for every currently-
+    linked alias in the chat. A name absent from this map isn't linked —
+    callers should fall back to treating it as its own canonical, matching
+    resolve_canonical's own behavior when get_identity_link finds nothing:
+    canonical_map.get(name.lower(), {"kind": "proxy", "user_id": None, "proxy_name": name})
+    """
+    links = db.list_identity_links(chat_id, status="linked")
+    result: dict[str, dict] = {}
+    for link in links:
+        canonical = (
+            {"kind": "user", "user_id": link["canonical_user_id"], "proxy_name": None}
+            if link["canonical_user_id"] is not None
+            else {"kind": "proxy", "user_id": None, "proxy_name": link["canonical_proxy_name"]}
+        )
+        result[link["alias_proxy_name"].lower()] = canonical
+    return result
+
+
 def get_alias_group(chat_id: int, *, user_id: Optional[int] = None,
                      proxy_name: Optional[str] = None) -> dict:
     """Resolve to canonical, then collect every alias pointing at it.

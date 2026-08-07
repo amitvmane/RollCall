@@ -39,6 +39,54 @@ class TestResolveCanonical(unittest.TestCase):
         self.assertEqual(r, {"kind": "proxy", "user_id": None, "proxy_name": "Ajay"})
 
 
+class TestGetCanonicalMap(unittest.TestCase):
+    """Batch version of resolve_canonical used by the hot aggregators
+    (get_ghost_leaderboard, get_leaderboard_by_attendance,
+    get_all_dues_balances) to avoid one get_identity_link query per proxy
+    row — see db.py's Phase 1 N+1 fix."""
+
+    def test_empty_chat_returns_empty_map(self):
+        with patch("services.identity.db.list_identity_links", return_value=[]):
+            m = identity.get_canonical_map(1)
+        self.assertEqual(m, {})
+
+    def test_maps_alias_merged_into_real_user(self):
+        links = [{"alias_proxy_name": "Rex", "canonical_user_id": 999, "canonical_proxy_name": None}]
+        with patch("services.identity.db.list_identity_links", return_value=links):
+            m = identity.get_canonical_map(1)
+        self.assertEqual(m["rex"], {"kind": "user", "user_id": 999, "proxy_name": None})
+
+    def test_maps_alias_merged_into_another_proxy(self):
+        links = [{"alias_proxy_name": "Ajya", "canonical_user_id": None, "canonical_proxy_name": "Ajay"}]
+        with patch("services.identity.db.list_identity_links", return_value=links):
+            m = identity.get_canonical_map(1)
+        self.assertEqual(m["ajya"], {"kind": "proxy", "user_id": None, "proxy_name": "Ajay"})
+
+    def test_key_is_lowercased_for_case_insensitive_lookup(self):
+        links = [{"alias_proxy_name": "SB7", "canonical_user_id": 1, "canonical_proxy_name": None}]
+        with patch("services.identity.db.list_identity_links", return_value=links):
+            m = identity.get_canonical_map(1)
+        self.assertIn("sb7", m)
+        self.assertNotIn("SB7", m)
+
+    def test_matches_resolve_canonical_for_each_linked_name(self):
+        # The whole point of the batch map is that per-name lookups against
+        # it agree with what resolve_canonical (the per-row, DB-hitting
+        # path) would have returned for the same name.
+        links = [
+            {"alias_proxy_name": "Rex", "canonical_user_id": 999, "canonical_proxy_name": None},
+            {"alias_proxy_name": "Ajya", "canonical_user_id": None, "canonical_proxy_name": "Ajay"},
+        ]
+        with patch("services.identity.db.list_identity_links", return_value=links):
+            m = identity.get_canonical_map(1)
+        for link in links:
+            with patch("services.identity.db.get_identity_link",
+                       return_value={"canonical_user_id": link["canonical_user_id"],
+                                     "canonical_proxy_name": link["canonical_proxy_name"]}):
+                expected = identity.resolve_canonical(1, proxy_name=link["alias_proxy_name"])
+            self.assertEqual(m[link["alias_proxy_name"].lower()], expected)
+
+
 class TestGetAliasGroup(unittest.TestCase):
 
     def test_unmerged_identity_has_no_aliases(self):

@@ -323,3 +323,54 @@ def test_get_proxy_name_activity_counts_sessions_and_finds_last_seen():
     assert activity["SB7"]["count"] == 3
     assert activity["SB7"]["last_seen"] == "2026-08-01 10:00:00"
     assert activity["Other"]["count"] == 1
+
+
+def test_multi_alias_merge_folds_identically_across_all_three_aggregators():
+    """Phase 1 N+1 fix: get_ghost_leaderboard/get_leaderboard_by_attendance/
+    get_all_dues_balances now batch-fetch identity_links once (via
+    services.identity.get_canonical_map) instead of one get_identity_link
+    query per proxy row. With 3 aliases merged into one real user, this
+    proves the batch path still folds every alias's rows into a single
+    combined entry — not just a single-alias merge (already covered by the
+    existing per-function tests above), which wouldn't exercise the map
+    holding multiple entries at once."""
+    chat = CHAT - 12
+    db.get_or_create_chat(chat)
+    db.upsert_chat_member(chat, 777, "Real7", "real7user")
+
+    rid = _mk_rollcall(chat)
+    db.update_rollcall(rid, is_active=0)
+    db.add_or_update_user(rid, 777, "Real7", "real7user", "in")
+    db.increment_user_stat(chat, 777, "total_in")
+    db.increment_user_stat(chat, 777, "total_rollcalls")
+    db.increment_ghost_count(chat, 777, "Real7")
+
+    conn = db.get_connection()
+    cur = conn.cursor()
+    for alias in ("Alias1", "Alias2", "Alias3"):
+        cur.execute("INSERT INTO proxy_users (rollcall_id, name, status) VALUES (?, ?, ?)",
+                    (rid, alias, "in"))
+        db.increment_ghost_count(chat, -1, alias, proxy_name=alias)
+    conn.commit()
+    cur.close()
+    for alias in ("Alias1", "Alias2", "Alias3"):
+        db.add_dues_entry(chat, None, None, alias, "game_share", 10, None, 1, "Admin")
+
+    for alias in ("Alias1", "Alias2", "Alias3"):
+        identity.link_identities(chat, alias, canonical_user_id=777,
+                                  admin_user_id=1, admin_name="Admin")
+
+    attendance = db.get_leaderboard_by_attendance(chat)
+    matching_attendance = [r for r in attendance if r.get("user_id") == 777]
+    assert len(matching_attendance) == 1
+    assert matching_attendance[0]["attended"] == 4  # Real7's own + 3 aliases
+
+    ghosts = db.get_ghost_leaderboard(chat)
+    matching_ghosts = [r for r in ghosts if r["user_id"] == 777]
+    assert len(matching_ghosts) == 1
+    assert matching_ghosts[0]["ghost_count"] == 4  # Real7's own + 3 aliases
+
+    balances = db.get_all_dues_balances(chat)
+    matching_balance = [r for r in balances if r["user_id"] == 777]
+    assert len(matching_balance) == 1
+    assert matching_balance[0]["balance"] == 30  # 3 aliases x 10, Real7 itself has no entry

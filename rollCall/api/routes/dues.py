@@ -690,6 +690,27 @@ async def close_preview(
 
 
 # ── QR code ───────────────────────────────────────────────────────────────────
+# dues_qr is loaded via a plain <img src=...> tag, which cannot carry a
+# custom header — so unlike every other route in this file, it stays on a
+# query param. To avoid putting the long-lived (30-day) id_token itself in
+# that URL, the frontend first calls qr_token (header-authenticated, like
+# everything else) to mint a short-lived token scoped to nothing but
+# fetching this one image, then embeds THAT in the <img src>.
+
+@router.get(
+    "/web/group/{group_token}/dues/qr-token",
+    summary="Mint a short-lived token for the QR image URL (any verified member)",
+)
+async def dues_qr_token(
+    group_token: str = Path(...),
+    id_token: Optional[str] = Depends(identity_from_header),
+) -> dict:
+    chat = _resolve_chat(group_token)
+    _require_dues(chat)
+    user_id = _require_identity(id_token)
+    from api.identity import issue_identity_token
+    return {"token": issue_identity_token(user_id, ttl_seconds=300)}
+
 
 @router.get(
     "/web/group/{group_token}/dues/qr",

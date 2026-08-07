@@ -2151,6 +2151,23 @@ async function _duesGet(path,params={}){
   return r.json();
 }
 
+// Populates the QR <img> once a short-lived, single-purpose token is minted
+// — fire-and-forget from the (synchronous) render path rather than making
+// the whole render chain async just for this one image.
+async function _loadQrImage(balance){
+  const img=document.getElementById("dues-qr-img");
+  if(!img)return;
+  try{
+    const{token}=await _duesGet("/qr-token");
+    // Re-check the element is still in the DOM — a fast re-render (e.g.
+    // switching tabs) could have replaced it while this fetch was in flight.
+    const stillThere=document.getElementById("dues-qr-img");
+    if(stillThere)stillThere.src=`${DUES_API}/qr?id_token=${encodeURIComponent(token)}&amount=${balance}&_t=${Date.now()}`;
+  }catch(e){
+    console.warn("QR token fetch failed:",e.message);
+  }
+}
+
 async function _duesPost(path,body={}){
   const r=await fetch(`${DUES_API}${path}`,{
     method:"POST",headers:{"Content-Type":"application/json"},
@@ -2244,19 +2261,21 @@ function renderMemberDues(){
   if(payEl){
     if(balance>0&&vpa){
       const upiLink=`upi://pay?pa=${encodeURIComponent(vpa)}&am=${balance}&cu=INR&tn=RollCall`;
-      // Cache-bust QR so refresh after payment shows correct amount
-      const qrSrc=`${DUES_API}/qr?id_token=${encodeURIComponent(_idToken||"")}&amount=${balance}&_t=${Date.now()}`;
       let html=`<a href="${upiLink}" class="dues-upi-btn">💳 Pay ₹${balance} via UPI</a>`;
       html+=`<div class="dues-vpa-row">
         <span class="dues-vpa-text">${esc(vpa)}</span>
         <button class="dues-vpa-copy">📋 Copy</button>
       </div>`;
-      html+=`<div class="dues-qr-wrap"><img src="${qrSrc}" alt="UPI QR" loading="lazy"/></div>`;
+      // src is populated async below once a short-lived QR token is minted —
+      // the <img> tag itself can't send the X-Identity-Token header, so the
+      // long-lived id_token never goes in this URL (see dues_qr_token route).
+      html+=`<div class="dues-qr-wrap"><img id="dues-qr-img" alt="UPI QR" loading="lazy"/></div>`;
       if(mode==="auto"){
         html+=`<button class="dues-self-paid-btn" id="self-paid-btn" data-amount="${balance}">✅ I've paid ₹${balance}</button>`;
       }
       payEl.innerHTML=html;
       payEl.classList.remove("hidden");
+      _loadQrImage(balance);
       // Attach self-paid listener safely (avoids onclick-in-attribute XSS surface)
       const spBtn=payEl.querySelector("#self-paid-btn");
       if(spBtn)spBtn.addEventListener("click",()=>doSelfPaid(balance));

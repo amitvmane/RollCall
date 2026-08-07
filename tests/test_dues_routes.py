@@ -173,6 +173,32 @@ class TestDuesGetRoutesRequireHeaderIdentity(unittest.TestCase):
             r = _client().get("/api/v1/web/group/grp123/dues/close-preview")
         self.assertEqual(r.status_code, 401)
 
+    # ── /dues/qr-token (member) — mints the short-lived token the QR <img>
+    # embeds, so the long-lived id_token never appears in that URL ────────
+    def test_qr_token_200_with_valid_header(self):
+        with patch("api.routes.dues._db.get_chat_by_group_web_token", return_value=CHAT):
+            r = _client().get("/api/v1/web/group/grp123/dues/qr-token", headers={"X-Identity-Token": self.token})
+        self.assertEqual(r.status_code, 200)
+        short_token = r.json()["token"]
+        self.assertNotEqual(short_token, self.token)
+        # The minted token must itself verify to the same user id.
+        from api.identity import verify_identity_token
+        self.assertEqual(verify_identity_token(short_token), 42)
+
+    def test_qr_token_is_short_lived_not_the_30_day_ttl(self):
+        with patch("api.routes.dues._db.get_chat_by_group_web_token", return_value=CHAT):
+            r = _client().get("/api/v1/web/group/grp123/dues/qr-token", headers={"X-Identity-Token": self.token})
+        short_token = r.json()["token"]
+        short_exp = int(short_token.split(".")[1])
+        full_exp = int(self.token.split(".")[1])
+        # 5-minute token must expire long before the 30-day one.
+        self.assertLess(short_exp, full_exp)
+
+    def test_qr_token_401_without_header(self):
+        with patch("api.routes.dues._db.get_chat_by_group_web_token", return_value=CHAT):
+            r = _client().get("/api/v1/web/group/grp123/dues/qr-token")
+        self.assertEqual(r.status_code, 401)
+
     # ── Sanity: an invalid (garbage, not just missing) header is also 401 ─
     def test_invalid_header_token_also_401(self):
         with patch("api.routes.dues._db.get_chat_by_group_web_token", return_value=CHAT):

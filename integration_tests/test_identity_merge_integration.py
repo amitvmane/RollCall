@@ -290,3 +290,36 @@ def test_merge_into_non_member_user_id_rejected():
     # Confirm nothing was actually linked.
     assert db.get_dues_balance(chat, member_name="SomeProxy") == 50
     assert db.get_dues_balance(chat, user_id=424242424242) == 0
+
+
+def test_get_proxy_name_activity_counts_sessions_and_finds_last_seen():
+    """Powers the merge panel's recency/frequency sort — one grouped query
+    across every proxy name in the chat. Unlike get_proxy_stats (which
+    filters to r.is_active = FALSE), a name used only in a still-active
+    rollcall must still be counted, not be invisible until the session
+    ends."""
+    chat = CHAT - 11
+    db.get_or_create_chat(chat)
+    rid1 = _mk_rollcall(chat, is_active=0)
+    rid2 = _mk_rollcall(chat, is_active=0)
+    rid3 = _mk_rollcall(chat, is_active=1)  # still active
+
+    conn = db.get_connection()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO proxy_users (rollcall_id, name, status, updated_at) VALUES (?, ?, ?, ?)",
+                (rid1, "SB7", "in", "2026-01-01 10:00:00"))
+    cur.execute("INSERT INTO proxy_users (rollcall_id, name, status, updated_at) VALUES (?, ?, ?, ?)",
+                (rid2, "SB7", "in", "2026-03-01 10:00:00"))
+    cur.execute("INSERT INTO proxy_users (rollcall_id, name, status, updated_at) VALUES (?, ?, ?, ?)",
+                (rid3, "SB7", "in", "2026-08-01 10:00:00"))
+    # A second, unrelated name — confirms grouping is per-name, not global.
+    cur.execute("INSERT INTO proxy_users (rollcall_id, name, status, updated_at) VALUES (?, ?, ?, ?)",
+                (rid1, "Other", "in", "2026-01-01 10:00:00"))
+    conn.commit()
+    cur.close()
+
+    activity = db.get_proxy_name_activity(chat)
+
+    assert activity["SB7"]["count"] == 3
+    assert activity["SB7"]["last_seen"] == "2026-08-01 10:00:00"
+    assert activity["Other"]["count"] == 1

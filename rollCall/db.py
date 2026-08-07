@@ -3334,6 +3334,31 @@ def get_all_proxy_names(chat_id: int) -> List[str]:
         return []
 
 
+def get_proxy_name_activity(chat_id: int) -> Dict[str, Dict]:
+    """One grouped query: every proxy name's session count + last-seen
+    timestamp for a chat. Covers active AND ended rollcalls (unlike
+    get_proxy_stats, which filters to ended-only) — a name used only in
+    the currently-open session should still show up, not be invisible
+    until the session ends. Powers the merge panel's recency/frequency
+    sort. Returns {name: {"count": int, "last_seen": str|None}}."""
+    try:
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"""SELECT pu.name AS name, COUNT(*) AS cnt, MAX(pu.updated_at) AS last_seen
+                    FROM proxy_users pu
+                    JOIN rollcalls r ON pu.rollcall_id = r.id
+                    WHERE r.chat_id = {ph}
+                    GROUP BY pu.name""",
+                (chat_id,)
+            )
+            return {row["name"]: {"count": int(row["cnt"] or 0), "last_seen": row["last_seen"]}
+                    for row in cursor.fetchall()}
+    except Exception as e:
+        logging.error(f"Error getting proxy name activity: {e}")
+        return {}
+
+
 def get_identity_last_activity(chat_id: int, user_id: int = None,
                                 proxy_name: str = None) -> Optional[str]:
     """updated_at from user_stats/proxy_stats for one identity — powers the

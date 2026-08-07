@@ -306,6 +306,8 @@ class WebIdentityItem(BaseModel):
     proxy_name: Optional[str] = None
     display_name: str
     merged_into: Optional[WebCanonicalRef] = None
+    proxy_count: Optional[int] = None
+    proxy_last_seen: Optional[str] = None
 
 
 class WebIdentityGroupResponse(BaseModel):
@@ -330,6 +332,7 @@ class WebIdentitySuggestion(BaseModel):
     candidate_proxy_name: Optional[str] = None
     candidate_display_name: str
     score: int
+    confidence: Literal["exact_username", "exact_first_name", "exact_proxy", "close"] = "close"
 
 
 class WebIdentitySuggestionsResponse(BaseModel):

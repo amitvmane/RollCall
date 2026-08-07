@@ -436,6 +436,23 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .alias-more-btn{background:none;border:none;color:var(--accent);font-size:.77rem;font-weight:600;cursor:pointer;padding:2px 4px}
 .pill-wrap{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 
+/* Merge-review confidence badge — reuses the .chip-in/.chip-maybe pill
+   colors (success/warn) already defined in shared/tokens.css instead of a
+   new color system: exact matches get .chip-in (green), fuzzy get
+   .chip-maybe (amber). */
+.itm-conf-badge{display:inline-block;font-size:.68rem;font-weight:700;padding:1px 6px;border-radius:5px;margin-right:6px}
+
+/* Searchable combobox (Merge manually FROM/TO) — hand-rolled, no external
+   deps. See _mountCombo in app.js. */
+.im-combo{position:relative}
+.im-combo-input{width:100%;box-sizing:border-box;padding:9px 12px;border-radius:var(--radius-sm);border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem}
+.im-combo-input:focus{border-color:var(--accent);outline:none}
+.im-combo-list{position:absolute;z-index:20;top:calc(100% + 4px);left:0;right:0;max-height:220px;overflow-y:auto;background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius-sm);box-shadow:var(--shadow-md)}
+.im-combo-list.hidden{display:none}
+.im-combo-opt{padding:8px 12px;font-size:.85rem;cursor:pointer;color:var(--text)}
+.im-combo-opt:hover,.im-combo-opt.active{background:var(--hover)}
+.im-combo-empty{padding:8px 12px;font-size:.82rem;color:var(--sub);font-style:italic}
+
 @media(max-width:480px){
   .identity-tbl col.c-name{width:34%}
   .identity-tbl th:nth-child(2),.identity-tbl td:nth-child(2){display:none}

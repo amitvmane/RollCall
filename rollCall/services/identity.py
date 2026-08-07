@@ -303,12 +303,14 @@ def list_all_identities(chat_id: int) -> list[dict]:
     alias as free-standing). Sorted alphabetically by display_name."""
     _auto_merge_exact_duplicates(chat_id)
     discarded_lower = {n.lower() for n in list_discarded(chat_id)}
+    activity = db.get_proxy_name_activity(chat_id)  # {name: {"count", "last_seen"}}, one grouped query
     result = []
     for m in db.get_active_members(chat_id):
         result.append({
             "kind": "user", "user_id": m["user_id"], "proxy_name": None,
             "display_name": m.get("first_name") or m.get("username") or str(m["user_id"]),
             "merged_into": None,  # real users are always canonical, never an alias
+            "proxy_count": None, "proxy_last_seen": None,  # only meaningful for proxy names
         })
     for name in db.get_all_proxy_names(chat_id):
         if name.lower() in discarded_lower:
@@ -323,10 +325,12 @@ def list_all_identities(chat_id: int) -> list[dict]:
         # say "amit"=="amit". Only an exact-string match confirms this
         # query's raw spelling IS the literal stored canonical.
         is_self = canonical["kind"] == "proxy" and canonical["proxy_name"] == name
+        act = activity.get(name, {})
         result.append({
             "kind": "proxy", "user_id": None, "proxy_name": name,
             "display_name": name,
             "merged_into": None if is_self else canonical,
+            "proxy_count": act.get("count"), "proxy_last_seen": act.get("last_seen"),
         })
     result.sort(key=lambda i: (i["display_name"] or "").lower())
     return result
@@ -364,7 +368,7 @@ def undiscard_identity(chat_id: int, alias_proxy_name: str, *,
     return {"restored": restored}
 
 
-def list_suggestions(chat_id: int, limit: int = 20) -> list[dict]:
+def list_suggestions(chat_id: int, limit: int = 200) -> list[dict]:
     """Fuzzy "possible duplicates" — proxy names vs each other AND vs
     active real members' first_name/username. Reuses services/ghost.py's
     lazy-import Levenshtein pattern. Never real<->real. Excludes aliases
@@ -376,6 +380,23 @@ def list_suggestions(chat_id: int, limit: int = 20) -> list[dict]:
     (its single best-scoring match) — every candidate within threshold
     for every name produced an unbounded, noisy list; capping per-name
     keeps this to roughly one row per unmatched name, best-first.
+
+    Each result also carries a `confidence` label so callers (the merge
+    panel) can visually distinguish a near-certain match from a genuine
+    guess: "exact_username"/"exact_first_name" (normalized score 0
+    against a real member's username/first_name — username wins ties
+    since it's the stronger identity signal, first names commonly
+    collide across different people), "exact_proxy" (normalized score 0
+    against another proxy name — note _auto_merge_exact_duplicates
+    already silently merges away same-chat exact proxy duplicates before
+    this runs, so this label is reachable but rare here), or "close"
+    (a real but non-zero edit distance, i.e. a genuine guess).
+
+    limit defaults high (200, not the old 20) — the O(n^2) comparison
+    below already scores every pair before this function slices to
+    limit, so raising it costs nothing extra and avoids a visible row in
+    a large chat silently missing its suggestion badge just because 20
+    other names elsewhere happened to score better.
 
     Returns [] (no Levenshtein) if the optional dependency isn't installed
     — same graceful degrade as find_ghost_record."""
@@ -417,22 +438,34 @@ def list_suggestions(chat_id: int, limit: int = 20) -> list[dict]:
                 "alias_proxy_name": alias, "candidate_kind": "proxy",
                 "candidate_user_id": None, "candidate_proxy_name": other,
                 "candidate_display_name": other, "score": score,
+                "confidence": "exact_proxy" if score == 0 else "close",
             })
-        # proxy <-> real member
+        # proxy <-> real member. Checked in (username, first_name) order so
+        # that on a tie (e.g. both exactly 0, or both equally fuzzy) the
+        # username field wins the argmin below — a username match is a
+        # stronger identity signal than a first-name match, which commonly
+        # collides across different people.
         for m in real_members:
-            names = [n for n in (m.get("first_name"), m.get("username")) if n]
-            if not names:
+            field_values = [(f, v) for f, v in (("username", m.get("username")),
+                                                  ("first_name", m.get("first_name"))) if v]
+            if not field_values:
                 continue
-            best_score = min(lev_distance(_normalize_for_match(alias), _normalize_for_match(n)) for n in names)
+            scored = [(lev_distance(_normalize_for_match(alias), _normalize_for_match(v)), field)
+                      for field, v in field_values]
+            best_score, best_field = min(scored, key=lambda t: t[0])
             if best_score > _SUGGEST_THRESHOLD:
                 continue
             if (alias.lower(), str(m["user_id"])) in dismissed_pairs:
                 continue
+            if best_score == 0:
+                confidence = "exact_username" if best_field == "username" else "exact_first_name"
+            else:
+                confidence = "close"
             all_candidates.append({
                 "alias_proxy_name": alias, "candidate_kind": "user",
                 "candidate_user_id": m["user_id"], "candidate_proxy_name": None,
                 "candidate_display_name": m.get("first_name") or m.get("username") or str(m["user_id"]),
-                "score": best_score,
+                "score": best_score, "confidence": confidence,
             })
 
     # Greedy cap: process best-scoring matches first, and once a name

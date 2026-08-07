@@ -132,6 +132,21 @@ function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").
 // result: escJsAttr(name) escapes \ and ' for the JS-string layer, then
 // esc() escapes &<>" for the HTML-attribute layer around it.
 function escJsAttr(s){return String(s||"").replace(/\\/g,"\\\\").replace(/'/g,"\\'")}
+// Relative-time label for a sqlite "YYYY-MM-DD HH:MM:SS" timestamp (as
+// returned by db.get_proxy_name_activity) — used by the merge-identities
+// review list's recency badge.
+function _relTime(ts){
+  if(!ts)return"";
+  const d=new Date(String(ts).replace(" ","T")+"Z");
+  if(isNaN(d))return"";
+  const days=Math.floor((Date.now()-d.getTime())/86400000);
+  if(days<1)return"today";
+  if(days<2)return"1d ago";
+  if(days<30)return`${days}d ago`;
+  const months=Math.floor(days/30);
+  if(months<12)return`${months}mo ago`;
+  return`${Math.floor(months/12)}y ago`;
+}
 
 // ── Theme toggle ───────────────────────────────────────────────────────────
 function updateThemeBtn(){
@@ -2964,14 +2979,18 @@ async function refreshDues(){
 // another proxy so stats/dues/ghost-tracking count them once) ──────────────
 let _identityMergeOpen=false, _identitiesCache=null, _identityGroupsCache=null,
     _suggestionsCache=null, _discardedCache=null, _identityDiscardedOpen=false,
-    _identityUnmatchedOpen=false;
+    _identityUnmatchedOpen=false, _imTargetCombo=null;
 
 window._toggleExtraAliases=function(btn){
   const extra=btn.previousElementSibling;
   if(!extra)return;
   const hidden=extra.classList.contains("hidden");
+  // Counts .alias-pill descendants when present (alias lists); falls back
+  // to direct children for other "+N more" uses (e.g. the merge review
+  // list's rows, which aren't alias pills).
+  const n=extra.querySelectorAll(".alias-pill").length||extra.children.length;
   if(hidden){extra.classList.remove("hidden");btn.textContent="show less";}
-  else{extra.classList.add("hidden");btn.textContent=`+${extra.querySelectorAll(".alias-pill").length} more`;}
+  else{extra.classList.add("hidden");btn.textContent=`+${n} more`;}
 };
 
 window.toggleIdentityUnmatched=function(){
@@ -3042,18 +3061,122 @@ function _buildTargetOptions(excludeProxyNameLower){
   const identities=_identitiesCache||[];
   const users=identities.filter(i=>i.kind==="user");
   const proxies=identities.filter(i=>i.kind==="proxy"&&!i.merged_into&&i.proxy_name.toLowerCase()!==excludeProxyNameLower);
-  const opt=i=>`<option value="${_identityKey(i.kind,i.user_id,i.proxy_name)}">${esc(i.display_name)}${i.kind==="proxy"?" (proxy)":""}</option>`;
-  return users.map(opt).join("")+proxies.map(opt).join("");
+  const opt=i=>({value:_identityKey(i.kind,i.user_id,i.proxy_name),label:i.display_name+(i.kind==="proxy"?" (proxy)":"")});
+  return users.map(opt).concat(proxies.map(opt));
 }
 
-window._onImAliasChange=function(){
-  const aliasSel=document.getElementById("im-alias-select");
-  const targetSel=document.getElementById("im-target-select");
-  if(!aliasSel||!targetSel)return;
-  const prevVal=targetSel.value;
-  targetSel.innerHTML=_buildTargetOptions(aliasSel.value.toLowerCase());
-  if([...targetSel.options].some(o=>o.value===prevVal))targetSel.value=prevVal;
+window._onImAliasChange=function(aliasValue){
+  if(!_imTargetCombo)return;
+  const opts=_buildTargetOptions((aliasValue||"").toLowerCase());
+  _imTargetCombo.setOptions(opts);
+  _imTargetCombo.setSelected(opts[0]||null);
 };
+
+// ── Suggestion lookup + unified review-row priority (items 1-3: fold the
+// old separate "Suggested merges" section into the unmatched-names list,
+// flag exact matches, sort by confidence then recency/frequency) ──────────
+function _buildSuggestionIndex(suggestions){
+  // Maps lowercased proxy name -> {s: suggestion, otherLabel}. Every
+  // suggestion is indexed under its alias_proxy_name; proxy<->proxy
+  // suggestions are ALSO indexed under candidate_proxy_name, because
+  // list_suggestions only ever emits the alphabetically-first name as the
+  // alias side (services/identity.py) — without this second entry, the
+  // alphabetically-LATER name's own row would show no hint despite being
+  // an equally valid match. The merge action is always the same call
+  // regardless of which row triggered it (same alias/candidate pair) —
+  // only the display label of "the other side" differs per row.
+  const idx={};
+  suggestions.forEach(s=>{
+    const aliasKey=s.alias_proxy_name.toLowerCase();
+    if(!(aliasKey in idx))idx[aliasKey]={s,otherLabel:s.candidate_display_name};
+    if(s.candidate_kind==="proxy"){
+      const candKey=s.candidate_proxy_name.toLowerCase();
+      if(!(candKey in idx))idx[candKey]={s,otherLabel:s.alias_proxy_name};
+    }
+  });
+  return idx;
+}
+
+const _CONF_TIER={exact_username:0,exact_first_name:1,exact_proxy:2,close:3};
+
+function _buildUnifiedReviewRows(unmatched,suggestions){
+  const sugIdx=_buildSuggestionIndex(suggestions);
+  const rows=unmatched.map(row=>{
+    const hit=sugIdx[row.proxy_name.toLowerCase()];
+    return{
+      row,
+      suggestion:hit?hit.s:null,
+      otherLabel:hit?hit.otherLabel:null,
+      tier:hit?_CONF_TIER[hit.s.confidence]:4,
+      score:hit?hit.s.score:99,
+      count:row.proxy_count||0,
+      lastSeen:row.proxy_last_seen||"",
+    };
+  });
+  // Confidence tier first (exact username > exact name > exact proxy >
+  // close > no suggestion), then closer fuzzy score first within a tier,
+  // then — per admin preference — most-recently-used first, session count
+  // as the tie-break (a name used last week outranks one used 20x a year
+  // ago). last_seen is a sqlite "YYYY-MM-DD HH:MM:SS" string, lexically
+  // sortable; "" (never seen) always sorts last.
+  rows.sort((a,b)=>
+    a.tier-b.tier ||
+    a.score-b.score ||
+    (b.lastSeen>a.lastSeen?1:b.lastSeen<a.lastSeen?-1:0) ||
+    b.count-a.count
+  );
+  return rows;
+}
+
+// ── Lightweight searchable combobox (no external deps — this app has no
+// build step). Keeps a hidden <input> holding the selected value so
+// existing callers (doMergeIdentityManual) read .value exactly as when
+// these were native <select> elements. ─────────────────────────────────
+// Single delegated listener (registered once, not per mount) closes any
+// open combobox dropdown on an outside click — mounting fresh listeners
+// on `document` itself on every re-render would leak one per render.
+document.addEventListener("click",e=>{
+  document.querySelectorAll(".im-combo").forEach(wrap=>{
+    if(!wrap.contains(e.target)){
+      const list=wrap.querySelector(".im-combo-list");
+      if(list)list.classList.add("hidden");
+    }
+  });
+});
+
+function _mountCombo({searchId,hiddenId,listId,options,onSelect}){
+  const input=document.getElementById(searchId), hidden=document.getElementById(hiddenId),
+        list=document.getElementById(listId);
+  if(!input||!hidden||!list)return null;
+  let filtered=options, activeIdx=-1;
+  const render=()=>{
+    list.innerHTML=filtered.length
+      ?filtered.map((o,i)=>`<div class="im-combo-opt${i===activeIdx?" active":""}" data-i="${i}">${esc(o.label)}</div>`).join("")
+      :`<div class="im-combo-empty">No matches</div>`;
+  };
+  const close=()=>{list.classList.add("hidden");activeIdx=-1;};
+  const pick=o=>{hidden.value=o.value;input.value=o.label;close();if(onSelect)onSelect(o.value);};
+  input.addEventListener("input",()=>{
+    const q=input.value.trim().toLowerCase();
+    filtered=options.filter(o=>o.label.toLowerCase().includes(q));
+    activeIdx=-1;render();list.classList.remove("hidden");
+  });
+  input.addEventListener("focus",()=>{filtered=options;activeIdx=-1;render();list.classList.remove("hidden");});
+  input.addEventListener("keydown",e=>{
+    if(e.key==="ArrowDown"){e.preventDefault();activeIdx=Math.min(activeIdx+1,filtered.length-1);render();}
+    else if(e.key==="ArrowUp"){e.preventDefault();activeIdx=Math.max(activeIdx-1,0);render();}
+    else if(e.key==="Enter"){e.preventDefault();if(filtered[activeIdx])pick(filtered[activeIdx]);}
+    else if(e.key==="Escape"){close();}
+  });
+  list.addEventListener("mousedown",e=>{
+    const opt=e.target.closest(".im-combo-opt");if(!opt)return;
+    e.preventDefault();pick(filtered[+opt.dataset.i]);
+  });
+  return{
+    setOptions(o){options=o;filtered=o;},
+    setSelected(o){hidden.value=o?o.value:"";input.value=o?o.label:"";},
+  };
+}
 
 function renderIdentityMerge(){
   const body=document.getElementById("identity-merge-body");
@@ -3065,20 +3188,66 @@ function renderIdentityMerge(){
 
   let html="";
 
-  if(suggestions.length){
-    html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:6px">Suggested merges</div>`;
-    html+=suggestions.map((s,i)=>`
-      <div class="sched-item">
+  // Precompute once so the review section (needs `unmatched`) can render
+  // ahead of the already-merged Identities table.
+  const groupsByKey={};
+  groups.forEach(g=>{groupsByKey[_identityMapKey(g.kind,g.user_id,g.proxy_name)]=g.aliases;});
+  const canonicalRows=identities.filter(i=>i.kind==="user"||!i.merged_into);
+  const pill=a=>`<span class="alias-pill">${esc(a)}<span class="alias-pill-x" title="Unmerge" onclick="doUnmergeIdentity('${esc(escJsAttr(a))}')">✕</span></span>`;
+  const mergedRows=canonicalRows
+    .map(row=>({row,aliases:groupsByKey[_identityMapKey(row.kind,row.user_id,row.proxy_name)]||[]}))
+    .filter(x=>x.aliases.length>0);
+  // Never merged into anything — nothing "resolved" here, but still worth
+  // surfacing so obvious garbage (e.g. "2", "]") can be discarded even
+  // when no fuzzy suggestion ever caught it.
+  const unmatched=canonicalRows.filter(row=>row.kind==="proxy"&&!(groupsByKey[_identityMapKey(row.kind,row.user_id,row.proxy_name)]||[]).length);
+
+  // ── Review & merge: one unified, prioritized list (replaces the old
+  // separate "Suggested merges" + "Unmatched proxy names" sections) —
+  // exact matches first, then fuzzy suggestions (closer first), then
+  // everything else by recency/frequency. See _buildUnifiedReviewRows.
+  const reviewRows=_buildUnifiedReviewRows(unmatched,suggestions);
+  if(reviewRows.length){
+    const SHOW_N=12;
+    const vis=reviewRows.slice(0,SHOW_N), extra=reviewRows.slice(SHOW_N);
+    const CONF_LABEL={exact_username:"✓ username match",exact_first_name:"✓ name match",
+                       exact_proxy:"✓ exact match",close:"≈ close spelling"};
+    const rowHtml=r=>{
+      const{row,suggestion,otherLabel}=r;
+      const confBadge=suggestion
+        ?`<span class="itm-conf-badge ${suggestion.confidence.startsWith("exact")?"chip-in":"chip-maybe"}">${CONF_LABEL[suggestion.confidence]}</span>`
+        :"";
+      const metaBits=[`${row.proxy_count||0}×`];
+      if(row.proxy_last_seen)metaBits.push(_relTime(row.proxy_last_seen));
+      const metaBadge=`<span class="itcount${(row.proxy_count||0)>3?" hot":""}">${esc(metaBits.join(" · "))}</span>`;
+      const title=suggestion?`${esc(row.proxy_name)} ↔ ${esc(otherLabel)}`:esc(row.proxy_name);
+      const mergeBtn=suggestion
+        ?`<button class="id-change" title="Merge these" onclick="doMergeIdentity('${esc(escJsAttr(suggestion.alias_proxy_name))}','${suggestion.candidate_kind}',${suggestion.candidate_user_id!=null?suggestion.candidate_user_id:"null"},${suggestion.candidate_proxy_name!=null?`'${esc(escJsAttr(suggestion.candidate_proxy_name))}'`:"null"})">🔗</button>`
+        :"";
+      const dismissBtn=suggestion
+        ?`<button class="id-change" title="Not a match" onclick="doDismissSuggestion(${_suggestionsCache.indexOf(suggestion)})">✕</button>`
+        :"";
+      return `<div class="sched-item">
         <div class="sched-item-info">
-          <div class="sched-item-title">${esc(s.alias_proxy_name)} ↔ ${esc(s.candidate_display_name)}</div>
-          <div class="sched-item-time">Possible duplicate</div>
+          <div class="sched-item-title">${title}</div>
+          <div class="sched-item-time">${confBadge}${metaBadge}</div>
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0">
-          <button class="id-change" title="Merge these" onclick="doMergeIdentity('${esc(escJsAttr(s.alias_proxy_name))}','${s.candidate_kind}',${s.candidate_user_id!=null?s.candidate_user_id:"null"},${s.candidate_proxy_name!=null?`'${esc(escJsAttr(s.candidate_proxy_name))}'`:"null"})">🔗</button>
-          <button class="id-change" title="Not a match" onclick="doDismissSuggestion(${i})">✕</button>
-          <button class="id-change" title="'${esc(s.alias_proxy_name)}' is invalid/garbage — discard it" onclick="doDiscardIdentity('${esc(escJsAttr(s.alias_proxy_name))}')">🗑</button>
+          ${mergeBtn}${dismissBtn}
+          <button class="id-change" title="'${esc(row.proxy_name)}' is invalid/garbage — discard it" onclick="doDiscardIdentity('${esc(escJsAttr(row.proxy_name))}')">🗑</button>
         </div>
-      </div>`).join("");
+      </div>`;
+    };
+    html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:6px;cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none" onclick="toggleIdentityUnmatched()">
+      <span id="im-unmatched-chevron">${_identityUnmatchedOpen?"▲":"▼"}</span>Review & merge (${reviewRows.length})
+    </div>`;
+    html+=`<div id="im-unmatched-body" class="${_identityUnmatchedOpen?"":"hidden"}">`;
+    html+=vis.map(rowHtml).join("");
+    if(extra.length){
+      html+=`<div class="alias-extra hidden">${extra.map(rowHtml).join("")}</div>`;
+      html+=`<button class="alias-more-btn" onclick="_toggleExtraAliases(this)">+${extra.length} more</button>`;
+    }
+    html+=`</div>`;
   }
 
   // Dense 4-column table: Canonical | Type | Count | Aliases. Only rows
@@ -3090,16 +3259,9 @@ function renderIdentityMerge(){
   // "+N more" toggle so one person with many aliases doesn't blow out
   // their row's height, and Count is highlighted once it crosses that
   // same threshold as a quick "worth a second look" signal.
-  html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin:${suggestions.length?"14px":"0"} 0 6px">Identities</div>`;
-  const groupsByKey={};
-  groups.forEach(g=>{groupsByKey[_identityMapKey(g.kind,g.user_id,g.proxy_name)]=g.aliases;});
-  const canonicalRows=identities.filter(i=>i.kind==="user"||!i.merged_into);
-  const pill=a=>`<span class="alias-pill">${esc(a)}<span class="alias-pill-x" title="Unmerge" onclick="doUnmergeIdentity('${esc(escJsAttr(a))}')">✕</span></span>`;
-  const mergedRows=canonicalRows
-    .map(row=>({row,aliases:groupsByKey[_identityMapKey(row.kind,row.user_id,row.proxy_name)]||[]}))
-    .filter(x=>x.aliases.length>0);
+  html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin:${reviewRows.length?"14px":"0"} 0 6px">Identities</div>`;
   if(!mergedRows.length){
-    html+=`<div class="sched-empty">No merges yet — use Suggested merges above or pick manually below.</div>`;
+    html+=`<div class="sched-empty">No merges yet — use Review & merge above or pick manually below.</div>`;
   }else{
     html+=`<div class="identity-tbl-wrap"><table class="identity-tbl">
       <colgroup><col class="c-name"><col class="c-type"><col class="c-count"><col class="c-aliases"></colgroup>
@@ -3117,19 +3279,6 @@ function renderIdentityMerge(){
       </tr>`;
     }).join("");
     html+=`</tbody></table></div>`;
-  }
-
-  // Unmatched proxy names: never merged into anything — nothing to review,
-  // but still worth surfacing so obvious garbage (e.g. "2", "]") can be
-  // discarded even when no fuzzy suggestion ever caught it.
-  const unmatched=canonicalRows.filter(row=>row.kind==="proxy"&&!(groupsByKey[_identityMapKey(row.kind,row.user_id,row.proxy_name)]||[]).length);
-  if(unmatched.length){
-    html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin:14px 0 6px;cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none" onclick="toggleIdentityUnmatched()">
-      <span id="im-unmatched-chevron">${_identityUnmatchedOpen?"▲":"▼"}</span>Unmatched proxy names (${unmatched.length})
-    </div>`;
-    html+=`<div id="im-unmatched-body" class="pill-wrap ${_identityUnmatchedOpen?"":"hidden"}">`;
-    html+=unmatched.map(row=>`<span class="alias-pill">${esc(row.proxy_name)}<span class="alias-pill-x" title="Discard invalid/garbage name" onclick="doDiscardIdentity('${esc(escJsAttr(row.proxy_name))}')">🗑</span></span>`).join("");
-    html+=`</div>`;
   }
 
   if(discarded.length){
@@ -3152,23 +3301,49 @@ function renderIdentityMerge(){
   // already an alias can't itself be re-picked as FROM without unmerging
   // first); TO picker excludes whatever's currently picked as FROM (see
   // _onImAliasChange) so the same identity can never appear on both sides.
-  const aliasOptions=identities.filter(i=>i.kind==="proxy"&&!i.merged_into)
-    .map(i=>`<option value="${esc(i.proxy_name)}">${esc(i.display_name)} (proxy)</option>`).join("");
+  // Both pickers are searchable comboboxes (mounted below, after the HTML
+  // is in the DOM) rather than native <select> — see _mountCombo.
+  const aliasProxies=identities.filter(i=>i.kind==="proxy"&&!i.merged_into);
 
   html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin:14px 0 6px">Merge manually</div>`;
-  if(!aliasOptions){
+  if(!aliasProxies.length){
     html+=`<div class="sched-empty">No unmerged proxy names to merge.</div>`;
   }else{
-    const firstAlias=identities.find(i=>i.kind==="proxy"&&!i.merged_into);
-    const targetOptions=_buildTargetOptions((firstAlias&&firstAlias.proxy_name||"").toLowerCase());
     html+=`
-      <select id="im-alias-select" onchange="_onImAliasChange()" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem;margin-bottom:8px">${aliasOptions}</select>
+      <div class="im-combo" style="margin-bottom:8px">
+        <input type="text" id="im-alias-search" class="im-combo-input" placeholder="Search proxy names…" autocomplete="off">
+        <input type="hidden" id="im-alias-select">
+        <div class="im-combo-list hidden" id="im-alias-list"></div>
+      </div>
       <div style="font-size:.75rem;color:var(--sub);margin-bottom:4px">merges into →</div>
-      <select id="im-target-select" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem;margin-bottom:10px">${targetOptions}</select>
+      <div class="im-combo" style="margin-bottom:10px">
+        <input type="text" id="im-target-search" class="im-combo-input" placeholder="Search members/proxies…" autocomplete="off">
+        <input type="hidden" id="im-target-select">
+        <div class="im-combo-list hidden" id="im-target-list"></div>
+      </div>
       <button class="btn btn-primary" style="width:100%;padding:9px" onclick="doMergeIdentityManual()">🔗 Merge</button>`;
   }
 
   body.innerHTML=html;
+
+  if(aliasProxies.length){
+    const aliasOpts=aliasProxies.map(i=>({value:i.proxy_name,label:`${i.display_name} (proxy)`}));
+    const aliasCombo=_mountCombo({
+      searchId:"im-alias-search",hiddenId:"im-alias-select",listId:"im-alias-list",
+      options:aliasOpts,
+      onSelect:value=>window._onImAliasChange(value),
+    });
+    aliasCombo.setSelected(aliasOpts[0]);
+
+    const targetOpts=_buildTargetOptions((aliasOpts[0].value||"").toLowerCase());
+    _imTargetCombo=_mountCombo({
+      searchId:"im-target-search",hiddenId:"im-target-select",listId:"im-target-list",
+      options:targetOpts,
+    });
+    _imTargetCombo.setSelected(targetOpts[0]||null);
+  }else{
+    _imTargetCombo=null;
+  }
 }
 
 window.doMergeIdentity=async function(aliasProxyName,candidateKind,candidateUserId,candidateProxyName){

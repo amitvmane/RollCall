@@ -258,6 +258,36 @@ class TestListAllIdentities(unittest.TestCase):
         self.assertNotIn("Garbage2", names)
         self.assertIn("Solo", names)
 
+    def test_proxy_activity_attached_from_db(self):
+        activity = {"Solo": {"count": 5, "last_seen": "2026-08-01 10:00:00"}}
+        with patch("services.identity.db.get_active_members", return_value=[]), \
+             patch("services.identity.db.get_all_proxy_names", return_value=["Solo"]), \
+             patch("services.identity.db.get_identity_link", return_value=None), \
+             patch("services.identity.db.get_proxy_name_activity", return_value=activity):
+            result = identity.list_all_identities(1)
+        self.assertEqual(result[0]["proxy_count"], 5)
+        self.assertEqual(result[0]["proxy_last_seen"], "2026-08-01 10:00:00")
+
+    def test_real_member_activity_fields_are_none(self):
+        members = [{"user_id": 1, "first_name": "Alice", "username": None}]
+        with patch("services.identity.db.get_active_members", return_value=members), \
+             patch("services.identity.db.get_all_proxy_names", return_value=[]), \
+             patch("services.identity.db.get_proxy_name_activity", return_value={}):
+            result = identity.list_all_identities(1)
+        self.assertIsNone(result[0]["proxy_count"])
+        self.assertIsNone(result[0]["proxy_last_seen"])
+
+    def test_proxy_missing_from_activity_defaults_safely(self):
+        # The name-list query and the activity query aren't atomic — a name
+        # present in one but absent from the other shouldn't crash the picker.
+        with patch("services.identity.db.get_active_members", return_value=[]), \
+             patch("services.identity.db.get_all_proxy_names", return_value=["Ghost"]), \
+             patch("services.identity.db.get_identity_link", return_value=None), \
+             patch("services.identity.db.get_proxy_name_activity", return_value={}):
+            result = identity.list_all_identities(1)
+        self.assertIsNone(result[0]["proxy_count"])
+        self.assertIsNone(result[0]["proxy_last_seen"])
+
 
 class TestAutoMergeExactDuplicates(unittest.TestCase):
     """Case/whitespace-only variants of the same proxy name (e.g. "Amit" /
@@ -506,6 +536,63 @@ class TestListSuggestions(unittest.TestCase):
             result = identity.list_suggestions(1)
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["score"], 0)
+
+    def test_exact_username_match_is_exact_username_confidence(self):
+        with patch("services.identity.db.get_all_proxy_names", return_value=["SB7"]), \
+             patch("services.identity.db.get_active_members",
+                   return_value=[{"user_id": 1, "first_name": "Someone Else", "username": "SB7"}]), \
+             patch("services.identity.db.list_identity_links", return_value=[]):
+            result = identity.list_suggestions(1)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["score"], 0)
+        self.assertEqual(result[0]["confidence"], "exact_username")
+
+    def test_exact_first_name_match_without_username_is_exact_first_name_confidence(self):
+        with patch("services.identity.db.get_all_proxy_names", return_value=["Ravi"]), \
+             patch("services.identity.db.get_active_members",
+                   return_value=[{"user_id": 1, "first_name": "Ravi", "username": None}]), \
+             patch("services.identity.db.list_identity_links", return_value=[]):
+            result = identity.list_suggestions(1)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["score"], 0)
+        self.assertEqual(result[0]["confidence"], "exact_first_name")
+
+    def test_username_wins_tie_break_over_first_name_when_both_exact(self):
+        # A member whose username AND first_name both exactly match the
+        # proxy name — username must win per the argmin's field order.
+        with patch("services.identity.db.get_all_proxy_names", return_value=["Ravi"]), \
+             patch("services.identity.db.get_active_members",
+                   return_value=[{"user_id": 1, "first_name": "Ravi", "username": "Ravi"}]), \
+             patch("services.identity.db.list_identity_links", return_value=[]):
+            result = identity.list_suggestions(1)
+        self.assertEqual(result[0]["confidence"], "exact_username")
+
+    def test_fuzzy_real_member_match_is_close_confidence(self):
+        with patch("services.identity.db.get_all_proxy_names", return_value=["Ajya"]), \
+             patch("services.identity.db.get_active_members",
+                   return_value=[{"user_id": 1, "first_name": "Ajay", "username": None}]), \
+             patch("services.identity.db.list_identity_links", return_value=[]):
+            result = identity.list_suggestions(1)
+        self.assertEqual(len(result), 1)
+        self.assertGreater(result[0]["score"], 0)
+        self.assertEqual(result[0]["confidence"], "close")
+
+    def test_exact_proxy_pair_is_exact_proxy_confidence(self):
+        with patch("services.identity.db.get_all_proxy_names",
+                   return_value=["Amit K", "AmitK"]), \
+             patch("services.identity.db.get_active_members", return_value=[]), \
+             patch("services.identity.db.list_identity_links", return_value=[]):
+            result = identity.list_suggestions(1)
+        self.assertEqual(result[0]["confidence"], "exact_proxy")
+
+    def test_close_proxy_pair_is_close_confidence(self):
+        with patch("services.identity.db.get_all_proxy_names", return_value=["Ajya", "Ajay"]), \
+             patch("services.identity.db.get_active_members", return_value=[]), \
+             patch("services.identity.db.list_identity_links", return_value=[]):
+            result = identity.list_suggestions(1)
+        proxy_result = [s for s in result if s["candidate_kind"] == "proxy"]
+        self.assertEqual(len(proxy_result), 1)
+        self.assertEqual(proxy_result[0]["confidence"], "close")
 
 
 class TestDismissSuggestion(unittest.TestCase):

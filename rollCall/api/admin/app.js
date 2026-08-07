@@ -275,7 +275,7 @@ window.onAdminTelegramAuth=async function(user){
 async function _afterAdminIdentity(idToken){
   _adminTgStatus("Checking your groups…");
   try{
-    const res=await fetch(API+"/auth/admin/groups?id_token="+encodeURIComponent(idToken));
+    const res=await fetch(API+"/auth/admin/groups",{headers:{"X-Identity-Token":idToken}});
     const body=await res.json();
     if(!res.ok)throw new Error(body.detail||"Could not load your groups");
     const groups=body.groups||[];

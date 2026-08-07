@@ -221,7 +221,7 @@ function renderSummary(groups){
 async function loadUpcoming(){
   const section=$id("upcoming-section");
   try{
-    const data=await apiFetch("/portal/upcoming?id_token="+encodeURIComponent(_idToken));
+    const data=await apiFetch("/portal/upcoming",{headers:{"X-Identity-Token":_idToken}});
     const items=data.items||[];
     if(!items.length){section.style.display="none";return;}
     const rows=items.map(item=>{
@@ -255,7 +255,7 @@ async function loadGroups(){
   $id("upcoming-section").style.display="none";
   try{
     const [data] = await Promise.all([
-      apiFetch("/portal/groups?id_token="+encodeURIComponent(_idToken)),
+      apiFetch("/portal/groups",{headers:{"X-Identity-Token":_idToken}}),
       loadUpcoming(),
     ]);
     _groups=data.groups||[];
@@ -413,7 +413,7 @@ ${bestStreak>0?`<div class="milestone-box">🏆 Best streak ever: <strong>${best
   const [,] = await Promise.allSettled([
     (async()=>{
       try{
-        const data=await apiFetch(`/portal/groups/${g.chat_id}/history?id_token=${encodeURIComponent(_idToken)}&limit=30`);
+        const data=await apiFetch(`/portal/groups/${g.chat_id}/history?limit=30`,{headers:{"X-Identity-Token":_idToken}});
         const sessions=data.sessions||[];
         if(!sessions.length){
           $id("history-body").innerHTML='<div style="color:var(--sub);font-size:.85rem">No sessions yet.</div>';
@@ -461,7 +461,7 @@ async function _loadDuesSection(g){
   // Try user's own balance (always allowed for verified members)
   let myDues=null;
   try{
-    myDues=await apiFetch(`/web/group/${encodeURIComponent(g.group_web_token)}/dues/my?id_token=${encodeURIComponent(_idToken)}`);
+    myDues=await apiFetch(`/web/group/${encodeURIComponent(g.group_web_token)}/dues/my`,{headers:{"X-Identity-Token":_idToken}});
   }catch(e){
     // 403 = dues not enabled, 404 = group not found
     el.innerHTML=DUES_EMPTY_HTML;
@@ -502,7 +502,7 @@ async function _loadDuesSection(g){
   // Admin view: whole-group outstanding + fund, visually fenced off from the
   // member's own numbers above so the two are never mistaken for each other.
   try{
-    const summary=await apiFetch(`/web/group/${encodeURIComponent(g.group_web_token)}/dues/summary?id_token=${encodeURIComponent(_idToken)}&nonzero_only=true`);
+    const summary=await apiFetch(`/web/group/${encodeURIComponent(g.group_web_token)}/dues/summary?nonzero_only=true`,{headers:{"X-Identity-Token":_idToken}});
     const balances=summary.balances||[];
     const fundBal=summary.fund_balance||0;
     const memberRows=balances.length
@@ -522,7 +522,7 @@ async function _loadDuesSection(g){
   }catch(e){
     // Non-admin or dues not configured — fund balance still visible standalone
     try{
-      const fund=await apiFetch(`/web/group/${encodeURIComponent(g.group_web_token)}/dues/fund?id_token=${encodeURIComponent(_idToken)}`);
+      const fund=await apiFetch(`/web/group/${encodeURIComponent(g.group_web_token)}/dues/fund`,{headers:{"X-Identity-Token":_idToken}});
       html+=`<div class="dues-fund-row" style="margin-top:12px">🏦 Fund balance: <strong>₹${fund.fund_balance||0}</strong></div>`;
     }catch(e2){
       // Fund endpoint failed — silently skip

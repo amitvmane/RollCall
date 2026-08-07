@@ -72,7 +72,7 @@ class TestMiniAppGroupPicker(unittest.TestCase):
 
     def test_portal_groups_lists_the_chat_for_the_voter(self):
         tok = self.issue_identity_token(VOTER_ID)
-        resp = self.client.get(f"/api/v1/portal/groups?id_token={tok}")
+        resp = self.client.get("/api/v1/portal/groups", headers={"X-Identity-Token": tok})
         self.assertEqual(resp.status_code, 200)
         chat_ids = [g["chat_id"] for g in resp.json()["groups"]]
         self.assertIn(CHAT_ID, chat_ids)
@@ -114,7 +114,7 @@ class TestMiniAppGroupPicker(unittest.TestCase):
         group but has never completed a vote must still see it in their
         picker, not just the people who've voted before."""
         tok = self.issue_identity_token(LURKER_ID)
-        resp = self.client.get(f"/api/v1/portal/groups?id_token={tok}")
+        resp = self.client.get("/api/v1/portal/groups", headers={"X-Identity-Token": tok})
         self.assertEqual(resp.status_code, 200)
         groups = resp.json()["groups"]
         chat_ids = [g["chat_id"] for g in groups]

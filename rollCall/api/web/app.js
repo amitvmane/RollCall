@@ -802,13 +802,14 @@ const TG_USER_ID=TG_USER?.id||_verifiedUserId||null;
 async function loadWebStats(){
   const sc=$("stats-card");if(!sc)return;
   const params=new URLSearchParams();
-  // Pass a signed identity token (never a raw user_id) so the server can
-  // verify who is requesting personal stats and prevent IDOR.
-  if(_idToken)params.set("id_token",_idToken);
-  else if(currentName)params.set("name",currentName);
+  // Identity is proven via the X-Identity-Token header (never a raw
+  // user_id in the URL) so the server can verify who is requesting
+  // personal stats and prevent IDOR — name stays a query param since it's
+  // not sensitive, only used as an unverified fallback when no id_token.
+  if(!_idToken&&currentName)params.set("name",currentName);
   const url=`/api/v1/web/group/${URL_TOKEN}/stats${params.size?"?"+params:""}`;
   try{
-    const res=await fetch(url,{signal:AbortSignal.timeout(8000)});
+    const res=await fetch(url,{headers:_idToken?{"X-Identity-Token":_idToken}:{},signal:AbortSignal.timeout(8000)});
     if(!res.ok)return;
     const data=await res.json();
     renderStats(data);
@@ -1384,7 +1385,7 @@ let _isWebAdmin=false;
 async function _checkWebAdmin(){
   if(!IS_GROUP||!_idToken)return;
   try{
-    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/admin-status?id_token=${encodeURIComponent(_idToken)}`,{signal:AbortSignal.timeout(5000)});
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/admin-status`,{headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(5000)});
     if(!res.ok)return;
     const d=await res.json();
     _isWebAdmin=!!d.is_admin;
@@ -1410,7 +1411,7 @@ async function _loadAdminGroupSwitcher(){
   const el=document.getElementById("admin-group-switcher");
   if(!el||!_idToken)return;
   try{
-    const res=await fetch(`/api/v1/auth/admin/groups?id_token=${encodeURIComponent(_idToken)}`,{signal:AbortSignal.timeout(5000)});
+    const res=await fetch(`/api/v1/auth/admin/groups`,{headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(5000)});
     if(!res.ok)return;
     const data=await res.json();
     const groups=(data.groups||[]).filter(g=>g.group_web_token&&g.group_web_token!==URL_TOKEN);
@@ -1467,7 +1468,7 @@ async function _loadWeblogInMembers(){
   const sel=document.getElementById("weblogin-member-select");
   if(!sel||!_idToken)return;
   try{
-    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/members?id_token=${encodeURIComponent(_idToken)}`,{signal:AbortSignal.timeout(8000)});
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/members`,{headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(8000)});
     if(!res.ok)throw new Error();
     const data=await res.json();
     const members=data.members||[];
@@ -2080,7 +2081,7 @@ async function _loadScheduledOnceList(){
   if(!body||!_idToken)return;
   body.innerHTML='<div class="sched-empty">Loading…</div>';
   try{
-    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/scheduled-rollcalls?id_token=${encodeURIComponent(_idToken)}`,{signal:AbortSignal.timeout(5000)});
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/scheduled-rollcalls`,{headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(5000)});
     if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"Failed to load");
     const d=await res.json();
     _scheduledOnceCache=d.items||[];
@@ -2115,8 +2116,8 @@ window.cancelScheduledOnce=async function(id){
   if(!_idToken)return;
   if(!confirm("Cancel this scheduled rollcall?"))return;
   try{
-    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/scheduled-rollcalls/${id}?id_token=${encodeURIComponent(_idToken)}`,{
-      method:"DELETE",signal:AbortSignal.timeout(8000),
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/scheduled-rollcalls/${id}`,{
+      method:"DELETE",headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(8000),
     });
     if(!res.ok&&res.status!==204){const d=await res.json().catch(()=>({}));throw new Error(d.detail||"Failed");}
     toast("Scheduled rollcall cancelled.",2000);
@@ -2144,8 +2145,8 @@ let _duesSummaryData=null; // summary response (admin)
 let _duesPreviewData=null; // close-preview response (admin)
 
 async function _duesGet(path,params={}){
-  const q=new URLSearchParams({...params,id_token:_idToken||""});
-  const r=await fetch(`${DUES_API}${path}?${q}`,{signal:AbortSignal.timeout(10000)});
+  const q=new URLSearchParams(params);
+  const r=await fetch(`${DUES_API}${path}?${q}`,{headers:{"X-Identity-Token":_idToken||""},signal:AbortSignal.timeout(10000)});
   if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||"Request failed");}
   return r.json();
 }
@@ -2594,8 +2595,8 @@ async function loadTemplatesSchedule(){
   if(!body||!_idToken)return;
   body.innerHTML='<div class="sched-empty">Loading…</div>';
   try{
-    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/templates?id_token=${encodeURIComponent(_idToken)}`,
-      {signal:AbortSignal.timeout(8000)});
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/templates`,
+      {headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(8000)});
     if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"Failed to load templates");
     _templatesCache=await res.json();
     // Also load the one-time pending list (if not already cached) so a
@@ -2603,7 +2604,7 @@ async function loadTemplatesSchedule(){
     // schedule_enabled — doesn't get mislabeled "Not scheduled" below.
     if(!_scheduledOnceCache){
       try{
-        const r2=await fetch(`/api/v1/web/group/${URL_TOKEN}/scheduled-rollcalls?id_token=${encodeURIComponent(_idToken)}`,{signal:AbortSignal.timeout(5000)});
+        const r2=await fetch(`/api/v1/web/group/${URL_TOKEN}/scheduled-rollcalls`,{headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(5000)});
         if(r2.ok)_scheduledOnceCache=(await r2.json()).items||[];
       }catch(_){/* best-effort — Templates list still renders without it */}
     }
@@ -3016,8 +3017,8 @@ async function loadIdentityMerge(){
   body.innerHTML='<div class="sched-empty">Loading…</div>';
   try{
     const[idRes,sugRes]=await Promise.all([
-      fetch(`/api/v1/web/group/${URL_TOKEN}/identities?id_token=${encodeURIComponent(_idToken)}`,{signal:AbortSignal.timeout(8000)}),
-      fetch(`/api/v1/web/group/${URL_TOKEN}/identities/suggestions?id_token=${encodeURIComponent(_idToken)}`,{signal:AbortSignal.timeout(8000)}),
+      fetch(`/api/v1/web/group/${URL_TOKEN}/identities`,{headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(8000)}),
+      fetch(`/api/v1/web/group/${URL_TOKEN}/identities/suggestions`,{headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(8000)}),
     ]);
     if(!idRes.ok)throw new Error((await idRes.json().catch(()=>({}))).detail||"Failed to load identities");
     const idData=await idRes.json();

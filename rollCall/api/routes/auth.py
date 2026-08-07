@@ -23,8 +23,10 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from urllib.parse import parse_qsl, unquote
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse
+
+from api.identity import identity_from_header
 from pydantic import BaseModel
 
 from db import (
@@ -328,7 +330,7 @@ _ADMIN_SESSION_TOKEN_TTL_SECONDS = 365 * 24 * 3600  # matches /gentoken's lifeti
     response_model=AdminGroupsResponse,
     summary="List chats this verified Telegram user has cached web-admin status for",
 )
-async def admin_groups(id_token: str = "") -> AdminGroupsResponse:
+async def admin_groups(id_token: Optional[str] = Depends(identity_from_header)) -> AdminGroupsResponse:
     """
     Powers the admin console's Telegram-based sign-in: after the Login Widget
     proves identity, the console calls this to find which group(s) to offer —

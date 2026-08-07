@@ -8,11 +8,13 @@ derived from its signature server-side. A raw numeric tg_user_id is NOT
 accepted — trusting one would let anyone read any user's attendance history.
 Rate-limited by the shared middleware.
 """
-from fastapi import APIRouter, Path, Query
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Path, Query
 
 import db as _db
 from rollcall_manager import manager
-from api.identity import require_identity
+from api.identity import identity_from_header, require_identity
 from services.stats import session_display_date
 from api.schemas.portal import (
     PortalGroupHistoryResponse,
@@ -39,7 +41,7 @@ def _require_identity(id_token: str) -> int:
     summary="All groups this Telegram user is active in, with per-group stats",
 )
 async def portal_groups(
-    id_token: str = Query(..., description="Signed identity token (from tg-verify / Mini App auth)"),
+    id_token: Optional[str] = Depends(identity_from_header),
 ) -> PortalGroupsResponse:
     tg_user_id = _require_identity(id_token)
 
@@ -118,7 +120,7 @@ async def portal_groups(
     summary="Upcoming scheduled rollcalls across all the user's groups",
 )
 async def portal_upcoming(
-    id_token: str = Query(..., description="Signed identity token"),
+    id_token: Optional[str] = Depends(identity_from_header),
 ) -> PortalUpcomingResponse:
     tg_user_id = _require_identity(id_token)
     rows = _db.get_user_upcoming_scheduled_rollcalls(tg_user_id)
@@ -144,7 +146,7 @@ async def portal_upcoming(
 )
 async def portal_group_history(
     chat_id: int = Path(...),
-    id_token: str = Query(..., description="Signed identity token (from tg-verify / Mini App auth)"),
+    id_token: Optional[str] = Depends(identity_from_header),
     limit: int = Query(20, ge=1, le=50),
 ) -> PortalGroupHistoryResponse:
     tg_user_id = _require_identity(id_token)

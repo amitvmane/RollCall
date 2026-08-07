@@ -90,26 +90,27 @@ def _good_token(user_id):
 @unittest.skipUnless(FASTAPI_AVAILABLE, "fastapi not installed")
 class TestPortalRequiresIdentity(unittest.TestCase):
     def test_raw_user_id_no_longer_accepted(self):
-        # Old attack: ?tg_user_id=<victim>. The param is gone; id_token is
-        # required, so the request is rejected as malformed (422).
+        # Old attack: ?tg_user_id=<victim>. The param is gone; id_token now
+        # comes from the X-Identity-Token header, and its absence here is
+        # simply unauthenticated (401), not a validation error.
         resp = _client().get("/api/v1/portal/groups?tg_user_id=12345")
-        self.assertEqual(resp.status_code, 422)
+        self.assertEqual(resp.status_code, 401)
 
     def test_invalid_id_token_unauthorized(self):
-        resp = _client().get("/api/v1/portal/groups?id_token=forged.0.deadbeef")
+        resp = _client().get("/api/v1/portal/groups", headers={"X-Identity-Token": "forged.0.deadbeef"})
         self.assertEqual(resp.status_code, 401)
 
     def test_valid_id_token_resolves_to_signed_user(self):
         tok = _good_token(777)
         with patch("api.routes.portal._db.get_user_voted_chats", return_value=[]) as m:
-            resp = _client().get(f"/api/v1/portal/groups?id_token={tok}")
+            resp = _client().get("/api/v1/portal/groups", headers={"X-Identity-Token": tok})
         self.assertEqual(resp.status_code, 200)
         # The user id used for the lookup comes from the signature, not the URL.
         m.assert_called_once_with(777)
 
     def test_history_requires_identity(self):
         resp = _client().get("/api/v1/portal/groups/-100/history?tg_user_id=12345")
-        self.assertEqual(resp.status_code, 422)
+        self.assertEqual(resp.status_code, 401)
 
 
 # ---------------------------------------------------------------------------
@@ -181,8 +182,7 @@ class TestWebAdminRequiresIdentity(unittest.TestCase):
         with patch("api.routes.web._db.get_chat_by_group_web_token", return_value={"chat_id": -100}), \
              patch("api.routes.web._db.is_web_admin", return_value=True):
             resp = _client().get(
-                "/api/v1/web/group/grouptok/admin-status?id_token=12345"
-            )
+                "/api/v1/web/group/grouptok/admin-status", headers={"X-Identity-Token": "12345"})
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(resp.json()["is_admin"])
 
@@ -198,8 +198,7 @@ class TestWebAdminRequiresIdentity(unittest.TestCase):
              patch("api.routes.web._db.is_web_admin", return_value=True), \
              patch("bot_state.bot.get_chat_member", side_effect=Exception("no live check in this test")):
             resp = _client().get(
-                f"/api/v1/web/group/grouptok/admin-status?id_token={tok}"
-            )
+                "/api/v1/web/group/grouptok/admin-status", headers={"X-Identity-Token": tok})
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(resp.json()["is_admin"])
 

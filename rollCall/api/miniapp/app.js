@@ -113,7 +113,7 @@ async function loadGroups() {
   if (!state.idToken) {
     throw new Error("Couldn't verify your identity — try reopening from Telegram.");
   }
-  const data = await apiFetch(`/portal/groups?id_token=${encodeURIComponent(state.idToken)}`);
+  const data = await apiFetch('/portal/groups', { headers: { 'X-Identity-Token': state.idToken } });
   state.groups = data.groups || [];
 }
 

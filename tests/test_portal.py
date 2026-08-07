@@ -48,19 +48,22 @@ class TestPortalGroups(unittest.TestCase):
     def setUp(self):
         _reset_rate_limit()
 
-    def test_missing_id_token_returns_422(self):
+    def test_missing_id_token_returns_401(self):
+        # id_token now comes from the X-Identity-Token header (an optional
+        # dependency), not a required query param — a missing header is
+        # simply unauthenticated (401), not a validation error (422).
         resp = _client().get("/api/v1/portal/groups")
-        self.assertEqual(resp.status_code, 422)
+        self.assertEqual(resp.status_code, 401)
 
     def test_invalid_id_token_returns_401(self):
-        resp = _client().get("/api/v1/portal/groups?id_token=bad.token.here")
+        resp = _client().get("/api/v1/portal/groups", headers={"X-Identity-Token": "bad.token.here"})
         self.assertEqual(resp.status_code, 401)
 
     def test_valid_token_empty_groups(self):
         tok = _good_token(42)
         with patch("api.routes.portal._db.get_user_voted_chats", return_value=[]), \
              patch("api.routes.portal._db.get_user_rank_in_chat", return_value=None):
-            resp = _client().get(f"/api/v1/portal/groups?id_token={tok}")
+            resp = _client().get("/api/v1/portal/groups", headers={"X-Identity-Token": tok})
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
         self.assertEqual(body["tg_user_id"], 42)
@@ -82,7 +85,7 @@ class TestPortalGroups(unittest.TestCase):
         }]
         with patch("api.routes.portal._db.get_user_voted_chats", return_value=fake_rows), \
              patch("api.routes.portal._db.get_user_rank_in_chat", return_value=2):
-            resp = _client().get(f"/api/v1/portal/groups?id_token={tok}")
+            resp = _client().get("/api/v1/portal/groups", headers={"X-Identity-Token": tok})
         self.assertEqual(resp.status_code, 200)
         g = resp.json()["groups"][0]
         self.assertEqual(g["chat_id"], -100111)
@@ -115,7 +118,7 @@ class TestPortalGroups(unittest.TestCase):
         }]
         with patch("api.routes.portal._db.get_user_voted_chats", return_value=fake_rows), \
              patch("api.routes.portal._db.get_user_rank_in_chat", return_value=None):
-            resp = _client().get(f"/api/v1/portal/groups?id_token={tok}")
+            resp = _client().get("/api/v1/portal/groups", headers={"X-Identity-Token": tok})
         g = resp.json()["groups"][0]
         self.assertIsNone(g["attendance_rate"])
         self.assertIsNone(g["voting_rate"])
@@ -137,7 +140,7 @@ class TestPortalGroups(unittest.TestCase):
              patch("api.routes.portal._db.get_member_chats", return_value=member_rows), \
              patch("api.routes.portal._db.get_chat_session_count", return_value=4), \
              patch("api.routes.portal._db.is_web_admin", return_value=False):
-            resp = _client().get(f"/api/v1/portal/groups?id_token={tok}")
+            resp = _client().get("/api/v1/portal/groups", headers={"X-Identity-Token": tok})
         self.assertEqual(resp.status_code, 200)
         groups = resp.json()["groups"]
         self.assertEqual(len(groups), 1)
@@ -179,7 +182,7 @@ class TestPortalGroups(unittest.TestCase):
              patch("api.routes.portal._db.get_member_chats", return_value=member_rows), \
              patch("api.routes.portal._db.get_user_rank_in_chat", return_value=1), \
              patch("api.routes.portal._db.is_web_admin", return_value=False):
-            resp = _client().get(f"/api/v1/portal/groups?id_token={tok}")
+            resp = _client().get("/api/v1/portal/groups", headers={"X-Identity-Token": tok})
         self.assertEqual(resp.status_code, 200)
         groups = resp.json()["groups"]
         self.assertEqual(len(groups), 1)
@@ -193,18 +196,18 @@ class TestPortalUpcoming(unittest.TestCase):
     def setUp(self):
         _reset_rate_limit()
 
-    def test_missing_token_returns_422(self):
+    def test_missing_token_returns_401(self):
         resp = _client().get("/api/v1/portal/upcoming")
-        self.assertEqual(resp.status_code, 422)
+        self.assertEqual(resp.status_code, 401)
 
     def test_invalid_token_returns_401(self):
-        resp = _client().get("/api/v1/portal/upcoming?id_token=x.y.z")
+        resp = _client().get("/api/v1/portal/upcoming", headers={"X-Identity-Token": "x.y.z"})
         self.assertEqual(resp.status_code, 401)
 
     def test_empty_upcoming(self):
         tok = _good_token(10)
         with patch("api.routes.portal._db.get_user_upcoming_scheduled_rollcalls", return_value=[]):
-            resp = _client().get(f"/api/v1/portal/upcoming?id_token={tok}")
+            resp = _client().get("/api/v1/portal/upcoming", headers={"X-Identity-Token": tok})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["items"], [])
 
@@ -219,7 +222,7 @@ class TestPortalUpcoming(unittest.TestCase):
             "scheduled_at": "2026-07-06T07:00:00Z",
         }]
         with patch("api.routes.portal._db.get_user_upcoming_scheduled_rollcalls", return_value=fake):
-            resp = _client().get(f"/api/v1/portal/upcoming?id_token={tok}")
+            resp = _client().get("/api/v1/portal/upcoming", headers={"X-Identity-Token": tok})
         self.assertEqual(resp.status_code, 200)
         items = resp.json()["items"]
         self.assertEqual(len(items), 1)
@@ -235,12 +238,12 @@ class TestPortalHistory(unittest.TestCase):
     def setUp(self):
         _reset_rate_limit()
 
-    def test_missing_token_returns_422(self):
+    def test_missing_token_returns_401(self):
         resp = _client().get("/api/v1/portal/groups/-100/history")
-        self.assertEqual(resp.status_code, 422)
+        self.assertEqual(resp.status_code, 401)
 
     def test_invalid_token_returns_401(self):
-        resp = _client().get("/api/v1/portal/groups/-100/history?id_token=bad")
+        resp = _client().get("/api/v1/portal/groups/-100/history", headers={"X-Identity-Token": "bad"})
         self.assertEqual(resp.status_code, 401)
 
     def test_history_returned(self):
@@ -250,7 +253,7 @@ class TestPortalHistory(unittest.TestCase):
             {"id": 2, "title": "Session B", "ended_at": "2026-06-08 10:00:00", "status": "miss"},
         ]
         with patch("api.routes.portal._db.get_user_session_history", return_value=fake_sessions):
-            resp = _client().get(f"/api/v1/portal/groups/-100/history?id_token={tok}")
+            resp = _client().get("/api/v1/portal/groups/-100/history", headers={"X-Identity-Token": tok})
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
         self.assertEqual(body["chat_id"], -100)
@@ -262,12 +265,12 @@ class TestPortalHistory(unittest.TestCase):
     def test_limit_param_accepted(self):
         tok = _good_token(20)
         with patch("api.routes.portal._db.get_user_session_history", return_value=[]) as m:
-            _client().get(f"/api/v1/portal/groups/-100/history?id_token={tok}&limit=5")
+            _client().get("/api/v1/portal/groups/-100/history?limit=5", headers={"X-Identity-Token": tok})
         m.assert_called_once_with(-100, 20, limit=5)
 
     def test_limit_above_max_rejected(self):
         tok = _good_token(20)
-        resp = _client().get(f"/api/v1/portal/groups/-100/history?id_token={tok}&limit=100")
+        resp = _client().get("/api/v1/portal/groups/-100/history?limit=100", headers={"X-Identity-Token": tok})
         self.assertEqual(resp.status_code, 422)
 
 

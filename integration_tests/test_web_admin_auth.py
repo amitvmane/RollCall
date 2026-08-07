@@ -117,7 +117,7 @@ class TestWebAdminStatusEndpoint(WebAdminAuthBase):
         token = self._id_token(ALICE_ID)
         r = self.client.get(
             f"/api/v1/web/group/{chat['group_web_token']}/admin-status",
-            params={"id_token": token},
+            headers={"X-Identity-Token": token},
         )
         self.assertEqual(r.status_code, 200)
         self.assertTrue(r.json()["is_admin"])
@@ -127,7 +127,7 @@ class TestWebAdminStatusEndpoint(WebAdminAuthBase):
         token = self._id_token(BOB_ID)
         r = self.client.get(
             f"/api/v1/web/group/{chat['group_web_token']}/admin-status",
-            params={"id_token": token},
+            headers={"X-Identity-Token": token},
         )
         self.assertEqual(r.status_code, 200)
         self.assertFalse(r.json()["is_admin"])
@@ -214,7 +214,7 @@ class TestAdminGroupsEndpoint(WebAdminAuthBase):
     def test_lists_cached_admin_chats(self):
         self.db.set_web_admin(CHAT_ID, ALICE_ID, "Alice")
         token = self._id_token(ALICE_ID)
-        r = self.client.get("/api/v1/auth/admin/groups", params={"id_token": token})
+        r = self.client.get("/api/v1/auth/admin/groups", headers={"X-Identity-Token": token})
         self.assertEqual(r.status_code, 200)
         groups = r.json()["groups"]
         self.assertEqual(len(groups), 1)
@@ -223,12 +223,12 @@ class TestAdminGroupsEndpoint(WebAdminAuthBase):
 
     def test_empty_for_never_cached_user(self):
         token = self._id_token(BOB_ID)
-        r = self.client.get("/api/v1/auth/admin/groups", params={"id_token": token})
+        r = self.client.get("/api/v1/auth/admin/groups", headers={"X-Identity-Token": token})
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["groups"], [])
 
     def test_401_on_bad_identity_token(self):
-        r = self.client.get("/api/v1/auth/admin/groups", params={"id_token": "garbage"})
+        r = self.client.get("/api/v1/auth/admin/groups", headers={"X-Identity-Token": "garbage"})
         self.assertEqual(r.status_code, 401)
 
 

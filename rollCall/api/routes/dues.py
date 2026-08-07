@@ -21,10 +21,10 @@ Dues guard:
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 
 import db as _db
-from api.identity import require_identity
+from api.identity import identity_from_header, require_identity
 from api.web_admin import check_web_admin_live
 from api.schemas.dues import (
     DuesAddAdhocRequest,
@@ -133,7 +133,7 @@ async def _announce(chat_id: int, text: Optional[str]) -> None:
 )
 async def get_my_dues(
     group_token: str = Path(...),
-    id_token: str = Query(..., description="Signed identity token"),
+    id_token: Optional[str] = Depends(identity_from_header),
 ) -> DuesMyResponse:
     chat = _resolve_chat(group_token)
     _require_dues(chat)
@@ -158,7 +158,7 @@ async def get_my_dues(
 )
 async def get_dues_summary(
     group_token: str = Path(...),
-    id_token: str = Query(...),
+    id_token: Optional[str] = Depends(identity_from_header),
     nonzero_only: bool = Query(False, description="Only return members with a non-zero balance"),
 ) -> DuesSummaryResponse:
     chat = _resolve_chat(group_token)
@@ -182,7 +182,7 @@ async def get_dues_summary(
 )
 async def get_fund(
     group_token: str = Path(...),
-    id_token: str = Query(...),
+    id_token: Optional[str] = Depends(identity_from_header),
 ) -> DuesFundResponse:
     chat = _resolve_chat(group_token)
     _require_dues(chat)
@@ -200,7 +200,7 @@ async def get_fund(
 )
 async def get_fund_history(
     group_token: str = Path(...),
-    id_token: str = Query(...),
+    id_token: Optional[str] = Depends(identity_from_header),
     limit: int = Query(15, ge=1, le=50),
     offset: int = Query(0, ge=0),
 ) -> DuesFundHistoryResponse:
@@ -228,7 +228,7 @@ async def get_fund_history(
 )
 async def get_tiers(
     group_token: str = Path(...),
-    id_token: str = Query(...),
+    id_token: Optional[str] = Depends(identity_from_header),
 ) -> DuesTiersResponse:
     chat = _resolve_chat(group_token)
     chat_id = int(chat["chat_id"])
@@ -245,7 +245,7 @@ async def get_tiers(
 )
 async def get_settings(
     group_token: str = Path(...),
-    id_token: str = Query(...),
+    id_token: Optional[str] = Depends(identity_from_header),
 ) -> DuesSettingsResponse:
     chat = _resolve_chat(group_token)
     chat_id = int(chat["chat_id"])
@@ -577,7 +577,7 @@ async def upsert_tier(
 async def delete_tier(
     group_token: str = Path(...),
     tier_name: str = Path(...),
-    id_token: str = Query(...),
+    id_token: Optional[str] = Depends(identity_from_header),
 ) -> None:
     chat = _resolve_chat(group_token)
     chat_id = int(chat["chat_id"])
@@ -663,7 +663,7 @@ async def self_paid(
 )
 async def close_preview(
     group_token: str = Path(...),
-    id_token: str = Query(...),
+    id_token: Optional[str] = Depends(identity_from_header),
     subsidy: int = Query(0, ge=0),
 ) -> DuesClosePreviewResponse:
     chat = _resolve_chat(group_token)

@@ -36,6 +36,8 @@ import os
 import time
 from typing import Optional
 
+from fastapi import Header
+
 
 # 30 days. These back a "stay verified" UX in the browser; long enough to
 # avoid nagging re-verification, short enough to bound a leaked token.
@@ -126,3 +128,20 @@ def require_identity(
     if not user_id or user_id <= 0:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail)
     return user_id
+
+
+async def identity_from_header(
+    x_identity_token: Optional[str] = Header(None, alias="X-Identity-Token"),
+) -> Optional[str]:
+    """FastAPI dependency: extracts id_token from the X-Identity-Token
+    header instead of a URL query param. A query param leaks a 30-day
+    non-revocable credential via browser history, server access logs, and
+    Referer headers on navigation away from the page — a header doesn't.
+
+    Routes that previously declared `id_token: str = ""` (a query param)
+    switch to `id_token: Optional[str] = Depends(identity_from_header)` —
+    the downstream require_identity()/verify_identity_token() call is
+    unchanged, since verification only cares about the string value, not
+    where it came from.
+    """
+    return x_identity_token

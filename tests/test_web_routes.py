@@ -781,7 +781,7 @@ class TestWebAdminStatusLiveCheck(unittest.TestCase):
                    return_value=self._member("administrator")), \
              patch.object(_web_mod._db, "set_web_admin") as set_admin, \
              patch.object(_web_mod._db, "revoke_web_admin") as revoke:
-            resp = _client().get("/api/v1/web/group/grp123/admin-status?id_token=tok")
+            resp = _client().get("/api/v1/web/group/grp123/admin-status", headers={"X-Identity-Token": "tok"})
         self.assertTrue(resp.json()["is_admin"])
         set_admin.assert_called_once_with(-100, 99, "Amit")
         revoke.assert_not_called()
@@ -794,7 +794,7 @@ class TestWebAdminStatusLiveCheck(unittest.TestCase):
              patch("bot_state.bot.get_chat_member", new_callable=AsyncMock,
                    return_value=self._member("creator")), \
              patch.object(_web_mod._db, "set_web_admin"):
-            resp = _client().get("/api/v1/web/group/grp123/admin-status?id_token=tok")
+            resp = _client().get("/api/v1/web/group/grp123/admin-status", headers={"X-Identity-Token": "tok"})
         self.assertTrue(resp.json()["is_admin"])
 
     def test_demoted_member_revokes_stale_cache(self):
@@ -811,7 +811,7 @@ class TestWebAdminStatusLiveCheck(unittest.TestCase):
                    return_value=self._member("member")), \
              patch.object(_web_mod._db, "set_web_admin") as set_admin, \
              patch.object(_web_mod._db, "revoke_web_admin") as revoke:
-            resp = _client().get("/api/v1/web/group/grp123/admin-status?id_token=tok")
+            resp = _client().get("/api/v1/web/group/grp123/admin-status", headers={"X-Identity-Token": "tok"})
         self.assertFalse(resp.json()["is_admin"])
         revoke.assert_called_once_with(-100, 99)
         set_admin.assert_not_called()
@@ -830,7 +830,7 @@ class TestWebAdminStatusLiveCheck(unittest.TestCase):
              patch("bot_state.bot.get_chat_member", new_callable=AsyncMock) as gcm, \
              patch.object(_web_mod._db, "set_web_admin") as set_admin, \
              patch.object(_web_mod._db, "revoke_web_admin") as revoke:
-            resp = _client().get("/api/v1/web/group/grp123/admin-status?id_token=tok")
+            resp = _client().get("/api/v1/web/group/grp123/admin-status", headers={"X-Identity-Token": "tok"})
         self.assertTrue(resp.json()["is_admin"])
         cached.assert_called_once_with(-100, 99)
         gcm.assert_not_awaited()
@@ -848,7 +848,7 @@ class TestWebAdminStatusLiveCheck(unittest.TestCase):
              patch("bot_state.bot.get_chat_member", new_callable=AsyncMock,
                    side_effect=Exception("Telegram unreachable")), \
              patch.object(_web_mod._db, "is_web_admin", return_value=True) as cached:
-            resp = _client().get("/api/v1/web/group/grp123/admin-status?id_token=tok")
+            resp = _client().get("/api/v1/web/group/grp123/admin-status", headers={"X-Identity-Token": "tok"})
         self.assertTrue(resp.json()["is_admin"])
         cached.assert_called_once_with(-100, 99)
 
@@ -860,13 +860,13 @@ class TestWebAdminStatusLiveCheck(unittest.TestCase):
              patch("bot_state.bot.get_chat_member", new_callable=AsyncMock,
                    side_effect=Exception("Telegram unreachable")), \
              patch.object(_web_mod._db, "is_web_admin", return_value=False):
-            resp = _client().get("/api/v1/web/group/grp123/admin-status?id_token=tok")
+            resp = _client().get("/api/v1/web/group/grp123/admin-status", headers={"X-Identity-Token": "tok"})
         self.assertFalse(resp.json()["is_admin"])
 
     def test_invalid_group_token_false(self):
         import api.routes.web as _web_mod
         with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value=None):
-            resp = _client().get("/api/v1/web/group/badgrp/admin-status?id_token=tok")
+            resp = _client().get("/api/v1/web/group/badgrp/admin-status", headers={"X-Identity-Token": "tok"})
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(resp.json()["is_admin"])
 
@@ -893,7 +893,7 @@ class TestWebTemplateSchedule(unittest.TestCase):
         import api.routes.web as _web_mod
         with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
              patch("api.identity.verify_identity_token", return_value=None):
-            resp = _client().get("/api/v1/web/group/grp123/templates?id_token=bad")
+            resp = _client().get("/api/v1/web/group/grp123/templates", headers={"X-Identity-Token": "bad"})
         self.assertEqual(resp.status_code, 401)
 
     def test_list_requires_web_admin(self):
@@ -901,13 +901,13 @@ class TestWebTemplateSchedule(unittest.TestCase):
         with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
              patch.object(_web_mod._db, "is_web_admin", return_value=False), \
              patch("api.identity.verify_identity_token", return_value=77):
-            resp = _client().get("/api/v1/web/group/grp123/templates?id_token=tok")
+            resp = _client().get("/api/v1/web/group/grp123/templates", headers={"X-Identity-Token": "tok"})
         self.assertEqual(resp.status_code, 403)
 
     def test_list_invalid_group_token_404(self):
         import api.routes.web as _web_mod
         with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value=None):
-            resp = _client().get("/api/v1/web/group/badgrp/templates?id_token=tok")
+            resp = _client().get("/api/v1/web/group/badgrp/templates", headers={"X-Identity-Token": "tok"})
         self.assertEqual(resp.status_code, 404)
 
     def test_list_returns_templates_for_admin(self):
@@ -916,7 +916,7 @@ class TestWebTemplateSchedule(unittest.TestCase):
              patch.object(_web_mod._db, "is_web_admin", return_value=True), \
              patch("api.identity.verify_identity_token", return_value=99), \
              patch("services.templates.list_templates", return_value=[self._tmpl()]):
-            resp = _client().get("/api/v1/web/group/grp123/templates?id_token=tok")
+            resp = _client().get("/api/v1/web/group/grp123/templates", headers={"X-Identity-Token": "tok"})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()[0]["name"], "SundayGame")
 
@@ -1326,7 +1326,7 @@ class TestWebIdentityMerge(unittest.TestCase):
         import api.routes.web as _web_mod
         with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
              patch("api.identity.verify_identity_token", return_value=None):
-            resp = _client().get("/api/v1/web/group/grp123/identities?id_token=bad")
+            resp = _client().get("/api/v1/web/group/grp123/identities", headers={"X-Identity-Token": "bad"})
         self.assertEqual(resp.status_code, 401)
 
     def test_list_requires_web_admin(self):
@@ -1334,13 +1334,13 @@ class TestWebIdentityMerge(unittest.TestCase):
         with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
              patch.object(_web_mod._db, "is_web_admin", return_value=False), \
              patch("api.identity.verify_identity_token", return_value=77):
-            resp = _client().get("/api/v1/web/group/grp123/identities?id_token=tok")
+            resp = _client().get("/api/v1/web/group/grp123/identities", headers={"X-Identity-Token": "tok"})
         self.assertEqual(resp.status_code, 403)
 
     def test_list_invalid_group_token_404(self):
         import api.routes.web as _web_mod
         with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value=None):
-            resp = _client().get("/api/v1/web/group/badgrp/identities?id_token=tok")
+            resp = _client().get("/api/v1/web/group/badgrp/identities", headers={"X-Identity-Token": "tok"})
         self.assertEqual(resp.status_code, 404)
 
     def test_list_returns_identities_and_groups(self):
@@ -1354,7 +1354,7 @@ class TestWebIdentityMerge(unittest.TestCase):
              patch("api.identity.verify_identity_token", return_value=99), \
              patch("services.identity.list_all_identities", return_value=identities), \
              patch("services.identity.list_identity_groups", return_value=groups):
-            resp = _client().get("/api/v1/web/group/grp123/identities?id_token=tok")
+            resp = _client().get("/api/v1/web/group/grp123/identities", headers={"X-Identity-Token": "tok"})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["identities"][0]["display_name"], "Amit")
         self.assertEqual(resp.json()["groups"][0]["aliases"], ["Rex"])
@@ -1368,7 +1368,7 @@ class TestWebIdentityMerge(unittest.TestCase):
              patch.object(_web_mod._db, "is_web_admin", return_value=True), \
              patch("api.identity.verify_identity_token", return_value=99), \
              patch("services.identity.list_suggestions", return_value=suggestions):
-            resp = _client().get("/api/v1/web/group/grp123/identities/suggestions?id_token=tok")
+            resp = _client().get("/api/v1/web/group/grp123/identities/suggestions", headers={"X-Identity-Token": "tok"})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["suggestions"][0]["alias_proxy_name"], "Ajya")
 
@@ -1487,7 +1487,7 @@ class TestWebIdentityMerge(unittest.TestCase):
              patch("services.identity.list_all_identities", return_value=[]), \
              patch("services.identity.list_identity_groups", return_value=[]), \
              patch("services.identity.list_discarded", return_value=["2", "]"]):
-            resp = _client().get("/api/v1/web/group/grp123/identities?id_token=tok")
+            resp = _client().get("/api/v1/web/group/grp123/identities", headers={"X-Identity-Token": "tok"})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["discarded"], ["2", "]"])
 
@@ -1609,7 +1609,7 @@ class TestWebMembersList(unittest.TestCase):
         with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
              patch.object(_web_mod._db, "is_web_admin", return_value=False), \
              patch("api.identity.verify_identity_token", return_value=77):
-            resp = _client().get("/api/v1/web/group/grp123/members?id_token=tok")
+            resp = _client().get("/api/v1/web/group/grp123/members", headers={"X-Identity-Token": "tok"})
         self.assertEqual(resp.status_code, 403)
 
     def test_returns_member_list(self):
@@ -1621,7 +1621,7 @@ class TestWebMembersList(unittest.TestCase):
                  {"user_id": 1, "first_name": "Amit", "username": "amit"},
                  {"user_id": 2, "first_name": "Priya", "username": None},
              ]):
-            resp = _client().get("/api/v1/web/group/grp123/members?id_token=tok")
+            resp = _client().get("/api/v1/web/group/grp123/members", headers={"X-Identity-Token": "tok"})
         self.assertEqual(resp.status_code, 200)
         members = resp.json()["members"]
         self.assertEqual(len(members), 2)
@@ -1632,7 +1632,7 @@ class TestWebMembersList(unittest.TestCase):
     def test_invalid_group_token_404(self):
         import api.routes.web as _web_mod
         with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value=None):
-            resp = _client().get("/api/v1/web/group/badgrp/members?id_token=tok")
+            resp = _client().get("/api/v1/web/group/badgrp/members", headers={"X-Identity-Token": "tok"})
         self.assertEqual(resp.status_code, 404)
 
 
@@ -1771,7 +1771,7 @@ class TestWebScheduledRollcallsTemplateReference(unittest.TestCase):
              patch("api.identity.verify_identity_token", return_value=99), \
              patch("services.templates.get_upcoming_scheduled_rollcalls", return_value=rows), \
              patch("services.templates.get_template", return_value=tmpl):
-            resp = _client().get("/api/v1/web/group/grp123/scheduled-rollcalls?id_token=tok")
+            resp = _client().get("/api/v1/web/group/grp123/scheduled-rollcalls", headers={"X-Identity-Token": "tok"})
         self.assertEqual(resp.status_code, 200)
         item = resp.json()["items"][0]
         self.assertEqual(item["display_title"], "Friday Match Night")
@@ -1791,7 +1791,7 @@ class TestWebScheduledRollcallsTemplateReference(unittest.TestCase):
              patch("api.identity.verify_identity_token", return_value=99), \
              patch("services.templates.get_upcoming_scheduled_rollcalls", return_value=rows), \
              patch("services.templates.get_template", return_value=None):
-            resp = _client().get("/api/v1/web/group/grp123/scheduled-rollcalls?id_token=tok")
+            resp = _client().get("/api/v1/web/group/grp123/scheduled-rollcalls", headers={"X-Identity-Token": "tok"})
         self.assertEqual(resp.status_code, 200)
         item = resp.json()["items"][0]
         self.assertIsNone(item["display_title"])

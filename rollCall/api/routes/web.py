@@ -19,12 +19,12 @@ import logging
 import os
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Path, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 import db as _db
-from api.identity import require_identity, verify_identity_token
+from api.identity import identity_from_header, require_identity, verify_identity_token
 from api.web_admin import check_web_admin_live
 from api.telegram_mirror import mirror_panel_to_telegram as _mirror_panel_to_telegram, send_vote_notification as _send_vote_notification, send_event_notification as _send_event_notification
 from services import web as web_svc
@@ -190,7 +190,7 @@ async def web_group_presence(
 async def get_web_group_stats(
     group_token: str = Path(..., description="Permanent group token"),
     name: Optional[str] = Query(None, description="Display name to personalise the response with personal stats"),
-    id_token: Optional[str] = Query(None, description="Signed identity token to personalise the response with personal stats"),
+    id_token: Optional[str] = Depends(identity_from_header),
 ) -> WebGroupStatsResponse:
     # Resolve the requesting identity from a signed token only — never from a
     # raw user_id so callers cannot supply an arbitrary Telegram id and read
@@ -221,7 +221,7 @@ async def get_web_group(
 )
 async def web_admin_status(
     group_token: str = Path(...),
-    id_token: str = "",
+    id_token: Optional[str] = Depends(identity_from_header),
 ) -> WebAdminStatusResponse:
     # Identity must be proven by a signed token; a raw user id can't grant
     # admin status because the server never trusts it.
@@ -609,7 +609,7 @@ async def _actor_display_name(chat_id: int, actor_user_id: int) -> str:
 )
 async def web_list_templates(
     group_token: str = Path(...),
-    id_token: str = "",
+    id_token: Optional[str] = Depends(identity_from_header),
 ) -> list[WebTemplateResponse]:
     chat_id, _ = await _require_web_admin(group_token, id_token)
     from services import templates as tmpl_svc
@@ -796,7 +796,7 @@ async def web_delete_template(
 )
 async def web_list_identities(
     group_token: str = Path(...),
-    id_token: str = "",
+    id_token: Optional[str] = Depends(identity_from_header),
 ) -> WebIdentityListResponse:
     chat_id, _ = await _require_web_admin(group_token, id_token)
     from services import identity as identity_svc
@@ -814,7 +814,7 @@ async def web_list_identities(
 )
 async def web_list_identity_suggestions(
     group_token: str = Path(...),
-    id_token: str = "",
+    id_token: Optional[str] = Depends(identity_from_header),
 ) -> WebIdentitySuggestionsResponse:
     chat_id, _ = await _require_web_admin(group_token, id_token)
     from services import identity as identity_svc
@@ -994,7 +994,7 @@ async def create_scheduled_rollcall(
 )
 async def list_scheduled_rollcalls(
     group_token: str = Path(...),
-    id_token: Optional[str] = Query(None),
+    id_token: Optional[str] = Depends(identity_from_header),
 ) -> ScheduledRollcallsResponse:
     chat = _db.get_chat_by_group_web_token(group_token)
     if not chat:
@@ -1016,7 +1016,7 @@ async def list_scheduled_rollcalls(
 async def delete_scheduled_rollcall(
     group_token: str = Path(...),
     item_id: int = Path(..., ge=1),
-    id_token: Optional[str] = Query(None),
+    id_token: Optional[str] = Depends(identity_from_header),
 ) -> None:
     chat = _db.get_chat_by_group_web_token(group_token)
     if not chat:
@@ -1059,7 +1059,7 @@ class _MemberListResponse(BaseModel):
 )
 async def list_members_for_weblogin(
     group_token: str = Path(...),
-    id_token: str = "",
+    id_token: Optional[str] = Depends(identity_from_header),
 ) -> _MemberListResponse:
     chat_id, _ = await _require_web_admin(group_token, id_token)
     members = _db.get_active_members(chat_id)

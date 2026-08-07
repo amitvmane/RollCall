@@ -6336,6 +6336,31 @@ def consume_web_direct_login_token(token: str) -> Optional[Dict]:
             release_connection(conn)
 
 
+def peek_web_direct_login_token(token: str) -> Optional[Dict]:
+    """Read-only lookup of a still-valid (unused, unexpired) weblogin token —
+    does NOT consume it. Used by the GET /auth/weblogin/{token} redirect
+    handler to resolve which group to redirect to, without spending the
+    token before the frontend has had a chance to POST-redeem it for the
+    actual identity token (see consume_web_direct_login_token, which does
+    the real one-time consumption at that later step)."""
+    try:
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            now = _utcnow_naive().isoformat()
+            cursor.execute(
+                f"SELECT chat_id, tg_user_id, tg_name FROM web_direct_login_tokens "
+                f"WHERE token={ph} AND used_at IS NULL AND expires_at > {ph}",
+                (token, now),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            return dict(row)
+    except Exception:
+        logging.exception("peek_web_direct_login_token failed")
+        return None
+
+
 # ── Digest / periodic-job helpers ─────────────────────────────────────────────
 
 def get_latest_ended_rollcall(chat_id: int) -> Optional[Dict]:

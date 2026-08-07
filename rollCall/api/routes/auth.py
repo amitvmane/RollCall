@@ -27,7 +27,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from api.identity import identity_from_header
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from db import (
     _hash_token, generate_api_token, get_or_create_chat, get_member_chats,
@@ -415,18 +415,26 @@ h1{{font-size:1.3rem;margin:0 0 12px}}p{{color:#555;font-size:.9rem;margin:0}}</
 
 @router.get(
     "/auth/weblogin/{token}",
-    summary="Redeem an admin-issued web login token",
+    summary="Redirect an admin-issued web login link to the group page for redemption",
 )
 async def weblogin_redeem(token: str):
     """
-    Validate and consume a single-use admin-issued login token, then redirect to
-    the group web page with a signed identity token so the user is authenticated
-    without needing Telegram active.
+    A real browser navigation (the link a member taps in Telegram) — this
+    can't send a custom header, so it can't redeem the token for the real
+    id_token directly the way every other identity-bearing request now does
+    (see api/identity.py:identity_from_header). Instead: PEEK (not consume)
+    the token just to find which group to redirect to, then hand the still-
+    unconsumed, single-use, short-expiry weblogin code itself to the
+    frontend via the URL. The code is only good for one redemption and
+    expires with the original link — leaking it in an access log is far
+    lower value than leaking the 30-day id_token that used to be minted and
+    embedded here directly. The frontend immediately POSTs it to
+    /auth/weblogin/redeem (mirroring member_token_login in tg_verify.py) to
+    get the real id_token back in a JSON response body, never in a URL.
     """
     import db as _db
-    from api.identity import issue_identity_token, IdentityError
 
-    payload = _db.consume_web_direct_login_token(token)
+    payload = _db.peek_web_direct_login_token(token)
     if not payload:
         return HTMLResponse(
             content=_WEBLOGIN_ERROR_HTML.format(
@@ -436,30 +444,17 @@ async def weblogin_redeem(token: str):
             status_code=410,
         )
 
-    tg_user_id = payload["tg_user_id"]
     chat_id = payload["chat_id"]
-
-    try:
-        id_token = issue_identity_token(tg_user_id)
-    except IdentityError:
-        logging.error("[weblogin_redeem] cannot issue id_token — TELEGRAM_TOKEN not set")
-        return HTMLResponse(
-            content=_WEBLOGIN_ERROR_HTML.format(
-                title="Server error",
-                message="Could not issue identity token. Contact the group admin.",
-            ),
-            status_code=503,
-        )
 
     # Resolve the group's permanent URL
     chat = _db.get_or_create_chat(chat_id)
     group_token = chat.get("group_web_token", "")
     base = os.environ.get("WEB_BASE_URL", "").rstrip("/")
     if base and group_token:
-        redirect_url = f"{base}/web/group/{group_token}?login_token={id_token}"
+        redirect_url = f"{base}/web/group/{group_token}?weblogin_code={token}"
     elif group_token:
         # Relative redirect — works when client opened the link on the same origin
-        redirect_url = f"/web/group/{group_token}?login_token={id_token}"
+        redirect_url = f"/web/group/{group_token}?weblogin_code={token}"
     else:
         return HTMLResponse(
             content=_WEBLOGIN_ERROR_HTML.format(
@@ -470,7 +465,47 @@ async def weblogin_redeem(token: str):
         )
 
     logging.info(
-        "[weblogin_redeem] redeemed token for user=%s chat=%s → %s",
-        tg_user_id, chat_id, redirect_url.split("?")[0],
+        "[weblogin_redeem] redirecting unconsumed weblogin code for chat=%s → %s",
+        chat_id, redirect_url.split("?")[0],
     )
     return RedirectResponse(url=redirect_url, status_code=302)
+
+
+class _WeblogInRedeemRequest(BaseModel):
+    token: str = Field(..., max_length=128)
+
+
+class _WeblogInRedeemResponse(BaseModel):
+    id_token: str
+    chat_id: int
+
+
+@router.post(
+    "/auth/weblogin/redeem",
+    response_model=_WeblogInRedeemResponse,
+    summary="Redeem a weblogin code (from the GET redirect above) for the real identity token",
+)
+async def weblogin_redeem_post(body: _WeblogInRedeemRequest):
+    """
+    Mirrors member_token_login (tg_verify.py) — the actual single-use
+    consumption happens here, not in the GET redirect, so the long-lived
+    id_token this mints only ever travels in a JSON response body.
+    """
+    import db as _db
+    from api.identity import issue_identity_token, IdentityError
+
+    payload = _db.consume_web_direct_login_token(body.token)
+    if not payload:
+        raise HTTPException(status_code=410, detail="This login link has expired or was already used.")
+
+    tg_user_id = payload["tg_user_id"]
+    chat_id = payload["chat_id"]
+
+    try:
+        id_token = issue_identity_token(tg_user_id)
+    except IdentityError:
+        logging.error("[weblogin_redeem_post] cannot issue id_token — TELEGRAM_TOKEN not set")
+        raise HTTPException(status_code=503, detail="Could not issue identity token. Contact the group admin.")
+
+    logging.info("[weblogin_redeem_post] redeemed token for user=%s chat=%s", tg_user_id, chat_id)
+    return _WeblogInRedeemResponse(id_token=id_token, chat_id=chat_id)

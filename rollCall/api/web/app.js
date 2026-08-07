@@ -32,21 +32,38 @@ if(_verifiedUserId&&!_idToken){
   localStorage.removeItem(LS_TG_USER_ID);
 }
 
-// Admin-issued weblogin redirect: ?login_token=<id_token> lands here after the
-// server validates the single-use token and issues an identity token. Store it,
-// strip the param from the URL so it isn't bookmarked or shared accidentally,
-// then continue with normal page load.
+// Admin-issued weblogin redirect: ?weblogin_code=<code> lands here after the
+// server peeks (not consumes) a single-use admin-issued token just to find
+// which group to redirect to (GET /auth/weblogin/{token} in auth.py). The
+// code itself — not the final id_token — is what's in this URL, since a
+// plain browser navigation can't carry the X-Identity-Token header every
+// other identity-bearing request now uses. Strip it from the URL immediately
+// (so it isn't bookmarked/shared) and POST-redeem it for the real id_token,
+// which arrives in a JSON response body, never a URL. Blocks the entry
+// point below (via _weblogInRedeemPromise) so the rest of the page doesn't
+// start loading with a stale/absent identity while this is in flight.
+let _weblogInRedeemPromise=null;
 (function(){
   try{
     const p=new URLSearchParams(window.location.search);
-    const lt=p.get("login_token");
-    if(lt){
-      localStorage.setItem(LS_ID_TOKEN,lt);
-      _idToken=lt;
-      p.delete("login_token");
+    const code=p.get("weblogin_code");
+    if(code){
+      p.delete("weblogin_code");
       const qs=p.toString();
       const clean=window.location.pathname+(qs?"?"+qs:"");
       history.replaceState(null,"",clean);
+      _weblogInRedeemPromise=fetch("/api/v1/auth/weblogin/redeem",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({token:code}),
+        signal:AbortSignal.timeout(10000),
+      }).then(async r=>{
+        if(!r.ok)throw new Error((await r.json().catch(()=>({}))).detail||"Login link redemption failed");
+        const data=await r.json();
+        localStorage.setItem(LS_ID_TOKEN,data.id_token);
+        _idToken=data.id_token;
+      }).catch(e=>{
+        console.warn("weblogin redeem failed:",e.message);
+      });
     }
   }catch(_){}
 })();
@@ -3518,8 +3535,12 @@ function _showDuesModal(title,sublabel,defaultVal,onConfirm,opts={}){
 }
 
 // ── Entry point ────────────────────────────────────────────────────────────
+// Waits for a pending weblogin redemption (see _weblogInRedeemPromise above)
+// so load() doesn't run against a stale/absent _idToken while that's still
+// in flight — a no-op .then(load) when there's nothing to wait for.
 if(URL_TOKEN&&(URL_MODE==="join"||URL_MODE==="group")){
-  load();
+  if(_weblogInRedeemPromise)_weblogInRedeemPromise.then(load);
+  else load();
 }else{
   // No token in URL — show home screen
   renderHomeScreen();

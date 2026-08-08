@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 import json
 import logging
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any
@@ -135,14 +136,45 @@ def init_sqlite():
     try:
         db_conn = sqlite3.connect(db_path, check_same_thread=False)
         db_conn.row_factory = sqlite3.Row
+        # WAL mode: allows concurrent readers while a writer is mid-transaction
+        # (the default rollback-journal mode holds an exclusive lock that
+        # blocks all readers) — the actual prerequisite for get_connection()'s
+        # per-worker-thread connections below to be useful rather than just
+        # serialize behind the main thread anyway. synchronous is deliberately
+        # left at its default (FULL), not lowered to NORMAL — see db-phase-2
+        # notes: the extra durability trade-off isn't worth it on the same
+        # connection as the append-only dues ledger just for write throughput,
+        # which isn't what this change is for.
+        db_conn.execute("PRAGMA journal_mode=WAL")
         logging.debug(f"SQLite database connected: {db_path}")
     except Exception as e:
         logging.error(f"Failed to connect to SQLite database: {e}")
         raise
 
+_thread_local = threading.local()
+
+# Backs the two genuinely bot-wide, unscoped-by-design queries
+# (services/stats.py:bot_stats, get_idle_chats below) that still do
+# full/near-full table scans and would otherwise block the whole bot's
+# single event loop for their entire duration. SQLite-only (see
+# get_connection() above) — small pool since both callers are rare
+# (admin-only /stats bot, once-a-day scheduler digest), not a general
+# DB-offload mechanism.
+from concurrent.futures import ThreadPoolExecutor  # noqa: E402
+_stats_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="dbstats")
+
+
 def get_connection():
     """Get database connection. Tracks pool usage and throttle-warns once
-    every 60s if the PG pool is saturated."""
+    every 60s if the PG pool is saturated.
+
+    SQLite: the shared db_conn (check_same_thread=False) is only safe from
+    the main thread — that flag just disables sqlite3's own assertion, it
+    doesn't make concurrent cross-thread use safe. A worker thread (e.g.
+    _stats_executor below) gets its own lazily-opened, thread-local
+    connection instead — long-lived for that thread's lifetime, matching
+    the main connection's own never-closed lifecycle, not reopened per call.
+    """
     global _pool_in_use, _pool_high_water, _pool_saturation_logged_at
     if db_type == 'postgresql':
         if _pool_in_use >= _pool_max:
@@ -158,7 +190,14 @@ def get_connection():
         if _pool_in_use > _pool_high_water:
             _pool_high_water = _pool_in_use
         return conn
-    return db_conn
+    if threading.current_thread() is threading.main_thread():
+        return db_conn
+    if not hasattr(_thread_local, "conn"):
+        path = DATABASE_URL.replace('sqlite:///', '')
+        _thread_local.conn = sqlite3.connect(path, check_same_thread=True)
+        _thread_local.conn.row_factory = sqlite3.Row
+        _thread_local.conn.execute("PRAGMA journal_mode=WAL")
+    return _thread_local.conn
 
 
 def release_connection(conn):

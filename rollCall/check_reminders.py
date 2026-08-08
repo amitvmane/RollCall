@@ -463,7 +463,16 @@ async def _auto_start_from_template(chat_id: int, tmpl: dict, stamp_date: str = 
         return False
 
     if stamp_date is not None:
-        update_template_last_scheduled_date(chat_id, tmpl["name"], stamp_date)
+        if not update_template_last_scheduled_date(chat_id, tmpl["name"], stamp_date):
+            # Compare-and-swap lost: another process already claimed this
+            # occurrence (or this template) for stamp_date. Skip — firing
+            # here too would double-create the rollcall.
+            logging.info(
+                "[scheduler] Skipping auto-start for template '%s' chat %s — "
+                "already claimed for %s by another process/tick.",
+                tmpl["name"], chat_id, stamp_date,
+            )
+            return False
 
     title = tmpl.get("title") or tmpl["name"]
     rc = manager.add_rollcall(chat_id, title)
@@ -697,7 +706,16 @@ async def _fire_scheduled_rollcalls():
             # and create a second rollcall for it. Claiming first means a
             # mid-fire crash instead skips the fire — recoverable by hand,
             # unlike a silent duplicate rollcall.
-            mark_scheduled_rollcall_fired(row_id)
+            #
+            # The claim itself is a compare-and-swap (WHERE is_fired=FALSE) —
+            # if it fails, another process already claimed this row between
+            # our SELECT and this UPDATE, so back off instead of firing too.
+            if not mark_scheduled_rollcall_fired(row_id):
+                logging.info(
+                    "[scheduler] Skipping scheduled rollcall id=%s for chat %s — "
+                    "already claimed by another process.", row_id, chat_id,
+                )
+                continue
 
             # One-time "Schedule" (web unified flow) always saves a template
             # first, then repurposes this row's existing `title` column to

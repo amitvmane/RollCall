@@ -3247,12 +3247,19 @@ function renderIdentityMerge(){
   if(reviewRows.length){
     const SHOW_N=12;
     const vis=reviewRows.slice(0,SHOW_N), extra=reviewRows.slice(SHOW_N);
-    const CONF_LABEL={exact_username:"✓ username match",exact_first_name:"✓ name match",
+    // exact_first_name is deliberately NOT given the same strong "chip-in"
+    // styling as exact_username/exact_proxy — first names commonly collide
+    // across different real people in the same group (see the confidence
+    // assignment in services/identity.list_suggestions), so it's rendered
+    // at the same "weaker signal" tier as a fuzzy "close" match instead of
+    // looking equally certain to an admin skimming this list.
+    const CONF_LABEL={exact_username:"✓ username match",exact_first_name:"≈ same first name",
                        exact_proxy:"✓ exact match",close:"≈ close spelling"};
+    const STRONG_CONF=new Set(["exact_username","exact_proxy"]);
     const rowHtml=r=>{
       const{row,suggestion,otherLabel}=r;
       const confBadge=suggestion
-        ?`<span class="itm-conf-badge ${suggestion.confidence.startsWith("exact")?"chip-in":"chip-maybe"}">${CONF_LABEL[suggestion.confidence]}</span>`
+        ?`<span class="itm-conf-badge ${STRONG_CONF.has(suggestion.confidence)?"chip-in":"chip-maybe"}">${CONF_LABEL[suggestion.confidence]}</span>`
         :"";
       const metaBits=[`${row.proxy_count||0}×`];
       if(row.proxy_last_seen)metaBits.push(_relTime(row.proxy_last_seen));

@@ -162,29 +162,29 @@ class TestLinkIdentities(unittest.TestCase):
 
     def test_basic_merge_into_real_user(self):
         with patch("services.identity.db.get_identity_link", return_value=None), \
-             patch("services.identity.db.upsert_identity_link") as mock_upsert, \
-             patch("services.identity.db.repoint_links") as mock_repoint, \
+             patch("services.identity.db.merge_identity_link") as mock_merge, \
              patch("services.identity.db.log_admin_action") as mock_log, \
              patch("services.identity.db.get_links_by_canonical", return_value=[]), \
+             patch("services.identity.db.is_active_chat_member", return_value=True), \
              patch("services.identity.db.get_member_display_info", return_value={"first_name": "Rex", "username": "rexreal"}):
             g = identity.link_identities(1, "Rex", canonical_user_id=999, **self._admin())
-        mock_upsert.assert_called_once()
-        self.assertEqual(mock_upsert.call_args.kwargs["canonical_user_id"], 999)
-        self.assertIsNone(mock_upsert.call_args.kwargs["canonical_proxy_name"])
-        mock_repoint.assert_called_once_with(1, "Rex", to_user_id=999, to_proxy_name=None)
+        mock_merge.assert_called_once()
+        self.assertEqual(mock_merge.call_args.args[0], 1)
+        self.assertEqual(mock_merge.call_args.args[1], "Rex")
+        self.assertEqual(mock_merge.call_args.kwargs["canonical_user_id"], 999)
+        self.assertIsNone(mock_merge.call_args.kwargs["canonical_proxy_name"])
         mock_log.assert_called_once()
         self.assertEqual(g["kind"], "user")
         self.assertEqual(g["user_id"], 999)
 
     def test_basic_merge_into_another_proxy(self):
         with patch("services.identity.db.get_identity_link", return_value=None), \
-             patch("services.identity.db.upsert_identity_link") as mock_upsert, \
-             patch("services.identity.db.repoint_links"), \
+             patch("services.identity.db.merge_identity_link") as mock_merge, \
              patch("services.identity.db.log_admin_action"), \
              patch("services.identity.db.get_links_by_canonical", return_value=[]):
             identity.link_identities(1, "Aju", canonical_proxy_name="Ajay", **self._admin())
-        self.assertIsNone(mock_upsert.call_args.kwargs["canonical_user_id"])
-        self.assertEqual(mock_upsert.call_args.kwargs["canonical_proxy_name"], "Ajay")
+        self.assertIsNone(mock_merge.call_args.kwargs["canonical_user_id"])
+        self.assertEqual(mock_merge.call_args.kwargs["canonical_proxy_name"], "Ajay")
 
     def test_flattens_through_existing_alias(self):
         """Merging into a name that's ITSELF already an alias must write
@@ -192,29 +192,33 @@ class TestLinkIdentities(unittest.TestCase):
         # "Ajay" resolves to a real user 555 via an existing link.
         existing_link = {"canonical_user_id": 555, "canonical_proxy_name": None}
         with patch("services.identity.db.get_identity_link", return_value=existing_link), \
-             patch("services.identity.db.upsert_identity_link") as mock_upsert, \
-             patch("services.identity.db.repoint_links") as mock_repoint, \
+             patch("services.identity.db.merge_identity_link") as mock_merge, \
              patch("services.identity.db.log_admin_action"), \
              patch("services.identity.db.get_links_by_canonical", return_value=[]), \
              patch("services.identity.db.get_member_display_info", return_value=None):
             g = identity.link_identities(1, "Aju", canonical_proxy_name="Ajay", **self._admin())
         # New alias "Aju" must point directly at 555, not at "Ajay".
-        self.assertEqual(mock_upsert.call_args.kwargs["canonical_user_id"], 555)
-        self.assertIsNone(mock_upsert.call_args.kwargs["canonical_proxy_name"])
-        mock_repoint.assert_called_once_with(1, "Aju", to_user_id=555, to_proxy_name=None)
+        self.assertEqual(mock_merge.call_args.args[1], "Aju")
+        self.assertEqual(mock_merge.call_args.kwargs["canonical_user_id"], 555)
+        self.assertIsNone(mock_merge.call_args.kwargs["canonical_proxy_name"])
         self.assertEqual(g["user_id"], 555)
 
     def test_cascade_repoints_existing_aliases_of_the_merged_name(self):
         """Merging "Ajay" (which already has its own aliases) into a real
-        user must repoint those existing aliases too, in the same call."""
+        user must repoint those existing aliases too, in the same call —
+        merge_identity_link does the upsert AND the repoint cascade
+        atomically (see db.merge_identity_link's docstring)."""
         with patch("services.identity.db.get_identity_link", return_value=None), \
-             patch("services.identity.db.upsert_identity_link"), \
-             patch("services.identity.db.repoint_links") as mock_repoint, \
+             patch("services.identity.db.merge_identity_link") as mock_merge, \
              patch("services.identity.db.log_admin_action"), \
              patch("services.identity.db.get_links_by_canonical", return_value=[]), \
+             patch("services.identity.db.is_active_chat_member", return_value=True), \
              patch("services.identity.db.get_member_display_info", return_value={"first_name": "Ajay", "username": "ajayreal"}):
             identity.link_identities(1, "Ajay", canonical_user_id=555, **self._admin())
-        mock_repoint.assert_called_once_with(1, "Ajay", to_user_id=555, to_proxy_name=None)
+        mock_merge.assert_called_once()
+        self.assertEqual(mock_merge.call_args.args[1], "Ajay")
+        self.assertEqual(mock_merge.call_args.kwargs["canonical_user_id"], 555)
+        self.assertIsNone(mock_merge.call_args.kwargs["canonical_proxy_name"])
 
     def test_self_merge_rejected(self):
         with self.assertRaises(incorrectParameter):

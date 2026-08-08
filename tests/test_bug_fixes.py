@@ -677,6 +677,7 @@ class TestFireScheduledRollcalls(unittest.TestCase):
 
         def _fake_mark_fired(row_id):
             order.append("claim")
+            return True
 
         def _fake_add_rollcall(chat_id, title):
             order.append("create")
@@ -1019,6 +1020,7 @@ class TestAutoStartStampsBeforeCreating(unittest.IsolatedAsyncioTestCase):
 
         def _fake_stamp(chatid, name, date_str):
             order.append("stamp")
+            return True
 
         def _fake_add_rollcall(chat_id, title):
             order.append("create")

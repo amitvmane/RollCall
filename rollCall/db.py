@@ -128,6 +128,21 @@ def init_postgresql():
         logging.error(f"Failed to create PostgreSQL connection pool: {e}")
         raise
 
+def _enable_wal(conn) -> None:
+    """Set WAL mode and log if it didn't actually take (SQLite reports the
+    resulting mode, which can silently stay on the default rollback-journal
+    mode on some filesystems/locking conditions) — the per-worker-thread
+    connections in get_connection() depend on WAL's readers-don't-block-
+    writer guarantee actually being active, not just requested."""
+    try:
+        row = conn.execute("PRAGMA journal_mode=WAL").fetchone()
+        mode = row[0] if row else None
+        if not mode or str(mode).lower() != "wal":
+            logging.warning(f"SQLite journal_mode did not switch to WAL (got: {mode!r})")
+    except Exception:
+        logging.exception("Failed to set SQLite journal_mode=WAL")
+
+
 def init_sqlite():
     """Initialize SQLite connection"""
     global db_conn
@@ -145,7 +160,7 @@ def init_sqlite():
         # notes: the extra durability trade-off isn't worth it on the same
         # connection as the append-only dues ledger just for write throughput,
         # which isn't what this change is for.
-        db_conn.execute("PRAGMA journal_mode=WAL")
+        _enable_wal(db_conn)
         logging.debug(f"SQLite database connected: {db_path}")
     except Exception as e:
         logging.error(f"Failed to connect to SQLite database: {e}")
@@ -192,11 +207,17 @@ def get_connection():
         return conn
     if threading.current_thread() is threading.main_thread():
         return db_conn
+    path = DATABASE_URL.replace('sqlite:///', '')
+    if path == ':memory:':
+        # sqlite3.connect(":memory:") always opens a brand-new, isolated
+        # database — there's no file to share, so a second connection here
+        # would silently see an empty, unrelated database instead of the
+        # real one. MEMORY_MODE is dev/test-only, so just reuse db_conn.
+        return db_conn
     if not hasattr(_thread_local, "conn"):
-        path = DATABASE_URL.replace('sqlite:///', '')
         _thread_local.conn = sqlite3.connect(path, check_same_thread=True)
         _thread_local.conn.row_factory = sqlite3.Row
-        _thread_local.conn.execute("PRAGMA journal_mode=WAL")
+        _enable_wal(_thread_local.conn)
     return _thread_local.conn
 
 
@@ -2590,13 +2611,21 @@ def enable_template_schedule(chatid: int, name: str) -> bool:
 
 
 def update_template_last_scheduled_date(chatid: int, name: str, date_str: str) -> bool:
-    """Record the date (YYYY-MM-DD) when a template was last auto-started."""
+    """Record the date (YYYY-MM-DD) when a template was last auto-started.
+
+    A compare-and-swap claim (only updates if last_scheduled_date isn't
+    already date_str) — under normal single-process operation the caller
+    only reaches this after confirming the template isn't already stamped
+    for today, so this always succeeds; it's what stops two overlapping
+    scheduler processes (e.g. a brief rolling-restart overlap) from both
+    passing that earlier check and both auto-starting the same occurrence."""
     try:
         with _cursor(commit=True) as cursor:
             ph = "%s" if db_type == "postgresql" else "?"
             cursor.execute(
-                f"UPDATE templates SET last_scheduled_date = {ph} WHERE chatid = {ph} AND name = {ph}",
-                (date_str, chatid, name),
+                f"UPDATE templates SET last_scheduled_date = {ph} WHERE chatid = {ph} AND name = {ph} "
+                f"AND (last_scheduled_date IS NULL OR last_scheduled_date != {ph})",
+                (date_str, chatid, name, date_str),
             )
             return cursor.rowcount > 0
     except Exception as e:
@@ -3167,6 +3196,60 @@ def get_links_by_canonical(chat_id: int, canonical_user_id: int = None,
         return []
 
 
+def _upsert_identity_link_tx(cursor, chat_id: int, alias_proxy_name: str, *,
+                              canonical_user_id: int = None,
+                              canonical_proxy_name: str = None,
+                              created_by: int = None, created_by_name: str = None) -> Dict:
+    """Cursor-level body of upsert_identity_link — shared with
+    merge_identity_link so the upsert and its repoint cascade can share one
+    transaction. Caller owns the connection/commit."""
+    if db_type == 'postgresql':
+        cursor.execute(
+            """INSERT INTO identity_links
+                   (chat_id, alias_proxy_name, canonical_user_id, canonical_proxy_name,
+                    status, created_by, created_by_name, created_at)
+               VALUES (%s, %s, %s, %s, 'linked', %s, %s, CURRENT_TIMESTAMP)
+               ON CONFLICT (chat_id, LOWER(alias_proxy_name)) WHERE status = 'linked'
+               DO UPDATE SET canonical_user_id = EXCLUDED.canonical_user_id,
+                             canonical_proxy_name = EXCLUDED.canonical_proxy_name,
+                             created_by = EXCLUDED.created_by,
+                             created_by_name = EXCLUDED.created_by_name,
+                             created_at = CURRENT_TIMESTAMP
+               RETURNING *""",
+            (chat_id, alias_proxy_name, canonical_user_id, canonical_proxy_name,
+             created_by, created_by_name)
+        )
+        return dict(cursor.fetchone())
+    else:
+        cursor.execute(
+            "SELECT id FROM identity_links WHERE chat_id = ? AND LOWER(alias_proxy_name) = LOWER(?) AND status = 'linked'",
+            (chat_id, alias_proxy_name)
+        )
+        existing = cursor.fetchone()
+        if existing:
+            cursor.execute(
+                """UPDATE identity_links
+                   SET canonical_user_id = ?, canonical_proxy_name = ?,
+                       created_by = ?, created_by_name = ?, created_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (canonical_user_id, canonical_proxy_name, created_by, created_by_name, existing["id"])
+            )
+        else:
+            cursor.execute(
+                """INSERT INTO identity_links
+                       (chat_id, alias_proxy_name, canonical_user_id, canonical_proxy_name,
+                        status, created_by, created_by_name, created_at)
+                   VALUES (?, ?, ?, ?, 'linked', ?, ?, CURRENT_TIMESTAMP)""",
+                (chat_id, alias_proxy_name, canonical_user_id, canonical_proxy_name,
+                 created_by, created_by_name)
+            )
+        cursor.execute(
+            "SELECT * FROM identity_links WHERE chat_id = ? AND LOWER(alias_proxy_name) = LOWER(?) AND status = 'linked'",
+            (chat_id, alias_proxy_name)
+        )
+        return dict(cursor.fetchone())
+
+
 def upsert_identity_link(chat_id: int, alias_proxy_name: str, *,
                           canonical_user_id: int = None,
                           canonical_proxy_name: str = None,
@@ -3176,54 +3259,29 @@ def upsert_identity_link(chat_id: int, alias_proxy_name: str, *,
     given — enforced by services/identity.py, not here."""
     try:
         with _cursor(commit=True) as cursor:
-            if db_type == 'postgresql':
-                cursor.execute(
-                    """INSERT INTO identity_links
-                           (chat_id, alias_proxy_name, canonical_user_id, canonical_proxy_name,
-                            status, created_by, created_by_name, created_at)
-                       VALUES (%s, %s, %s, %s, 'linked', %s, %s, CURRENT_TIMESTAMP)
-                       ON CONFLICT (chat_id, LOWER(alias_proxy_name)) WHERE status = 'linked'
-                       DO UPDATE SET canonical_user_id = EXCLUDED.canonical_user_id,
-                                     canonical_proxy_name = EXCLUDED.canonical_proxy_name,
-                                     created_by = EXCLUDED.created_by,
-                                     created_by_name = EXCLUDED.created_by_name,
-                                     created_at = CURRENT_TIMESTAMP
-                       RETURNING *""",
-                    (chat_id, alias_proxy_name, canonical_user_id, canonical_proxy_name,
-                     created_by, created_by_name)
-                )
-                return dict(cursor.fetchone())
-            else:
-                cursor.execute(
-                    "SELECT id FROM identity_links WHERE chat_id = ? AND LOWER(alias_proxy_name) = LOWER(?) AND status = 'linked'",
-                    (chat_id, alias_proxy_name)
-                )
-                existing = cursor.fetchone()
-                if existing:
-                    cursor.execute(
-                        """UPDATE identity_links
-                           SET canonical_user_id = ?, canonical_proxy_name = ?,
-                               created_by = ?, created_by_name = ?, created_at = CURRENT_TIMESTAMP
-                           WHERE id = ?""",
-                        (canonical_user_id, canonical_proxy_name, created_by, created_by_name, existing["id"])
-                    )
-                else:
-                    cursor.execute(
-                        """INSERT INTO identity_links
-                               (chat_id, alias_proxy_name, canonical_user_id, canonical_proxy_name,
-                                status, created_by, created_by_name, created_at)
-                           VALUES (?, ?, ?, ?, 'linked', ?, ?, CURRENT_TIMESTAMP)""",
-                        (chat_id, alias_proxy_name, canonical_user_id, canonical_proxy_name,
-                         created_by, created_by_name)
-                    )
-                cursor.execute(
-                    "SELECT * FROM identity_links WHERE chat_id = ? AND LOWER(alias_proxy_name) = LOWER(?) AND status = 'linked'",
-                    (chat_id, alias_proxy_name)
-                )
-                return dict(cursor.fetchone())
+            return _upsert_identity_link_tx(
+                cursor, chat_id, alias_proxy_name,
+                canonical_user_id=canonical_user_id, canonical_proxy_name=canonical_proxy_name,
+                created_by=created_by, created_by_name=created_by_name,
+            )
     except Exception:
         logging.exception("upsert_identity_link failed")
         raise
+
+
+def _repoint_links_tx(cursor, chat_id: int, from_proxy_name: str, *,
+                       to_user_id: int = None, to_proxy_name: str = None) -> int:
+    """Cursor-level body of repoint_links — shared with merge_identity_link.
+    Caller owns the connection/commit."""
+    ph = '%s' if db_type == 'postgresql' else '?'
+    cursor.execute(
+        f"""UPDATE identity_links
+            SET canonical_user_id = {ph}, canonical_proxy_name = {ph}
+            WHERE chat_id = {ph} AND status = 'linked'
+              AND LOWER(canonical_proxy_name) = LOWER({ph})""",
+        (to_user_id, to_proxy_name, chat_id, from_proxy_name)
+    )
+    return cursor.rowcount or 0
 
 
 def repoint_links(chat_id: int, from_proxy_name: str, *,
@@ -3233,17 +3291,40 @@ def repoint_links(chat_id: int, from_proxy_name: str, *,
     its own aliases) to the new final target. Returns rows affected."""
     try:
         with _cursor(commit=True) as cursor:
-            ph = '%s' if db_type == 'postgresql' else '?'
-            cursor.execute(
-                f"""UPDATE identity_links
-                    SET canonical_user_id = {ph}, canonical_proxy_name = {ph}
-                    WHERE chat_id = {ph} AND status = 'linked'
-                      AND LOWER(canonical_proxy_name) = LOWER({ph})""",
-                (to_user_id, to_proxy_name, chat_id, from_proxy_name)
-            )
-            return cursor.rowcount or 0
+            return _repoint_links_tx(cursor, chat_id, from_proxy_name,
+                                      to_user_id=to_user_id, to_proxy_name=to_proxy_name)
     except Exception:
         logging.exception("repoint_links failed")
+        raise
+
+
+def merge_identity_link(chat_id: int, alias_proxy_name: str, *,
+                         canonical_user_id: int = None, canonical_proxy_name: str = None,
+                         created_by: int = None, created_by_name: str = None) -> Dict:
+    """Atomic upsert + repoint-cascade for services.identity.link_identities.
+
+    upsert_identity_link and repoint_links used to be called back to back as
+    two independently-committed writes. A crash between them left
+    alias_proxy_name correctly pointed at the new canonical target but its
+    OWN former aliases still pointing at alias_proxy_name — a stale 2-hop
+    chain, since every read site (resolve_canonical, get_canonical_map) only
+    does a single-hop lookup. Doing both writes on one cursor with one
+    commit means they land together or not at all.
+
+    Returns the new/updated link row for alias_proxy_name itself (same
+    shape as upsert_identity_link)."""
+    try:
+        with _cursor(commit=True) as cursor:
+            result = _upsert_identity_link_tx(
+                cursor, chat_id, alias_proxy_name,
+                canonical_user_id=canonical_user_id, canonical_proxy_name=canonical_proxy_name,
+                created_by=created_by, created_by_name=created_by_name,
+            )
+            _repoint_links_tx(cursor, chat_id, alias_proxy_name,
+                               to_user_id=canonical_user_id, to_proxy_name=canonical_proxy_name)
+            return result
+    except Exception:
+        logging.exception("merge_identity_link failed")
         raise
 
 
@@ -4713,6 +4794,26 @@ def mark_member_inactive(chat_id: int, user_id: int) -> None:
         logging.error(f"Error marking member inactive: {e}")
 
 
+def is_active_chat_member(chat_id: int, user_id: int) -> bool:
+    """True if user_id is a currently-active tracked member of this chat
+    (not just someone who appears historically in chat_members). Used to
+    gate identity merges — see services/identity.link_identities — so a
+    merge target must be someone actually still in the group, not merely
+    someone who was at some point."""
+    try:
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            active_val = True if db_type == 'postgresql' else 1
+            cursor.execute(
+                f"SELECT 1 FROM chat_members WHERE chat_id = {ph} AND user_id = {ph} AND is_active = {ph}",
+                (chat_id, user_id, active_val),
+            )
+            return cursor.fetchone() is not None
+    except Exception as e:
+        logging.error(f"Error checking is_active_chat_member: {e}")
+        return False
+
+
 def get_active_members(chat_id: int) -> List[Dict]:
     """Return all members currently marked active for a chat.
 
@@ -5473,23 +5574,31 @@ def get_upcoming_scheduled_rollcalls(chat_id: int) -> List[Dict]:
         return []
 
 
-def mark_scheduled_rollcall_fired(row_id: int) -> None:
+def mark_scheduled_rollcall_fired(row_id: int) -> bool:
+    """Claim this row as fired. Guarded by `AND is_fired = FALSE/0` — a
+    compare-and-swap so two overlapping scheduler processes (e.g. a brief
+    rolling-restart overlap) can't both read the row as pending and both
+    fire it; only the first UPDATE to land wins, and rowcount==0 tells the
+    loser to back off instead of creating a duplicate rollcall."""
     try:
         with _cursor(commit=True) as cursor:
-            ph = "%s" if db_type == "postgresql" else "?"
             now = _utcnow_naive().strftime("%Y-%m-%dT%H:%M:%SZ")
             if db_type == "postgresql":
                 cursor.execute(
-                    "UPDATE scheduled_rollcalls SET is_fired = TRUE, fired_at = %s WHERE id = %s",
+                    "UPDATE scheduled_rollcalls SET is_fired = TRUE, fired_at = %s "
+                    "WHERE id = %s AND is_fired = FALSE",
                     (now, row_id),
                 )
             else:
                 cursor.execute(
-                    "UPDATE scheduled_rollcalls SET is_fired = 1, fired_at = ? WHERE id = ?",
+                    "UPDATE scheduled_rollcalls SET is_fired = 1, fired_at = ? "
+                    "WHERE id = ? AND is_fired = 0",
                     (now, row_id),
                 )
+            return cursor.rowcount > 0
     except Exception:
         logging.exception("mark_scheduled_rollcall_fired failed")
+        return False
 
 
 def delete_scheduled_rollcall(row_id: int, chat_id: int) -> bool:

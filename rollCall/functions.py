@@ -148,10 +148,25 @@ WEEKDAY_MAP = {
 
 
 def _localize_safe(tz, naive_dt):
+    """Localize a naive datetime, handling DST cutovers the same way
+    check_reminders._ensure_aware does — see that function's docstring for
+    the full rationale. Ambiguous fall-back times resolve to the EARLIER
+    occurrence (is_dst=True); non-existent spring-forward times resolve to
+    the post-jump equivalent (is_dst=False). Kept as a separate function
+    (not a call to _ensure_aware) to avoid a functions.py -> check_reminders
+    import cycle; must stay behaviorally in sync with it."""
     try:
         return tz.localize(naive_dt, is_dst=None)
+    except pytz.AmbiguousTimeError:
+        return tz.localize(naive_dt, is_dst=True)
+    except pytz.NonExistentTimeError:
+        logging.warning(
+            f"[_localize_safe] non-existent local time {naive_dt.isoformat()} in {tz}; "
+            "interpreting as standard-time equivalent (post-DST-jump)"
+        )
+        return tz.localize(naive_dt, is_dst=False)
     except Exception:
-        # DST gap — clocks spring forward past this time; use is_dst=False to land after the gap
+        logging.exception(f"[_localize_safe] unexpected localize failure for {naive_dt} in {tz}")
         return tz.localize(naive_dt, is_dst=False)
 
 

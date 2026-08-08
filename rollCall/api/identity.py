@@ -87,6 +87,35 @@ def verify_identity_token(token: Optional[str]) -> Optional[int]:
 
     Never raises on malformed input — a bad token is simply unauthenticated.
     """
+    return _verify(token, scope=None)
+
+
+def issue_scoped_token(user_id: int, scope: str, ttl_seconds: int) -> str:
+    """Like issue_identity_token, but bound to `scope` — only verify_scoped_token
+    called with the SAME scope will accept it. Signs a different payload
+    (scope is mixed into the HMAC input, not just carried alongside it), so
+    a scoped token can't be replayed against verify_identity_token or a
+    different scope's endpoints, and a generic identity token can't be used
+    where a scoped one is required. Wire format is unchanged (still
+    `<user_id>.<exp>.<sig>`) — only the signature differs.
+
+    Use for short-lived, single-purpose tokens (e.g. the dues QR image URL)
+    where a leak (browser history, access logs — it's embedded in a URL)
+    should only be useful for that one purpose, not as a general-purpose
+    identity credential for whatever's left of its TTL.
+    """
+    user_id = int(user_id)
+    exp = int(time.time()) + int(ttl_seconds)
+    payload = f"{scope}.{user_id}.{exp}"
+    return f"{user_id}.{exp}.{_sign(payload)}"
+
+
+def verify_scoped_token(token: Optional[str], scope: str) -> Optional[int]:
+    """Counterpart to issue_scoped_token — verifies against the same scope."""
+    return _verify(token, scope=scope)
+
+
+def _verify(token: Optional[str], scope: Optional[str]) -> Optional[int]:
     if not token or not isinstance(token, str):
         return None
     parts = token.split(".")
@@ -99,7 +128,7 @@ def verify_identity_token(token: Optional[str]) -> Optional[int]:
     except (TypeError, ValueError):
         return None
 
-    payload = f"{user_id}.{exp}"
+    payload = f"{scope}.{user_id}.{exp}" if scope is not None else f"{user_id}.{exp}"
     try:
         expected = _sign(payload)
     except IdentityError:
@@ -125,6 +154,19 @@ def require_identity(
     """
     from fastapi import HTTPException, status
     user_id = verify_identity_token(id_token)
+    if not user_id or user_id <= 0:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail)
+    return user_id
+
+
+def require_scoped_identity(
+    id_token: Optional[str], scope: str,
+    detail: str = "Verify with Telegram to use this feature.",
+) -> int:
+    """verify_scoped_token, raising HTTP 401 instead of returning None —
+    the scoped counterpart to require_identity."""
+    from fastapi import HTTPException, status
+    user_id = verify_scoped_token(id_token, scope)
     if not user_id or user_id <= 0:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail)
     return user_id

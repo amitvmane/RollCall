@@ -221,12 +221,13 @@ def link_identities(chat_id: int, alias_proxy_name: str, *,
     if (canonical_user_id is None) == (canonical_proxy_name is None):
         raise parameterMissing("Specify exactly one merge target: a real user or another proxy name.")
 
-    if canonical_user_id is not None and db.get_member_display_info(chat_id, canonical_user_id) is None:
+    if canonical_user_id is not None and not db.is_active_chat_member(chat_id, canonical_user_id):
         # canonical_user_id is caller-supplied and otherwise unchecked — a
         # typo or a bad-faith merge could permanently combine a proxy's
         # dues/attendance history onto an arbitrary Telegram user id who
-        # has never even been in this chat. Require the target to be a
-        # known member (chat_members) before the merge can proceed.
+        # has never even been in this chat (or who left long ago). Require
+        # the target to be a currently-active member (chat_members,
+        # is_active) before the merge can proceed.
         raise incorrectParameter("That user isn't a known member of this group.")
 
     if canonical_proxy_name is not None:
@@ -243,15 +244,16 @@ def link_identities(chat_id: int, alias_proxy_name: str, *,
     if final_proxy_name is not None and final_proxy_name.lower() == alias_proxy_name.lower():
         raise incorrectParameter("This merge would create a cycle.")
 
-    db.upsert_identity_link(
+    # Cascade: alias_proxy_name may itself have had aliases pointing at it
+    # (it was a merge target before) — repoint them to the new final target
+    # so nothing is ever more than one hop from canonical. Both writes share
+    # one transaction (merge_identity_link) so a crash between them can't
+    # leave a stale multi-hop chain.
+    db.merge_identity_link(
         chat_id, alias_proxy_name,
         canonical_user_id=final_user_id, canonical_proxy_name=final_proxy_name,
         created_by=admin_user_id, created_by_name=admin_name,
     )
-    # Cascade: alias_proxy_name may itself have had aliases pointing at it
-    # (it was a merge target before) — repoint them to the new final target
-    # so nothing is ever more than one hop from canonical.
-    db.repoint_links(chat_id, alias_proxy_name, to_user_id=final_user_id, to_proxy_name=final_proxy_name)
 
     db.log_admin_action(
         chat_id, admin_user_id, admin_name, "identity_merge",

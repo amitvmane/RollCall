@@ -24,7 +24,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 
 import db as _db
-from api.identity import identity_from_header, require_identity
+from api.identity import identity_from_header, require_identity, require_scoped_identity
 from api.web_admin import check_web_admin_live
 from api.schemas.dues import (
     DuesAddAdhocRequest,
@@ -697,6 +697,9 @@ async def close_preview(
 # everything else) to mint a short-lived token scoped to nothing but
 # fetching this one image, then embeds THAT in the <img src>.
 
+_QR_TOKEN_SCOPE = "dues_qr"
+
+
 @router.get(
     "/web/group/{group_token}/dues/qr-token",
     summary="Mint a short-lived token for the QR image URL (any verified member)",
@@ -708,8 +711,12 @@ async def dues_qr_token(
     chat = _resolve_chat(group_token)
     _require_dues(chat)
     user_id = _require_identity(id_token)
-    from api.identity import issue_identity_token
-    return {"token": issue_identity_token(user_id, ttl_seconds=300)}
+    from api.identity import issue_scoped_token
+    # Scoped, not a generic identity token — this token is embedded in the
+    # <img src> URL (browser history / access logs), so it must only be
+    # usable for this one image fetch, not as a bearer credential for any
+    # other identity-gated endpoint during its 5-minute life.
+    return {"token": issue_scoped_token(user_id, _QR_TOKEN_SCOPE, ttl_seconds=300)}
 
 
 @router.get(
@@ -725,7 +732,7 @@ async def dues_qr(
     from fastapi.responses import Response as _Resp
     chat = _resolve_chat(group_token)
     _require_dues(chat)
-    _require_identity(id_token)
+    require_scoped_identity(id_token, _QR_TOKEN_SCOPE)
     chat_id = int(chat["chat_id"])
 
     settings = dues_svc.get_dues_settings(chat_id)

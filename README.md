@@ -311,7 +311,7 @@ RollCall/
 │   │   ├── schemas/           # Pydantic request/response models
 │   │   ├── web/               # Group voting SPA (PWA: push, manifest, service worker)
 │   │   ├── portal/            # Cross-group user portal SPA
-│   │   ├── admin/             # Admin console SPA (legacy — group page covers it now)
+│   │   ├── shared/            # Design tokens + base styles shared across all web surfaces
 │   │   ├── index/             # Public landing page
 │   │   └── miniapp/           # Telegram Mini App SPA
 │   ├── models.py              # RollCall and User data models

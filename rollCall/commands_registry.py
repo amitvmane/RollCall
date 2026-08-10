@@ -455,14 +455,14 @@ COMMANDS = [
     {
         "name": "gentoken", "aliases": [], "scope": "admin", "category": "API Access",
         "args": "", "sample": "/gentoken",
-        "summary": "Generate an API token for the admin dashboard",
+        "summary": "Generate an API token for scripted/API access",
         "details": (
             "Issues a personal API token scoped to this group (read + vote + admin), "
             "valid for 1 year. The token is sent to you via private DM — never posted in the group.\n\n"
             "Only Telegram group admins (administrator or creator) can run this command.\n\n"
             "For everyday admin tasks, your group's web page (/weblink) now does everything this "
-            "token can — no token needed there, just sign in with Telegram. This token is for the "
-            "legacy admin dashboard at /admin/ or scripted/API access.\n\n"
+            "token can — no token needed there, just sign in with Telegram. This token is for "
+            "scripted/API access only.\n\n"
             "When your token expires, run /gentoken again to get a fresh one."
         ),
     },

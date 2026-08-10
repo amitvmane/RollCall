@@ -2612,8 +2612,8 @@ window.toggleAdminSection=function(name){
   if(ch)ch.textContent=_adminSectionOpen[name]?"▲":"▼";
 };
 
-// ── Recurring template schedules (self-serve — no server/API-token needed,
-// unlike the separate /admin/ console) ──────────────────────────────────
+// ── Recurring template schedules (self-serve — no separate API token
+// needed) ──────────────────────────────────────────────────────────────
 const WEEKDAYS=["monday","tuesday","wednesday","thursday","friday","saturday","sunday"];
 let _templatesScheduleOpen=false, _templatesCache=null, _templatesEditingName=null, _templatesCreatingNew=false;
 

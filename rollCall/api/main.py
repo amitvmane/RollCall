@@ -233,8 +233,9 @@ def create_app() -> FastAPI:
             return FileResponse(str(_favicon), media_type="image/svg+xml")
         return RedirectResponse(url="/web/logo.svg", status_code=302)
 
-    # Serve shared design tokens (CSS vars + dark-mode init script) consumed
-    # by all 5 web surfaces at /shared/
+    # Serve shared design tokens (CSS vars, dark-mode init script, and the
+    # base stylesheet portal builds on — formerly served from the now-
+    # retired admin console) consumed by all web surfaces at /shared/
     _shared_dir = Path(__file__).parent / "shared"
     if _shared_dir.is_dir():
         app.mount("/shared", StaticFiles(directory=str(_shared_dir)), name="shared")
@@ -251,11 +252,16 @@ def create_app() -> FastAPI:
         app.mount("/web", StaticFiles(directory=str(_web_dir), html=True), name="web")
         logging.info("[api] Web voting page served at /web/")
 
-    # Serve admin dashboard at /admin/
-    _admin_dir = Path(__file__).parent / "admin"
-    if _admin_dir.is_dir():
-        app.mount("/admin", StaticFiles(directory=str(_admin_dir), html=True), name="admin")
-        logging.info("[api] Admin dashboard served at /admin/")
+    # The standalone admin console SPA is retired (2026-08-10) — every task
+    # it did has lived on the group web page since 2026-08-05 (see
+    # commit a0068ab and later). Old bookmarks/links redirect to /portal
+    # rather than 404ing outright. The bearer-token REST API it used to
+    # call (api/routes/admin.py, still used for /gentoken scripted access)
+    # is unaffected — this only removes the static UI.
+    @app.get("/admin", include_in_schema=False)
+    @app.get("/admin/{_path:path}", include_in_schema=False)
+    async def _admin_retired_redirect(_path: str = ""):
+        return RedirectResponse(url="/portal", status_code=301)
 
     # Serve member portal at /portal/
     _portal_dir = Path(__file__).parent / "portal"

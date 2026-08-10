@@ -3,7 +3,6 @@ Admin handlers: /delete_user, /set_status, /audit_log, /gentoken, audit_paginati
 """
 import html
 import logging
-import os
 from datetime import datetime, timedelta, timezone
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -299,35 +298,22 @@ async def gentoken_command(message):
     )
 
     # Build the DM in HTML, not Markdown: the token is `rc_<hex>` and contains
-    # an underscore, which legacy Markdown reads as an unterminated italic when
-    # the token appears in a plain URL (the one-click login link) — producing
-    # "can't parse entities". HTML escapes cleanly and handles URLs in <a href>.
-    web_base = os.environ.get("WEB_BASE_URL", "").rstrip("/")
-    if web_base:
-        # Token goes in the URL fragment (#token=), never the query string, so
-        # it can't land in server access logs or a Referer header — the SPA
-        # reads it client-side from location.hash.
-        login_url = f"{web_base}/admin/#token={token}"
-        dashboard_line = (
-            f"\n🖥 <a href=\"{html.escape(login_url, quote=True)}\">One-click login (legacy admin console)</a>\n"
-            f"<i>(link logs you in directly — don't share it)</i>\n"
-        )
-    else:
-        dashboard_line = ""
-
-    # The group web page (see /weblink) now covers everything day-to-day —
-    # voter management, templates, settings, stats — with a plain Telegram
-    # sign-in, no token needed. This token remains for the legacy admin
-    # console and scripted/API access, not the primary way in anymore.
+    # an underscore, which legacy Markdown reads as an unterminated italic
+    # when the token appears in plain text — producing "can't parse
+    # entities". HTML escapes cleanly.
+    #
+    # The standalone admin console (and its one-click #token= login link)
+    # was retired 2026-08-10 — every day-to-day task moved to the group web
+    # page (see /weblink) back in 2026-08-05. This token is now purely for
+    # scripted/API access.
     dm_text = (
         f"🔑 <b>API Token — {html.escape(chat_title)}</b>\n\n"
         f"<code>{html.escape(token)}</code>\n\n"
         f"⚠️ <i>Save this now — it won't be shown again.</i>\n\n"
         f"<b>Chat ID:</b> <code>{cid}</code>\n"
         f"<b>Scopes:</b> read, vote, admin\n"
-        f"<b>Expires:</b> {expires_at.strftime('%d %b %Y')}\n"
-        f"{dashboard_line}\n"
-        f"💡 <i>For everyday admin tasks, your group's web page (/weblink) now does it all — no token needed, just sign in with Telegram. This token is for the legacy admin console or API/script access.</i>\n\n"
+        f"<b>Expires:</b> {expires_at.strftime('%d %b %Y')}\n\n"
+        f"💡 <i>For everyday admin tasks, your group's web page (/weblink) now does it all — no token needed, just sign in with Telegram. This token is for scripted/API access.</i>\n\n"
         f"When it expires, run /gentoken in the group again."
     )
 

@@ -165,13 +165,12 @@ function _adoptIdentity(res){
 
 function showApp(){
   $id("verify-screen").style.display="none";
-  // admin/style.css (which portal also loads, since portal builds on
-  // admin's base styles) has a real stylesheet rule "#app{display:none}".
+  // /shared/base.css (which portal also loads, since portal builds on
+  // its base styles) has a real stylesheet rule "#app{display:none}".
   // Clearing the inline style to "" only removes the INLINE override —
   // it doesn't beat that stylesheet rule, so #app stayed hidden after
   // login with zero errors anywhere (nothing to catch: this is a display
-  // computation, not an exception). Must set an explicit value, matching
-  // how admin/app.js's own equivalent already does it correctly.
+  // computation, not an exception). Must set an explicit value.
   $id("app").style.display="block";
   $id("portal-identity").textContent=_userName||"";
   loadGroups();

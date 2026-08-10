@@ -384,7 +384,8 @@ def set_admin_rights(
 
 def list_groups() -> list:
     """
-    Return summary info for every known chat — used by the admin dashboard.
+    Return summary info for every known chat — used by the bearer-token
+    admin REST API (api/routes/groups.py).
 
     Each entry: {chat_id, group_name, timezone, active_rollcalls, absent_limit, ghost_tracking_enabled}
     """

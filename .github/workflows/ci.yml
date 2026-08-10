@@ -97,6 +97,37 @@ jobs:
           TELEGRAM_TOKEN: "123:ci-smoke"
         run: python scripts/smoke_test.py
 
+  load-test:
+    name: Load test (10 groups x 50 users)
+    runs-on: ubuntu-latest
+    # Real telebot processing (no handler mocks) driving 10 groups x 50
+    # simulated voters (500 total) CONCURRENTLY through the full feature
+    # surface -- voting (sequential + concurrent burst), stats, dues
+    # settlement, templates/scheduler, identity merge -- plus cross-group
+    # isolation and bot-wide /stats at 10-group scale.
+    # ~3-4s locally; cheap enough to run on every push/PR alongside smoke.
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-loadtest-${{ hashFiles('requirements.lock') }}
+
+      - name: Install runtime dependencies (locked)
+        run: pip install -r requirements.lock
+
+      - name: Run load test
+        run: python scripts/load_test_50_users.py
+
   docker:
     name: Docker Build Check
     runs-on: ubuntu-latest

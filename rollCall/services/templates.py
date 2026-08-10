@@ -103,6 +103,75 @@ def list_pending_once(chat_id: int) -> list[dict]:
     return out
 
 
+def upcoming_events(chat_id: int, limit: int = 10) -> list[dict]:
+    """Merge three sources into one chronological "what's coming up" list —
+    backs /calendar:
+      - active rollcalls with a future finalizeDate ("closes")
+      - pending one-time scheduled rollcalls ("starts") — reuses
+        list_pending_once above rather than re-deriving the title-resolution
+      - enabled recurring templates' NEXT occurrence ("recurs") — via
+        check_reminders.next_occurrence_datetime, so this can't drift from
+        what the scheduler will actually fire
+
+    Each entry: {"kind": "closes"|"starts"|"recurs", "when": tz-aware
+    datetime, "label": str}, sorted ascending, capped to `limit`.
+    """
+    chat = manager.get_chat(chat_id)
+    tzname = chat.get("timezone", "Asia/Kolkata")
+    try:
+        tz = pytz.timezone(tzname)
+    except Exception:
+        tz = pytz.timezone("Asia/Kolkata")
+    now = datetime.now(tz)
+
+    events = []
+
+    for rc in manager.get_rollcalls(chat_id):
+        fd = getattr(rc, "finalizeDate", None)
+        if fd is None:
+            continue
+        if fd.tzinfo is None:
+            fd = tz.localize(fd)
+        if fd < now:
+            continue
+        events.append({"kind": "closes", "when": fd, "label": rc.title})
+
+    for row in list_pending_once(chat_id):
+        try:
+            when = datetime.fromisoformat(str(row["scheduled_at"]).replace("Z", "+00:00"))
+        except (ValueError, AttributeError, KeyError):
+            continue
+        if when.tzinfo is None:
+            when = pytz.UTC.localize(when)
+        if when < now:
+            continue
+        label = row.get("display_title") or row.get("title") or "Rollcall"
+        events.append({"kind": "starts", "when": when, "label": label})
+
+    # Local import: avoids a module-level import cycle with check_reminders
+    # (which itself imports services.templates locally for the same reason
+    # — see _fire_scheduled_rollcalls).
+    from check_reminders import next_occurrence_datetime
+
+    for t in get_templates(chat_id):
+        if str(t.get("schedule_enabled", "0")) in ("0", "False", "None", ""):
+            continue
+        sched_time = t.get("schedule_time")
+        if not sched_time:
+            continue
+        recurrence = t.get("recurrence_type") or "weekly"
+        nxt = next_occurrence_datetime(
+            tz, sched_time, t.get("schedule_day"), recurrence, t.get("last_scheduled_date"),
+        )
+        if nxt is None:
+            continue
+        label = f"{t.get('title') or t.get('name')} ({recurrence})"
+        events.append({"kind": "recurs", "when": nxt, "label": label})
+
+    events.sort(key=lambda e: e["when"])
+    return events[:limit]
+
+
 def get_one_template(chat_id: int, name: str) -> dict:
     """
     Return a single template by name.

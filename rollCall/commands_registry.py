@@ -61,6 +61,17 @@ COMMANDS = [
         "details": "Lists every currently-open rollcall in this chat with their numbers (used for ::N targeting).",
     },
     {
+        "name": "calendar", "aliases": ["cal"], "scope": "user", "category": "View Lists",
+        "args": "", "sample": "/calendar",
+        "summary": "See what's coming up",
+        "details": (
+            "One merged, chronological list of everything scheduled for this chat: "
+            "active rollcalls (when they close), pending one-time scheduled rollcalls "
+            "(when they start), and recurring templates (their next auto-start). "
+            "Visible to everyone — for managing schedules, admins use /schedules."
+        ),
+    },
+    {
         "name": "whos_in", "aliases": ["wi"], "scope": "user", "category": "View Lists",
         "args": "", "sample": "/wi",
         "summary": "Show who's IN",
@@ -184,22 +195,28 @@ COMMANDS = [
     },
     {
         "name": "start_roll_call", "aliases": ["src"], "scope": "admin", "category": "Rollcall",
-        "args": "[title]", "sample": "/src Friday Football",
+        "args": "[title] [repeat=daily|weekly|biweekly|monthly]", "sample": "/src Friday Football repeat=weekly",
         "summary": "Start a new rollcall",
         "details": (
             "Starts a rollcall in this chat. If title is omitted, defaults to 'Roll Call'. "
             "Sends the inline vote panel immediately so members can vote in one tap. "
-            "Admin-only. If multiple rollcalls are active, each is numbered for ::N targeting."
+            "Admin-only. If multiple rollcalls are active, each is numbered for ::N targeting.\n\n"
+            "Add repeat=daily|weekly|biweekly|monthly to also make it auto-recur — this "
+            "sets up a template scheduled for this same weekday/day-of-month and time, "
+            "skipping /set_template + /schedule_template entirely. See /calendar for "
+            "what's coming up, /schedules to manage or turn it off."
         ),
     },
     {
         "name": "repeat", "aliases": ["rpt"], "scope": "admin", "category": "Rollcall",
-        "args": "", "sample": "/repeat",
+        "args": "[repeat=daily|weekly|biweekly|monthly]", "sample": "/repeat repeat=weekly",
         "summary": "Start a new rollcall cloned from the last one",
         "details": (
             "Clones the last ended rollcall's title, IN-list limit, location, and event fee "
             "into a fresh rollcall — no retyping the same settings every week. "
-            "Finalize time is NOT carried over; set it with /srt if needed."
+            "Finalize time is NOT carried over; set it with /srt if needed.\n\n"
+            "Add repeat=daily|weekly|biweekly|monthly to also make it auto-recur from here on "
+            "— see /src's repeat= for details."
         ),
     },
     {

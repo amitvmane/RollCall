@@ -7,6 +7,7 @@ import html
 import logging
 from datetime import datetime, timedelta
 
+import pytz
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot_state import bot, _sched_selection, _log_task_exc, _esc_md, reply_error, safe_edit_text
@@ -230,6 +231,53 @@ async def schedules_command(message):
     except Exception:
         logging.exception("Error in /schedules")
         await bot.send_message(cid, "Error fetching schedule info.")
+
+
+def _fmt_calendar_entry(ev: dict, tz) -> str:
+    icon = {"closes": "🏁", "starts": "🆕", "recurs": "🔁"}.get(ev["kind"], "📅")
+    verb = {"closes": "closes", "starts": "starts", "recurs": "next"}.get(ev["kind"], "")
+    when = ev["when"].astimezone(tz)
+    today = datetime.now(tz).date()
+    if when.date() == today:
+        day_label = "Today"
+    elif when.date() == today + timedelta(days=1):
+        day_label = "Tomorrow"
+    else:
+        day_label = when.strftime("%a %d %b")
+    return f"{icon} {html.escape(ev['label'])} — {verb} {day_label} {when.strftime('%H:%M')}"
+
+
+@bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/calendar")
+async def calendar_command(message):
+    """List upcoming events for this chat: active rollcalls closing,
+    pending one-time scheduled rollcalls, and recurring templates' next
+    occurrence — one merged, chronological view. Visible to everyone
+    (read-only), unlike the admin-only /schedules it draws on."""
+    cid = message.chat.id
+    try:
+        chat = manager.get_chat(cid)
+        tzname = chat.get("timezone", "Asia/Kolkata")
+        try:
+            tz = pytz.timezone(tzname)
+        except Exception:
+            tz = pytz.timezone("Asia/Kolkata")
+
+        events = templates_svc.upcoming_events(cid)
+        if not events:
+            await bot.send_message(
+                cid,
+                "📅 Nothing scheduled yet.\n"
+                "Start one with /src, or set up a recurring one with "
+                "/src <title> repeat=weekly.",
+            )
+            return
+
+        lines = [_fmt_calendar_entry(ev, tz) for ev in events]
+        text = "<b>📅 Coming up</b>\n\n" + "\n".join(lines)
+        await bot.send_message(cid, text, parse_mode="HTML")
+    except Exception:
+        logging.exception("Error in /calendar")
+        await bot.send_message(cid, "Error fetching upcoming events.")
 
 
 @bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/schedule_template")

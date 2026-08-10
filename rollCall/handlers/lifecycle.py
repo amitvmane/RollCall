@@ -5,8 +5,10 @@ notify_proxy_owner_wait_to_in, and the btn_* callback handler.
 import asyncio
 import logging
 import os
+import re
 from datetime import datetime
 
+import pytz
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot_state import (
@@ -254,6 +256,78 @@ async def notify_proxy_owner_wait_to_in(rc, moved_user: User, cid, title: str, r
         logging.exception("Failed to notify proxy owner for WAITING→IN")
 
 
+# ── repeat= flag (shared by /start_roll_call and /repeat) ──────────────────────
+# Auto-creates/refreshes a template from a fresh rollcall's own settings and
+# schedules it to recur — a one-step shortcut for the common "same game every
+# week" case that would otherwise need /set_template + /schedule_template.
+
+_REPEAT_FLAG_RE = re.compile(r"^repeat=(\w+)$", re.IGNORECASE)
+_REPEAT_TYPES = {"daily", "weekly", "biweekly", "monthly"}
+
+
+def _extract_repeat_flag(tokens: list) -> tuple:
+    """Scan title tokens for a `repeat=<type>` flag (anywhere, not just
+    trailing) and strip it out. Returns (remaining_tokens, repeat_type or
+    None) — repeat_type is lowercased and NOT validated here; the caller
+    checks it against _REPEAT_TYPES before creating anything, so a typoed
+    flag fails cleanly instead of starting an unscheduled rollcall."""
+    remaining = []
+    repeat_type = None
+    for tok in tokens:
+        m = _REPEAT_FLAG_RE.match(tok)
+        if m and repeat_type is None:
+            repeat_type = m.group(1).lower()
+        else:
+            remaining.append(tok)
+    return remaining, repeat_type
+
+
+async def _apply_repeat_flag(cid: int, rc, repeat_type: str, admin_user_id: int, admin_name: str):
+    """Create/refresh a template from `rc`'s settings (title, limit,
+    location, fee — same fields /repeat already clones) and schedule it to
+    recur on rc's own weekday/day-of-month and time, so it repeats going
+    forward with zero further admin action. Returns a confirmation string,
+    or None if scheduling failed — best-effort: a scheduling failure must
+    not undo the rollcall that's already been created and announced, so
+    this never raises past its own try/except.
+
+    Template name is a slug of the title; upsert_template is idempotent
+    (services/templates.py), so re-running `repeat=weekly` under the same
+    title next week just refreshes the existing template/schedule instead
+    of erroring or creating a duplicate.
+    """
+    try:
+        tz = pytz.timezone(rc.timezone)
+    except Exception:
+        tz = pytz.timezone("Asia/Kolkata")
+    now = datetime.now(tz)
+
+    slug = re.sub(r"[^a-z0-9]+", "-", (rc.title or "").lower()).strip("-")[:40] or "repeat"
+
+    from services import templates as templates_svc
+
+    try:
+        templates_svc.upsert_template(
+            cid, slug, admin_user_id, admin_name,
+            title=rc.title, limit=rc.inListLimit or None,
+            location=rc.location or None, fee=rc.event_fee or None,
+        )
+        sched_kwargs = {"recurrence_type": repeat_type, "schedule_time": now.strftime("%H:%M")}
+        if repeat_type == "monthly":
+            sched_kwargs["monthly_day"] = now.day
+        else:
+            sched_kwargs["schedule_day"] = now.strftime("%A").lower()
+        templates_svc.set_schedule(cid, slug, admin_user_id, admin_name, **sched_kwargs)
+    except Exception:
+        logging.exception("[repeat] failed to schedule recurring template for chat %s", cid)
+        return None
+
+    when = ("every day" if repeat_type == "daily"
+            else f"on day {now.day} of the month" if repeat_type == "monthly"
+            else f"every {now.strftime('%A')} ({repeat_type})")
+    return f"🔁 Repeats {when} at {now.strftime('%H:%M')} {tz.zone} — manage with /schedules."
+
+
 # ── /start_roll_call ──────────────────────────────────────────────────────────
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/start_roll_call")
@@ -267,7 +341,12 @@ async def start_roll_call(message):
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
 
         arr = msg.split(" ")
-        title = ' '.join(arr[1:]) if len(arr) > 1 else None
+        title_tokens, repeat_type = _extract_repeat_flag(arr[1:])
+        if repeat_type and repeat_type not in _REPEAT_TYPES:
+            raise incorrectParameter(
+                f"'{repeat_type}' isn't a valid repeat type. Use: " + ", ".join(sorted(_REPEAT_TYPES))
+            )
+        title = ' '.join(title_tokens) if title_tokens else None
 
         result = await rollcalls_svc.start_rollcall(
             cid, title,
@@ -281,6 +360,14 @@ async def start_roll_call(message):
         sent = await bot.send_message(message.chat.id, text, reply_markup=markup)
         _panel_msg_ids[(cid, rc_number_1based)] = sent.message_id
         _persist_panel_msg_id(rc, sent.message_id)
+
+        if repeat_type:
+            repeat_msg = await _apply_repeat_flag(
+                cid, rc, repeat_type, message.from_user.id,
+                message.from_user.first_name or message.from_user.username or "Admin",
+            )
+            if repeat_msg:
+                await bot.send_message(cid, repeat_msg)
 
         # Dues reminder: prompt the admin to set the ground cost now so it
         # isn't forgotten before /erc.  Only shown in non-shh mode.
@@ -307,6 +394,12 @@ async def repeat_roll_call(message):
     try:
         if await admin_rights(message, manager) == False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
+
+        _tokens, repeat_type = _extract_repeat_flag(message.text.split(" ")[1:])
+        if repeat_type and repeat_type not in _REPEAT_TYPES:
+            raise incorrectParameter(
+                f"'{repeat_type}' isn't a valid repeat type. Use: " + ", ".join(sorted(_REPEAT_TYPES))
+            )
 
         last = db.get_latest_ended_rollcall(cid)
         if not last:
@@ -346,6 +439,14 @@ async def repeat_roll_call(message):
                 cid,
                 f"🔁 Repeated from last game — carried over: {', '.join(cloned)}",
             )
+
+        if repeat_type:
+            repeat_msg = await _apply_repeat_flag(
+                cid, rc, repeat_type, message.from_user.id,
+                message.from_user.first_name or message.from_user.username or "Admin",
+            )
+            if repeat_msg:
+                await bot.send_message(cid, repeat_msg)
     except Exception as e:
         await reply_error(cid, e)
 

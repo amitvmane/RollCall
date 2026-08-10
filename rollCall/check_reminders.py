@@ -576,6 +576,46 @@ def _parse_hhmm(raw):
     return None
 
 
+def _matches_recurrence(candidate_date, schedule_day, recurrence_type, last_scheduled_date):
+    """Pure day-matching predicate: does `candidate_date` (a date, not a
+    datetime) match this schedule's recurrence pattern? No catch-up-window
+    or already-fired-today logic here — that's _is_due_now's concern
+    ("is it due RIGHT NOW"); this only answers "would this calendar date
+    match", which is also what next_occurrence_datetime (below, backs
+    /calendar) needs and _is_due_now doesn't otherwise expose standalone.
+
+    last_scheduled_date: "YYYY-MM-DD" string or None — only consulted for
+    biweekly (the 14-days-since-last-fire gate); ignored otherwise.
+    """
+    if recurrence_type == "monthly":
+        try:
+            target_day = int(schedule_day)
+        except (ValueError, TypeError):
+            return False
+        # Clamp to the last day of the month — a schedule set for day
+        # 29/30/31 must still match (on the month's last day) in months
+        # that don't have that many days.
+        last_day_of_month = calendar.monthrange(candidate_date.year, candidate_date.month)[1]
+        target_day = min(target_day, last_day_of_month)
+        return candidate_date.day == target_day
+
+    if recurrence_type == "daily":
+        return True
+
+    if candidate_date.strftime("%A").lower() != (schedule_day or "").lower():
+        return False
+
+    if recurrence_type == "biweekly" and last_scheduled_date:
+        try:
+            last_dt = datetime.strptime(last_scheduled_date, "%Y-%m-%d").date()
+            if (candidate_date - last_dt).days < 14:
+                return False
+        except (ValueError, TypeError):
+            return False
+
+    return True
+
+
 def _is_due_now(schedule_time, schedule_day, last_date, now, recurrence_type):
     """Return True iff this template's schedule should fire on the current
     iteration. Centralises the day/time/catch-up/dedupe logic for all three
@@ -583,7 +623,8 @@ def _is_due_now(schedule_time, schedule_day, last_date, now, recurrence_type):
 
     Catch-up semantics: we treat the schedule as due if the chat's clock has
     crossed the scheduled minute (within SCHEDULE_CATCHUP_MINUTES) AND we
-    haven't fired today AND day-of-week/day-of-month matches.
+    haven't fired today AND day-of-week/day-of-month matches (delegated to
+    _matches_recurrence).
 
     Old code did exact-minute string equality on now.strftime('%H:%M') ==
     schedule_time. Any iteration that skipped the target minute (drift
@@ -611,37 +652,39 @@ def _is_due_now(schedule_time, schedule_day, last_date, now, recurrence_type):
     if (now - scheduled_dt).total_seconds() > SCHEDULE_CATCHUP_MINUTES * 60:
         return False
 
-    today_name = now.strftime("%A").lower()
-    if recurrence_type == "monthly":
-        try:
-            target_day = int(schedule_day)
-        except (ValueError, TypeError):
-            return False
-        # Clamp to the last day of the current month — a schedule set for
-        # day 29/30/31 must still fire (on the month's last day) in months
-        # that don't have that many days, instead of being silently skipped
-        # for the entire month with no catch-up mechanism to recover it.
-        last_day_of_month = calendar.monthrange(now.year, now.month)[1]
-        target_day = min(target_day, last_day_of_month)
-        if now.day != target_day:
-            return False
-        return True
+    return _matches_recurrence(now.date(), schedule_day, recurrence_type, last_date)
 
-    if recurrence_type == "daily":
-        return True
 
-    if today_name != (schedule_day or "").lower():
-        return False
+def next_occurrence_datetime(tz, schedule_time, schedule_day, recurrence_type,
+                              last_scheduled_date=None, horizon_days=60):
+    """First future tz-aware datetime matching this schedule, starting from
+    now — backs /calendar's "next occurrence" display for recurring
+    templates.
 
-    if recurrence_type == "biweekly" and last_date:
-        try:
-            last_dt = datetime.strptime(last_date, "%Y-%m-%d").date()
-            if (now.date() - last_dt).days < 14:
-                return False
-        except (ValueError, TypeError):
-            return False
+    Brute-forces candidate calendar dates day by day and reuses
+    _matches_recurrence rather than a second, independently-derived "next
+    date" formula, so this can't silently drift from what the scheduler
+    will actually do — check_reminders.py has direct history of exactly
+    that class of bug (_localize_safe vs _ensure_aware once diverging on
+    DST handling).
 
-    return True
+    horizon_days=60 comfortably covers monthly (max ~31-day gap) and
+    biweekly (14-day gap) worst cases. Returns None if nothing matches
+    within the horizon (malformed schedule_day/time).
+    """
+    hm = _parse_hhmm(schedule_time)
+    if hm is None:
+        return None
+    sh, sm = hm
+    now = datetime.now(tz)
+    for offset in range(horizon_days):
+        candidate = (now + timedelta(days=offset)).date()
+        if not _matches_recurrence(candidate, schedule_day, recurrence_type, last_scheduled_date):
+            continue
+        candidate_dt = tz.localize(datetime(candidate.year, candidate.month, candidate.day, sh, sm))
+        if candidate_dt >= now:
+            return candidate_dt
+    return None
 
 
 def _missed_within_days(schedule_day, schedule_time, last_date, now, max_days):

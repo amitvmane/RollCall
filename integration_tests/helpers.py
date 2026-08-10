@@ -12,7 +12,7 @@ def _import_all():
     import bot_state
     import rollcall_manager
     from handlers.lifecycle import (
-        start_roll_call, end_roll_call, callback_handler,
+        start_roll_call, repeat_roll_call, end_roll_call, callback_handler,
         get_status_keyboard, show_panel_for_rollcall, set_title, show_panel,
     )
     from handlers.voting import in_user, out_user, maybe_user
@@ -31,6 +31,7 @@ def _import_all():
     from handlers.templates import (
         list_templates, set_template, start_template,
         delete_template_command, schedules_command, schedule_template_cmd, schedules_toggle_callback,
+        calendar_command,
     )
     from handlers.settings import (
         shh, louder, wait_limit, event_fee, individual_fee, when, set_location,
@@ -126,6 +127,7 @@ class IntegrationBase(unittest.IsolatedAsyncioTestCase):
         cls.bs = h["bot_state"]
         cls.mgr = h["rollcall_manager"].manager
         cls.start_roll_call = staticmethod(h["start_roll_call"])
+        cls.repeat_roll_call = staticmethod(h["repeat_roll_call"])
         cls.end_roll_call = staticmethod(h["end_roll_call"])
         cls.callback_handler = staticmethod(h["callback_handler"])
         cls.show_panel_for_rollcall = staticmethod(h["show_panel_for_rollcall"])
@@ -156,6 +158,7 @@ class IntegrationBase(unittest.IsolatedAsyncioTestCase):
         cls.start_template = staticmethod(h["start_template"])
         cls.delete_template_command = staticmethod(h["delete_template_command"])
         cls.schedules_command = staticmethod(h["schedules_command"])
+        cls.calendar_command = staticmethod(h["calendar_command"])
         cls.shh = staticmethod(h["shh"])
         cls.louder = staticmethod(h["louder"])
         cls.wait_limit = staticmethod(h["wait_limit"])

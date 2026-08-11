@@ -876,6 +876,8 @@ _RECONCILE_COLUMNS = {
         ("collector_paid_ground", "collector_paid_ground INTEGER DEFAULT 0", "collector_paid_ground INTEGER DEFAULT 0"),
         ("collector_upi",  "collector_upi TEXT DEFAULT NULL",          "collector_upi TEXT DEFAULT NULL"),
         ("auto_buzz_sent", "auto_buzz_sent INTEGER DEFAULT 0",         "auto_buzz_sent INTEGER DEFAULT 0"),
+        ("reminder_before_close_sent", "reminder_before_close_sent INTEGER DEFAULT 0", "reminder_before_close_sent INTEGER DEFAULT 0"),
+        ("reminder_after_open_sent",   "reminder_after_open_sent INTEGER DEFAULT 0",   "reminder_after_open_sent INTEGER DEFAULT 0"),
     ],
     "chats": [
         ("shh_mode",               "shh_mode INTEGER DEFAULT 0",               "shh_mode BOOLEAN DEFAULT FALSE"),
@@ -895,6 +897,8 @@ _RECONCILE_COLUMNS = {
         ("dues_enabled",           "dues_enabled BOOLEAN DEFAULT FALSE",       "dues_enabled INTEGER DEFAULT 0"),
         ("dues_self_paid_mode",    "dues_self_paid_mode TEXT DEFAULT 'auto'",  "dues_self_paid_mode TEXT DEFAULT 'auto'"),
         ("auto_buzz_hours",        "auto_buzz_hours INTEGER DEFAULT 0",        "auto_buzz_hours INTEGER DEFAULT 0"),
+        ("reminder_before_close_hours", "reminder_before_close_hours INTEGER DEFAULT 0", "reminder_before_close_hours INTEGER DEFAULT 0"),
+        ("reminder_after_open_hours",   "reminder_after_open_hours INTEGER DEFAULT 0",   "reminder_after_open_hours INTEGER DEFAULT 0"),
         ("dues_weekly_nudge",      "dues_weekly_nudge INTEGER DEFAULT 0",      "dues_weekly_nudge INTEGER DEFAULT 0"),
         ("dues_report_enabled",    "dues_report_enabled INTEGER DEFAULT 0",    "dues_report_enabled INTEGER DEFAULT 0"),
         ("last_idle_nudge",        "last_idle_nudge TEXT DEFAULT NULL",        "last_idle_nudge TEXT DEFAULT NULL"),
@@ -1849,6 +1853,7 @@ _VALID_CHAT_FIELDS = {
     'dues_enabled', 'dues_self_paid_mode',
     'auto_buzz_hours', 'dues_weekly_nudge', 'dues_report_enabled', 'last_idle_nudge',
     'collector_rotation', 'last_collector_uid', 'dues_epoch',
+    'reminder_before_close_hours', 'reminder_after_open_hours',
 }
 
 def update_chat_settings(chat_id: int, **kwargs) -> bool:
@@ -1994,6 +1999,7 @@ _VALID_ROLLCALL_FIELDS = {
     'is_cancelled',
     'collector_uid', 'collector_name', 'collector_paid_ground', 'collector_upi',
     'auto_buzz_sent',
+    'reminder_before_close_sent', 'reminder_after_open_sent',
 }
 
 def update_rollcall(rollcall_id: int, **kwargs) -> bool:

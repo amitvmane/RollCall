@@ -17,7 +17,10 @@ def _import_all():
     )
     from handlers.voting import in_user, out_user, maybe_user
     from handlers.proxy import set_in_for, set_out_for, set_maybe_for
-    from handlers.lists import whos_in, whos_out, whos_maybe, whos_waiting, buzz_command, history_command
+    from handlers.lists import (
+        whos_in, whos_out, whos_maybe, whos_waiting, buzz_command, history_command,
+        remind_before_close_command, remind_after_open_command,
+    )
     from handlers.ghost import (
         toggle_ghost_tracking, set_absent_limit, clear_absent, mark_absent,
         ghost_callback_handler,
@@ -41,7 +44,7 @@ def _import_all():
         set_admins, unset_admins, welcome_and_explanation, help_commands,
         broadcast, config_timezone, version_command, show_reminders,
     )
-    from handlers.stats import stats_command
+    from handlers.stats import stats_command, export_stats_command
     from handlers.dues import (
         settle_dues as dues_settle_dues,
         settle_pick_callback as dues_settle_pick_callback,
@@ -145,6 +148,9 @@ class IntegrationBase(unittest.IsolatedAsyncioTestCase):
         cls.whos_maybe = staticmethod(h["whos_maybe"])
         cls.whos_waiting = staticmethod(h["whos_waiting"])
         cls.buzz_command = staticmethod(h["buzz_command"])
+        cls.remind_before_close_command = staticmethod(h["remind_before_close_command"])
+        cls.remind_after_open_command = staticmethod(h["remind_after_open_command"])
+        cls.export_stats_command = staticmethod(h["export_stats_command"])
         cls.toggle_ghost_tracking = staticmethod(h["toggle_ghost_tracking"])
         cls.set_absent_limit = staticmethod(h["set_absent_limit"])
         cls.clear_absent = staticmethod(h["clear_absent"])

@@ -12,6 +12,7 @@ from db import (
     clear_rollcall_reminder,
     update_chat_group_name,
     get_pending_scheduled_rollcalls, mark_scheduled_rollcall_fired,
+    get_or_create_chat,
 )
 
 logging.basicConfig(
@@ -125,6 +126,44 @@ def _now_truncated(tz):
     return datetime.now(tz).replace(second=0, microsecond=0)
 
 
+async def _dm_non_responders(chat_id: int, rc_number: int, title: str, when_phrase: str) -> None:
+    """Best-effort DM to every non-voter for this rollcall (admin opt-in via
+    /remind_before_close or /remind_after_open). Reuses the same
+    "who hasn't voted" computation auto-buzz already relies on
+    (services.lists.get_non_responders) rather than a second query.
+
+    Per-DM failure is silent (mirrors bot_state._dm_promoted_real_user) —
+    no group fallback per failed send, which would spam the group once per
+    member who's never started the bot at any real group size.
+    """
+    try:
+        from services import lists as lists_svc
+        svc = lists_svc.get_non_responders(chat_id, rc_number - 1)
+        candidates = svc.get("candidates") or []
+    except Exception:
+        logging.exception(f"[reminder-dm] get_non_responders failed for chat {chat_id}")
+        return
+    if not candidates:
+        return
+    sent = 0
+    for c in candidates:
+        uid = c.get("user_id")
+        if not isinstance(uid, int):
+            continue  # proxies aren't DM-able
+        try:
+            await bot.send_message(
+                uid,
+                f"⏰ You haven't voted yet for *{title}* — it {when_phrase}. /in, /out, or /maybe?",
+                parse_mode="Markdown",
+            )
+            sent += 1
+        except Exception:
+            logging.warning(f"[reminder-dm] failed to DM user {uid} (chat {chat_id})")
+    logging.info(
+        f"[reminder-dm] sent {sent}/{len(candidates)} DM(s) for rollcall #{rc_number} in chat {chat_id}"
+    )
+
+
 async def check(rollcalls, timezone, chat_id):
     from rollcall_manager import manager
     while True:
@@ -141,16 +180,55 @@ async def check(rollcalls, timezone, chat_id):
 
         for rollcall in current_rollcalls:
             try:
-                if rollcall.finalizeDate is None:
-                    no_reminder_rollcalls += 1
-                    continue
-
                 rc_number = rc_id_map.get(id(rollcall))
                 if rc_number is None:
                     continue
 
                 tz = pytz.timezone(timezone)
                 now_date = _now_truncated(tz)
+
+                # ── After-open DM reminder ──────────────────────────────────
+                # Unlike everything below, this must run for rollcalls with
+                # NO finalizeDate too (it's keyed off createdDate, not a
+                # close time) -- so it runs before the finalizeDate gate,
+                # not after it.
+                try:
+                    if not getattr(rollcall, "reminder_after_open_sent", False):
+                        # NOT manager.get_chat(chat_id): that cache dict is
+                        # populated once with a fixed 6-field subset (see
+                        # RollCallManager.get_chat) that doesn't include this
+                        # setting, so it would always read as unset/0 no
+                        # matter what the admin configured. A fresh DB read
+                        # is cheap here (once per rollcall per 60s tick).
+                        chat_cfg = get_or_create_chat(chat_id)
+                        after_open_hours = int(chat_cfg.get("reminder_after_open_hours") or 0)
+                        if after_open_hours > 0:
+                            # createdDate is a UTC system timestamp (DB
+                            # default CURRENT_TIMESTAMP), NOT local wall-clock
+                            # time like finalizeDate is -- _ensure_aware would
+                            # wrongly localize it AS local time, shifting it
+                            # by the chat's UTC offset. Localize as UTC
+                            # instead; comparing aware datetimes works
+                            # correctly across zones without converting to tz.
+                            created_dt = rollcall.createdDate
+                            if created_dt.tzinfo is None:
+                                created_dt = pytz.UTC.localize(created_dt)
+                            if now_date >= created_dt + timedelta(hours=after_open_hours):
+                                rollcall.reminder_after_open_sent = True
+                                rc_db_id_a = getattr(rollcall, "db_id", None) or getattr(rollcall, "id", None)
+                                if rc_db_id_a is not None:
+                                    try:
+                                        from db import update_rollcall
+                                        update_rollcall(rc_db_id_a, reminder_after_open_sent=1)
+                                    except Exception:
+                                        logging.exception("Failed to persist reminder_after_open_sent")
+                                await _dm_non_responders(chat_id, rc_number, rollcall.title, "just opened")
+                except Exception:
+                    logging.exception("Error in after-open reminder DM")
+
+                if rollcall.finalizeDate is None:
+                    no_reminder_rollcalls += 1
+                    continue
 
                 # BUG12: ensure finalizeDate is tz-aware before any comparison
                 finalize_dt = _ensure_aware(rollcall.finalizeDate, tz)
@@ -161,7 +239,9 @@ async def check(rollcalls, timezone, chat_id):
                 # a restart can't re-ping. Skipped when the IN list is full.
                 try:
                     if not getattr(rollcall, "auto_buzz_sent", False):
-                        chat_cfg = manager.get_chat(chat_id)
+                        # get_or_create_chat, not manager.get_chat -- see the
+                        # after-open reminder block above for why.
+                        chat_cfg = get_or_create_chat(chat_id)
                         buzz_hours = int(chat_cfg.get("auto_buzz_hours") or 0)
                         if buzz_hours > 0 and finalize_dt - timedelta(hours=buzz_hours) <= now_date < finalize_dt:
                             rollcall.auto_buzz_sent = True
@@ -195,6 +275,34 @@ async def check(rollcalls, timezone, chat_id):
                                     )
                 except Exception:
                     logging.exception("Error in auto-buzz escalation")
+
+                # ── Before-close DM reminder ────────────────────────────────
+                # Same window/one-shot shape as auto-buzz above, but DMs each
+                # non-voter individually (admin opt-in via
+                # /remind_before_close) instead of @-mentioning them in the
+                # group. Independent toggle/flag from auto-buzz — a chat can
+                # run either, both, or neither.
+                try:
+                    if not getattr(rollcall, "reminder_before_close_sent", False):
+                        # get_or_create_chat, not manager.get_chat -- see the
+                        # after-open reminder block above for why.
+                        chat_cfg = get_or_create_chat(chat_id)
+                        before_close_hours = int(chat_cfg.get("reminder_before_close_hours") or 0)
+                        if (before_close_hours > 0
+                                and finalize_dt - timedelta(hours=before_close_hours) <= now_date < finalize_dt):
+                            rollcall.reminder_before_close_sent = True
+                            rc_db_id_c = getattr(rollcall, "db_id", None) or getattr(rollcall, "id", None)
+                            if rc_db_id_c is not None:
+                                try:
+                                    from db import update_rollcall
+                                    update_rollcall(rc_db_id_c, reminder_before_close_sent=1)
+                                except Exception:
+                                    logging.exception("Failed to persist reminder_before_close_sent")
+                            await _dm_non_responders(
+                                chat_id, rc_number, rollcall.title, f"closes in ~{before_close_hours}h"
+                            )
+                except Exception:
+                    logging.exception("Error in before-close reminder DM")
 
                 if rollcall.reminder is not None:
                     reminder_time = finalize_dt - timedelta(hours=int(rollcall.reminder))

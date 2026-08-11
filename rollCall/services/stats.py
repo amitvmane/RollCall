@@ -23,6 +23,7 @@ from db import (
     get_rollcall_history,
     get_user_attendance_count,
     get_user_session_history,
+    get_user_streaks,
     find_proxy_in_chat,
     find_user_by_username_for_stats,
     find_users_by_name_for_stats,
@@ -194,6 +195,65 @@ def leaderboard(chat_id: int, limit: int = 10) -> dict:
         "total_rollcalls_in_chat": total_rollcalls,
         "entries": entries,
     }
+
+
+_EXPORT_COLUMNS = [
+    "rank", "name", "username", "user_id", "kind",
+    "sessions_attended", "total_sessions_voted", "attendance_rate", "voting_rate",
+    "ghost_count", "current_streak", "best_streak",
+]
+
+
+def export_stats_csv(chat_id: int) -> str:
+    """Leaderboard-style CSV export: one row per member (real or proxy) with
+    attendance, ghost, and streak stats. Backs /export_stats.
+
+    Same contract as dues_export_csv (services/dues.py) — returns the raw
+    CSV string, caller builds the filename/wraps it for send_document.
+
+    Base rows come from leaderboard() (one query); ghost_count and streaks
+    are backfilled per row (get_ghost_count/get_proxy_streaks etc. — the
+    same per-entity lookups personal_stats/proxy_stats already do
+    individually). This is N+1, deliberately not optimized: unlike the
+    bot-wide aggregators fixed in the 2026-08-08 DB audit (hit on every
+    render, across every group), this runs once, admin-triggered, bounded
+    by one chat's member count.
+    """
+    import csv
+    import io
+
+    lb = leaderboard(chat_id, limit=10_000)
+    rows = []
+    for entry in lb["entries"]:
+        kind = entry["kind"]
+        if kind == "real":
+            uid = entry["user_id"]
+            ghost = get_ghost_count(chat_id, uid)
+            streaks = get_user_streaks(chat_id, uid) or {}
+        else:
+            name = entry["display_name"]
+            ghost = get_ghost_count_by_proxy_name(chat_id, name)
+            streaks = get_proxy_streaks(chat_id, name) or {}
+        rows.append({
+            "rank": entry["rank"],
+            "name": entry["display_name"],
+            "username": entry.get("username") or "",
+            "user_id": entry["user_id"] if entry["user_id"] is not None else "",
+            "kind": kind,
+            "sessions_attended": entry["sessions_attended"],
+            "total_sessions_voted": entry["total_sessions_voted"],
+            "attendance_rate": entry["attendance_rate"] if entry["attendance_rate"] is not None else "",
+            "voting_rate": entry["voting_rate"] if entry["voting_rate"] is not None else "",
+            "ghost_count": ghost,
+            "current_streak": int(streaks.get("current_streak") or 0),
+            "best_streak": int(streaks.get("best_streak") or 0),
+        })
+
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=_EXPORT_COLUMNS)
+    writer.writeheader()
+    writer.writerows(rows)
+    return buf.getvalue()
 
 
 def session_display_date(row: dict) -> str:

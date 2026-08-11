@@ -357,3 +357,68 @@ async def auto_buzz_command(message):
         )
     except Exception as e:
         await reply_error(cid, e)
+
+
+# ── /remind_before_close, /remind_after_open — private DM reminders ──────────
+# Siblings of /auto_buzz above: same window/one-shot shape, but DM each
+# non-voter individually instead of @-mentioning them in the group. A chat
+# can run auto-buzz, either of these, both, or neither independently.
+
+async def _reminder_hours_command(message, field: str, label: str, usage_example: str):
+    cid = message.chat.id
+    try:
+        if await admin_rights(message, manager) == False:
+            raise insufficientPermissions(f"Admin only: {usage_example.split()[0]}")
+
+        from db import update_chat_settings, get_or_create_chat
+        args = message.text.split()[1:]
+
+        if not args:
+            current = int(get_or_create_chat(cid).get(field) or 0)
+            status = f"ON — {label} {current}h" if current else "OFF"
+            await bot.send_message(
+                cid,
+                f"⏰ Reminder DMs ({label}) are {status}.\n"
+                f"Usage: {usage_example} <hours 1-168> to enable · {usage_example} off to disable.\n"
+                "Non-voters are DM'd individually (not mentioned in the group), once per rollcall."
+            )
+            return
+
+        arg = args[0].lower()
+        if arg in ("off", "0", "disable"):
+            update_chat_settings(cid, **{field: 0})
+            await bot.send_message(cid, "🔕 Reminder DMs disabled.")
+            return
+
+        try:
+            hours = int(arg)
+        except ValueError:
+            raise incorrectParameter(f"Hours must be a number 1-168, or 'off'. Example: {usage_example} 3")
+        if not 1 <= hours <= 168:
+            raise incorrectParameter("Hours must be between 1 and 168 (1 week).")
+
+        update_chat_settings(cid, **{field: hours})
+        log_admin_action(cid, message.from_user.id, message.from_user.first_name,
+                         field, details=f"set to {hours}h")
+        await bot.send_message(
+            cid,
+            f"⏰ Reminder DMs enabled — members who haven't voted will be DM'd "
+            f"*{label} {hours}h* (once per rollcall).",
+            parse_mode="Markdown",
+        )
+    except Exception as e:
+        await reply_error(cid, e)
+
+
+@bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/remind_before_close")
+@bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/rbc")
+async def remind_before_close_command(message):
+    """Configure private DM reminders to non-voters N hours before a rollcall's close time."""
+    await _reminder_hours_command(message, "reminder_before_close_hours", "before close", "/remind_before_close")
+
+
+@bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/remind_after_open")
+@bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/rao")
+async def remind_after_open_command(message):
+    """Configure private DM reminders to non-voters N hours after a rollcall opens."""
+    await _reminder_hours_command(message, "reminder_after_open_hours", "after open", "/remind_after_open")

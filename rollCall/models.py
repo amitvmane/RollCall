@@ -92,6 +92,8 @@ class RollCall:
                 self.chat_id = None
             self.absent_marked = False
             self.auto_buzz_sent = False
+            self.reminder_before_close_sent = False
+            self.reminder_after_open_sent = False
 
     def _load_from_db(self, db_id):
         """Load rollcall data from database"""
@@ -108,6 +110,8 @@ class RollCall:
         self.event_fee = data['event_fee']
         self.absent_marked = bool(data.get('absent_marked', False))
         self.auto_buzz_sent = bool(data.get('auto_buzz_sent', 0))
+        self.reminder_before_close_sent = bool(data.get('reminder_before_close_sent', 0))
+        self.reminder_after_open_sent = bool(data.get('reminder_after_open_sent', 0))
         self.web_token = data.get('web_token')
         raw_limit = data['in_list_limit']
         try:

@@ -126,6 +126,17 @@ COMMANDS = [
         ),
     },
     {
+        "name": "export_stats", "aliases": ["es"], "scope": "admin", "category": "Stats & History",
+        "args": "", "sample": "/export_stats",
+        "summary": "Export the leaderboard as a CSV file",
+        "details": (
+            "Sends a CSV file with one row per member (real or proxy): sessions "
+            "attended, sessions voted, attendance/voting rate, ghost count, and "
+            "current/best streak. Same shape as /dues_export, for attendance data "
+            "instead of dues. Admin-only."
+        ),
+    },
+    {
         "name": "timezone", "aliases": ["tz"], "scope": "user", "category": "Settings",
         "args": "[Region/City]", "sample": "/timezone Asia/Kolkata",
         "summary": "Set your timezone",
@@ -425,6 +436,32 @@ COMMANDS = [
             "restarts, and is skipped when the IN list is already full. "
             "Only applies to rollcalls with a close time set (/srt or scheduled templates). "
             "/auto_buzz off disables. /auto_buzz alone shows current status."
+        ),
+    },
+    {
+        "name": "remind_before_close", "aliases": ["rbc"], "scope": "admin", "category": "User Management",
+        "args": "<hours | off>", "sample": "/remind_before_close 2",
+        "summary": "DM non-voters before close time",
+        "details": (
+            "Privately DMs members who haven't voted N hours (1-168) before a "
+            "rollcall's scheduled close time — same timing as /auto_buzz, but a "
+            "direct message per non-voter instead of a group @-mention. Fires once "
+            "per rollcall, survives bot restarts. Only applies to rollcalls with a "
+            "close time set (/srt or scheduled templates). Independent of /auto_buzz "
+            "— run either, both, or neither. "
+            "/remind_before_close off disables. Alone, shows current status."
+        ),
+    },
+    {
+        "name": "remind_after_open", "aliases": ["rao"], "scope": "admin", "category": "User Management",
+        "args": "<hours | off>", "sample": "/remind_after_open 6",
+        "summary": "DM non-voters N hours after a rollcall opens",
+        "details": (
+            "Privately DMs members who haven't voted N hours (1-168) after a rollcall "
+            "starts — works even for rollcalls with no close time set, unlike "
+            "/remind_before_close and /auto_buzz. Fires once per rollcall, survives "
+            "bot restarts. "
+            "/remind_after_open off disables. Alone, shows current status."
         ),
     },
     {

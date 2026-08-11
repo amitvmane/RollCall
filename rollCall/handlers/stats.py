@@ -315,4 +315,38 @@ async def summary_command(message):
 
         await bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
     except Exception as e:
+        await reply_error(cid, e)
+
+
+# ── /export_stats — leaderboard CSV export ────────────────────────────────────
+# Same send_document shape as /dues_export (handlers/dues.py) — see
+# services.stats.export_stats_csv for the same "return a CSV string, handler
+# builds the filename" contract dues_export_csv already established.
+
+@bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] in ("/export_stats", "/es"))
+async def export_stats_command(message):
+    from functions import admin_rights
+    from exceptions import insufficientPermissions
+    from bot_state import reply_error
+    cid = message.chat.id
+    try:
+        if await admin_rights(message, manager) is False:
+            raise insufficientPermissions("Admin only: /export_stats")
+        import io
+        import datetime as _dt
+        csv_str = stats_svc.export_stats_csv(cid)
+        data_rows = [line for line in csv_str.splitlines() if line.strip()][1:]  # skip header
+        if not data_rows:
+            await bot.send_message(cid, "No stats data yet.")
+            return
+        date_str = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d")
+        filename = f"stats_export_{date_str}.csv"
+        buf = io.BytesIO(csv_str.encode("utf-8"))
+        buf.name = filename
+        await bot.send_document(
+            cid, buf,
+            caption=f"📊 Stats export — {date_str}",
+            visible_file_name=filename,
+        )
+    except Exception as e:
         await reply_error(message, e)

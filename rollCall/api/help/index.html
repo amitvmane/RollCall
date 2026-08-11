@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=5.0"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="theme-color" content="#2563eb"/>
+  <title>RollCall — Command Reference</title>
+  <link rel="icon" href="/web/logo.svg" type="image/svg+xml"/>
+  <script src="/shared/theme-init.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800;900&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/shared/tokens.css"/>
+  <link rel="stylesheet" href="/shared/base.css"/>
+  <link rel="stylesheet" href="/help/style.css"/>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-left">
+    <img src="/web/logo.svg" alt="" class="topbar-logo" width="26" height="26" aria-hidden="true"/>
+    <span class="logo">RollCall Commands</span>
+  </div>
+  <div class="topbar-right">
+    <a href="https://github.com/amitvmane/RollCall" target="_blank" rel="noopener" class="btn-theme" title="View source, open an issue, or send a PR on GitHub" style="text-decoration:none;display:flex;align-items:center;justify-content:center">🐙</a>
+    <a href="/" class="btn-theme" title="Back to RollCall" style="text-decoration:none;display:flex;align-items:center;justify-content:center">🏠</a>
+    <button class="btn-theme" title="Toggle dark mode" onclick="toggleTheme()">🌙</button>
+  </div>
+</div>
+
+<div id="app-root" class="wrap">
+  <div class="hero-block">
+    <h1>Every RollCall command, in one place</h1>
+    <p class="sub">Search by name, category, or what it does — the same reference the bot's own <code>/help</code> uses.</p>
+  </div>
+
+  <div class="controls-bar">
+    <input id="search-input" type="search" placeholder="Search commands — try &quot;dues&quot;, &quot;ghost&quot;, or &quot;streak&quot;" autocomplete="off" oninput="onSearchInput()"/>
+    <div class="scope-toggle" role="tablist">
+      <button id="scope-all" class="scope-btn active" onclick="setScope('all')">All commands</button>
+      <button id="scope-user" class="scope-btn" onclick="setScope('user')">User</button>
+      <button id="scope-admin" class="scope-btn" onclick="setScope('admin')">Admin</button>
+    </div>
+  </div>
+
+  <div id="result-count" class="result-count"></div>
+  <div id="categories-root"></div>
+  <div id="empty-state" class="empty-state hidden">No commands match "<span id="empty-query"></span>".</div>
+
+  <footer class="page-footer">
+    Found a bug, or a command that could use a better example? RollCall is open source —
+    <a href="https://github.com/amitvmane/RollCall" target="_blank" rel="noopener">browse the code, open an issue, or send a PR on GitHub</a>.
+  </footer>
+</div>
+
+<script src="/help/app.js"></script>
+</body>
+</html>

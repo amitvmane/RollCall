@@ -47,12 +47,26 @@ class TestHelpDetail(IntegrationBase):
         self.assertIn("/in", text)
         self.assertIn("Mark yourself", text)
 
-    async def test_help_typo_offers_suggestion(self):
-        # "stat" is 1 edit from "stats" — should suggest.
+    async def test_help_keyword_hit_shows_matching_commands(self):
+        # "stat" no longer falls through to the fuzzy suggester -- it's a
+        # substring of the "Stats & History" category name, so the
+        # category/keyword search (added alongside the quick-start block)
+        # catches it first and shows every command in that category, which
+        # is strictly more useful than a bare "did you mean /stats?" would
+        # have been.
         await self.help_commands(self.msg("/help stat", ADMIN_USER))
         text = self._last_text().lower()
+        self.assertIn("🔎", text)
+        self.assertIn("/stats", text)
+        self.assertIn("/summary", text)
+
+    async def test_help_typo_offers_suggestion(self):
+        # A typo with no category/keyword collision still reaches the
+        # fuzzy "did you mean" fallback.
+        await self.help_commands(self.msg("/help brdcast", ADMIN_USER))
+        text = self._last_text().lower()
         self.assertIn("did you mean", text)
-        self.assertIn("stats", text)
+        self.assertIn("broadcast", text)
 
     async def test_help_unknown_gives_graceful_message(self):
         # Far from any command — should NOT crash, should hint /help.

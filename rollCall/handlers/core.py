@@ -97,6 +97,67 @@ def _render_command_detail(cmd):
     return "\n".join(lines)
 
 
+_QUICK_START_NAMES = ["start_roll_call", "in", "whos_in", "stats"]
+
+
+def _render_quick_start():
+    """A handful of the most common commands with real examples, shown
+    before the full category dump -- 92 commands across 12 categories is a
+    lot to scan for a first-time user's first /help."""
+    lines = ["💡 *Quick start*"]
+    for name in _QUICK_START_NAMES:
+        cmd = lookup_command(name)
+        if cmd is None:
+            continue
+        lines.append(f"`{cmd['sample']}` — {_esc_md(cmd['summary'])}")
+    lines.append("`/help admin` — see admin-only commands")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _search_by_category(query):
+    """Commands whose category matches `query` (case-insensitive
+    substring, e.g. 'dues' -> 'Dues & Fund'). Returns [] if nothing
+    matches -- callers fall through to keyword search."""
+    q = query.strip().lower()
+    if not q:
+        return []
+    matched_cats = {c["category"] for c in COMMANDS if q in c["category"].lower()}
+    if not matched_cats:
+        return []
+    return [c for c in COMMANDS if c["category"] in matched_cats]
+
+
+def _search_by_keyword(query, limit=10):
+    """Commands whose summary or details mention `query` (case-insensitive
+    substring). Capped so a very generic word doesn't dump half the
+    registry."""
+    q = query.strip().lower()
+    if not q:
+        return []
+    out = []
+    for c in COMMANDS:
+        haystack = f"{c['summary']} {c.get('details', '')}".lower()
+        if q in haystack:
+            out.append(c)
+            if len(out) >= limit:
+                break
+    return out
+
+
+def _render_search_results(cmds, header):
+    """Mini command list for a category/keyword search hit -- same
+    per-line format as the full /help list, just not grouped by category
+    (the results are usually already one category, or a scattered handful
+    across a few)."""
+    parts = [header, ""]
+    for c in cmds:
+        parts.append(_format_cmd_line(c))
+    parts.append("")
+    parts.append("💡 `/help <command>` shows full details and an example")
+    return "\n".join(parts)
+
+
 def _suggest_command(query):
     """Return the closest command name/alias by Levenshtein distance, or None
     if nothing's within 2 edits. Defends against typos in /help <cmd>."""
@@ -208,17 +269,19 @@ async def welcome_and_explanation(message):
 
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/help")
 async def help_commands(message):
-    """Three forms:
-      /help              → user-command list
+    """Five forms:
+      /help              → quick-start + user-command list
       /help admin        → admin-command list (incl. super-admin docs)
       /help <command>    → detail card for one command (name OR any alias)
+      /help <category>   → every command in that category, e.g. "/help dues"
+      /help <keyword>    → every command whose summary/details mention it
     Unknown <command> falls back to a fuzzy "did you mean…?" hint.
     Everything renders from the COMMANDS registry in commands_registry.py."""
     parts = message.text.strip().split()
     if len(parts) <= 1:
         await bot.send_message(
             message.chat.id,
-            _render_command_list({"user"}, USER_CATEGORY_ORDER, "🎯 *RollCall — User Commands*"),
+            _render_quick_start() + "\n" + _render_command_list({"user"}, USER_CATEGORY_ORDER, "🎯 *RollCall — User Commands*"),
             parse_mode='Markdown',
         )
         return
@@ -235,6 +298,28 @@ async def help_commands(message):
     cmd = lookup_command(arg)
     if cmd is not None:
         await bot.send_message(message.chat.id, _render_command_detail(cmd), parse_mode='Markdown')
+        return
+
+    # No exact command match — try category, then keyword, before giving up
+    # on a fuzzy typo guess. "dues"/"ghost"/"template" etc. aren't command
+    # names themselves but are exactly what a user unsure of the exact
+    # command would type.
+    by_category = _search_by_category(arg)
+    if by_category:
+        await bot.send_message(
+            message.chat.id,
+            _render_search_results(by_category, f"🔎 *{_esc_md(arg.title())} commands*"),
+            parse_mode='Markdown',
+        )
+        return
+
+    by_keyword = _search_by_keyword(arg)
+    if by_keyword:
+        await bot.send_message(
+            message.chat.id,
+            _render_search_results(by_keyword, f"🔎 *Commands matching \"{_esc_md(arg)}\"*"),
+            parse_mode='Markdown',
+        )
         return
 
     # Unknown command — offer a suggestion if one is close.

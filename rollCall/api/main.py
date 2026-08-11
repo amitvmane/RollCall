@@ -34,7 +34,7 @@ from exceptions import (
     timeError,
 )
 from api.rate_limit import rate_limit_middleware
-from api.routes import admin, auth, dues as dues_routes, groups, health, portal, proxy_votes, rollcalls, stats, templates, tg_verify, votes, web as web_routes
+from api.routes import admin, auth, commands as commands_routes, dues as dues_routes, groups, health, portal, proxy_votes, rollcalls, stats, templates, tg_verify, votes, web as web_routes
 from api.schemas.common import ErrorResponse
 
 
@@ -152,6 +152,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router, prefix=API_PREFIX, tags=["auth"])
     app.include_router(tg_verify.router, prefix=API_PREFIX, tags=["auth"])
     app.include_router(health.router, prefix=API_PREFIX, tags=["health"])
+    app.include_router(commands_routes.router, prefix=API_PREFIX, tags=["commands"])
     app.include_router(rollcalls.router, prefix=API_PREFIX, tags=["rollcalls"])
     app.include_router(votes.router, prefix=API_PREFIX, tags=["votes"])
     app.include_router(proxy_votes.router, prefix=API_PREFIX, tags=["proxy-votes"])
@@ -268,6 +269,13 @@ def create_app() -> FastAPI:
     if _portal_dir.is_dir():
         app.mount("/portal", StaticFiles(directory=str(_portal_dir), html=True), name="portal")
         logging.info("[api] Member portal served at /portal/")
+
+    # Serve the command reference page at /help/ — renders GET /api/v1/commands
+    # (commands_registry.py, the same source /help renders in Telegram).
+    _help_dir = Path(__file__).parent / "help"
+    if _help_dir.is_dir():
+        app.mount("/help", StaticFiles(directory=str(_help_dir), html=True), name="help")
+        logging.info("[api] Command reference served at /help/")
 
     return app
 

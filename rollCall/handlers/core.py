@@ -71,6 +71,9 @@ def _render_command_list(scope_set, category_order, header):
 
     parts.append("💡 `/help <command>` shows details — e.g. `/help start_roll_call`")
     parts.append("💡 Add `::2` or `::3` to target a specific rollcall when multiple are active")
+    web_url = _help_web_url()
+    if web_url:
+        parts.append(f"🌐 Full searchable reference: {web_url}")
     return "\n".join(parts)
 
 
@@ -95,6 +98,16 @@ def _render_command_detail(cmd):
         _esc_md(details),
     ]
     return "\n".join(lines)
+
+
+def _help_web_url() -> str:
+    """Public URL of the searchable web command reference, or "" if
+    WEB_BASE_URL isn't configured (self-hosted bots without a public web
+    deployment) -- same env var + empty-if-unset pattern as
+    handlers/lifecycle._group_web_url, just without a per-chat token
+    since /help/ isn't group-scoped."""
+    base = os.environ.get("WEB_BASE_URL", "").rstrip("/")
+    return f"{base}/help" if base else ""
 
 
 _QUICK_START_NAMES = ["start_roll_call", "in", "whos_in", "stats"]
@@ -331,9 +344,11 @@ async def help_commands(message):
             parse_mode='Markdown',
         )
     else:
+        web_url = _help_web_url()
+        web_hint = f" Or browse/search the full list: {web_url}" if web_url else ""
         await bot.send_message(
             message.chat.id,
-            f"No command `/{_esc_md(arg)}`. Use /help or /help admin to see the list.",
+            f"No command `/{_esc_md(arg)}`. Use /help or /help admin to see the list.{web_hint}",
             parse_mode='Markdown',
         )
 

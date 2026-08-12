@@ -54,6 +54,19 @@ _VERIFY_WINDOW = 60
 _VERIFY_MAX = 5
 
 
+# Trimming a bucket empties its deque but never removes the key, and this
+# endpoint is unauthenticated and internet-facing — so without a sweep the key
+# count grows with every distinct source IP ever seen and never shrinks. Same
+# guard api/rate_limit.py applies to its own bucket dict.
+#
+# The bound this buys is "IPs active within the last _VERIFY_WINDOW", not an
+# absolute ceiling: a burst of distinct IPs inside one window is still all
+# retained, and is released on the first request after they age out. That is
+# deliberate — evicting a client while it is still inside its window would
+# reset its counter and hand it a fresh allowance, defeating the limiter.
+_VERIFY_BUCKETS_SWEEP_AT = 1000
+
+
 def _check_verify_rate(request: Request) -> None:
     client = request.client
     ip = client.host if client else "unknown"
@@ -65,10 +78,14 @@ def _check_verify_rate(request: Request) -> None:
     if len(bucket) >= _VERIFY_MAX:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Too many verification requests — try again in a minute.",
+            detail="Too many verification requests — try again in a minute.",
             headers={"Retry-After": "60"},
         )
     bucket.append(now)
+
+    if len(_verify_buckets) > _VERIFY_BUCKETS_SWEEP_AT:
+        for k in [k for k, dq in _verify_buckets.items() if not dq or dq[-1] < cutoff]:
+            del _verify_buckets[k]
 
 
 def _bot_username() -> str:

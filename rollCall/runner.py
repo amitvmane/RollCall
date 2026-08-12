@@ -436,8 +436,9 @@ async def memory_prune_loop(interval_seconds: int = 600):
         _rate_limits, _buzz_cooldowns, _pending_deletes, _pending_overrides,
         _pending_proxy_add, _pending_reconf, _pending_subsidy_input,
         _pending_payment_input, _prune_pending, _panel_msg_ids, _sched_selection,
-        _group_warning_cooldowns,
+        _group_warning_cooldowns, _ghost_selections,
     )
+    from handlers.dues import _settle_nudge_msgs
     from services import presence as presence_svc
 
     RATE_LIMIT_AGE = 300   # individual vote rate-limit window is 2s; 5 min is well past stale
@@ -452,6 +453,28 @@ async def memory_prune_loop(interval_seconds: int = 600):
     # /schedule_template multi-select panel leaves its entry forever — bound
     # growth with a blunt size guard instead of per-entry aging.
     SCHED_SELECTION_MAX = 500
+    # Same problem, same remedy, for two more untimestamped dicts:
+    #   _ghost_selections   — dropped only when the ghost flow completes; an
+    #                         abandoned panel leaks one entry. Safe to evict:
+    #                         it is mirrored to ghost_selections in the DB and
+    #                         reloaded on demand.
+    #   _settle_nudge_msgs  — one entry per ended dues game, dropped only when
+    #                         that game is settled. Evicting just loses the
+    #                         later unpin, which is the same already-documented
+    #                         outcome as a restart; the button keeps working
+    #                         because it re-reads DB state.
+    # Both are keyed per chat+rollcall, so these caps are far above any
+    # realistic working set and only bite on genuinely abandoned entries.
+    GHOST_SELECTIONS_MAX = 500
+    SETTLE_NUDGE_MAX = 500
+
+    def _cap_oldest(d: dict, maxlen: int) -> None:
+        """Drop oldest entries (dicts keep insertion order) down to maxlen,
+        rather than clearing wholesale — keeps live flows working."""
+        excess = len(d) - maxlen
+        if excess > 0:
+            for k in list(d)[:excess]:
+                d.pop(k, None)
 
     while True:
         try:
@@ -475,6 +498,9 @@ async def memory_prune_loop(interval_seconds: int = 600):
 
             if len(_sched_selection) > SCHED_SELECTION_MAX:
                 _sched_selection.clear()
+
+            _cap_oldest(_ghost_selections, GHOST_SELECTIONS_MAX)
+            _cap_oldest(_settle_nudge_msgs, SETTLE_NUDGE_MAX)
 
             # Per-chat state — clean entries for chats whose rollcalls are
             # all gone, or panel ids past the current rollcall count.

@@ -67,17 +67,11 @@ def _uid(name: str) -> int:
 
 def _seed_chat_members() -> None:
     """Insert all 20 members into chat_members so _resolve_member treats them as real users."""
-    conn = db.get_connection()
-    cur = conn.cursor()
+    # upsert_chat_member instead of raw "INSERT OR REPLACE", which is
+    # SQLite-only syntax; the db helper branches per backend.
+    db.get_or_create_chat(CHAT)
     for m in MEMBERS:
-        cur.execute(
-            "INSERT OR REPLACE INTO chat_members"
-            " (chat_id, user_id, first_name, username, is_active)"
-            " VALUES (?, ?, ?, ?, 1)",
-            (CHAT, m["user_id"], m["first_name"], m["username"]),
-        )
-    conn.commit()
-    cur.close()
+        db.upsert_chat_member(CHAT, m["user_id"], m["first_name"], m["username"])
 
 
 def _insert_ended_rollcall(
@@ -94,13 +88,14 @@ def _insert_ended_rollcall(
     if chat_id is None:
         chat_id = CHAT
     ended_at = datetime.datetime.utcnow().isoformat() + "Z"
+    db.get_or_create_chat(chat_id)  # PG enforces the rollcalls->chats FK; SQLite does not
     conn = db.get_connection()
     cur = conn.cursor()
     cur.execute(
         "INSERT INTO rollcalls "
         "(chat_id, title, is_active, is_cancelled, ended_at, event_fee,"
         " collector_uid, collector_name, collector_paid_ground)"
-        " VALUES (?, ?, 0, 0, ?, ?, ?, ?, ?)",
+        " VALUES (?, ?, FALSE, FALSE, ?, ?, ?, ?, ?)",  # FALSE, not 0: is_active/is_cancelled are BOOLEAN on PG
         (chat_id, title, ended_at, str(event_fee),
          collector_uid, collector_name, collector_paid_ground),
     )

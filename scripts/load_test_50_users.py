@@ -41,7 +41,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 _DB_FILE = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
 os.environ["TELEGRAM_TOKEN"] = "999999:dummy_token_for_load_test"
-os.environ["DATABASE_URL"] = f"sqlite:///{_DB_FILE}"
+# A DATABASE_URL from the environment wins, so this same load test can be run
+# against a real Postgres (pooling behaves differently under concurrency than
+# SQLite's WAL). Defaults to a throwaway SQLite file, which is what CI uses.
+os.environ.setdefault("DATABASE_URL", f"sqlite:///{_DB_FILE}")
 os.environ["ADMIN1"] = "100"
 
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))

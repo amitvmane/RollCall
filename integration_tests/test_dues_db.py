@@ -25,12 +25,14 @@ CHAT = -(int(time.time() * 1000) % 10**12) - 10**14
 def _mk_rollcall(chat_id=CHAT, title="Sunday Game", is_active=0, is_cancelled=0,
                  ended_at="2026-07-01T10:00:00Z"):
     """Insert a rollcall row directly and return its id."""
+    db.get_or_create_chat(chat_id)  # PG enforces the rollcalls->chats FK; SQLite does not
     conn = db.get_connection()
     cur = conn.cursor()
     cur.execute(
         "INSERT INTO rollcalls (chat_id, title, is_active, is_cancelled, ended_at)"
         " VALUES (?, ?, ?, ?, ?)",
-        (chat_id, title, is_active, is_cancelled, ended_at),
+        # bool(): both columns are BOOLEAN on PG; SQLite stores them as 0/1
+        (chat_id, title, bool(is_active), bool(is_cancelled), ended_at),
     )
     conn.commit()
     rc_id = cur.lastrowid
@@ -321,6 +323,8 @@ def test_get_nth_game_closure():
     assert db.get_nth_game_closure(chat, 3) is None
 
 
+@pytest.mark.skipif(db.db_type != "sqlite",
+                    reason="builds an old-schema DB with a raw sqlite3 connection")
 def test_reconciler_adds_dues_columns_to_old_schema():
     path = tempfile.mktemp(suffix=".db")
     conn = sqlite3.connect(path)

@@ -33,3 +33,13 @@ class duesGameAlreadyClosed(Exception):
 
 class duesNothingToClose(Exception):
     pass
+
+class databaseError(Exception):
+    """A write that was asked for did not land.
+
+    Raised by the db writers whose result callers historically discarded, so
+    a failed write surfaces instead of the handler going on to announce
+    success. The message must stay generic — the underlying driver error is
+    logged at the raise site and must never be echoed into a chat.
+    """
+    pass

@@ -41,6 +41,7 @@ except ImportError:
 
 import sqlite3
 from config import DATABASE_URL
+from exceptions import databaseError
 
 # Replace the default sqlite3 datetime adapter (deprecated as of Python 3.12,
 # scheduled for removal). The bot stores naive UTC datetimes; this preserves
@@ -1856,6 +1857,15 @@ _VALID_CHAT_FIELDS = {
     'reminder_before_close_hours', 'reminder_after_open_hours',
 }
 
+# Columns declared BOOLEAN in the Postgres schema. SQLite has no bool type and
+# stores 0/1, so callers pass ints interchangeably with bools -- Postgres
+# rejects an int for a boolean column ("column is of type boolean but
+# expression is of type integer") and, because update_chat_settings swallows
+# its exception, the write silently no-ops. Coerce on the way in.
+_BOOLEAN_CHAT_FIELDS = {
+    'shh_mode', 'admin_rights', 'ghost_tracking_enabled', 'dues_enabled',
+}
+
 def update_chat_settings(chat_id: int, **kwargs) -> bool:
     """Update chat settings"""
     for key in kwargs:
@@ -1873,6 +1883,10 @@ def update_chat_settings(chat_id: int, **kwargs) -> bool:
                 # Convert boolean to int for SQLite
                 if db_type == 'sqlite' and isinstance(value, bool):
                     value = 1 if value else 0
+                # ...and int to boolean for Postgres' strict BOOLEAN columns
+                elif (db_type == 'postgresql' and key in _BOOLEAN_CHAT_FIELDS
+                        and isinstance(value, int) and not isinstance(value, bool)):
+                    value = bool(value)
                 values.append(value)
         
             if not fields:
@@ -1885,8 +1899,12 @@ def update_chat_settings(chat_id: int, **kwargs) -> bool:
             logging.info(f"Updated chat settings for {chat_id}: {kwargs}")
             return True
     except Exception as e:
+        # Raise rather than return False: every caller discarded the result,
+        # so a failed write used to be indistinguishable from success and the
+        # handler went on to announce "done". The driver error stays in the
+        # log; the exception message is generic so nothing leaks into chat.
         logging.error(f"Error updating chat settings: {e}")
-        return False
+        raise databaseError("⚠️ Couldn't save that setting — please try again.") from e
 
 def create_rollcall(chat_id: int, title: str, timezone: str = 'Asia/Kolkata', web_token: Optional[str] = None) -> int:
     """Create a new rollcall and return its ID"""
@@ -2002,6 +2020,13 @@ _VALID_ROLLCALL_FIELDS = {
     'reminder_before_close_sent', 'reminder_after_open_sent',
 }
 
+# The rollcalls columns that are BOOLEAN on Postgres — same int-vs-bool trap as
+# _BOOLEAN_CHAT_FIELDS. Note the three *_sent flags and auto_buzz_sent are
+# genuinely INTEGER here and must NOT be coerced.
+_BOOLEAN_ROLLCALL_FIELDS = {
+    'is_active', 'is_cancelled', 'absent_marked',
+}
+
 def update_rollcall(rollcall_id: int, **kwargs) -> bool:
     """Update rollcall fields"""
     for key in kwargs:
@@ -2016,11 +2041,16 @@ def update_rollcall(rollcall_id: int, **kwargs) -> bool:
 
             for key, value in kwargs.items():
                 fields.append(f"{key} = %s" if db_type == 'postgresql' else f"{key} = ?")
+                # int -> bool for Postgres' strict BOOLEAN columns; callers pass
+                # 0/1 interchangeably because SQLite has no bool type.
+                if (db_type == 'postgresql' and key in _BOOLEAN_ROLLCALL_FIELDS
+                        and isinstance(value, int) and not isinstance(value, bool)):
+                    value = bool(value)
                 values.append(value)
-        
+
             if not fields:
                 return True
-        
+
             values.append(rollcall_id)
             query = f"UPDATE rollcalls SET {', '.join(fields)} WHERE id = {'%s' if db_type == 'postgresql' else '?'}"
         
@@ -2029,7 +2059,7 @@ def update_rollcall(rollcall_id: int, **kwargs) -> bool:
             return True
     except Exception as e:
         logging.error(f"Error updating rollcall: {e}")
-        return False
+        raise databaseError("⚠️ Couldn't save that change — please try again.") from e
 
 def get_active_rollcalls(chat_id: int) -> List[Dict]:
     """Get all active rollcalls for a chat"""
@@ -2216,8 +2246,12 @@ def end_rollcall(rollcall_id: int) -> bool:
             logging.info(f"Ended rollcall {rollcall_id}")
             return True
     except Exception as e:
+        # Must raise: rollcall_manager.end_rollcall pops the rollcall from the
+        # in-memory cache straight after this call, so swallowing left the
+        # rollcall still active in the DB but gone from memory — and it came
+        # back as active on the next restart.
         logging.error(f"Error ending rollcall: {e}")
-        return False
+        raise databaseError("⚠️ Couldn't end the rollcall — please try again.") from e
 
 
 def get_all_chat_ids() -> List[int]:
@@ -2427,8 +2461,10 @@ def add_or_update_proxy_user(rollcall_id: int, name: str, status: str, comment: 
 
             return True
     except Exception as e:
+        # A dropped proxy write means the vote exists in memory but not on
+        # disk — it silently disappears at the next restart.
         logging.error(f"Error adding/updating proxy user: {e}")
-        return False
+        raise databaseError("⚠️ Couldn't save that vote — please try again.") from e
 
 def get_all_users(rollcall_id: int):
     """
@@ -3478,6 +3514,23 @@ def get_all_proxy_names(chat_id: int) -> List[str]:
         return []
 
 
+def _ts_str(value):
+    """Normalise a timestamp column to SQLite's 'YYYY-MM-DD HH:MM:SS' text form.
+
+    Postgres returns real datetime objects for TIMESTAMP columns while SQLite
+    hands back the stored string. Callers here are typed/documented as str --
+    notably WebIdentityItem.proxy_last_seen, which pydantic rejects outright
+    when handed a datetime. The format is lexicographically ordered, so the
+    '>' comparisons callers do on these values stay chronologically correct.
+    """
+    if value is None or isinstance(value, str):
+        return value
+    try:
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    except AttributeError:
+        return str(value)
+
+
 def get_proxy_name_activity(chat_id: int) -> Dict[str, Dict]:
     """One grouped query: every proxy name's session count + last-seen
     timestamp for a chat. Covers active AND ended rollcalls (unlike
@@ -3496,7 +3549,8 @@ def get_proxy_name_activity(chat_id: int) -> Dict[str, Dict]:
                     GROUP BY pu.name""",
                 (chat_id,)
             )
-            return {row["name"]: {"count": int(row["cnt"] or 0), "last_seen": row["last_seen"]}
+            return {row["name"]: {"count": int(row["cnt"] or 0),
+                                  "last_seen": _ts_str(row["last_seen"])}
                     for row in cursor.fetchall()}
     except Exception as e:
         logging.error(f"Error getting proxy name activity: {e}")
@@ -3522,7 +3576,7 @@ def get_identity_last_activity(chat_id: int, user_id: int = None,
                     (chat_id, proxy_name)
                 )
             row = cursor.fetchone()
-            return row["updated_at"] if row else None
+            return _ts_str(row["updated_at"]) if row else None
     except Exception as e:
         logging.error(f"Error getting identity last activity: {e}")
         return None
@@ -3698,7 +3752,13 @@ def load_ghost_selections(chat_id: int, rc_db_id: int) -> Optional[set]:
             )
             row = cursor.fetchone()
             if row and row['selected_ids']:
-                return set(json.loads(row['selected_ids']))
+                raw = row['selected_ids']
+                # selected_ids is jsonb on Postgres, which psycopg2 has already
+                # deserialised into a list by this point; on SQLite it is TEXT
+                # and still needs decoding. json.loads(list) raises, and the
+                # except below would swallow it into a silent "no selections".
+                ids = raw if isinstance(raw, (list, tuple)) else json.loads(raw)
+                return set(ids)
             return None
     except Exception as e:
         logging.error(f"Error loading ghost selections: {e}")
@@ -5847,9 +5907,9 @@ def update_game_closure_collector(
             )
             updated = cursor.rowcount > 0
             return updated
-    except Exception:
+    except Exception as e:
         logging.exception("update_game_closure_collector failed")
-        return False
+        raise databaseError("⚠️ Couldn't update the collector — please try again.") from e
 
 
 def delete_game_closure(rollcall_id: int) -> bool:
@@ -5868,9 +5928,13 @@ def delete_game_closure(rollcall_id: int) -> bool:
             )
             deleted = cursor.rowcount > 0
             return deleted
-    except Exception:
+    except Exception as e:
+        # The compensating ledger entries have already been written by the
+        # time this runs, so swallowing left the ledger saying "reversed"
+        # while the closure row still said "closed" — and the game could
+        # never be re-closed.
         logging.exception("delete_game_closure failed")
-        return False
+        raise databaseError("⚠️ Couldn't cancel the game's dues — please try again.") from e
 
 
 def add_dues_entry(
@@ -6311,9 +6375,9 @@ def upsert_penalty_tier(
                      late_minutes_threshold, ditch_int, now),
                 )
             return True
-    except Exception:
+    except Exception as e:
         logging.exception("upsert_penalty_tier failed")
-        return False
+        raise databaseError("⚠️ Couldn't save that penalty tier — please try again.") from e
 
 
 def _dues_epoch_clause(chat_id: int, ph: str):

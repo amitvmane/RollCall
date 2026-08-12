@@ -19,11 +19,12 @@ CHAT = -(int(time.time() * 1000) % 10**12) - 10**14
 
 
 def _mk_rollcall(chat_id, title="Game", is_active=0):
+    db.get_or_create_chat(chat_id)  # PG enforces the rollcalls->chats FK; SQLite does not
     conn = db.get_connection()
     cur = conn.cursor()
     cur.execute(
         "INSERT INTO rollcalls (chat_id, title, is_active) VALUES (?, ?, ?)",
-        (chat_id, title, is_active),
+        (chat_id, title, bool(is_active)),  # bool(): PG's is_active is BOOLEAN, SQLite stores it as 0/1
     )
     conn.commit()
     rc_id = cur.lastrowid
@@ -31,6 +32,7 @@ def _mk_rollcall(chat_id, title="Game", is_active=0):
     return rc_id
 
 
+@unittest.skipIf(db.db_type != "sqlite", "WAL is a SQLite-only journal mode")
 class TestWalModeActive(unittest.TestCase):
 
     def test_journal_mode_is_wal(self):

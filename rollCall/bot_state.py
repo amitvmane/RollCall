@@ -15,7 +15,7 @@ from config import TELEGRAM_TOKEN
 from exceptions import (
     rollCallNotStarted, insufficientPermissions, parameterMissing, incorrectParameter,
     duplicateProxy, alreadyInList, repeatlyName, timeError, amountOfRollCallsReached, rollCallAlreadyStarted,
-    duesGameAlreadyClosed, duesNothingToClose,
+    duesGameAlreadyClosed, duesNothingToClose, databaseError,
 )
 from models import RollCall, User
 from rollcall_manager import manager
@@ -31,6 +31,9 @@ _USER_FACING_EXCEPTIONS = (
     rollCallNotStarted, insufficientPermissions, parameterMissing, incorrectParameter,
     duplicateProxy, alreadyInList, repeatlyName, timeError, amountOfRollCallsReached, rollCallAlreadyStarted,
     duesGameAlreadyClosed, duesNothingToClose,
+    # databaseError's message is deliberately generic ("couldn't save that —
+    # try again"); the driver error is logged at the raise site, never here.
+    databaseError,
 )
 
 logging.basicConfig(

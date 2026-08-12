@@ -1224,5 +1224,207 @@ class TestAutoStartUnsettledWarning(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(picker.await_count, 2)
 
 
+class TestRotateCollector(unittest.IsolatedAsyncioTestCase):
+    """/rotate_collector — round-robin collector auto-assignment toggle."""
+
+    def setUp(self):
+        import bot_state
+        self.bot_state = bot_state
+        bot_state.bot.send_message = AsyncMock()
+        self.mgr = _make_lock_manager()
+        patcher = patch("handlers.dues._require_dues_enabled")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _sent_text(self, idx=0):
+        return self.bot_state.bot.send_message.call_args_list[idx][0][1]
+
+    async def test_admin_denied(self):
+        from handlers.dues import rotate_collector
+        with _admin_denied(), patch("handlers.dues.manager", self.mgr):
+            await rotate_collector(_msg("/rotate_collector on"))
+        self.assertIn("Admin", self._sent_text())
+
+    async def test_no_args_reports_current_state_off(self):
+        from handlers.dues import rotate_collector
+        with _admin_ok(), patch("handlers.dues.manager", self.mgr), \
+             patch("handlers.dues._db.get_or_create_chat",
+                   return_value={"collector_rotation": 0}):
+            await rotate_collector(_msg("/rotate_collector"))
+        self.assertIn("OFF", self._sent_text())
+
+    async def test_no_args_reports_current_state_on(self):
+        from handlers.dues import rotate_collector
+        with _admin_ok(), patch("handlers.dues.manager", self.mgr), \
+             patch("handlers.dues._db.get_or_create_chat",
+                   return_value={"collector_rotation": 1}):
+            await rotate_collector(_msg("/rotate_collector"))
+        self.assertIn("ON", self._sent_text())
+
+    async def test_on_enables_via_service(self):
+        from handlers.dues import rotate_collector
+        svc = MagicMock(return_value={"announcement": "🔄 Collector rotation ON"})
+        with _admin_ok(), patch("handlers.dues.manager", self.mgr), \
+             patch("handlers.dues.dues_svc.set_collector_rotation", svc):
+            await rotate_collector(_msg("/rotate_collector on"))
+        self.assertIs(svc.call_args.kwargs["enabled"], True)
+        self.assertIn("ON", self._sent_text())
+
+    async def test_off_disables_via_service(self):
+        from handlers.dues import rotate_collector
+        svc = MagicMock(return_value={"announcement": "🔄 Collector rotation OFF"})
+        with _admin_ok(), patch("handlers.dues.manager", self.mgr), \
+             patch("handlers.dues.dues_svc.set_collector_rotation", svc):
+            await rotate_collector(_msg("/rotate_collector off"))
+        self.assertIs(svc.call_args.kwargs["enabled"], False)
+
+    async def test_garbage_arg_shows_usage_and_does_not_call_service(self):
+        from handlers.dues import rotate_collector
+        svc = MagicMock()
+        with _admin_ok(), patch("handlers.dues.manager", self.mgr), \
+             patch("handlers.dues.dues_svc.set_collector_rotation", svc):
+            await rotate_collector(_msg("/rotate_collector maybe"))
+        svc.assert_not_called()
+        self.assertIn("Usage", self._sent_text())
+
+
+class TestDuesNudges(unittest.IsolatedAsyncioTestCase):
+    """/dues_nudges — weekly dues reminder toggle."""
+
+    def setUp(self):
+        import bot_state
+        self.bot_state = bot_state
+        bot_state.bot.send_message = AsyncMock()
+        self.mgr = _make_lock_manager()
+        patcher = patch("handlers.dues._require_dues_enabled")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _sent_text(self, idx=0):
+        return self.bot_state.bot.send_message.call_args_list[idx][0][1]
+
+    async def test_admin_denied(self):
+        from handlers.dues import dues_nudges
+        with _admin_denied(), patch("handlers.dues.manager", self.mgr):
+            await dues_nudges(_msg("/dues_nudges on"))
+        self.assertIn("Admin", self._sent_text())
+
+    async def test_no_args_reports_state(self):
+        from handlers.dues import dues_nudges
+        with _admin_ok(), patch("handlers.dues.manager", self.mgr), \
+             patch("handlers.dues._db.get_or_create_chat",
+                   return_value={"dues_weekly_nudge": 1}):
+            await dues_nudges(_msg("/dues_nudges"))
+        self.assertIn("ON", self._sent_text())
+
+    async def test_on_persists_flag(self):
+        from handlers.dues import dues_nudges
+        upd = MagicMock()
+        with _admin_ok(), patch("handlers.dues.manager", self.mgr), \
+             patch("handlers.dues._db.update_chat_settings", upd):
+            await dues_nudges(_msg("/dues_nudges on"))
+        self.assertEqual(upd.call_args.kwargs["dues_weekly_nudge"], 1)
+
+    async def test_off_persists_flag(self):
+        from handlers.dues import dues_nudges
+        upd = MagicMock()
+        with _admin_ok(), patch("handlers.dues.manager", self.mgr), \
+             patch("handlers.dues._db.update_chat_settings", upd):
+            await dues_nudges(_msg("/dues_nudges off"))
+        self.assertEqual(upd.call_args.kwargs["dues_weekly_nudge"], 0)
+
+    async def test_garbage_arg_shows_usage_and_persists_nothing(self):
+        from handlers.dues import dues_nudges
+        upd = MagicMock()
+        with _admin_ok(), patch("handlers.dues.manager", self.mgr), \
+             patch("handlers.dues._db.update_chat_settings", upd):
+            await dues_nudges(_msg("/dues_nudges sometimes"))
+        upd.assert_not_called()
+        self.assertIn("Usage", self._sent_text())
+
+
+class TestPenaltiesListing(unittest.IsolatedAsyncioTestCase):
+    """/penalties — read-only tier listing."""
+
+    def setUp(self):
+        self.mgr = _make_lock_manager()
+
+    async def test_lists_tiers_from_service(self):
+        from handlers.dues import penalties
+        sender = AsyncMock()
+        with patch("handlers.dues.manager", self.mgr), \
+             patch("handlers.dues.send_md_fallback", sender), \
+             patch("handlers.dues.dues_svc.list_penalty_tiers",
+                   return_value={"announcement": "⚖️ Penalty tiers:\n• ditch — ₹200"}):
+            await penalties(_msg("/penalties"))
+        self.assertIn("ditch", sender.call_args[0][1])
+
+    async def test_available_to_non_admins_by_design(self):
+        """Deliberately has no admin guard and no dues-enabled guard, so admins
+        can review tiers before enabling dues (see the handler's comment)."""
+        from handlers.dues import penalties
+        sender = AsyncMock()
+        with _admin_denied(), patch("handlers.dues.manager", self.mgr), \
+             patch("handlers.dues.send_md_fallback", sender), \
+             patch("handlers.dues.dues_svc.list_penalty_tiers",
+                   return_value={"announcement": "⚖️ Penalty tiers:\n• ditch — ₹200"}):
+            await penalties(_msg("/penalties"))
+        sender.assert_awaited_once()
+
+
+class TestMatchdayCard(unittest.IsolatedAsyncioTestCase):
+    """/card (/mc) — shareable match-day card image."""
+
+    def setUp(self):
+        import bot_state
+        self.bot_state = bot_state
+        bot_state.bot.send_message = AsyncMock()
+        bot_state.bot.send_photo = AsyncMock()
+        self.mgr = _make_lock_manager()
+
+    def _sent_text(self, idx=0):
+        return self.bot_state.bot.send_message.call_args_list[idx][0][1]
+
+    def _rc(self, names, title="Sunday Game"):
+        rc = MagicMock()
+        rc.title = title
+        rc.inList = [MagicMock(name=n) for n in names]
+        # MagicMock(name=...) sets the mock's repr, not a .name attribute
+        for stub, n in zip(rc.inList, names):
+            stub.name = n
+        return rc
+
+    async def test_no_active_rollcall_errors(self):
+        from handlers.dues import matchday_card
+        with patch("handlers.dues.manager", self.mgr), \
+             patch("functions.roll_call_not_started", return_value=False):
+            await matchday_card(_msg("/card"))
+        self.assertIn("rollcall", self._sent_text().lower())
+        self.bot_state.bot.send_photo.assert_not_awaited()
+
+    async def test_empty_in_list_explains_instead_of_sending_image(self):
+        from handlers.dues import matchday_card
+        self.mgr.get_rollcall.return_value = self._rc([])
+        with patch("handlers.dues.manager", self.mgr), \
+             patch("functions.roll_call_not_started", return_value=True):
+            await matchday_card(_msg("/card"))
+        self.assertIn("Nobody is IN", self._sent_text())
+        self.bot_state.bot.send_photo.assert_not_awaited()
+
+    async def test_sends_photo_with_in_players(self):
+        from handlers.dues import matchday_card
+        self.mgr.get_rollcall.return_value = self._rc(["Alice", "Bob", "Ravi"])
+        gen = MagicMock(return_value=b"fake-png-bytes")
+        with patch("handlers.dues.manager", self.mgr), \
+             patch("functions.roll_call_not_started", return_value=True), \
+             patch("utils.card_gen.matchday_card", gen):
+            await matchday_card(_msg("/card"))
+        self.bot_state.bot.send_photo.assert_awaited_once()
+        # the generator gets the IN names, and the caption carries the count
+        self.assertEqual(gen.call_args[0][2], ["Alice", "Bob", "Ravi"])
+        self.assertIn("3 players IN",
+                      self.bot_state.bot.send_photo.call_args.kwargs["caption"])
+
+
 if __name__ == "__main__":
     unittest.main()

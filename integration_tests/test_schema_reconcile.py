@@ -11,7 +11,15 @@ import os
 import sqlite3
 import tempfile
 
+import pytest
+
 import db
+
+# Hand-builds an old-schema database with a raw sqlite3 connection and inspects
+# it via PRAGMA table_info -- both SQLite-only. The reconciler's Postgres path
+# is covered by the suite booting against a cold PG database.
+pytestmark = pytest.mark.skipif(
+    db.db_type != "sqlite", reason="SQLite-only schema reconciler test")
 
 
 def _old_schema_conn():

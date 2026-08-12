@@ -128,6 +128,67 @@ jobs:
       - name: Run load test
         run: python scripts/load_test_50_users.py
 
+      - name: Run realistic parallel scenario
+        run: python scripts/parallel_scenario_test.py
+
+  postgres:
+    name: Postgres (integration + load + scenario)
+    runs-on: ubuntu-latest
+    # Everything above runs on SQLite. Postgres is the other supported
+    # backend and behaves differently in ways SQLite silently tolerates:
+    # BOOLEAN columns reject 0/1 ints, jsonb comes back already decoded,
+    # TIMESTAMP columns return datetime objects rather than strings, and
+    # foreign keys are actually enforced. Three production bugs of exactly
+    # that shape (dues could never be enabled, ghost-selection recovery
+    # always returned nothing, the identities endpoint 500'd) shipped
+    # undetected because no CI job ever pointed the suite at a real
+    # Postgres. This job is what keeps them from coming back.
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: rolltest
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: rollcall_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://rolltest:test@127.0.0.1:5432/rollcall_test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-postgres-${{ hashFiles('requirements.lock') }}
+
+      - name: Install dependencies (locked)
+        run: pip install -r requirements.lock pytest
+
+      - name: Run integration tests against Postgres
+        run: python -m pytest integration_tests/ -v --tb=short
+
+      - name: Run load test against Postgres
+        run: python scripts/load_test_50_users.py
+
+      - name: Run realistic parallel scenario against Postgres
+        run: python scripts/parallel_scenario_test.py
+
   docker:
     name: Docker Build Check
     runs-on: ubuntu-latest

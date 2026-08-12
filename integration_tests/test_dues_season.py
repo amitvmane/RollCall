@@ -23,10 +23,17 @@ def _bump_ended_at(rollcall_id, seconds=120):
     one second. Positive = clearly after the epoch, negative = clearly before."""
     sign = "+" if seconds >= 0 else "-"
     with db._cursor(commit=True) as cur:
-        cur.execute(
-            "UPDATE rollcalls SET ended_at = datetime(ended_at, ?) WHERE id = ?",
-            (f"{sign}{abs(seconds)} seconds", rollcall_id),
-        )
+        if db.db_type == "postgresql":
+            # datetime() is SQLite-only; ended_at is a real TIMESTAMP here
+            cur.execute(
+                "UPDATE rollcalls SET ended_at = ended_at + %s::interval WHERE id = %s",
+                (f"{sign}{abs(seconds)} seconds", rollcall_id),
+            )
+        else:
+            cur.execute(
+                "UPDATE rollcalls SET ended_at = datetime(ended_at, ?) WHERE id = ?",
+                (f"{sign}{abs(seconds)} seconds", rollcall_id),
+            )
 
 
 class SeasonBase(IntegrationBase):

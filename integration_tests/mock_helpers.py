@@ -70,6 +70,13 @@ def reset_db():
     """Truncate all rows between tests. Keeps schema intact."""
     import db as _db
     conn = _db.get_connection()
+    # On Postgres a failed statement leaves the connection in an aborted
+    # transaction where every subsequent command errors until it is rolled
+    # back. SQLite has no such state, so this is a no-op there.
+    try:
+        conn.rollback()
+    except Exception:
+        pass
     cur = conn.cursor()
     for tbl in [
         "admin_actions", "ghost_events", "ghost_records", "ghost_selections",

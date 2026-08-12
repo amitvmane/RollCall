@@ -1856,6 +1856,15 @@ _VALID_CHAT_FIELDS = {
     'reminder_before_close_hours', 'reminder_after_open_hours',
 }
 
+# Columns declared BOOLEAN in the Postgres schema. SQLite has no bool type and
+# stores 0/1, so callers pass ints interchangeably with bools -- Postgres
+# rejects an int for a boolean column ("column is of type boolean but
+# expression is of type integer") and, because update_chat_settings swallows
+# its exception, the write silently no-ops. Coerce on the way in.
+_BOOLEAN_CHAT_FIELDS = {
+    'shh_mode', 'admin_rights', 'ghost_tracking_enabled', 'dues_enabled',
+}
+
 def update_chat_settings(chat_id: int, **kwargs) -> bool:
     """Update chat settings"""
     for key in kwargs:
@@ -1873,6 +1882,10 @@ def update_chat_settings(chat_id: int, **kwargs) -> bool:
                 # Convert boolean to int for SQLite
                 if db_type == 'sqlite' and isinstance(value, bool):
                     value = 1 if value else 0
+                # ...and int to boolean for Postgres' strict BOOLEAN columns
+                elif (db_type == 'postgresql' and key in _BOOLEAN_CHAT_FIELDS
+                        and isinstance(value, int) and not isinstance(value, bool)):
+                    value = bool(value)
                 values.append(value)
         
             if not fields:
@@ -3478,6 +3491,23 @@ def get_all_proxy_names(chat_id: int) -> List[str]:
         return []
 
 
+def _ts_str(value):
+    """Normalise a timestamp column to SQLite's 'YYYY-MM-DD HH:MM:SS' text form.
+
+    Postgres returns real datetime objects for TIMESTAMP columns while SQLite
+    hands back the stored string. Callers here are typed/documented as str --
+    notably WebIdentityItem.proxy_last_seen, which pydantic rejects outright
+    when handed a datetime. The format is lexicographically ordered, so the
+    '>' comparisons callers do on these values stay chronologically correct.
+    """
+    if value is None or isinstance(value, str):
+        return value
+    try:
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    except AttributeError:
+        return str(value)
+
+
 def get_proxy_name_activity(chat_id: int) -> Dict[str, Dict]:
     """One grouped query: every proxy name's session count + last-seen
     timestamp for a chat. Covers active AND ended rollcalls (unlike
@@ -3496,7 +3526,8 @@ def get_proxy_name_activity(chat_id: int) -> Dict[str, Dict]:
                     GROUP BY pu.name""",
                 (chat_id,)
             )
-            return {row["name"]: {"count": int(row["cnt"] or 0), "last_seen": row["last_seen"]}
+            return {row["name"]: {"count": int(row["cnt"] or 0),
+                                  "last_seen": _ts_str(row["last_seen"])}
                     for row in cursor.fetchall()}
     except Exception as e:
         logging.error(f"Error getting proxy name activity: {e}")
@@ -3522,7 +3553,7 @@ def get_identity_last_activity(chat_id: int, user_id: int = None,
                     (chat_id, proxy_name)
                 )
             row = cursor.fetchone()
-            return row["updated_at"] if row else None
+            return _ts_str(row["updated_at"]) if row else None
     except Exception as e:
         logging.error(f"Error getting identity last activity: {e}")
         return None
@@ -3698,7 +3729,13 @@ def load_ghost_selections(chat_id: int, rc_db_id: int) -> Optional[set]:
             )
             row = cursor.fetchone()
             if row and row['selected_ids']:
-                return set(json.loads(row['selected_ids']))
+                raw = row['selected_ids']
+                # selected_ids is jsonb on Postgres, which psycopg2 has already
+                # deserialised into a list by this point; on SQLite it is TEXT
+                # and still needs decoding. json.loads(list) raises, and the
+                # except below would swallow it into a silent "no selections".
+                ids = raw if isinstance(raw, (list, tuple)) else json.loads(raw)
+                return set(ids)
             return None
     except Exception as e:
         logging.error(f"Error loading ghost selections: {e}")

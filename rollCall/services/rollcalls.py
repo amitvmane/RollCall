@@ -25,6 +25,7 @@ from exceptions import (
 from functions import get_next_weekday_datetime
 from rollcall_manager import manager
 from db import (
+    get_or_create_chat,
     increment_user_stat,
     log_admin_action,
     reset_proxy_streak,
@@ -156,7 +157,10 @@ async def _push_rollcall_started(chat_id: int, title: str) -> None:
     try:
         import os as _os
         from services import push as push_svc
-        chat = manager.get_chat(chat_id)
+        # get_or_create_chat, not manager.get_chat -- that cache only ever
+        # populates a hardcoded 6-field subset and never included
+        # group_web_token, so this always read None and silently no-op'd.
+        chat = get_or_create_chat(chat_id)
         group_token = chat.get("group_web_token") if chat else None
         if not group_token:
             return
@@ -172,7 +176,9 @@ async def _push_rollcall_ended(chat_id: int, title: str) -> None:
     try:
         import os as _os
         from services import push as push_svc
-        chat = manager.get_chat(chat_id)
+        # get_or_create_chat, not manager.get_chat -- see the comment in
+        # _push_rollcall_started above.
+        chat = get_or_create_chat(chat_id)
         group_token = chat.get("group_web_token") if chat else None
         if not group_token:
             return

@@ -20,7 +20,26 @@ def _ts():
 
 
 class RollCallManager:
-    """Manages rollcalls with in-memory cache and database persistence"""
+    """Manages rollcalls with in-memory cache and database persistence.
+
+    CACHE CONTRACT: get_chat()'s cache dict is coherent ONLY for the six
+    keys populated below (rollCalls + the five fields backing the paired
+    get_x/set_x methods further down this class -- e.g. get_shh_mode/
+    set_shh_mode). Those setters write through to the DB *and* patch this
+    dict in the same call, which is what keeps them fresh; nothing else
+    ever refreshes a chat's cache entry once loaded (short of an explicit
+    reload_chat/clear_cache).
+
+    Do NOT read any other chat-settings field via
+    `manager.get_chat(chat_id).get(<field>)` -- it will silently return
+    None/default forever, since that field is never populated or kept in
+    sync. This has caused two real production bugs (auto_buzz_hours,
+    group_web_token both always read as unset). For any field outside the
+    six below, call `db.get_or_create_chat(chat_id)` directly instead --
+    see check_reminders.py and services/rollcalls.py for the fixed pattern.
+    `tests/test_rollcall_manager.py::test_cache_only_ever_carries_the_six_paired_fields`
+    pins this key set so a silent widening doesn't slip back in.
+    """
 
     def __init__(self):
         # In-memory cache:
@@ -29,7 +48,9 @@ class RollCallManager:
         #       'rollCalls': [RollCall objects],
         #       'shh': bool,
         #       'adminRights': bool,
-        #       'timezone': str
+        #       'timezone': str,
+        #       'absentLimit': int,
+        #       'ghostTrackingEnabled': bool,
         #   }
         # }
         self._cache = {}

@@ -253,6 +253,33 @@ class TestCacheManagement(unittest.TestCase):
         self.assertIsNotNone(chat_before)
         self.assertIsNotNone(chat_after)
 
+    def test_cache_only_ever_carries_the_six_paired_fields(self):
+        """Contract-pinning regression guard.
+
+        get_chat()'s cache dict is coherent ONLY for the fields that go
+        through a paired get_x/set_x method (shh, adminRights, timezone,
+        absentLimit, ghostTrackingEnabled) plus rollCalls -- those setters
+        keep the DB row and this cache dict in sync on every write. Any
+        OTHER field read via manager.get_chat(chat_id).get(field) silently
+        returns None/default forever, since nothing ever refreshes it after
+        the first load. This bit twice already: /auto_buzz (auto_buzz_hours)
+        and web-push start/end notifications (group_web_token) both read a
+        field through this cache that was never one of the six, and both
+        silently no-op'd in production until fixed to call
+        db.get_or_create_chat directly instead.
+
+        This test pins the cache's key set so a future change that widens
+        what get_chat() populates (or a future call site that assumes a 7th
+        key is safe to read) gets caught here rather than shipping another
+        silent no-op. The db.get_or_create_chat mock in setUp deliberately
+        returns group_web_token to prove it is NOT one of the cached keys.
+        """
+        chat = self.mgr.get_chat(5003)
+        self.assertEqual(
+            set(chat.keys()),
+            {"rollCalls", "shh", "adminRights", "timezone", "absentLimit", "ghostTrackingEnabled"},
+        )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

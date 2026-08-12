@@ -84,3 +84,16 @@ def test_reconcile_adds_treasury_upi_and_collector_upi():
     finally:
         conn.close()
         os.unlink(path)
+
+
+def test_reconcile_adds_reminder_dm_columns():
+    """A prod DB predating the reminder-DM feature gets the 4 new columns
+    backfilled on next restart, not a crash on 'no such column'."""
+    path, conn = _old_schema_conn()
+    try:
+        db._reconcile_columns(conn, conn.cursor())
+        assert {"reminder_before_close_hours", "reminder_after_open_hours"} <= _cols(conn, "chats")
+        assert {"reminder_before_close_sent", "reminder_after_open_sent"} <= _cols(conn, "rollcalls")
+    finally:
+        conn.close()
+        os.unlink(path)

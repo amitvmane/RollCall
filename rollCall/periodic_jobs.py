@@ -14,9 +14,12 @@ Firing rules (all in each chat's own timezone):
                         (money post — always sends, per the ledger rule)
   idle re-engagement  — daily sweep; groups with templates but no rollcall
                         in 14 days get ONE admin DM, re-armed after 30 days
+  ghost auto-forgive  — daily sweep; sessions nobody ever marked up get
+                        treated as "everyone attended" after a grace window
 """
 import asyncio
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 
 import pytz
@@ -25,6 +28,26 @@ from bot_state import bot, _log_task_exc
 
 IDLE_DAYS = 14
 IDLE_RENUDGE_DAYS = 30
+
+# Ghost auto-forgive: how long an ended session may sit unmarked before we
+# treat it as "everyone who was IN showed up". 0 disables the sweep.
+#
+# Why this exists: ghost counts are only ever INCREMENTED by an admin
+# explicitly marking no-shows, but they are only ever DECREMENTED by that
+# same admin answering the post-/erc "any ghosts?" prompt. Punishment is
+# therefore automatic while forgiveness needs a button tap after every single
+# game — an asymmetry that guarantees drift. Someone who ghosted once and has
+# attended ever since stays flagged forever, and gets a reconfirmation prompt
+# on every /in, purely because nobody tapped the prompt.
+#
+# This sweep can only ever forgive: a session that was never marked never
+# added a ghost to anyone, so processing it as "all attended" strictly
+# decrements. There is no input that makes it punish someone.
+GHOST_AUTOFORGIVE_DAYS = int(os.environ.get("GHOST_AUTOFORGIVE_DAYS", "7"))
+
+# Outer bound for the lookback, matching the /mark_absent panel's own window —
+# keeps a first run after upgrade from churning through ancient history.
+_AUTOFORGIVE_MAX_LOOKBACK_DAYS = 30
 
 
 def _tz_for(chat_id: int):
@@ -57,6 +80,10 @@ async def run_periodic_jobs() -> None:
         await _idle_reengagement()
     except Exception:
         logging.exception("[periodic] idle re-engagement sweep failed")
+    try:
+        await _ghost_auto_forgive()
+    except Exception:
+        logging.exception("[periodic] ghost auto-forgive sweep failed")
 
 
 # ── Weekly dues nudges ────────────────────────────────────────────────────────
@@ -192,6 +219,74 @@ async def _monthly_digests() -> None:
 
 
 # ── Idle-group re-engagement ──────────────────────────────────────────────────
+
+def _parse_ended_at(value):
+    """ended_at is a datetime on Postgres and an ISO-ish string on SQLite."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    text = str(value).strip().replace("Z", "+00:00").replace(" ", "T", 1)
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+async def _ghost_auto_forgive() -> None:
+    """Treat long-unmarked sessions as 'everyone attended' and forgive.
+
+    See GHOST_AUTOFORGIVE_DAYS above for why. Strictly decrements — an
+    unmarked session never added a ghost to anyone in the first place.
+    """
+    if GHOST_AUTOFORGIVE_DAYS <= 0:
+        return
+
+    import db as _db
+    from handlers.ghost import _decrement_attended
+
+    # Once per day for the whole sweep, same persistent-stamp pattern as the
+    # idle sweep so a restart can't make it run repeatedly.
+    today = datetime.now(pytz.timezone("Asia/Kolkata")).strftime("%Y-%m-%d")
+    if _db.get_system_config("ghost_autoforgive_last") == today:
+        return
+    _db.set_system_config("ghost_autoforgive_last", today)
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=GHOST_AUTOFORGIVE_DAYS)
+    swept = 0
+
+    for chat_id in _db.get_all_chat_ids():
+        try:
+            # Ghost tracking off → the whole concept doesn't apply here.
+            if not _db.get_or_create_chat(chat_id).get("ghost_tracking_enabled"):
+                continue
+
+            stale = [
+                rc for rc in _db.get_unprocessed_rollcalls(
+                    chat_id, days=_AUTOFORGIVE_MAX_LOOKBACK_DAYS)
+                if (ended := _parse_ended_at(rc.get("ended_at"))) and ended <= cutoff
+            ]
+            for rc in stale:
+                rc_id = rc["id"]
+                in_users = _db.get_rollcall_in_users(rc_id)
+                # selected=set() == "nobody ghosted", the same call the
+                # "✅ No, all showed up" button makes.
+                _decrement_attended(chat_id, in_users, set())
+                _db.mark_rollcall_absent_done(rc_id)
+                swept += 1
+                logging.info(
+                    "[periodic] ghost auto-forgive: chat=%s rollcall=%s (%r) "
+                    "unmarked for >%sd — forgave %d attendee(s)",
+                    chat_id, rc_id, rc.get("title"), GHOST_AUTOFORGIVE_DAYS,
+                    len(in_users),
+                )
+        except Exception:
+            logging.exception("[periodic] ghost auto-forgive failed for chat %s", chat_id)
+
+    if swept:
+        logging.info("[periodic] ghost auto-forgive: processed %d stale session(s)", swept)
+
 
 async def _idle_reengagement() -> None:
     import db as _db

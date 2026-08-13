@@ -141,6 +141,7 @@ variables:
 | `REST_API_PORT` | No | FastAPI port (default: `8081`) |
 | `WEB_BASE_URL` | No | Your public HTTPS base URL — enables web voting links in panels and `/weblink` |
 | `MINIAPP_URL` | No | Public URL of `/miniapp/` — wires the Telegram menu button on startup |
+| `GHOST_AUTOFORGIVE_DAYS` | No | Days before an unreviewed session counts as "everyone attended" (default: `7`, `0` disables) |
 
 **SQLite** (default) stores the database at `/app/data/rollcall.db`.  
 **PostgreSQL** example: `postgresql://user:password@host:5432/dbname`
@@ -225,10 +226,21 @@ For adding non-Telegram members to a rollcall. Proxy names are limited to **40 c
 | Command | Description |
 |---|---|
 | `/toggle_ghost_tracking` | Enable or disable no-show tracking |
-| `/set_absent_limit N` | Set no-show threshold for reconfirmation prompts |
+| `/set_absent_limit N` | Set no-show threshold for reconfirmation prompts (default `1`) |
 | `/absent_stats` | Show ghost leaderboard |
 | `/mark_absent` | Manually mark no-shows from a past session |
 | `/clear_absent name` | Clear ghost count for a user |
+
+**How absences are forgiven.** After a rollcall ends the bot asks *"any ghosts?"*. Answering it does
+two things: it records the no-shows you select, **and forgives one absence for everyone you don't**.
+That second half is easy to miss — skipping the prompt when everybody turned up means nobody gets
+credited, so a member who ghosted once can stay flagged indefinitely and keep getting a
+reconfirmation prompt on every `/in`.
+
+To stop that, sessions left unanswered for `GHOST_AUTOFORGIVE_DAYS` (default 7) are automatically
+treated as *"everyone who was IN attended"*. This can only ever forgive — an unanswered session never
+recorded a ghost against anyone. The trade-off is that once a session auto-closes you can no longer
+mark no-shows on it, so raise the window if your group reviews late, or set it to `0` to disable.
 
 ### Admin Tools
 

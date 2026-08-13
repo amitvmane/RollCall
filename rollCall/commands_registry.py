@@ -486,13 +486,24 @@ COMMANDS = [
         "name": "set_absent_limit", "aliases": [], "scope": "admin", "category": "Ghost Tracking",
         "args": "N", "sample": "/set_absent_limit 2",
         "summary": "Missed sessions before reconfirmation",
-        "details": "Sets how many ghosts trigger the reconfirmation prompt. 1 by default.",
+        "details": "Sets how many ghosts trigger the reconfirmation prompt. 1 by default — meaning a "
+                   "single no-show starts prompting that member on every /in until they attend a "
+                   "session that gets reviewed. Raise it to 2-3 if that feels harsh.\n\n"
+                   "Absences are forgiven one at a time by /mark_absent (or the prompt after /erc), "
+                   "and unreviewed sessions auto-forgive after 7 days.",
     },
     {
         "name": "mark_absent", "aliases": [], "scope": "admin", "category": "Ghost Tracking",
         "args": "", "sample": "/mark_absent",
         "summary": "Review & mark no-shows from a past session",
-        "details": "Walks through recently-ended rollcalls and lets you pick who actually didn't show. Resets streaks on selected users.",
+        "details": "Walks through recently-ended rollcalls and lets you pick who actually didn't show. "
+                   "Resets streaks on selected users.\n\n"
+                   "Answering this also FORGIVES everyone you don't select — each of them gets one "
+                   "absence removed. That's why it's worth answering even when nobody ghosted: "
+                   "'no ghosts' is what clears past absences for the people who did turn up.\n\n"
+                   "Sessions left unanswered are auto-treated as 'everyone attended' after 7 days "
+                   "(GHOST_AUTOFORGIVE_DAYS), so nobody stays flagged because a session was never "
+                   "reviewed — but you can no longer mark no-shows on a session once that happens.",
     },
     {
         "name": "clear_absent", "aliases": [], "scope": "admin", "category": "Ghost Tracking",

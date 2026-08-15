@@ -704,9 +704,16 @@ def create_tables():
         # Identity merge: alias a proxy name to a canonical identity (another
         # proxy name, or a real user) so stats/dues/ghost-tracking treat them
         # as one person. Resolved at read time — never rewrites the historical
-        # rows in ghost_records/dues_entries/user_stats/proxy_stats etc. The
-        # 'dismissed' status records a rejected fuzzy-match suggestion (so it
-        # doesn't keep resurfacing) without acting as a real merge.
+        # rows in ghost_records/dues_entries/user_stats/proxy_stats etc.
+        #
+        # status values (only 'linked' is an actual merge):
+        #   linked      — alias resolves to canonical_user_id/canonical_proxy_name
+        #   dismissed   — this (alias, candidate) pair was reviewed and rejected,
+        #                 so the fuzzy suggestion stops resurfacing
+        #   discarded   — invalid/garbage name, hidden from the merge UI entirely
+        #   standalone  — a real person with no Telegram account: out of the
+        #                 review queue, but still listed and still a valid merge
+        #                 target (see discard_identity_name)
         if db_type == 'postgresql':
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS identity_links (
@@ -3388,19 +3395,34 @@ def delete_identity_link(chat_id: int, alias_proxy_name: str) -> bool:
 
 
 def discard_identity_name(chat_id: int, alias_proxy_name: str, *,
-                           created_by: int = None, created_by_name: str = None) -> None:
-    """Mark a proxy name as invalid/garbage (a stray "2" or "]" from a
-    typo'd /sif) so it stops showing up in suggestions, the merge picker,
-    and the identities list — without touching its historical proxy_users
-    rows (past attendance isn't deleted, just hidden from future merge
-    bookkeeping). Idempotent. Reversible via undiscard_identity_name."""
+                           created_by: int = None, created_by_name: str = None,
+                           status: str = 'discarded') -> None:
+    """Retire a proxy name from the merge review queue without touching its
+    historical proxy_users rows (past attendance isn't deleted, just hidden
+    from future merge bookkeeping). Idempotent. Reversible via
+    undiscard_identity_name(status=...).
+
+    Two terminal statuses share this row shape:
+      'discarded'  — invalid/garbage (a stray "2" or "]" from a typo'd
+                     /sif). Hidden from suggestions, the merge picker, and
+                     the identities list entirely.
+      'standalone' — a REAL one-off person with no Telegram account. Also
+                     out of the review queue, but deliberately still a
+                     canonical identity: it stays in the identities list and
+                     stays eligible as a merge *target*, so when a similar
+                     name turns up months later it can be folded into this
+                     one instead of starting a fresh unmatched name.
+
+    Neither status is covered by the partial unique indexes (which only
+    constrain 'linked' and 'dismissed'), so idempotency is enforced by the
+    SELECT-then-INSERT below."""
     try:
         with _cursor(commit=True) as cursor:
             ph = '%s' if db_type == 'postgresql' else '?'
             cursor.execute(
                 f"""SELECT id FROM identity_links
-                    WHERE chat_id = {ph} AND LOWER(alias_proxy_name) = LOWER({ph}) AND status = 'discarded'""",
-                (chat_id, alias_proxy_name)
+                    WHERE chat_id = {ph} AND LOWER(alias_proxy_name) = LOWER({ph}) AND status = {ph}""",
+                (chat_id, alias_proxy_name, status)
             )
             if cursor.fetchone() is not None:
                 return
@@ -3408,27 +3430,29 @@ def discard_identity_name(chat_id: int, alias_proxy_name: str, *,
                 f"""INSERT INTO identity_links
                         (chat_id, alias_proxy_name, canonical_user_id, canonical_proxy_name,
                          status, created_by, created_by_name, created_at)
-                    VALUES ({ph}, {ph}, NULL, NULL, 'discarded', {ph}, {ph}, CURRENT_TIMESTAMP)""",
-                (chat_id, alias_proxy_name, created_by, created_by_name)
+                    VALUES ({ph}, {ph}, NULL, NULL, {ph}, {ph}, {ph}, CURRENT_TIMESTAMP)""",
+                (chat_id, alias_proxy_name, status, created_by, created_by_name)
             )
     except Exception:
-        logging.exception("discard_identity_name failed")
+        logging.exception("discard_identity_name failed (status=%s)", status)
         raise
 
 
-def undiscard_identity_name(chat_id: int, alias_proxy_name: str) -> bool:
-    """Reverse discard_identity_name. Returns True if a row was removed."""
+def undiscard_identity_name(chat_id: int, alias_proxy_name: str, *,
+                             status: str = 'discarded') -> bool:
+    """Reverse discard_identity_name for the given terminal status
+    ('discarded' or 'standalone'). Returns True if a row was removed."""
     try:
         with _cursor(commit=True) as cursor:
             ph = '%s' if db_type == 'postgresql' else '?'
             cursor.execute(
                 f"""DELETE FROM identity_links
-                    WHERE chat_id = {ph} AND LOWER(alias_proxy_name) = LOWER({ph}) AND status = 'discarded'""",
-                (chat_id, alias_proxy_name)
+                    WHERE chat_id = {ph} AND LOWER(alias_proxy_name) = LOWER({ph}) AND status = {ph}""",
+                (chat_id, alias_proxy_name, status)
             )
             return (cursor.rowcount or 0) > 0
     except Exception:
-        logging.exception("undiscard_identity_name failed")
+        logging.exception("undiscard_identity_name failed (status=%s)", status)
         raise
 
 

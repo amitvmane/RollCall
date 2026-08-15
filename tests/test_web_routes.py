@@ -1372,7 +1372,9 @@ class TestWebIdentityMerge(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["suggestions"][0]["alias_proxy_name"], "Ajya")
 
-    def test_merge_calls_service_and_mirrors(self):
+    def test_merge_calls_service_and_does_not_mirror(self):
+        # A merge is admin-side identity housekeeping — it must NOT post into
+        # the group chat. Durable record is the admin audit log only.
         import api.routes.web as _web_mod
         group = {"kind": "user", "user_id": 1, "proxy_name": None,
                  "aliases": ["Rex"], "display_name": "Amit"}
@@ -1392,8 +1394,7 @@ class TestWebIdentityMerge(unittest.TestCase):
         self.assertEqual(svc.call_args.kwargs["canonical_user_id"], 1)
         self.assertEqual(svc.call_args.kwargs["admin_user_id"], 99)
         self.assertEqual(svc.call_args.kwargs["admin_name"], "Amit")
-        notify.assert_awaited_once()
-        self.assertIn("Rex", notify.call_args[0][1])
+        notify.assert_not_awaited()
 
     def test_merge_non_admin_403(self):
         import api.routes.web as _web_mod
@@ -1419,7 +1420,7 @@ class TestWebIdentityMerge(unittest.TestCase):
                 json={"id_token": "tok", "alias_proxy_name": "Rex", "canonical_proxy_name": "Rex"})
         self.assertEqual(resp.status_code, 422)
 
-    def test_unmerge_calls_service_and_mirrors(self):
+    def test_unmerge_calls_service_and_does_not_mirror(self):
         import api.routes.web as _web_mod
         with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
              patch.object(_web_mod._db, "is_web_admin", return_value=True), \
@@ -1434,7 +1435,7 @@ class TestWebIdentityMerge(unittest.TestCase):
         self.assertTrue(resp.json()["unmerged"])
         self.assertEqual(svc.call_args.args[0], -100)
         self.assertEqual(svc.call_args.args[1], "Rex")
-        notify.assert_awaited_once()
+        notify.assert_not_awaited()
 
     def test_unmerge_noop_does_not_mirror(self):
         import api.routes.web as _web_mod
@@ -1515,6 +1516,71 @@ class TestWebIdentityMerge(unittest.TestCase):
             resp = _client().post(
                 "/api/v1/web/group/grp123/identities/discard",
                 json={"id_token": "tok", "alias_proxy_name": "2"})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_list_includes_standalone(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.identity.list_all_identities", return_value=[]), \
+             patch("services.identity.list_identity_groups", return_value=[]), \
+             patch("services.identity.list_discarded", return_value=[]), \
+             patch("services.identity.list_standalone", return_value=["Guest Ravi"]):
+            resp = _client().get("/api/v1/web/group/grp123/identities", headers={"X-Identity-Token": "tok"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["standalone"], ["Guest Ravi"])
+
+    def test_standalone_calls_service_and_does_not_mirror(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value=None), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.identity.mark_standalone", return_value={"standalone": True}) as svc, \
+             patch.object(_web_mod, "_send_event_notification", new_callable=AsyncMock) as notify:
+            resp = _client().post(
+                "/api/v1/web/group/grp123/identities/standalone",
+                json={"id_token": "tok", "alias_proxy_name": "Guest Ravi"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["standalone"])
+        self.assertEqual(svc.call_args.args[0], -100)
+        self.assertEqual(svc.call_args.args[1], "Guest Ravi")
+        self.assertEqual(svc.call_args.kwargs["admin_user_id"], 99)
+        notify.assert_not_awaited()
+
+    def test_standalone_non_admin_403(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=False), \
+             patch("api.identity.verify_identity_token", return_value=77):
+            resp = _client().post(
+                "/api/v1/web/group/grp123/identities/standalone",
+                json={"id_token": "tok", "alias_proxy_name": "Guest Ravi"})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_unstandalone_calls_service(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value=None), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.identity.unmark_standalone", return_value={"restored": True}) as svc:
+            resp = _client().post(
+                "/api/v1/web/group/grp123/identities/unstandalone",
+                json={"id_token": "tok", "alias_proxy_name": "Guest Ravi"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["restored"])
+        self.assertEqual(svc.call_args.args[1], "Guest Ravi")
+
+    def test_unstandalone_non_admin_403(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=False), \
+             patch("api.identity.verify_identity_token", return_value=77):
+            resp = _client().post(
+                "/api/v1/web/group/grp123/identities/unstandalone",
+                json={"id_token": "tok", "alias_proxy_name": "Guest Ravi"})
         self.assertEqual(resp.status_code, 403)
 
     def test_undiscard_calls_service(self):

@@ -255,6 +255,11 @@ def link_identities(chat_id: int, alias_proxy_name: str, *,
         created_by=admin_user_id, created_by_name=admin_name,
     )
 
+    # If this name had been signed off as a standalone person, that's now
+    # contradicted — it turned out to be an alias after all. Drop the marker
+    # so it can't linger and re-offer the name as its own identity.
+    db.undiscard_identity_name(chat_id, alias_proxy_name, status="standalone")
+
     db.log_admin_action(
         chat_id, admin_user_id, admin_name, "identity_merge",
         target_name=alias_proxy_name,
@@ -307,6 +312,7 @@ def _auto_merge_exact_duplicates(chat_id: int) -> None:
     proxy_names = db.get_all_proxy_names(chat_id)
     linked_lower = {l["alias_proxy_name"].lower() for l in db.list_identity_links(chat_id, status="linked")}
     discarded_lower = {n.lower() for n in list_discarded(chat_id)}
+    standalone_lower = {n.lower() for n in list_standalone(chat_id)}
     groups: dict[str, list[str]] = {}
     for name in proxy_names:
         if name.lower() in linked_lower or name.lower() in discarded_lower:
@@ -317,7 +323,16 @@ def _auto_merge_exact_duplicates(chat_id: int) -> None:
         if len(variants) < 2:
             continue
         variants = sorted(variants)  # deterministic canonical pick
-        canonical, aliases = variants[0], variants[1:]
+        # A standalone variant is an admin-confirmed real person, so it wins
+        # the canonical slot outright rather than letting sort order decide —
+        # otherwise a later " rohit " typo could capture the canonical slot
+        # from the "Rohit" the admin already signed off on. The other
+        # variants still fold in as aliases: every name in this group is the
+        # same string modulo case/whitespace, so they're the same person by
+        # this function's own premise, standalone verdict or not.
+        standalone_variants = [v for v in variants if v.lower() in standalone_lower]
+        canonical = standalone_variants[0] if standalone_variants else variants[0]
+        aliases = [v for v in variants if v != canonical]
         for alias in aliases:
             db.upsert_identity_link(chat_id, alias, canonical_proxy_name=canonical,
                                      created_by=0, created_by_name="System (auto)")
@@ -331,9 +346,15 @@ def list_all_identities(chat_id: int) -> list[dict]:
     members + every distinct proxy name ever used (excluding discarded
     ones), each tagged with its current resolution (so the UI can show
     "Ajya -> merged into Ajay" inline instead of listing an already-merged
-    alias as free-standing). Sorted alphabetically by display_name."""
+    alias as free-standing). Sorted alphabetically by display_name.
+
+    Standalone names (real people with no Telegram account) ARE included,
+    flagged `standalone: True` — that flag is what keeps them out of the
+    review queue in the UI while leaving them selectable as merge targets.
+    Discarded names are the ones dropped outright."""
     _auto_merge_exact_duplicates(chat_id)
     discarded_lower = {n.lower() for n in list_discarded(chat_id)}
+    standalone_lower = {n.lower() for n in list_standalone(chat_id)}
     activity = db.get_proxy_name_activity(chat_id)  # {name: {"count", "last_seen"}}, one grouped query
     result = []
     for m in db.get_active_members(chat_id):
@@ -342,6 +363,7 @@ def list_all_identities(chat_id: int) -> list[dict]:
             "display_name": m.get("first_name") or m.get("username") or str(m["user_id"]),
             "merged_into": None,  # real users are always canonical, never an alias
             "proxy_count": None, "proxy_last_seen": None,  # only meaningful for proxy names
+            "standalone": False,  # only meaningful for proxy names
         })
     for name in db.get_all_proxy_names(chat_id):
         if name.lower() in discarded_lower:
@@ -362,6 +384,7 @@ def list_all_identities(chat_id: int) -> list[dict]:
             "display_name": name,
             "merged_into": None if is_self else canonical,
             "proxy_count": act.get("count"), "proxy_last_seen": act.get("last_seen"),
+            "standalone": name.lower() in standalone_lower,
         })
     result.sort(key=lambda i: (i["display_name"] or "").lower())
     return result
@@ -374,6 +397,48 @@ def list_discarded(chat_id: int) -> list[str]:
     return sorted(l["alias_proxy_name"] for l in db.list_identity_links(chat_id, status="discarded"))
 
 
+def list_standalone(chat_id: int) -> list[str]:
+    """Every proxy name confirmed as a real person with no Telegram account
+    (see mark_standalone). Unlike discarded names these stay visible and
+    stay valid merge targets — they're just done being reviewed."""
+    return sorted(l["alias_proxy_name"] for l in db.list_identity_links(chat_id, status="standalone"))
+
+
+def mark_standalone(chat_id: int, alias_proxy_name: str, *,
+                     admin_user_id: int, admin_name: str) -> dict:
+    """Confirm a proxy name is a REAL one-off person (a guest with no
+    Telegram account), not a duplicate of anyone. Removes it from the
+    review queue permanently — the admin has answered "there is nothing to
+    merge here" — while keeping it a first-class canonical identity: it
+    still appears in the identities list and is still offered as a merge
+    target, so if a near-identical name shows up months later it folds into
+    this one instead of starting a fresh unmatched name.
+
+    This is the non-destructive counterpart to discard_identity, which is
+    for garbage strings. Reversible via unmark_standalone."""
+    alias_proxy_name = _norm(alias_proxy_name)
+    # Mutually exclusive with 'discarded' — see discard_identity.
+    db.undiscard_identity_name(chat_id, alias_proxy_name, status="discarded")
+    db.discard_identity_name(chat_id, alias_proxy_name,
+                              created_by=admin_user_id, created_by_name=admin_name,
+                              status="standalone")
+    db.log_admin_action(chat_id, admin_user_id, admin_name, "identity_standalone",
+                         target_name=alias_proxy_name)
+    return {"standalone": True}
+
+
+def unmark_standalone(chat_id: int, alias_proxy_name: str, *,
+                       admin_user_id: int, admin_name: str) -> dict:
+    """Reverse mark_standalone — puts the name back in the review queue.
+    Idempotent: a no-op if it wasn't marked standalone."""
+    alias_proxy_name = _norm(alias_proxy_name)
+    restored = db.undiscard_identity_name(chat_id, alias_proxy_name, status="standalone")
+    if restored:
+        db.log_admin_action(chat_id, admin_user_id, admin_name, "identity_unstandalone",
+                             target_name=alias_proxy_name)
+    return {"restored": restored}
+
+
 def discard_identity(chat_id: int, alias_proxy_name: str, *,
                       admin_user_id: int, admin_name: str) -> dict:
     """Mark a garbage/invalid proxy name (a stray "2", "]", or other typo
@@ -381,6 +446,10 @@ def discard_identity(chat_id: int, alias_proxy_name: str, *,
     the identities list. Nothing is deleted — its historical proxy_users
     rows are untouched — so this is always reversible via undiscard_identity."""
     alias_proxy_name = _norm(alias_proxy_name)
+    # 'discarded' and 'standalone' are mutually exclusive verdicts on the
+    # same name — clear the other one so a reversal can't resurrect a stale
+    # second row and leave the name in both buckets at once.
+    db.undiscard_identity_name(chat_id, alias_proxy_name, status="standalone")
     db.discard_identity_name(chat_id, alias_proxy_name,
                               created_by=admin_user_id, created_by_name=admin_name)
     db.log_admin_action(chat_id, admin_user_id, admin_name, "identity_discard",
@@ -447,13 +516,32 @@ def list_suggestions(chat_id: int, limit: int = 200) -> list[dict]:
                     else (d["canonical_proxy_name"] or "").lower())
         dismissed_pairs.add((d["alias_proxy_name"].lower(), cand_key))
 
-    unlinked = [p for p in proxy_names if p.lower() not in linked_lower and p.lower() not in discarded_lower]
+    # Two distinct pools. CANDIDATES are every name still usable as a merge
+    # target, which deliberately includes standalone names — that's what
+    # lets a brand-new "Rohit K" be matched against the "Rohit" an admin
+    # confirmed months ago as a real no-Telegram guest, instead of the
+    # older name being invisible and the new one sitting unmatched forever.
+    # The ALIAS pool is narrower: only names still awaiting review. A
+    # standalone name is done being reviewed, so it never appears as the
+    # alias (left) side of a suggestion — it can only be merged INTO.
+    standalone_lower = {n.lower() for n in list_standalone(chat_id)}
+    candidates_pool = [p for p in proxy_names
+                       if p.lower() not in linked_lower and p.lower() not in discarded_lower]
+    alias_pool = [p for p in candidates_pool if p.lower() not in standalone_lower]
+    alias_pool_lower = {p.lower() for p in alias_pool}
     all_candidates = []
 
-    for alias in unlinked:
+    for alias in alias_pool:
         # proxy <-> proxy (each unordered pair emitted once)
-        for other in unlinked:
-            if alias.lower() >= other.lower():
+        for other in candidates_pool:
+            if alias.lower() == other.lower():
+                continue
+            # The alphabetical guard is what emits an unordered pair once —
+            # but it's only valid when BOTH names are iterated as aliases.
+            # A standalone `other` never gets its own alias pass, so
+            # applying the guard to it would silently drop the pair whenever
+            # the standalone name sorts earlier (e.g. "Rohit" vs "Rohit K").
+            if other.lower() in alias_pool_lower and alias.lower() >= other.lower():
                 continue
             score = lev_distance(_normalize_for_match(alias), _normalize_for_match(other))
             if score > _SUGGEST_THRESHOLD:

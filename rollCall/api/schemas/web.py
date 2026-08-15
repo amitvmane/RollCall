@@ -308,6 +308,7 @@ class WebIdentityItem(BaseModel):
     merged_into: Optional[WebCanonicalRef] = None
     proxy_count: Optional[int] = None
     proxy_last_seen: Optional[str] = None
+    standalone: bool = False  # confirmed real person, out of the review queue but still a merge target
 
 
 class WebIdentityGroupResponse(BaseModel):
@@ -323,6 +324,7 @@ class WebIdentityListResponse(BaseModel):
     identities: List[WebIdentityItem]
     groups: List[WebIdentityGroupResponse]
     discarded: List[str] = Field(default_factory=list)
+    standalone: List[str] = Field(default_factory=list)
 
 
 class WebIdentitySuggestion(BaseModel):
@@ -381,6 +383,26 @@ class WebUndiscardIdentityRequest(BaseModel):
 
 
 class WebUndiscardIdentityResponse(BaseModel):
+    restored: bool
+
+
+class WebStandaloneIdentityRequest(BaseModel):
+    id_token: str = Field(..., description="Signed identity token of the acting web admin")
+    alias_proxy_name: str = Field(
+        ..., max_length=40,
+        description="Proxy name confirmed to be a real person with no Telegram account")
+
+
+class WebStandaloneIdentityResponse(BaseModel):
+    standalone: bool
+
+
+class WebUnstandaloneIdentityRequest(BaseModel):
+    id_token: str = Field(..., description="Signed identity token of the acting web admin")
+    alias_proxy_name: str = Field(..., max_length=40)
+
+
+class WebUnstandaloneIdentityResponse(BaseModel):
     restored: bool
 
 

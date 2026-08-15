@@ -471,6 +471,121 @@ class TestDiscardIdentity(unittest.TestCase):
         self.assertEqual(result, [])
 
 
+class TestStandaloneIdentity(unittest.TestCase):
+    """A 'standalone' name is an admin's verdict that a proxy name is a real
+    person with no Telegram account — nothing to merge. It leaves the review
+    queue (so the queue can drain to empty) but stays a canonical identity
+    that a future similar name can still be merged into."""
+
+    def test_mark_standalone_writes_status_and_logs(self):
+        with patch("services.identity.db.discard_identity_name") as mock_mark, \
+             patch("services.identity.db.undiscard_identity_name") as mock_clear, \
+             patch("services.identity.db.log_admin_action") as mock_log:
+            r = identity.mark_standalone(1, "Guest Ravi", admin_user_id=7, admin_name="Admin")
+        mock_mark.assert_called_once_with(1, "Guest Ravi", created_by=7,
+                                          created_by_name="Admin", status="standalone")
+        # clears the mutually-exclusive 'discarded' verdict
+        mock_clear.assert_called_once_with(1, "Guest Ravi", status="discarded")
+        mock_log.assert_called_once()
+        self.assertEqual(r, {"standalone": True})
+
+    def test_unmark_standalone_is_idempotent(self):
+        with patch("services.identity.db.undiscard_identity_name", return_value=False), \
+             patch("services.identity.db.log_admin_action") as mock_log:
+            r = identity.unmark_standalone(1, "Nobody", admin_user_id=7, admin_name="Admin")
+        mock_log.assert_not_called()
+        self.assertEqual(r, {"restored": False})
+
+    def test_discard_clears_standalone_verdict(self):
+        with patch("services.identity.db.discard_identity_name"), \
+             patch("services.identity.db.undiscard_identity_name") as mock_clear, \
+             patch("services.identity.db.log_admin_action"):
+            identity.discard_identity(1, "Guest Ravi", admin_user_id=7, admin_name="Admin")
+        mock_clear.assert_called_once_with(1, "Guest Ravi", status="standalone")
+
+    def test_standalone_name_is_never_the_alias_side_of_a_suggestion(self):
+        # "Ravi" is standalone; "Ravii" is new and unreviewed. Exactly one
+        # suggestion should exist, and it must point Ravii -> Ravi (never the
+        # reverse), so the settled identity is the merge target.
+        with patch("services.identity.db.get_all_proxy_names", return_value=["Ravi", "Ravii"]), \
+             patch("services.identity.db.get_active_members", return_value=[]), \
+             patch("services.identity.db.list_identity_links",
+                   side_effect=lambda chat_id, status: [{"alias_proxy_name": "Ravi"}]
+                   if status == "standalone" else []):
+            result = identity.list_suggestions(1)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["alias_proxy_name"], "Ravii")
+        self.assertEqual(result[0]["candidate_proxy_name"], "Ravi")
+
+    def test_standalone_survives_alphabetical_guard_when_it_sorts_first(self):
+        # Regression: the unordered-pair guard (`alias >= other -> skip`) is
+        # only valid when both names get their own alias pass. "Rohit" sorts
+        # before "Rohit K", so applying the guard to a standalone candidate
+        # dropped the pair entirely and the new name sat unmatched forever.
+        with patch("services.identity.db.get_all_proxy_names", return_value=["Rohit", "Rohit K"]), \
+             patch("services.identity.db.get_active_members", return_value=[]), \
+             patch("services.identity.db.list_identity_links",
+                   side_effect=lambda chat_id, status: [{"alias_proxy_name": "Rohit"}]
+                   if status == "standalone" else []):
+            result = identity.list_suggestions(1)
+        self.assertEqual([(s["alias_proxy_name"], s["candidate_proxy_name"]) for s in result],
+                         [("Rohit K", "Rohit")])
+
+    def test_discarded_name_is_not_a_merge_candidate_but_standalone_is(self):
+        # The behavioural difference between the two terminal verdicts.
+        def links(status_of):
+            return lambda chat_id, status: ([{"alias_proxy_name": "Ravi"}]
+                                             if status == status_of else [])
+        with patch("services.identity.db.get_all_proxy_names", return_value=["Ravi", "Ravii"]), \
+             patch("services.identity.db.get_active_members", return_value=[]), \
+             patch("services.identity.db.list_identity_links", side_effect=links("discarded")):
+            discarded_result = identity.list_suggestions(1)
+        self.assertEqual(discarded_result, [])
+
+    def test_standalone_flagged_in_list_all_identities(self):
+        with patch("services.identity.db.get_all_proxy_names", return_value=["Ravi", "Zoe"]), \
+             patch("services.identity.db.get_active_members", return_value=[]), \
+             patch("services.identity.db.get_proxy_name_activity", return_value={}), \
+             patch("services.identity.db.list_identity_links",
+                   side_effect=lambda chat_id, status: [{"alias_proxy_name": "Ravi"}]
+                   if status == "standalone" else []), \
+             patch("services.identity.db.get_identity_link", return_value=None):
+            rows = identity.list_all_identities(1)
+        by_name = {r["proxy_name"]: r for r in rows}
+        # Still listed (unlike a discarded name) so it stays a merge target...
+        self.assertIn("Ravi", by_name)
+        self.assertTrue(by_name["Ravi"]["standalone"])
+        self.assertFalse(by_name["Zoe"]["standalone"])
+
+    def test_standalone_wins_canonical_slot_in_auto_merge(self):
+        # "Ravi" was signed off by an admin; a later " ravi " typo must fold
+        # INTO it, not capture the canonical slot on sort order.
+        with patch("services.identity.db.get_all_proxy_names", return_value=["Ravi", "ravi"]), \
+             patch("services.identity.db.list_identity_links",
+                   side_effect=lambda chat_id, status: [{"alias_proxy_name": "Ravi"}]
+                   if status == "standalone" else []), \
+             patch("services.identity.db.upsert_identity_link") as mock_upsert, \
+             patch("services.identity.db.log_admin_action"):
+            identity._auto_merge_exact_duplicates(1)
+        mock_upsert.assert_called_once_with(1, "ravi", canonical_proxy_name="Ravi",
+                                            created_by=0, created_by_name="System (auto)")
+
+    def test_merging_a_standalone_name_clears_its_verdict(self):
+        with patch("services.identity.db.is_active_chat_member", return_value=True), \
+             patch("services.identity.db.merge_identity_link"), \
+             patch("services.identity.db.undiscard_identity_name") as mock_clear, \
+             patch("services.identity.db.log_admin_action"), \
+             patch("services.identity.get_alias_group", return_value={}):
+            identity.link_identities(1, "Ravi", canonical_user_id=99,
+                                     admin_user_id=7, admin_name="Admin")
+        mock_clear.assert_called_once_with(1, "Ravi", status="standalone")
+
+    def test_list_standalone_returns_sorted_names(self):
+        rows = [{"alias_proxy_name": "Zulu"}, {"alias_proxy_name": "Alpha"}]
+        with patch("services.identity.db.list_identity_links", return_value=rows):
+            self.assertEqual(identity.list_standalone(1), ["Alpha", "Zulu"])
+
+
 class TestCombinedGhostCount(unittest.TestCase):
 
     def test_sums_across_group(self):

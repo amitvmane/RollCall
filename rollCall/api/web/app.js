@@ -3016,6 +3016,7 @@ async function refreshDues(){
 // another proxy so stats/dues/ghost-tracking count them once) ──────────────
 let _identityMergeOpen=false, _identitiesCache=null, _identityGroupsCache=null,
     _suggestionsCache=null, _discardedCache=null, _identityDiscardedOpen=false,
+    _standaloneCache=null, _identityStandaloneOpen=false,
     _identityUnmatchedOpen=false, _imTargetCombo=null;
 
 window._toggleExtraAliases=function(btn){
@@ -3061,6 +3062,7 @@ async function loadIdentityMerge(){
     _identitiesCache=idData.identities||[];
     _identityGroupsCache=idData.groups||[];
     _discardedCache=idData.discarded||[];
+    _standaloneCache=idData.standalone||[];
     _suggestionsCache=sugRes.ok?(await sugRes.json()).suggestions||[]:[];
     renderIdentityMerge();
   }catch(e){
@@ -3095,10 +3097,14 @@ function _buildTargetOptions(excludeProxyNameLower){
   // same identity can never be selected on both sides (that's the only
   // way a manual pick could look like a self-merge/cycle; the backend
   // also rejects it, this just stops the UI from offering it).
+  // Standalone names ARE offered here (that's the entire point of the
+  // status) — labelled "(guest)" so it's clear they're a confirmed person
+  // rather than an unreviewed name.
   const identities=_identitiesCache||[];
   const users=identities.filter(i=>i.kind==="user");
   const proxies=identities.filter(i=>i.kind==="proxy"&&!i.merged_into&&i.proxy_name.toLowerCase()!==excludeProxyNameLower);
-  const opt=i=>({value:_identityKey(i.kind,i.user_id,i.proxy_name),label:i.display_name+(i.kind==="proxy"?" (proxy)":"")});
+  const opt=i=>({value:_identityKey(i.kind,i.user_id,i.proxy_name),
+                 label:i.display_name+(i.kind==="proxy"?(i.standalone?" (guest)":" (proxy)"):"")});
   return users.map(opt).concat(proxies.map(opt));
 }
 
@@ -3222,6 +3228,7 @@ function renderIdentityMerge(){
   const groups=_identityGroupsCache||[];
   const suggestions=_suggestionsCache||[];
   const discarded=_discardedCache||[];
+  const standalone=_standaloneCache||[];
 
   let html="";
 
@@ -3236,8 +3243,11 @@ function renderIdentityMerge(){
     .filter(x=>x.aliases.length>0);
   // Never merged into anything — nothing "resolved" here, but still worth
   // surfacing so obvious garbage (e.g. "2", "]") can be discarded even
-  // when no fuzzy suggestion ever caught it.
-  const unmatched=canonicalRows.filter(row=>row.kind==="proxy"&&!(groupsByKey[_identityMapKey(row.kind,row.user_id,row.proxy_name)]||[]).length);
+  // when no fuzzy suggestion ever caught it. Standalone names are excluded:
+  // the admin has already ruled "this is a real person, nothing to merge",
+  // which is what lets this queue actually drain to empty. They stay in
+  // `identities` (so they remain merge targets) and get their own section.
+  const unmatched=canonicalRows.filter(row=>row.kind==="proxy"&&!row.standalone&&!(groupsByKey[_identityMapKey(row.kind,row.user_id,row.proxy_name)]||[]).length);
 
   // ── Review & merge: one unified, prioritized list (replaces the old
   // separate "Suggested merges" + "Unmatched proxy names" sections) —
@@ -3271,13 +3281,16 @@ function renderIdentityMerge(){
       const dismissBtn=suggestion
         ?`<button class="id-change" title="Not a match" onclick="doDismissSuggestion(${_suggestionsCache.indexOf(suggestion)})">✕</button>`
         :"";
+      // The "nothing to merge, and that's fine" exit — distinct from 🗑,
+      // which throws the name away. Keeps it as a future merge target.
+      const standaloneBtn=`<button class="id-change" title="'${esc(row.proxy_name)}' is a real person with no Telegram account — stop asking" onclick="doMarkStandalone('${esc(escJsAttr(row.proxy_name))}')">✅</button>`;
       return `<div class="sched-item">
         <div class="sched-item-info">
           <div class="sched-item-title">${title}</div>
           <div class="sched-item-time">${confBadge}${metaBadge}</div>
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0">
-          ${mergeBtn}${dismissBtn}
+          ${mergeBtn}${dismissBtn}${standaloneBtn}
           <button class="id-change" title="'${esc(row.proxy_name)}' is invalid/garbage — discard it" onclick="doDiscardIdentity('${esc(escJsAttr(row.proxy_name))}')">🗑</button>
         </div>
       </div>`;
@@ -3325,6 +3338,20 @@ function renderIdentityMerge(){
     html+=`</tbody></table></div>`;
   }
 
+  // Confirmed real people with no Telegram account. Out of the review
+  // queue, but still live identities — restoring one puts it straight back
+  // in the queue, and it stays pickable as a merge target either way.
+  if(standalone.length){
+    html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin:14px 0 6px;cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none" onclick="toggleIdentityStandalone()">
+      <span id="im-standalone-chevron">${_identityStandaloneOpen?"▲":"▼"}</span>✅ Standalone people (${standalone.length})
+    </div>`;
+    html+=`<div id="im-standalone-body" class="${_identityStandaloneOpen?"":"hidden"}">`;
+    html+=`<div style="font-size:.72rem;color:var(--sub);margin-bottom:6px">No Telegram account — still valid merge targets if a similar name turns up later.</div>`;
+    html+=standalone.map(name=>`
+      <span class="alias-pill">${esc(name)}<span class="alias-pill-x" title="Put back in the review queue" onclick="doUnmarkStandalone('${esc(escJsAttr(name))}')">✕</span></span>`).join("");
+    html+=`</div>`;
+  }
+
   if(discarded.length){
     html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin:14px 0 6px;cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none" onclick="toggleIdentityDiscarded()">
       <span id="im-discarded-chevron">${_identityDiscardedOpen?"▲":"▼"}</span>🗑 Discarded (${discarded.length})
@@ -3343,11 +3370,15 @@ function renderIdentityMerge(){
 
   // Manual merge: FROM picker only offers unmerged proxies (a proxy that's
   // already an alias can't itself be re-picked as FROM without unmerging
-  // first); TO picker excludes whatever's currently picked as FROM (see
-  // _onImAliasChange) so the same identity can never appear on both sides.
-  // Both pickers are searchable comboboxes (mounted below, after the HTML
-  // is in the DOM) rather than native <select> — see _mountCombo.
-  const aliasProxies=identities.filter(i=>i.kind==="proxy"&&!i.merged_into);
+  // first) that aren't confirmed standalone people — a standalone name is
+  // a settled identity, so it may be merged INTO but never folded away
+  // from here (restore it from the Standalone section first if that's
+  // really the intent). TO picker excludes whatever's currently picked as
+  // FROM (see _onImAliasChange) so the same identity can never appear on
+  // both sides. Both pickers are searchable comboboxes (mounted below,
+  // after the HTML is in the DOM) rather than native <select> — see
+  // _mountCombo.
+  const aliasProxies=identities.filter(i=>i.kind==="proxy"&&!i.merged_into&&!i.standalone);
 
   html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin:14px 0 6px">Merge manually</div>`;
   if(!aliasProxies.length){
@@ -3478,6 +3509,44 @@ window.doUndiscardIdentity=async function(aliasProxyName){
     _identitiesCache=null;
     await loadIdentityMerge();
   }catch(e){toast(e.message||"Could not restore",4000);}
+};
+
+window.doMarkStandalone=async function(aliasProxyName){
+  if(!confirm(`Mark "${aliasProxyName}" as a real person with no Telegram account? It leaves the review queue but stays available as a merge target if a similar name shows up later.`))return;
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/identities/standalone`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({id_token:_idToken,alias_proxy_name:aliasProxyName}),
+      signal:AbortSignal.timeout(8000),
+    });
+    if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"Failed to mark standalone");
+    toast(`✅ "${aliasProxyName}" marked standalone`,2500);
+    _identitiesCache=null;
+    await loadIdentityMerge();
+  }catch(e){toast(e.message||"Could not mark standalone",4000);}
+};
+
+window.doUnmarkStandalone=async function(aliasProxyName){
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/identities/unstandalone`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({id_token:_idToken,alias_proxy_name:aliasProxyName}),
+      signal:AbortSignal.timeout(8000),
+    });
+    if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"Failed to restore");
+    toast(`↩ "${aliasProxyName}" back in review`,2500);
+    _identitiesCache=null;
+    _identityStandaloneOpen=true;
+    await loadIdentityMerge();
+  }catch(e){toast(e.message||"Could not restore",4000);}
+};
+
+window.toggleIdentityStandalone=function(){
+  _identityStandaloneOpen=!_identityStandaloneOpen;
+  const body=document.getElementById("im-standalone-body");
+  const ch=document.getElementById("im-standalone-chevron");
+  if(body)body.classList.toggle("hidden",!_identityStandaloneOpen);
+  if(ch)ch.textContent=_identityStandaloneOpen?"▲":"▼";
 };
 
 window.toggleIdentityDiscarded=function(){

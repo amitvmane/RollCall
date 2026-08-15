@@ -61,6 +61,8 @@ from api.schemas.web import (
     WebRollcallResponse,
     WebSetScheduleRequest,
     WebStartRollcallRequest,
+    WebStandaloneIdentityRequest,
+    WebStandaloneIdentityResponse,
     WebStartTemplateRequest,
     WebTemplateResponse,
     WebToggleScheduleRequest,
@@ -68,6 +70,8 @@ from api.schemas.web import (
     WebUndiscardIdentityResponse,
     WebUnmergeIdentityRequest,
     WebUnmergeIdentityResponse,
+    WebUnstandaloneIdentityRequest,
+    WebUnstandaloneIdentityResponse,
     WebUpdateTemplateRequest,
     WebVoteRequest,
     UpcomingRollcall,
@@ -804,6 +808,7 @@ async def web_list_identities(
         identities=identity_svc.list_all_identities(chat_id),
         groups=identity_svc.list_identity_groups(chat_id),
         discarded=identity_svc.list_discarded(chat_id),
+        standalone=identity_svc.list_standalone(chat_id),
     )
 
 
@@ -841,9 +846,12 @@ async def web_merge_identity(
         admin_user_id=actor_user_id, admin_name=actor_name,
     )
     target = group.get("proxy_name") or group.get("user_id")
-    await _send_event_notification(
-        chat_id, f"🔗 '{body.alias_proxy_name}' merged into '{target}' (via web) — stats now combine."
-    )
+    # Deliberately NOT announced in the group: a merge is admin-side identity
+    # housekeeping, not a chat event members can act on. The durable record is
+    # db.log_admin_action("identity_merge") written inside link_identities,
+    # plus this server log line.
+    logging.info("[identity] merge chat=%s alias=%r -> %r by=%s",
+                 chat_id, body.alias_proxy_name, target, actor_user_id)
     return WebIdentityGroupResponse(**group)
 
 
@@ -862,7 +870,9 @@ async def web_unmerge_identity(
     result = identity_svc.unmerge_identity(chat_id, body.alias_proxy_name,
                                             admin_user_id=actor_user_id, admin_name=actor_name)
     if result["unmerged"]:
-        await _send_event_notification(chat_id, f"✂️ '{body.alias_proxy_name}' unmerged (via web).")
+        # Same reasoning as the merge route above — audit log only, no group post.
+        logging.info("[identity] unmerge chat=%s alias=%r by=%s",
+                     chat_id, body.alias_proxy_name, actor_user_id)
     return WebUnmergeIdentityResponse(**result)
 
 
@@ -918,6 +928,43 @@ async def web_undiscard_identity(
     result = identity_svc.undiscard_identity(chat_id, body.alias_proxy_name,
                                               admin_user_id=actor_user_id, admin_name=actor_name)
     return WebUndiscardIdentityResponse(**result)
+
+
+@router.post(
+    "/web/group/{group_token}/identities/standalone",
+    response_model=WebStandaloneIdentityResponse,
+    summary="Confirm a proxy name is a real person with no Telegram account (requires web-admin identity)",
+)
+async def web_standalone_identity(
+    body: WebStandaloneIdentityRequest,
+    group_token: str = Path(...),
+) -> WebStandaloneIdentityResponse:
+    chat_id, actor_user_id = await _require_web_admin(group_token, body.id_token)
+    actor_name = await _actor_display_name(chat_id, actor_user_id)
+    from services import identity as identity_svc
+    identity_svc.mark_standalone(chat_id, body.alias_proxy_name,
+                                  admin_user_id=actor_user_id, admin_name=actor_name)
+    # Admin-side housekeeping, same as merge — audit log only, no group post.
+    logging.info("[identity] standalone chat=%s name=%r by=%s",
+                 chat_id, body.alias_proxy_name, actor_user_id)
+    return WebStandaloneIdentityResponse(standalone=True)
+
+
+@router.post(
+    "/web/group/{group_token}/identities/unstandalone",
+    response_model=WebUnstandaloneIdentityResponse,
+    summary="Put a standalone name back in the merge review queue (requires web-admin identity)",
+)
+async def web_unstandalone_identity(
+    body: WebUnstandaloneIdentityRequest,
+    group_token: str = Path(...),
+) -> WebUnstandaloneIdentityResponse:
+    chat_id, actor_user_id = await _require_web_admin(group_token, body.id_token)
+    actor_name = await _actor_display_name(chat_id, actor_user_id)
+    from services import identity as identity_svc
+    result = identity_svc.unmark_standalone(chat_id, body.alias_proxy_name,
+                                             admin_user_id=actor_user_id, admin_name=actor_name)
+    return WebUnstandaloneIdentityResponse(**result)
 
 
 # ── Scheduled rollcalls ───────────────────────────────────────────────────────

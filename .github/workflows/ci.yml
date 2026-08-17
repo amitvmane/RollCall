@@ -189,6 +189,53 @@ jobs:
       - name: Run realistic parallel scenario against Postgres
         run: python scripts/parallel_scenario_test.py
 
+  audit:
+    name: Dependency audit (pip-audit)
+    runs-on: ubuntu-latest
+    # Scans the pinned closure in requirements.lock against the OSV / PyPI
+    # advisory databases. Gated through scripts/check_audit_baseline.py rather
+    # than failing on any finding: six pins were already vulnerable when this
+    # was switched on (2026-08-17), and a job that is red from day one gets
+    # ignored. The baseline makes NEW vulnerable dependencies fail while the
+    # known six are tracked in security/audit_baseline.json until bumped.
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-audit
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Run pip-audit
+        # --no-deps: requirements.lock is a fully-pinned pip-compile closure, so
+        # audit exactly what ships rather than re-resolving it.
+        # '|| true': pip-audit exits non-zero on any finding; the baseline check
+        # below is what decides pass/fail.
+        run: |
+          pip-audit -r requirements.lock --no-deps \
+            --format json --output audit.json --progress-spinner off || true
+
+      - name: Check against baseline
+        run: python scripts/check_audit_baseline.py audit.json
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-audit-report
+          path: audit.json
+
   docker:
     name: Docker Build Check
     runs-on: ubuntu-latest

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard"
+  ],
+  "timezone": "Asia/Kolkata",
+  "schedule": ["before 6am on the first day of the month"],
+  "prConcurrentLimit": 3,
+  "prHourlyLimit": 2,
+  "labels": ["dependencies"],
+  "commitMessagePrefix": "chore:",
+  "_comment_prefix": "pr-checks.yml only allows feat|fix|docs|refactor|test|chore|ci: title prefixes — 'deps:' is rejected, hence chore:.",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on the first day of the month"]
+  },
+  "_comment_grouping": "Patch and minor bumps are grouped into one PR a month so the soak has a single thing to watch. Majors stay separate and unscheduled — this project bumps by blast radius (one big bump is what broke v7.8), so each major gets its own review and soak.",
+  "packageRules": [
+    {
+      "matchUpdateTypes": ["patch", "minor"],
+      "groupName": "python deps (patch + minor)",
+      "automerge": false
+    },
+    {
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true,
+      "_comment": "Majors require an explicit click on the dependency dashboard before a PR opens. fastapi/starlette and cryptography are both sitting on major crossings — see security/audit_baseline.json."
+    },
+    {
+      "matchPackageNames": ["pyTelegramBotAPI"],
+      "dependencyDashboardApproval": true,
+      "_comment": "Telegram API surface — Tier B in the dep plan. v7.8 crashed prod from an unreviewed bump of this package. Never auto-open; scripts/smoke_test.py and scripts/functional_test_4_34.py are the gate."
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "schedule": ["at any time"],
+    "labels": ["dependencies", "security"],
+    "_comment": "Security fixes bypass the monthly schedule — they open immediately."
+  },
+  "osvVulnerabilityAlerts": true
+}

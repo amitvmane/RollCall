@@ -34,6 +34,7 @@ from exceptions import (
     timeError,
 )
 from api.rate_limit import rate_limit_middleware
+from api.security_headers import security_headers_middleware
 from api.routes import admin, auth, commands as commands_routes, dues as dues_routes, groups, health, portal, proxy_votes, rollcalls, stats, templates, tg_verify, votes, web as web_routes
 from api.schemas.common import ErrorResponse
 
@@ -147,6 +148,12 @@ def create_app() -> FastAPI:
 
     # Rate-limit middleware. Runs before routes; skips /health.
     app.middleware("http")(rate_limit_middleware)
+
+    # Security headers on every response, including static files and the
+    # 429s the rate limiter returns above. Registered last so it wraps
+    # outermost — see api/security_headers.py for why the CSP allows
+    # 'unsafe-inline' and why /miniapp/ is framing-exempt.
+    app.middleware("http")(security_headers_middleware)
 
     # Route mounting
     app.include_router(auth.router, prefix=API_PREFIX, tags=["auth"])

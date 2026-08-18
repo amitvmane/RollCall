@@ -22,6 +22,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi.responses import Response
 
 import db as _db
 from api.identity import identity_from_header, require_identity, require_scoped_identity
@@ -722,7 +723,17 @@ async def dues_qr_token(
 @router.get(
     "/web/group/{group_token}/dues/qr",
     summary="UPI QR code PNG for the group VPA (any verified member)",
-    response_class=None,
+    # response_class=None used to be tolerated but now trips
+    # "A response class is needed to generate OpenAPI" during schema
+    # generation. The handler returns image/png bytes, so declare it.
+    response_class=Response,
+    # Returns raw PNG bytes. The `-> "Response"` annotation below is a STRING,
+    # and Response is imported inside the function body, so it can never be
+    # resolved at module scope — without response_model=None, FastAPI tries to
+    # build a pydantic model from that unresolvable ForwardRef and OpenAPI
+    # generation dies with "TypeAdapter[...ForwardRef('Response')...] is not
+    # fully defined". Latent until the schema was first generated.
+    response_model=None,
 )
 async def dues_qr(
     group_token: str = Path(...),

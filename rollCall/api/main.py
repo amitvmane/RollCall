@@ -70,6 +70,15 @@ async def _lifespan(app: FastAPI):
     yield
 
 
+def _docs_enabled() -> bool:
+    """Whether to expose /api/docs, /api/redoc and the OpenAPI schema.
+
+    Default false — see the docs_url comment in create_app(). Matches the
+    truthy-string convention used by REST_API_ENABLED in runner.py.
+    """
+    return os.environ.get("API_DOCS_ENABLED", "").strip().lower() in ("true", "1", "yes", "on")
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="RollCall API",
@@ -79,9 +88,16 @@ def create_app() -> FastAPI:
             "the same `services/` layer the bot will use internally."
         ),
         version="0.1.0",
-        docs_url="/api/docs",
-        redoc_url="/api/redoc",
-        openapi_url=f"{API_PREFIX}/openapi.json",
+        # Interactive docs are OFF by default. They are unauthenticated and
+        # sit on the rate-limiter's bypass list, so on a tunnel-exposed
+        # deployment they hand any visitor a complete, rate-unlimited map of
+        # every endpoint and payload shape. Nothing in the product needs them
+        # at runtime — they're a development aid — so the default is closed
+        # and operators opt in with API_DOCS_ENABLED=true (e.g. on localhost
+        # while working on the API).
+        docs_url="/api/docs" if _docs_enabled() else None,
+        redoc_url="/api/redoc" if _docs_enabled() else None,
+        openapi_url=f"{API_PREFIX}/openapi.json" if _docs_enabled() else None,
         lifespan=_lifespan,
     )
 

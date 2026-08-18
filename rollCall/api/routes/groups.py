@@ -117,6 +117,13 @@ async def update_group_settings(
 @router.get(
     "/chats/{chat_id}/qrcode",
     summary="SVG QR code for the group's web voting link",
+    # This returns a raw Response (SVG bytes), not a serialisable model.
+    # Without response_model=None, FastAPI tries to build a pydantic model
+    # from the `-> Response` return annotation and OpenAPI schema generation
+    # dies with "TypeAdapter[...ForwardRef('Response')...] is not fully
+    # defined". Latent since the annotation was added; only surfaced once the
+    # schema was actually generated.
+    response_model=None,
 )
 async def get_group_qrcode(
     request: Request,

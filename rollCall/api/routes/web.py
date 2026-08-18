@@ -125,6 +125,10 @@ async def push_unsubscribe(
     "/web/group/{group_token}/manifest.json",
     summary="Dynamic PWA manifest for this group",
     include_in_schema=False,
+    # Raw Response (JSON manifest bytes), not a serialisable model — see the
+    # same note on get_group_qrcode in routes/groups.py. include_in_schema=False
+    # is not enough on its own: FastAPI still builds the response field.
+    response_model=None,
 )
 async def group_manifest(
     group_token: str = Path(...),

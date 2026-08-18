@@ -412,6 +412,44 @@ class TestWebPageRoutes(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 @unittest.skipUnless(FASTAPI_AVAILABLE, "fastapi not installed")
+def _all_route_paths(app):
+    """Flattened route paths, in registration order.
+
+    FastAPI/starlette changed shape here: `app.routes` used to be a flat list
+    of Route objects, but since the starlette 1.x era an `include_router()`
+    call leaves an `_IncludedRouter` container in the list instead of splicing
+    its children in. Reading `.path` off every entry therefore raises
+    AttributeError on the containers, and the children underneath store their
+    path WITHOUT the router prefix ("/web/{token}/vote", not
+    "/api/v1/web/{token}/vote") — so a naive recursion silently finds nothing
+    and the assertions below would pass vacuously.
+
+    So: recurse through `original_router`, carrying `include_context.prefix`
+    down. Handles both the old flat shape and the new nested one. Depth-first
+    preserves registration order, which is what route precedence depends on.
+    """
+    paths = []
+
+    def walk(routes, prefix=""):
+        for r in routes:
+            path = getattr(r, "path", None)
+            if path is not None:
+                paths.append(prefix + path)
+            # New shape: an include_router() container.
+            original = getattr(r, "original_router", None)
+            if original is not None:
+                ctx = getattr(r, "include_context", None)
+                walk(original.routes, prefix + (getattr(ctx, "prefix", "") or ""))
+                continue
+            # Old shape (and plain sub-applications): direct .routes children.
+            child = getattr(r, "routes", None)
+            if child:
+                walk(child, prefix)
+
+    walk(app.routes)
+    return paths
+
+
 class TestRouteOrdering(unittest.TestCase):
     """
     Regression tests: /web/group/{token} is registered before /web/{token}
@@ -421,7 +459,7 @@ class TestRouteOrdering(unittest.TestCase):
     def test_group_api_endpoint_registered_before_catchall(self):
         from api.main import create_app
         app = create_app()
-        paths = [r.path for r in app.routes]
+        paths = _all_route_paths(app)
         group_idx = next((i for i, p in enumerate(paths)
                           if p == "/api/v1/web/group/{group_token}"), None)
         catchall_idx = next((i for i, p in enumerate(paths)
@@ -434,25 +472,25 @@ class TestRouteOrdering(unittest.TestCase):
     def test_vote_endpoint_present(self):
         from api.main import create_app
         app = create_app()
-        paths = [r.path for r in app.routes]
+        paths = _all_route_paths(app)
         self.assertIn("/api/v1/web/{token}/vote", paths)
 
     def test_join_page_route_present(self):
         from api.main import create_app
         app = create_app()
-        paths = [r.path for r in app.routes]
+        paths = _all_route_paths(app)
         self.assertIn("/web/join/{token}", paths)
 
     def test_group_page_route_present(self):
         from api.main import create_app
         app = create_app()
-        paths = [r.path for r in app.routes]
+        paths = _all_route_paths(app)
         self.assertIn("/web/group/{group_token}", paths)
 
     def test_end_rollcall_route_present(self):
         from api.main import create_app
         app = create_app()
-        paths = [r.path for r in app.routes]
+        paths = _all_route_paths(app)
         self.assertIn("/api/v1/web/group/{group_token}/end-rollcall", paths)
 
 

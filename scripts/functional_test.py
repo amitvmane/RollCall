@@ -265,6 +265,157 @@ def contains(out, *needles):
     return (not missing), (f"missing: {missing}, got: {t[:200]!r}" if missing else "")
 
 
+async def phase_dues():
+    """Dues & Treasury — the money paths.
+
+    Left uncovered by this file until 2026-08-18 despite being the most
+    consequential code in the repo: dues_entries and fund_transactions are
+    append-only ledgers, and the group-chat announcement history is the stated
+    reconstruction source if the DB is ever lost. A silent handler failure here
+    loses money records, so these scenarios assert on the REPLY TEXT (the thing
+    members actually see), not merely that no exception escaped.
+    """
+    print("\n=== Phase 17: Dues & Treasury — setup ===\n")
+
+    out = await feed("/enable_dues", ALICE)
+    ok, d = contains(out, "dues")
+    record("/enable_dues responds", ok, d)
+
+    out = await feed("/set_upi alice@upi", ALICE)
+    ok, d = contains(out, "upi")
+    record("/set_upi accepts a VPA", ok, d)
+
+    out = await feed("/set_treasury_upi treasurer@upi", ALICE)
+    record("/set_treasury_upi responds", bool(out))
+
+    out = await feed("/dues_setup", ALICE)
+    record("/dues_setup renders the setup card", bool(out))
+
+    out = await feed("/set_round_step 5", ALICE)
+    record("/set_round_step responds", bool(out))
+
+    out = await feed("/dues_nudges on", ALICE)
+    record("/dues_nudges on responds", bool(out))
+
+    out = await feed("/dues_report weekly", ALICE)
+    record("/dues_report weekly responds", bool(out))
+
+    print("\n=== Phase 18: Penalty tiers ===\n")
+
+    out = await feed("/penalties", ALICE)
+    record("/penalties lists tiers", bool(out))
+
+    out = await feed("/add_penalty very_late 100 mins:20 significantly late", ALICE)
+    record("/add_penalty creates a tier", bool(out))
+
+    out = await feed("/penalties", ALICE)
+    # The reply is Markdown-escaped, so the tier renders as "very\_late".
+    # Compare against the unescaped text or this silently fails on a name
+    # that is actually present.
+    _tiers = text_of(out).replace("\\", "")
+    ok = "very_late" in _tiers
+    record("/penalties shows the new tier", ok,
+           f"got: {_tiers[:160]!r}" if not ok else "")
+
+    out = await feed("/remove_penalty very_late", ALICE)
+    record("/remove_penalty removes a tier", bool(out))
+
+    print("\n=== Phase 19: Game close → settle → collect ===\n")
+
+    # A fresh rollcall to charge against.
+    await feed("/src Dues Game", ALICE)
+    await feed("/in", ALICE)
+    await feed("/in", BOB)
+    await feed("/in", CAROL)
+    await feed("/ef 600", ALICE)
+
+    out = await feed("/set_collector Bob paid bob@upi", ALICE)
+    record("/set_collector assigns a collector", bool(out))
+
+    out = await feed("/pick_collector", ALICE)
+    record("/pick_collector responds", bool(out))
+
+    out = await feed("/rotate_collector on", ALICE)
+    record("/rotate_collector on responds", bool(out))
+
+    out = await feed("/add_adhoc Guest", ALICE)
+    record("/add_adhoc adds a non-voter to the bill", bool(out))
+
+    await feed("/erc", ALICE)
+
+    out = await feed("/settle_dues", ALICE)
+    record("/settle_dues responds after game close", bool(out))
+
+    out = await feed("/dues", ALICE)
+    record("/dues renders the ledger", bool(out))
+
+    out = await feed("/my_dues", BOB)
+    record("/my_dues renders a personal balance", bool(out))
+
+    out = await feed("/mark_paid Alice", ALICE)
+    record("/mark_paid records a payment", bool(out))
+
+    out = await feed("/waive Alice 75 injured", ALICE)
+    record("/waive records a waiver", bool(out))
+
+    out = await feed("/remind_dues", ALICE)
+    record("/remind_dues responds", bool(out))
+
+    print("\n=== Phase 20: Penalties applied to players ===\n")
+
+    out = await feed("/mark_late Alice 20", ALICE)
+    record("/mark_late applies a late penalty", bool(out))
+
+    out = await feed("/mark_ditch Bob", ALICE)
+    record("/mark_ditch applies the ditch tier", bool(out))
+
+    out = await feed("/mark_penalty late_short Carol", ALICE)
+    record("/mark_penalty responds (valid or curated error)", bool(out))
+
+    print("\n=== Phase 21: Fund / treasury ===\n")
+
+    out = await feed("/fund", ALICE)
+    record("/fund renders the fund balance", bool(out))
+
+    out = await feed("/fund_topup 500 donations", ALICE)
+    record("/fund_topup adds to the fund", bool(out))
+
+    out = await feed("/log_expense 150 new balls", ALICE)
+    record("/log_expense records an expense", bool(out))
+
+    out = await feed("/reimburse Bob 600 fronted ground", ALICE)
+    record("/reimburse records a reimbursement", bool(out))
+
+    out = await feed("/fund_history", ALICE)
+    record("/fund_history renders history", bool(out))
+
+    print("\n=== Phase 22: Dues reporting & season reset ===\n")
+
+    out = await feed("/dues_snapshot", ALICE)
+    record("/dues_snapshot responds", bool(out))
+
+    out = await feed("/dues_export", ALICE)
+    record("/dues_export responds", bool(out))
+
+    out = await feed("/cancel_game_dues", ALICE)
+    record("/cancel_game_dues responds", bool(out))
+
+    # /new_season is guarded (admin-only, two-step confirm, blocked while
+    # games are unsettled) — assert it RESPONDS rather than that it resets,
+    # so the guard firing is a pass, not a failure.
+    out = await feed("/new_season", ALICE)
+    record("/new_season responds (confirm card or guard message)", bool(out))
+
+    out = await feed("/disable_dues", ALICE)
+    record("/disable_dues responds", bool(out))
+
+    # Money handlers must never leak an internal error into the chat; the
+    # global no-ERROR-logs check at the end of Phase 16 covers the whole run,
+    # but fail fast here so a dues regression is attributed to this phase.
+    record("no ERROR-level logs during dues phases", len(_errors) == 0,
+           f"{len(_errors)} errors: {error_msgs()[:5]}" if _errors else "")
+
+
 async def run_all():
     print("\n=== Phase 1: Lifecycle & basic voting ===\n")
 
@@ -876,6 +1027,8 @@ async def run_all():
 
     # Close error-test rollcall
     await feed("/erc", ALICE)
+
+    await phase_dues()
 
     print("\n=== Phase 16: Lifecycle close (final) ===\n")
 

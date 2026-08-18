@@ -1,9 +1,14 @@
 """
-Functional test for pyTelegramBotAPI 4.34.0 upgrade.
+End-to-end functional test against the REAL pyTelegramBotAPI.
 
-Uses the REAL pyTelegramBotAPI 4.34.0 library — no mocks of telebot, types,
-or middleware. Constructs realistic Telegram Update payloads and feeds them
-through bot.process_new_updates(), which exercises:
+Originally written to qualify the 4.14.1 → 4.34.0 bump (PR #15) and named for
+that version; it now runs on every check-in as a standing regression contract,
+so keep EXTENDING it rather than replacing it when dependencies move. The
+pinned telebot version is whatever requirements.lock says — nothing here is
+tied to 4.34 any more.
+
+No mocks of telebot, types, or middleware. Constructs realistic Telegram Update
+payloads and feeds them through bot.process_new_updates(), which exercises:
 
   - The real Update.de_json deserialization
   - The real message router (matching @bot.message_handler decorators)
@@ -45,7 +50,11 @@ from importlib.metadata import version as _pkg_version  # noqa: E402
 
 _TBL_VER = _pkg_version("pyTelegramBotAPI")
 print(f"pyTelegramBotAPI version: {_TBL_VER}")
-assert _TBL_VER == "4.34.0", f"Expected 4.34.0, got {_TBL_VER}"
+# Deliberately NOT asserted against a fixed version. This used to pin 4.34.0,
+# which was right while the file was a one-off gate for that bump but would
+# now fail the build the first time telebot moves — exactly when this test is
+# most worth running. The version is reported so it shows in the CI log; what
+# is pinned lives in requirements.lock.
 
 # ─── Bot state + handlers (this triggers real decorator registration) ────────
 import bot_state  # noqa: E402
@@ -885,7 +894,7 @@ async def run_all():
 
 def main():
     print("=" * 70)
-    print("Functional test for pyTelegramBotAPI 4.34.0")
+    print(f"Functional test against real pyTelegramBotAPI {_TBL_VER}")
     print("=" * 70)
     asyncio.run(run_all())
 
@@ -906,7 +915,7 @@ def main():
                     print(f"     {d}")
         return 1
 
-    print("\n✅ All scenarios passed against pyTelegramBotAPI 4.34.0")
+    print(f"\n✅ All scenarios passed against pyTelegramBotAPI {_TBL_VER}")
     return 0
 
 

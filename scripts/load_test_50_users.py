@@ -3,7 +3,7 @@ Multi-group local load/functional test for RollCall: 10 groups x 50 users
 each (500 total), run concurrently.
 
 Uses the REAL pyTelegramBotAPI processing path (same pattern as
-scripts/functional_test_4_34.py) against a real temp SQLite DB — no handler
+scripts/functional_test.py) against a real temp SQLite DB — no handler
 mocks. Only outbound Telegram network calls are patched. Per group, exercises:
 
   - Rollcall lifecycle with 50 real voters (mixed /in /out /maybe)

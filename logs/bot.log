@@ -7944,3 +7944,1137 @@ Exception: db down
 2026-08-18 09:21:07,387 - root - INFO - [api] Command reference served at /help/
 2026-08-18 09:21:07,391 - root - INFO - [weblogin_redeem_post] redeemed token for user=42 chat=-100
 2026-08-18 09:21:07,392 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/auth/weblogin/redeem "HTTP/1.1 200 OK"
+2026-08-18 10:05:58,227 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Alice', @alice, id=1) → IN
+2026-08-18 10:05:58,229 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Alice', @alice, id=1) → IN
+2026-08-18 10:05:58,231 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Alice', @alice, id=1) → IN
+2026-08-18 10:05:58,232 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Alice', @alice, id=1) → MAYBE
+2026-08-18 10:05:58,233 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Alice', @alice, id=1) → IN
+2026-08-18 10:05:58,234 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Alice', @alice, id=1) → OUT
+2026-08-18 10:05:58,235 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Alice', @alice, id=1) → IN
+2026-08-18 10:05:58,236 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Alice', @alice, id=1) → IN
+2026-08-18 10:05:58,237 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Alice', @alice, id=1) → IN
+2026-08-18 10:05:58,238 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Bob', @bob, id=2) → IN
+2026-08-18 10:05:58,239 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Carol', @carol, id=3) → WAITING (limit=2)
+2026-08-18 10:05:58,240 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Alice', @alice, id=1) → IN
+2026-08-18 10:05:58,241 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Bob', @bob, id=2) → IN
+2026-08-18 10:05:58,243 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Alice', @alice, id=1) → IN
+2026-08-18 10:05:58,243 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Bob', @bob, id=2) → IN
+2026-08-18 10:05:58,245 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Carol', @carol, id=3) → WAITING (limit=2)
+2026-08-18 10:05:58,246 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Alice', @alice, id=1) → MAYBE
+2026-08-18 10:05:58,247 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Alice', @alice, id=1) → IN
+2026-08-18 10:05:58,250 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Bob', @bob, id=2) → IN
+2026-08-18 10:05:58,251 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Carol', @carol, id=3) → WAITING (limit=2)
+2026-08-18 10:05:58,252 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Alice', @alice, id=1) → OUT
+2026-08-18 10:05:58,253 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Alice', @alice, id=1) → IN
+2026-08-18 10:05:58,253 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Bob', @bob, id=2) → IN
+2026-08-18 10:05:58,254 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Carol', @carol, id=3) → WAITING (limit=2)
+2026-08-18 10:05:58,255 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Alice', @alice, id=1) → IN
+2026-08-18 10:05:58,256 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Bob', @bob, id=2) → IN
+2026-08-18 10:05:58,257 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Carol', @carol, id=3) → WAITING (limit=2)
+2026-08-18 10:05:58,258 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Alice', @alice, id=1) → OUT
+2026-08-18 10:05:58,260 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Alice', @alice, id=1) → OUT
+2026-08-18 10:05:58,261 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Alice', @alice, id=1) → IN
+2026-08-18 10:05:58,261 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Alice', @alice, id=1) → OUT
+2026-08-18 10:05:58,263 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Alice', @alice, id=1) → MAYBE
+2026-08-18 10:05:58,264 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Alice', @alice, id=1) → MAYBE
+2026-08-18 10:05:58,265 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Alice', @alice, id=1) → OUT
+2026-08-18 10:05:58,265 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Alice', @alice, id=1) → MAYBE
+2026-08-18 10:05:58,266 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User 'Alice' deleted
+2026-08-18 10:05:58,271 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Charlie Proxy', @None, id=Charlie Proxy) → IN
+2026-08-18 10:05:58,272 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Charlie Proxy', @None, id=Charlie Proxy) → IN
+2026-08-18 10:05:58,275 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Alice', @alice, id=1) → IN
+2026-08-18 10:05:58,275 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Test Event'] User(name='Bob', @bob, id=2) → OUT
+2026-08-18 10:05:58,277 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Weekly Game'] User(name='Alice', @alice, id=1) → IN
+2026-08-18 10:05:58,277 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Weekly Game'] User(name='Bob', @bob, id=2) → IN
+2026-08-18 10:05:58,278 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Weekly Game'] User(name='Carol', @carol, id=3) → IN
+2026-08-18 10:05:58,279 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Weekly Game'] User(name='Dave', @dave, id=4) → WAITING (limit=3)
+2026-08-18 10:05:58,280 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Weekly Game'] User(name='Alice', @alice, id=1) → OUT
+2026-08-18 10:05:58,282 - root - INFO - [2026-08-18 10:05:58] [RC #1 'Weekly Game'] User(name='Bob', @bob, id=2) → MAYBE
+2026-08-18 10:05:58,288 - root - INFO - [2026-08-18 10:05:58] [CHAT 100] Rollcall started: 'Event 3' (RC #3) by Alice (@alice)
+2026-08-18 10:05:58,295 - root - INFO - [push] notify: sent=0/0 group=testgrouptok title='Event 3'
+2026-08-18 10:05:58,321 - root - INFO - [2026-08-18 10:05:58] [CHAT 100] Title set to 'New Title' by Alice
+2026-08-18 10:05:58,329 - root - INFO - [2026-08-18 10:05:58] [CHAT 100] Rollcall ended: 'Event 1' by Alice (@alice)
+2026-08-18 10:05:58,331 - root - INFO - [push] notify_ended: sent=0/0 group=testgrouptok title='Event 1'
+2026-08-18 10:05:58,336 - root - INFO - [2026-08-18 10:05:58] [CHAT 100] Rollcall ended: 'Event 2' by Alice (@alice)
+2026-08-18 10:05:58,338 - root - INFO - [push] notify_ended: sent=0/0 group=testgrouptok title='Event 2'
+2026-08-18 10:05:58,408 - root - INFO - [2026-08-18 10:05:58] [CHAT 100] Rollcall started: 'Event 4' (RC #1) by Alice (@alice)
+2026-08-18 10:05:58,412 - root - INFO - [push] notify: sent=0/0 group=testgrouptok title='Event 4'
+2026-08-18 10:05:58,423 - root - INFO - [2026-08-18 10:05:58] Max limit of attendees is set to 5
+2026-08-18 10:05:58,435 - root - ERROR - mark_penalty failed for Alice (chat=100 tier=late)
+Traceback (most recent call last):
+  File "/app/tests/../rollCall/handlers/penalty_panel.py", line 340, in penalty_panel_callback
+    dues_svc.mark_penalty(
+  File "/usr/local/lib/python3.12/unittest/mock.py", line 1139, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/unittest/mock.py", line 1143, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/unittest/mock.py", line 1198, in _execute_mock_call
+    raise effect
+RuntimeError: db connection reset by peer
+2026-08-18 10:05:58,451 - root - INFO - [periodic] weekly dues report sent for chat -9001
+2026-08-18 10:05:58,453 - root - INFO - [periodic] weekly dues report sent for chat -9001
+2026-08-18 10:05:58,459 - root - INFO - [periodic] weekly dues report sent for chat -9001
+2026-08-18 10:05:58,463 - root - INFO - [periodic] weekly dues report sent for chat -9001
+2026-08-18 10:05:58,464 - root - INFO - [periodic] weekly dues report sent for chat -9002
+2026-08-18 10:05:58,466 - root - ERROR - [periodic] weekly dues report failed for chat -9001
+Traceback (most recent call last):
+  File "/app/tests/../rollCall/periodic_jobs.py", line 140, in _weekly_dues_report
+    snapshot = dues_svc.dues_snapshot(chat_id)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/unittest/mock.py", line 1139, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/unittest/mock.py", line 1143, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/unittest/mock.py", line 1198, in _execute_mock_call
+    raise effect
+RuntimeError: db down
+2026-08-18 10:05:58,470 - root - INFO - [periodic] ghost auto-forgive: chat=-9101 rollcall=41 ('Sunday Game') unmarked for >7d — forgave 2 attendee(s)
+2026-08-18 10:05:58,470 - root - INFO - [periodic] ghost auto-forgive: processed 1 stale session(s)
+2026-08-18 10:05:58,473 - root - INFO - [periodic] ghost auto-forgive: chat=-9101 rollcall=41 ('Sunday Game') unmarked for >7d — forgave 2 attendee(s)
+2026-08-18 10:05:58,473 - root - INFO - [periodic] ghost auto-forgive: chat=-9101 rollcall=42 ('Sunday Game') unmarked for >7d — forgave 2 attendee(s)
+2026-08-18 10:05:58,474 - root - INFO - [periodic] ghost auto-forgive: processed 2 stale session(s)
+2026-08-18 10:05:58,481 - root - INFO - [periodic] ghost auto-forgive: chat=-9101 rollcall=41 ('Sunday Game') unmarked for >7d — forgave 2 attendee(s)
+2026-08-18 10:05:58,482 - root - INFO - [periodic] ghost auto-forgive: processed 1 stale session(s)
+2026-08-18 10:05:58,486 - root - ERROR - [periodic] ghost auto-forgive failed for chat -1
+Traceback (most recent call last):
+  File "/app/tests/../rollCall/periodic_jobs.py", line 262, in _ghost_auto_forgive
+    if not _db.get_or_create_chat(chat_id).get("ghost_tracking_enabled"):
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/unittest/mock.py", line 1139, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/unittest/mock.py", line 1143, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/unittest/mock.py", line 1204, in _execute_mock_call
+    result = effect(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/tests/test_periodic_ghost_autoforgive.py", line 127, in _chat
+    raise RuntimeError("boom")
+RuntimeError: boom
+2026-08-18 10:05:58,490 - root - INFO - [periodic] ghost auto-forgive: chat=-9101 rollcall=41 ('Sunday Game') unmarked for >7d — forgave 0 attendee(s)
+2026-08-18 10:05:58,491 - root - INFO - [periodic] ghost auto-forgive: processed 1 stale session(s)
+2026-08-18 10:05:58,496 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:05:58,497 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:05:58,501 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:05:58,503 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:05:58,550 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/portal/groups "HTTP/1.1 200 OK"
+2026-08-18 10:05:58,554 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:05:58,555 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:05:58,557 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:05:58,558 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:05:58,603 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/portal/groups "HTTP/1.1 401 Unauthorized"
+2026-08-18 10:05:58,606 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:05:58,607 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:05:58,609 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:05:58,610 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:05:58,656 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/portal/groups "HTTP/1.1 200 OK"
+2026-08-18 10:05:58,660 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:05:58,661 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:05:58,662 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:05:58,663 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:05:58,707 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/portal/groups "HTTP/1.1 200 OK"
+2026-08-18 10:05:58,711 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:05:58,712 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:05:58,713 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:05:58,714 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:05:58,811 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/portal/groups "HTTP/1.1 401 Unauthorized"
+2026-08-18 10:05:58,815 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:05:58,815 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:05:58,817 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:05:58,818 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:05:58,863 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/portal/groups "HTTP/1.1 200 OK"
+2026-08-18 10:05:58,865 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:05:58,866 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:05:58,868 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:05:58,869 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:05:58,914 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/portal/groups "HTTP/1.1 200 OK"
+2026-08-18 10:05:58,917 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:05:58,918 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:05:58,920 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:05:58,921 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:05:58,965 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/portal/upcoming "HTTP/1.1 200 OK"
+2026-08-18 10:05:58,968 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:05:58,969 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:05:58,970 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:05:58,971 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:05:59,015 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/portal/upcoming "HTTP/1.1 401 Unauthorized"
+2026-08-18 10:05:59,018 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:05:59,019 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:05:59,021 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:05:59,021 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:05:59,067 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/portal/upcoming "HTTP/1.1 401 Unauthorized"
+2026-08-18 10:05:59,070 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:05:59,071 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:05:59,073 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:05:59,073 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:05:59,119 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/portal/upcoming "HTTP/1.1 200 OK"
+2026-08-18 10:05:59,123 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:05:59,124 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:05:59,125 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:05:59,126 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:05:59,171 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/portal/groups/-100/history "HTTP/1.1 200 OK"
+2026-08-18 10:05:59,175 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:05:59,176 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:05:59,178 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:05:59,179 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:05:59,224 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/portal/groups/-100/history "HTTP/1.1 401 Unauthorized"
+2026-08-18 10:05:59,227 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:05:59,228 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:05:59,230 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:05:59,231 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:05:59,338 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/portal/groups/-100/history?limit=100 "HTTP/1.1 422 Unprocessable Entity"
+2026-08-18 10:05:59,341 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:05:59,342 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:05:59,344 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:05:59,345 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:05:59,388 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/portal/groups/-100/history?limit=5 "HTTP/1.1 200 OK"
+2026-08-18 10:05:59,391 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:05:59,392 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:05:59,393 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:05:59,394 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:05:59,439 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/portal/groups/-100/history "HTTP/1.1 401 Unauthorized"
+2026-08-18 10:05:59,491 - root - WARNING - [push] send failed e2: WebPushException: boom, Response <tests.test_push._Resp object at 0xffff7dfaed20>
+2026-08-18 10:05:59,525 - root - ERROR - [repeat] failed to schedule recurring template for chat -100
+Traceback (most recent call last):
+  File "/app/tests/../rollCall/handlers/lifecycle.py", line 310, in _apply_repeat_flag
+    templates_svc.upsert_template(
+  File "/usr/local/lib/python3.12/unittest/mock.py", line 1139, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/unittest/mock.py", line 1143, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/unittest/mock.py", line 1198, in _execute_mock_call
+    raise effect
+RuntimeError: db down
+2026-08-18 10:05:59,532 - root - INFO - [2026-08-18 10:05:59] [RC #1] Created rollcall 'Event' for chat 1003
+2026-08-18 10:05:59,533 - root - INFO - [2026-08-18 10:05:59] Created rollcall 'Event' with ID 1 for chat 1003
+2026-08-18 10:05:59,536 - root - INFO - [2026-08-18 10:05:59] [RC #1] Created rollcall 'Yoga Session' for chat 1004
+2026-08-18 10:05:59,537 - root - INFO - [2026-08-18 10:05:59] Created rollcall 'Yoga Session' with ID 1 for chat 1004
+2026-08-18 10:05:59,538 - root - INFO - [2026-08-18 10:05:59] [RC #1] Created rollcall 'Test' for chat 1005
+2026-08-18 10:05:59,539 - root - INFO - [2026-08-18 10:05:59] Created rollcall 'Test' with ID 1 for chat 1005
+2026-08-18 10:05:59,547 - root - INFO - [2026-08-18 10:05:59] [RC #1] Created rollcall 'Badminton' for chat 1006
+2026-08-18 10:05:59,548 - root - INFO - [2026-08-18 10:05:59] Created rollcall 'Badminton' with ID 1 for chat 1006
+2026-08-18 10:05:59,548 - root - INFO - [2026-08-18 10:05:59] Ended rollcall DB ID 1 for chat 1006
+2026-08-18 10:05:59,550 - root - INFO - [2026-08-18 10:05:59] [RC #1] Created rollcall 'Cricket' for chat 1007
+2026-08-18 10:05:59,551 - root - INFO - [2026-08-18 10:05:59] Created rollcall 'Cricket' with ID 1 for chat 1007
+2026-08-18 10:05:59,552 - root - INFO - [2026-08-18 10:05:59] Ended rollcall DB ID 1 for chat 1007
+2026-08-18 10:05:59,557 - root - INFO - [2026-08-18 10:05:59] [RC #1] Created rollcall 'Test Event' for chat 4003
+2026-08-18 10:05:59,558 - root - INFO - [2026-08-18 10:05:59] Created rollcall 'Test Event' with ID 1 for chat 4003
+2026-08-18 10:05:59,561 - root - INFO - [2026-08-18 10:05:59] RollCall cache cleared
+2026-08-18 10:05:59,601 - root - WARNING - send_md_fallback: send failed for chat 100 (Forbidden: bot was blocked), retrying once
+2026-08-18 10:06:00,115 - root - ERROR - send_md_fallback: retry failed for chat 100 — message lost: 'hello'
+Traceback (most recent call last):
+  File "/app/tests/../rollCall/bot_state.py", line 274, in send_md_fallback
+    return await bot.send_message(cid, text, parse_mode="Markdown", **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/unittest/mock.py", line 2291, in _execute_mock_call
+    raise effect
+  File "/app/tests/../rollCall/bot_state.py", line 262, in send_md_fallback
+    return await bot.send_message(cid, text, parse_mode="Markdown", **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/unittest/mock.py", line 2291, in _execute_mock_call
+    raise effect
+Exception: Forbidden: bot was blocked
+2026-08-18 10:06:00,148 - root - WARNING - Markdown parse failed for chat 100; resending plain
+2026-08-18 10:06:00,184 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:00,185 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:00,187 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:00,188 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:00,197 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/health "HTTP/1.1 200 OK"
+2026-08-18 10:06:00,202 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:00,203 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:00,208 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:00,209 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:00,217 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/health "HTTP/1.1 200 OK"
+2026-08-18 10:06:00,271 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:00,277 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:00,283 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:00,284 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:00,299 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/commands "HTTP/1.1 200 OK"
+2026-08-18 10:06:00,302 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/commands "HTTP/1.1 429 Too Many Requests"
+2026-08-18 10:06:00,305 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:00,308 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:00,311 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:00,312 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:00,320 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/health "HTTP/1.1 200 OK"
+2026-08-18 10:06:00,324 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:00,324 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:00,326 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:00,327 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:00,334 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/health "HTTP/1.1 200 OK"
+2026-08-18 10:06:00,338 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:00,339 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:00,340 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:00,341 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:00,352 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/health "HTTP/1.1 200 OK"
+2026-08-18 10:06:00,360 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:00,364 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:00,370 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:00,375 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:00,454 - httpx - INFO - HTTP Request: GET http://testserver/miniapp/ "HTTP/1.1 200 OK"
+2026-08-18 10:06:00,457 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:00,458 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:00,459 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:00,460 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:00,467 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/health "HTTP/1.1 200 OK"
+2026-08-18 10:06:00,484 - root - INFO - [2026-08-18 10:06:00] [CHAT 100] Rollcall CANCELLED: 'Weekly' by Admin (@none)
+2026-08-18 10:06:00,490 - root - INFO - [2026-08-18 10:06:00] [CHAT 100] Rollcall CANCELLED: 'Weekly' by Admin (@none)
+2026-08-18 10:06:00,497 - root - INFO - [2026-08-18 10:06:00] [CHAT 100] Rollcall CANCELLED: 'Weekend Game' by Admin (@none) (reason: heavy rain)
+2026-08-18 10:06:00,501 - root - INFO - [2026-08-18 10:06:00] [CHAT 100] Rollcall ended: 'Weekly' by Admin (@none)
+2026-08-18 10:06:00,511 - root - INFO - [push] notify_ended: sent=0/0 group=testgrouptok title='Weekly'
+2026-08-18 10:06:00,641 - root - INFO - [2026-08-18 10:06:00] [CHAT 100] Rollcall started: 'Match Day' (RC #1) by Admin (@none)
+2026-08-18 10:06:00,644 - root - INFO - [push] notify: sent=0/0 group=testgrouptok title='Match Day'
+2026-08-18 10:06:00,647 - root - INFO - [2026-08-18 10:06:00] [CHAT 100] Rollcall started: '<Empty>' (RC #1) by Admin (@none)
+2026-08-18 10:06:00,649 - root - INFO - [push] notify: sent=0/0 group=testgrouptok title='<Empty>'
+2026-08-18 10:06:00,652 - root - INFO - [2026-08-18 10:06:00] [CHAT 100] Rollcall started: 'Sunday Cricket' (RC #1) by Admin (@none)
+2026-08-18 10:06:00,654 - root - INFO - [push] notify: sent=0/0 group=testgrouptok title='Sunday Cricket'
+2026-08-18 10:06:00,657 - root - INFO - [2026-08-18 10:06:00] [CHAT 100] Rollcall started: 'Sunday Cricket' (RC #1) by Admin (@none)
+2026-08-18 10:06:00,659 - root - INFO - [push] notify: sent=0/0 group=testgrouptok title='Sunday Cricket'
+2026-08-18 10:06:00,664 - root - INFO - [2026-08-18 10:06:00] [CHAT 100] Rollcall started: 'Test' (RC #1) by Admin (@none)
+2026-08-18 10:06:00,665 - root - INFO - [push] notify: sent=0/0 group=testgrouptok title='Test'
+2026-08-18 10:06:00,673 - root - INFO - [2026-08-18 10:06:00] [CHAT 100] Rollcall started: 'Plain' (RC #1) by Admin (@none)
+2026-08-18 10:06:00,674 - root - INFO - [push] notify: sent=0/0 group=testgrouptok title='Plain'
+2026-08-18 10:06:00,768 - root - INFO - [2026-08-18 10:06:00] [CHAT 100] delete_user: 'Alice' from RC #1 by Admin
+2026-08-18 10:06:00,777 - root - INFO - [2026-08-18 10:06:00] [CHAT 100] set_status: 'Alice' in → out in RC #1 by Admin
+2026-08-18 10:06:00,860 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:00,862 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:00,863 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:00,864 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:00,871 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/auth/tg-login/config "HTTP/1.1 503 Service Unavailable"
+2026-08-18 10:06:00,874 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:00,874 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:00,876 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:00,876 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:00,881 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/auth/tg-login/config "HTTP/1.1 200 OK"
+2026-08-18 10:06:00,884 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:00,885 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:00,886 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:00,887 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:00,893 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/auth/tg-login "HTTP/1.1 401 Unauthorized"
+2026-08-18 10:06:00,896 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:00,896 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:00,898 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:00,899 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:00,906 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/auth/tg-login "HTTP/1.1 422 Unprocessable Entity"
+2026-08-18 10:06:00,909 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:00,911 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:00,912 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:00,913 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:00,920 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/auth/tg-login "HTTP/1.1 200 OK"
+2026-08-18 10:06:00,922 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:00,923 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:00,925 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:00,925 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:00,931 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/auth/tg-login "HTTP/1.1 401 Unauthorized"
+2026-08-18 10:06:00,934 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:00,935 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:00,937 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:00,939 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:00,945 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/auth/tg-login "HTTP/1.1 200 OK"
+2026-08-18 10:06:00,950 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:00,951 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:00,953 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:00,953 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:00,991 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/badtoken "HTTP/1.1 422 Unprocessable Entity"
+2026-08-18 10:06:00,995 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:00,996 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:00,997 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:00,998 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:01,035 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/abc123rollcalltoken "HTTP/1.1 200 OK"
+2026-08-18 10:06:01,038 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:01,039 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:01,040 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:01,041 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:01,077 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/abc123rollcalltoken "HTTP/1.1 200 OK"
+2026-08-18 10:06:01,079 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:01,080 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:01,082 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:01,083 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:01,177 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/abc123rollcalltoken "HTTP/1.1 200 OK"
+2026-08-18 10:06:01,180 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:01,181 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:01,182 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:01,183 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:01,219 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/abc123rollcalltoken "HTTP/1.1 200 OK"
+2026-08-18 10:06:01,224 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:01,225 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:01,226 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:01,227 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:01,262 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/abc123rollcalltoken "HTTP/1.1 200 OK"
+2026-08-18 10:06:01,265 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:01,266 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:01,268 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:01,269 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:01,304 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/abc123rollcalltoken "HTTP/1.1 200 OK"
+2026-08-18 10:06:01,307 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:01,308 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:01,309 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:01,310 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:01,350 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/abc123rollcalltoken/vote "HTTP/1.1 422 Unprocessable Entity"
+2026-08-18 10:06:01,355 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:01,356 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:01,358 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:01,359 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:01,449 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/badtoken/vote "HTTP/1.1 422 Unprocessable Entity"
+2026-08-18 10:06:01,455 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:01,456 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:01,457 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:01,458 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:01,494 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/abc123rollcalltoken/vote "HTTP/1.1 422 Unprocessable Entity"
+2026-08-18 10:06:01,498 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:01,499 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:01,500 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:01,501 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:01,539 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/abc123rollcalltoken/vote "HTTP/1.1 422 Unprocessable Entity"
+2026-08-18 10:06:01,542 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:01,543 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:01,545 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:01,546 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:01,585 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/abc123rollcalltoken/vote "HTTP/1.1 422 Unprocessable Entity"
+2026-08-18 10:06:01,589 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:01,590 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:01,591 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:01,592 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:01,628 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/abc123rollcalltoken/vote "HTTP/1.1 200 OK"
+2026-08-18 10:06:01,631 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:01,632 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:01,633 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:01,634 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:01,671 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/abc123rollcalltoken/vote "HTTP/1.1 422 Unprocessable Entity"
+2026-08-18 10:06:01,674 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:01,675 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:01,677 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:01,678 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:01,787 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/abc123rollcalltoken/vote "HTTP/1.1 200 OK"
+2026-08-18 10:06:01,791 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:01,791 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:01,793 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:01,794 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:01,829 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/abc123rollcalltoken/vote "HTTP/1.1 200 OK"
+2026-08-18 10:06:01,832 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:01,833 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:01,834 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:01,835 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:01,870 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/mytok/vote "HTTP/1.1 200 OK"
+2026-08-18 10:06:01,873 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:01,874 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:01,876 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:01,877 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:01,913 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/abc123rollcalltoken/vote "HTTP/1.1 200 OK"
+2026-08-18 10:06:01,917 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:01,918 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:01,919 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:01,920 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:01,955 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/abc123rollcalltoken/vote "HTTP/1.1 200 OK"
+2026-08-18 10:06:01,958 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:01,959 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:01,961 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:01,961 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:02,000 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/abc123rollcalltoken/vote "HTTP/1.1 200 OK"
+2026-08-18 10:06:02,004 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:02,006 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:02,008 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:02,009 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:02,045 - root - INFO - [mirror] sending vote notification chat=-100200 name=Alice vote=in
+2026-08-18 10:06:02,047 - root - INFO - [mirror] vote notification sent ok chat=-100200
+2026-08-18 10:06:02,049 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/tok/vote "HTTP/1.1 200 OK"
+2026-08-18 10:06:02,052 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:02,053 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:02,054 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:02,055 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:02,089 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/tok/vote "HTTP/1.1 200 OK"
+2026-08-18 10:06:02,093 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:02,093 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:02,095 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:02,096 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:02,131 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/mygrouptoken000 "HTTP/1.1 200 OK"
+2026-08-18 10:06:02,133 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:02,135 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:02,136 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:02,137 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:02,174 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/mygrouptoken000 "HTTP/1.1 200 OK"
+2026-08-18 10:06:02,179 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:02,180 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:02,181 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:02,182 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:02,217 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/mygrouptoken000 "HTTP/1.1 200 OK"
+2026-08-18 10:06:02,220 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:02,221 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:02,222 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:02,223 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:02,327 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/badtoken "HTTP/1.1 422 Unprocessable Entity"
+2026-08-18 10:06:02,330 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:02,331 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:02,333 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:02,333 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:02,369 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/mygrouptoken000 "HTTP/1.1 200 OK"
+2026-08-18 10:06:02,371 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:02,372 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:02,374 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:02,374 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:02,410 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/mygrouptoken000 "HTTP/1.1 200 OK"
+2026-08-18 10:06:02,412 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:02,413 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:02,415 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:02,416 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:02,450 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/sometoken "HTTP/1.1 200 OK"
+2026-08-18 10:06:02,454 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:02,456 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:02,458 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:02,459 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:02,497 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/mygrouptoken000 "HTTP/1.1 200 OK"
+2026-08-18 10:06:02,500 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:02,501 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:02,502 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:02,503 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:02,549 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/mygrouptoken000 "HTTP/1.1 200 OK"
+2026-08-18 10:06:02,553 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:02,554 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:02,555 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:02,556 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:02,613 - httpx - INFO - HTTP Request: GET http://testserver/web/join/tok1 "HTTP/1.1 200 OK"
+2026-08-18 10:06:02,615 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:02,616 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:02,618 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:02,619 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:02,667 - httpx - INFO - HTTP Request: GET http://testserver/web/group/tok2 "HTTP/1.1 200 OK"
+2026-08-18 10:06:02,671 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:02,672 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:02,673 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:02,674 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:02,721 - httpx - INFO - HTTP Request: GET http://testserver/web/group/somegrouptoken "HTTP/1.1 200 OK"
+2026-08-18 10:06:02,724 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:02,725 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:02,726 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:02,727 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:02,773 - httpx - INFO - HTTP Request: GET http://testserver/web/group/somegrouptoken "HTTP/1.1 200 OK"
+2026-08-18 10:06:02,777 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:02,778 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:02,779 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:02,781 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:02,901 - httpx - INFO - HTTP Request: GET http://testserver/web/group/somegrouptoken "HTTP/1.1 200 OK"
+2026-08-18 10:06:02,903 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:02,905 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:02,907 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:02,907 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:02,953 - httpx - INFO - HTTP Request: GET http://testserver/web/join/somerollcalltoken "HTTP/1.1 200 OK"
+2026-08-18 10:06:02,956 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:02,957 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:02,959 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:02,960 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:03,006 - httpx - INFO - HTTP Request: GET http://testserver/web/join/somerollcalltoken "HTTP/1.1 200 OK"
+2026-08-18 10:06:03,009 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:03,010 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:03,011 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:03,012 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:03,063 - httpx - INFO - HTTP Request: GET http://testserver/web/join/somerollcalltoken "HTTP/1.1 200 OK"
+2026-08-18 10:06:03,068 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:03,069 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:03,070 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:03,071 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:03,120 - httpx - INFO - HTTP Request: GET http://testserver/web/join/sometoken "HTTP/1.1 200 OK"
+2026-08-18 10:06:03,123 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:03,124 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:03,126 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:03,127 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:03,174 - httpx - INFO - HTTP Request: GET http://testserver/web/join/sometoken "HTTP/1.1 200 OK"
+2026-08-18 10:06:03,176 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:03,177 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:03,178 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:03,179 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:03,230 - httpx - INFO - HTTP Request: GET http://testserver/web/join/sometoken "HTTP/1.1 200 OK"
+2026-08-18 10:06:03,236 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:03,237 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:03,239 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:03,240 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:03,297 - httpx - INFO - HTTP Request: GET http://testserver/web/join/sometoken "HTTP/1.1 200 OK"
+2026-08-18 10:06:03,300 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:03,301 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:03,302 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:03,303 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:03,352 - httpx - INFO - HTTP Request: GET http://testserver/web/join/sometoken "HTTP/1.1 200 OK"
+2026-08-18 10:06:03,355 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:03,356 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:03,358 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:03,359 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:03,498 - httpx - INFO - HTTP Request: GET http://testserver/web/join/sometoken "HTTP/1.1 200 OK"
+2026-08-18 10:06:03,501 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:03,502 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:03,504 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:03,505 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:03,551 - httpx - INFO - HTTP Request: GET http://testserver/web/join/sometoken "HTTP/1.1 200 OK"
+2026-08-18 10:06:03,555 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:03,556 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:03,557 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:03,558 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:03,561 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:03,562 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:03,564 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:03,564 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:03,566 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:03,567 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:03,569 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:03,569 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:03,572 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:03,572 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:03,573 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:03,574 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:03,576 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:03,577 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:03,578 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:03,579 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:03,583 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:03,583 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:03,584 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:03,585 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:03,619 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/abc123rollcalltoken "HTTP/1.1 200 OK"
+2026-08-18 10:06:03,622 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:03,623 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:03,624 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:03,625 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:03,660 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/abc123rollcalltoken "HTTP/1.1 200 OK"
+2026-08-18 10:06:03,663 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:03,665 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:03,666 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:03,667 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:03,702 - root - INFO - [mirror] updating panel chat=-100 rc=1 force_new=False
+2026-08-18 10:06:03,703 - root - INFO - [mirror] panel updated ok chat=-100 rc=1
+2026-08-18 10:06:03,705 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/end-rollcall "HTTP/1.1 200 OK"
+2026-08-18 10:06:03,708 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:03,709 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:03,711 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:03,711 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:03,745 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/badgrp/end-rollcall "HTTP/1.1 404 Not Found"
+2026-08-18 10:06:03,749 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:03,750 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:03,751 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:03,752 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:03,785 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/end-rollcall "HTTP/1.1 401 Unauthorized"
+2026-08-18 10:06:03,789 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:03,790 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:03,792 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:03,793 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:03,827 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/end-rollcall "HTTP/1.1 422 Unprocessable Entity"
+2026-08-18 10:06:03,831 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:03,832 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:03,833 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:03,834 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:03,868 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/end-rollcall "HTTP/1.1 403 Forbidden"
+2026-08-18 10:06:03,872 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:03,873 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:03,874 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:03,875 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:03,909 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/proxy-vote "HTTP/1.1 201 Created"
+2026-08-18 10:06:03,912 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:03,913 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:03,914 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:03,915 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:04,021 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/badgrp/proxy-vote "HTTP/1.1 404 Not Found"
+2026-08-18 10:06:04,024 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:04,025 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:04,027 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:04,027 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:04,062 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/proxy-vote "HTTP/1.1 401 Unauthorized"
+2026-08-18 10:06:04,065 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:04,066 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:04,067 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:04,068 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:04,103 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/proxy-vote "HTTP/1.1 422 Unprocessable Entity"
+2026-08-18 10:06:04,106 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:04,107 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:04,109 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:04,109 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:04,146 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/proxy-vote "HTTP/1.1 403 Forbidden"
+2026-08-18 10:06:04,149 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:04,150 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:04,152 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:04,153 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:04,188 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/proxy-vote "HTTP/1.1 201 Created"
+2026-08-18 10:06:04,191 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:04,192 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:04,193 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:04,194 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:04,229 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/proxy-vote "HTTP/1.1 422 Unprocessable Entity"
+2026-08-18 10:06:04,234 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:04,235 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:04,236 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:04,237 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:04,272 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/rollcalls/remove-user "HTTP/1.1 200 OK"
+2026-08-18 10:06:04,275 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:04,276 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:04,278 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:04,278 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:04,313 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/badgrp/rollcalls/remove-user "HTTP/1.1 404 Not Found"
+2026-08-18 10:06:04,316 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:04,317 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:04,318 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:04,319 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:04,355 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/rollcalls/remove-user "HTTP/1.1 401 Unauthorized"
+2026-08-18 10:06:04,357 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:04,359 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:04,360 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:04,361 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:04,397 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/rollcalls/remove-user "HTTP/1.1 422 Unprocessable Entity"
+2026-08-18 10:06:04,400 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:04,401 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:04,402 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:04,403 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:04,438 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/rollcalls/remove-user "HTTP/1.1 403 Forbidden"
+2026-08-18 10:06:04,441 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:04,442 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:04,443 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:04,444 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:04,549 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/rollcalls/move-user "HTTP/1.1 200 OK"
+2026-08-18 10:06:04,553 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:04,554 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:04,558 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:04,560 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:04,597 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/rollcalls/move-user "HTTP/1.1 403 Forbidden"
+2026-08-18 10:06:04,600 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:04,600 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:04,602 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:04,603 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:04,637 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/rollcalls/move-user "HTTP/1.1 422 Unprocessable Entity"
+2026-08-18 10:06:04,641 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:04,642 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:04,644 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:04,645 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:04,680 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/grp123/admin-status "HTTP/1.1 200 OK"
+2026-08-18 10:06:04,684 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:04,685 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:04,687 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:04,687 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:04,722 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/grp123/admin-status "HTTP/1.1 200 OK"
+2026-08-18 10:06:04,726 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:04,727 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:04,728 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:04,729 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:04,765 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/grp123/admin-status "HTTP/1.1 200 OK"
+2026-08-18 10:06:04,768 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:04,769 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:04,770 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:04,771 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:04,807 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/badgrp/admin-status "HTTP/1.1 200 OK"
+2026-08-18 10:06:04,810 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:04,811 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:04,812 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:04,813 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:04,848 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/grp123/admin-status "HTTP/1.1 200 OK"
+2026-08-18 10:06:04,851 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:04,853 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:04,855 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:04,856 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:04,890 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/grp123/admin-status "HTTP/1.1 200 OK"
+2026-08-18 10:06:04,893 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:04,894 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:04,896 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:04,897 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:04,932 - root - WARNING - [check_web_admin_live] live check failed chat=-100 user=99 — using cached value
+Traceback (most recent call last):
+  File "/app/tests/../rollCall/api/web_admin.py", line 39, in check_web_admin_live
+    member = await bot.get_chat_member(chat_id, tg_user_id)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/unittest/mock.py", line 2291, in _execute_mock_call
+    raise effect
+Exception: Telegram unreachable
+2026-08-18 10:06:04,937 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/grp123/admin-status "HTTP/1.1 200 OK"
+2026-08-18 10:06:04,940 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:04,941 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:04,942 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:04,943 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:04,977 - root - WARNING - [check_web_admin_live] live check failed chat=-100 user=99 — using cached value
+Traceback (most recent call last):
+  File "/app/tests/../rollCall/api/web_admin.py", line 39, in check_web_admin_live
+    member = await bot.get_chat_member(chat_id, tg_user_id)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/unittest/mock.py", line 2291, in _execute_mock_call
+    raise effect
+Exception: Telegram unreachable
+2026-08-18 10:06:04,979 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/grp123/admin-status "HTTP/1.1 200 OK"
+2026-08-18 10:06:04,983 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:04,984 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:04,986 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:04,986 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:05,112 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/templates/SundayGame/schedule/disable "HTTP/1.1 200 OK"
+2026-08-18 10:06:05,116 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:05,117 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:05,118 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:05,119 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:05,154 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/templates/SundayGame/schedule/disable "HTTP/1.1 403 Forbidden"
+2026-08-18 10:06:05,157 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:05,158 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:05,160 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:05,161 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:05,196 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/templates/SundayGame/schedule/enable "HTTP/1.1 200 OK"
+2026-08-18 10:06:05,199 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:05,200 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:05,201 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:05,202 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:05,286 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/badgrp/templates "HTTP/1.1 404 Not Found"
+2026-08-18 10:06:05,293 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:05,295 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:05,297 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:05,298 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:05,337 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/grp123/templates "HTTP/1.1 401 Unauthorized"
+2026-08-18 10:06:05,341 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:05,342 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:05,344 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:05,344 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:05,381 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/grp123/templates "HTTP/1.1 403 Forbidden"
+2026-08-18 10:06:05,384 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:05,385 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:05,387 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:05,388 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:05,423 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/grp123/templates "HTTP/1.1 200 OK"
+2026-08-18 10:06:05,427 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:05,428 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:05,429 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:05,430 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:05,466 - httpx - INFO - HTTP Request: PUT http://testserver/api/v1/web/group/grp123/templates/SundayGame/schedule "HTTP/1.1 200 OK"
+2026-08-18 10:06:05,469 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:05,470 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:05,473 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:05,473 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:05,509 - httpx - INFO - HTTP Request: PUT http://testserver/api/v1/web/group/grp123/templates/SundayGame/schedule "HTTP/1.1 200 OK"
+2026-08-18 10:06:05,514 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:05,515 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:05,516 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:05,517 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:05,552 - httpx - INFO - HTTP Request: PUT http://testserver/api/v1/web/group/grp123/templates/SundayGame/schedule "HTTP/1.1 200 OK"
+2026-08-18 10:06:05,556 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:05,556 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:05,558 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:05,559 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:05,664 - httpx - INFO - HTTP Request: PUT http://testserver/api/v1/web/group/grp123/templates/SundayGame/schedule "HTTP/1.1 200 OK"
+2026-08-18 10:06:05,667 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:05,668 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:05,670 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:05,671 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:05,707 - httpx - INFO - HTTP Request: PUT http://testserver/api/v1/web/group/grp123/templates/SundayGame/schedule "HTTP/1.1 403 Forbidden"
+2026-08-18 10:06:05,711 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:05,712 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:05,714 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:05,715 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:05,751 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/templates/SundayGame/start "HTTP/1.1 201 Created"
+2026-08-18 10:06:05,753 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:05,754 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:05,756 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:05,757 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:05,791 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/badgrp/templates/SundayGame/start "HTTP/1.1 404 Not Found"
+2026-08-18 10:06:05,794 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:05,795 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:05,796 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:05,797 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:05,832 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/templates/SundayGame/start "HTTP/1.1 403 Forbidden"
+2026-08-18 10:06:05,836 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:05,842 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:05,845 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:05,845 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:05,887 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/templates/SundayGame/start "HTTP/1.1 500 Internal Server Error"
+2026-08-18 10:06:05,891 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:05,893 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:05,896 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:05,896 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:05,937 - httpx - INFO - HTTP Request: PUT http://testserver/api/v1/web/group/grp123/templates/SundayGame "HTTP/1.1 200 OK"
+2026-08-18 10:06:05,940 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:05,941 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:05,942 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:05,944 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:05,981 - httpx - INFO - HTTP Request: PUT http://testserver/api/v1/web/group/grp123/templates/SundayGame "HTTP/1.1 200 OK"
+2026-08-18 10:06:05,985 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:05,986 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:05,987 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:05,988 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:06,025 - httpx - INFO - HTTP Request: PUT http://testserver/api/v1/web/group/grp123/templates/SundayGame "HTTP/1.1 200 OK"
+2026-08-18 10:06:06,028 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:06,029 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:06,031 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:06,031 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:06,067 - httpx - INFO - HTTP Request: PUT http://testserver/api/v1/web/group/grp123/templates/SundayGame "HTTP/1.1 403 Forbidden"
+2026-08-18 10:06:06,070 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:06,071 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:06,073 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:06,073 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:06,110 - httpx - INFO - HTTP Request: PUT http://testserver/api/v1/web/group/grp123/templates/FridayMatch "HTTP/1.1 200 OK"
+2026-08-18 10:06:06,114 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:06,115 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:06,117 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:06,117 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:06,224 - httpx - INFO - HTTP Request: PUT http://testserver/api/v1/web/group/grp123/templates/FridayMatch "HTTP/1.1 200 OK"
+2026-08-18 10:06:06,228 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:06,229 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:06,231 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:06,232 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:06,267 - httpx - INFO - HTTP Request: DELETE http://testserver/api/v1/web/group/grp123/templates/SundayGame "HTTP/1.1 200 OK"
+2026-08-18 10:06:06,270 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:06,271 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:06,273 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:06,273 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:06,309 - httpx - INFO - HTTP Request: DELETE http://testserver/api/v1/web/group/badgrp/templates/SundayGame "HTTP/1.1 404 Not Found"
+2026-08-18 10:06:06,312 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:06,312 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:06,314 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:06,315 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:06,350 - httpx - INFO - HTTP Request: DELETE http://testserver/api/v1/web/group/grp123/templates/SundayGame "HTTP/1.1 403 Forbidden"
+2026-08-18 10:06:06,353 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:06,354 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:06,355 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:06,356 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:06,392 - httpx - INFO - HTTP Request: DELETE http://testserver/api/v1/web/group/grp123/templates/Ghost "HTTP/1.1 422 Unprocessable Entity"
+2026-08-18 10:06:06,396 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:06,397 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:06,398 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:06,400 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:06,436 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/identities/discard "HTTP/1.1 200 OK"
+2026-08-18 10:06:06,439 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:06,440 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:06,441 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:06,442 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:06,477 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/identities/discard "HTTP/1.1 403 Forbidden"
+2026-08-18 10:06:06,481 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:06,482 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:06,484 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:06,485 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:06,519 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/identities/suggestions/dismiss "HTTP/1.1 403 Forbidden"
+2026-08-18 10:06:06,522 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:06,523 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:06,525 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:06,526 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:06,561 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/identities/suggestions/dismiss "HTTP/1.1 200 OK"
+2026-08-18 10:06:06,564 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:06,565 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:06,567 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:06,568 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:06,603 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/grp123/identities "HTTP/1.1 200 OK"
+2026-08-18 10:06:06,606 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:06,607 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:06,609 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:06,610 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:06,644 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/grp123/identities "HTTP/1.1 200 OK"
+2026-08-18 10:06:06,647 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:06,648 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:06,649 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:06,650 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:06,756 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/badgrp/identities "HTTP/1.1 404 Not Found"
+2026-08-18 10:06:06,759 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:06,760 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:06,762 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:06,763 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:06,797 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/grp123/identities "HTTP/1.1 401 Unauthorized"
+2026-08-18 10:06:06,801 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:06,801 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:06,803 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:06,804 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:06,839 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/grp123/identities "HTTP/1.1 403 Forbidden"
+2026-08-18 10:06:06,842 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:06,843 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:06,844 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:06,846 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:06,881 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/grp123/identities "HTTP/1.1 200 OK"
+2026-08-18 10:06:06,884 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:06,885 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:06,887 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:06,887 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:06,924 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/grp123/identities/suggestions "HTTP/1.1 200 OK"
+2026-08-18 10:06:06,927 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:06,928 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:06,930 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:06,931 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:06,966 - root - INFO - [identity] merge chat=-100 alias='Rex' -> 1 by=99
+2026-08-18 10:06:06,968 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/identities/merge "HTTP/1.1 201 Created"
+2026-08-18 10:06:06,971 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:06,972 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:06,973 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:06,974 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:07,009 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/identities/merge "HTTP/1.1 403 Forbidden"
+2026-08-18 10:06:07,012 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:07,013 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:07,015 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:07,016 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:07,050 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/identities/merge "HTTP/1.1 422 Unprocessable Entity"
+2026-08-18 10:06:07,054 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:07,055 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:07,056 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:07,057 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:07,094 - root - INFO - [identity] standalone chat=-100 name='Guest Ravi' by=99
+2026-08-18 10:06:07,096 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/identities/standalone "HTTP/1.1 200 OK"
+2026-08-18 10:06:07,100 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:07,101 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:07,103 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:07,104 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:07,138 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/identities/standalone "HTTP/1.1 403 Forbidden"
+2026-08-18 10:06:07,142 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:07,143 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:07,145 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:07,146 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:07,192 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/identities/undiscard "HTTP/1.1 200 OK"
+2026-08-18 10:06:07,270 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:07,271 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:07,273 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:07,274 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:07,308 - root - INFO - [identity] unmerge chat=-100 alias='Rex' by=99
+2026-08-18 10:06:07,310 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/identities/unmerge "HTTP/1.1 200 OK"
+2026-08-18 10:06:07,315 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:07,316 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:07,317 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:07,318 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:07,352 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/identities/unmerge "HTTP/1.1 200 OK"
+2026-08-18 10:06:07,356 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:07,357 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:07,359 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:07,360 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:07,401 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/identities/unstandalone "HTTP/1.1 200 OK"
+2026-08-18 10:06:07,405 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:07,406 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:07,407 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:07,408 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:07,443 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/identities/unstandalone "HTTP/1.1 403 Forbidden"
+2026-08-18 10:06:07,447 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:07,448 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:07,450 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:07,451 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:07,489 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/grp123 "HTTP/1.1 200 OK"
+2026-08-18 10:06:07,494 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:07,495 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:07,497 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:07,498 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:07,540 - httpx - INFO - HTTP Request: PATCH http://testserver/api/v1/web/group/grp123/settings "HTTP/1.1 204 No Content"
+2026-08-18 10:06:07,545 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:07,545 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:07,547 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:07,548 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:07,585 - httpx - INFO - HTTP Request: PATCH http://testserver/api/v1/web/group/grp123/settings "HTTP/1.1 204 No Content"
+2026-08-18 10:06:07,589 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:07,590 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:07,592 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:07,593 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:07,629 - httpx - INFO - HTTP Request: PATCH http://testserver/api/v1/web/group/grp123/settings "HTTP/1.1 403 Forbidden"
+2026-08-18 10:06:07,633 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:07,635 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:07,636 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:07,637 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:07,673 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/badgrp/members "HTTP/1.1 404 Not Found"
+2026-08-18 10:06:07,676 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:07,678 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:07,679 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:07,680 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:07,716 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/grp123/members "HTTP/1.1 403 Forbidden"
+2026-08-18 10:06:07,721 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:07,722 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:07,723 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:07,724 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:07,758 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/grp123/members "HTTP/1.1 200 OK"
+2026-08-18 10:06:07,761 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:07,762 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:07,764 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:07,764 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:07,869 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/start-rollcall "HTTP/1.1 422 Unprocessable Entity"
+2026-08-18 10:06:07,873 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:07,874 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:07,875 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:07,876 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:07,911 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/start-rollcall "HTTP/1.1 201 Created"
+2026-08-18 10:06:07,916 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:07,917 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:07,919 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:07,920 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:07,957 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/start-rollcall "HTTP/1.1 201 Created"
+2026-08-18 10:06:07,962 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:07,963 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:07,964 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:07,965 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:07,999 - root - WARNING - [web_start_rollcall] save_as_template failed chat=-100 name=FridayMatch
+Traceback (most recent call last):
+  File "/app/tests/../rollCall/api/routes/web.py", line 342, in web_start_rollcall
+    tmpl_svc.upsert_template(
+  File "/usr/local/lib/python3.12/unittest/mock.py", line 1139, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/unittest/mock.py", line 1143, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/unittest/mock.py", line 1198, in _execute_mock_call
+    raise effect
+Exception: db down
+2026-08-18 10:06:08,002 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/start-rollcall "HTTP/1.1 201 Created"
+2026-08-18 10:06:08,005 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:08,006 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:08,008 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:08,009 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:08,045 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/start-rollcall "HTTP/1.1 201 Created"
+2026-08-18 10:06:08,049 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:08,050 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:08,052 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:08,052 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:08,088 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/scheduled-rollcalls "HTTP/1.1 201 Created"
+2026-08-18 10:06:08,092 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:08,093 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:08,095 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:08,096 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:08,132 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/scheduled-rollcalls "HTTP/1.1 201 Created"
+2026-08-18 10:06:08,135 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:08,136 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:08,138 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:08,138 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:08,175 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/web/group/grp123/scheduled-rollcalls "HTTP/1.1 201 Created"
+2026-08-18 10:06:08,180 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:08,182 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:08,184 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:08,184 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:08,223 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/grp123/scheduled-rollcalls "HTTP/1.1 200 OK"
+2026-08-18 10:06:08,226 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:08,227 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:08,228 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:08,229 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:08,264 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/web/group/grp123/scheduled-rollcalls "HTTP/1.1 200 OK"
+2026-08-18 10:06:08,384 - runner - WARNING - Webhook handler: rejected request with missing/invalid secret token
+2026-08-18 10:06:08,388 - runner - WARNING - Webhook handler: rejected request with missing/invalid secret token
+2026-08-18 10:06:08,424 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:08,425 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:08,426 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:08,427 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:08,432 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/auth/weblogin/stale "HTTP/1.1 410 Gone"
+2026-08-18 10:06:08,435 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:08,436 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:08,438 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:08,439 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:08,443 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/auth/weblogin/rawcode123 "HTTP/1.1 404 Not Found"
+2026-08-18 10:06:08,445 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:08,446 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:08,448 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:08,449 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:08,452 - root - INFO - [weblogin_redeem] redirecting unconsumed weblogin code for chat=-100 → /web/group/grp123
+2026-08-18 10:06:08,454 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/auth/weblogin/rawcode123 "HTTP/1.1 302 Found"
+2026-08-18 10:06:08,456 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:08,457 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:08,458 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:08,459 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:08,464 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/auth/weblogin/redeem "HTTP/1.1 410 Gone"
+2026-08-18 10:06:08,467 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:08,467 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:08,470 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:08,471 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:08,475 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/auth/weblogin/redeem "HTTP/1.1 422 Unprocessable Entity"
+2026-08-18 10:06:08,478 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:08,479 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:08,480 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:08,481 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:08,484 - root - INFO - [weblogin_redeem_post] redeemed token for user=42 chat=-100
+2026-08-18 10:06:08,486 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/auth/weblogin/redeem "HTTP/1.1 200 OK"
+2026-08-18 10:06:08,488 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:08,489 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:08,490 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:08,491 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:08,496 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/auth/weblogin/redeem "HTTP/1.1 410 Gone"
+2026-08-18 10:06:08,499 - root - INFO - [api] Mini App served at /miniapp/
+2026-08-18 10:06:08,500 - root - INFO - [api] Web voting page served at /web/
+2026-08-18 10:06:08,501 - root - INFO - [api] Member portal served at /portal/
+2026-08-18 10:06:08,502 - root - INFO - [api] Command reference served at /help/
+2026-08-18 10:06:08,506 - root - INFO - [weblogin_redeem_post] redeemed token for user=42 chat=-100
+2026-08-18 10:06:08,507 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/auth/weblogin/redeem "HTTP/1.1 200 OK"

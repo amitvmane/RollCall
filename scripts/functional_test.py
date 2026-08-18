@@ -97,6 +97,16 @@ bot.send_message = _record("send_message")
 bot.edit_message_text = _record("edit_message_text")
 bot.edit_message_reply_markup = _record("edit_message_reply_markup")
 bot.answer_callback_query = AsyncMock(return_value=None)
+# File/image and pin outbound calls. Unpatched until 2026-08-18, which is part
+# of why /card and /export_stats had no functional coverage — they would have
+# attempted a REAL network call to Telegram mid-test. Patched here so the
+# handlers that produce match-day cards, receipts and CSV exports (the pillow
+# and matplotlib paths) can be exercised offline like everything else.
+bot.send_photo = _record("send_photo")
+bot.send_document = _record("send_document")
+bot.pin_chat_message = _record("pin_chat_message")
+bot.unpin = _record("unpin")
+bot.unpin_chat_message = _record("unpin_chat_message")
 
 # get_chat_member returns a fake member with admin status, so admin_rights() == True
 _fake_member = MagicMock()
@@ -413,6 +423,110 @@ async def phase_dues():
     # global no-ERROR-logs check at the end of Phase 16 covers the whole run,
     # but fail fast here so a dues regression is attributed to this phase.
     record("no ERROR-level logs during dues phases", len(_errors) == 0,
+           f"{len(_errors)} errors: {error_msgs()[:5]}" if _errors else "")
+
+
+async def phase_remaining_surface():
+    """The last 19 registered commands that had no functional coverage.
+
+    Mostly thin surfaces (link/token generation, reporting, reminder settings,
+    roster admin) but "thin" is exactly what nobody notices breaking — the
+    R11 regression that killed every panel button was a decorator on a handler
+    nobody drove in a test. Several of these also exercise the pillow and
+    matplotlib paths (/card, /export_stats), which no other layer touches.
+    """
+    print("\n=== Phase 23: Web & token surfaces ===\n")
+
+    out = await feed("/weblink", ALICE)
+    record("/weblink responds (link or config warning)", bool(out))
+
+    out = await feed("/mytoken", BOB)
+    record("/mytoken issues a personal token", bool(out))
+
+    out = await feed("/mytoken off", BOB)
+    record("/mytoken off revokes it", bool(out))
+
+    out = await feed("/weblogin Alice", ALICE)
+    record("/weblogin responds for a known member", bool(out))
+
+    out = await feed("/gentoken", ALICE)
+    record("/gentoken responds", bool(out))
+
+    print("\n=== Phase 24: Reporting & exports ===\n")
+
+    out = await feed("/summary", ALICE)
+    record("/summary responds", bool(out))
+
+    out = await feed("/summary 14", ALICE)
+    record("/summary with a day window responds", bool(out))
+
+    out = await feed("/calendar", ALICE)
+    record("/calendar responds", bool(out))
+
+    # Exercises the CSV/document path (bot.send_document).
+    out = await feed("/export_stats", ALICE)
+    record("/export_stats responds", bool(out))
+
+    print("\n=== Phase 25: Reminder & schedule settings ===\n")
+
+    for cmd, label in (
+        ("/auto_buzz 3", "/auto_buzz sets hours"),
+        ("/auto_buzz off", "/auto_buzz off disables"),
+        ("/remind_before_close 2", "/remind_before_close sets hours"),
+        ("/remind_before_close off", "/remind_before_close off disables"),
+        ("/remind_after_open 6", "/remind_after_open sets hours"),
+        ("/remind_after_open off", "/remind_after_open off disables"),
+        ("/set_rollcall_reminder 2", "/set_rollcall_reminder sets hours"),
+    ):
+        out = await feed(cmd, ALICE)
+        record(label, bool(out))
+
+    print("\n=== Phase 26: Roster admin on a live rollcall ===\n")
+
+    await feed("/src Surface Coverage Game", ALICE)
+    await feed("/in", ALICE)
+    await feed("/in", BOB)
+    await feed("/in", CAROL)
+
+    # Far-future date so this can never fail as "time is in the past".
+    out = await feed("/set_rollcall_time 12-06-2030 19:30", ALICE)
+    record("/set_rollcall_time accepts a future date", bool(out))
+
+    out = await feed("/set_status Bob out", ALICE)
+    record("/set_status changes a member's vote", bool(out))
+
+    out = await feed("/delete_user Carol", ALICE)
+    record("/delete_user removes a member from the list", bool(out))
+
+    # Match-day card — the pillow rendering path.
+    out = await feed("/card", ALICE)
+    record("/card renders without crashing", bool(out))
+
+    out = await feed("/mark_absent", ALICE)
+    record("/mark_absent responds", bool(out))
+
+    out = await feed("/cancel_roll_call rain", ALICE)
+    record("/cancel_roll_call cancels without recording stats", bool(out))
+
+    print("\n=== Phase 27: Repeat & broadcast ===\n")
+
+    # /repeat clones the last ENDED rollcall, so it needs one to exist.
+    await feed("/src Repeat Source", ALICE)
+    await feed("/erc", ALICE)
+
+    out = await feed("/repeat", ALICE)
+    record("/repeat clones the last ended rollcall", bool(out))
+    await feed("/erc", ALICE)
+
+    out = await feed("/repeat repeat=weekly", ALICE)
+    record("/repeat with a recurrence flag responds", bool(out))
+    await feed("/erc", ALICE)
+
+    # ALICE is uid 100 == ADMIN1, so she is the bot-owner/super-admin.
+    out = await feed('/broadcast "scheduled maintenance tonight"', ALICE)
+    record("/broadcast responds for the bot owner", bool(out))
+
+    record("no ERROR-level logs during surface phases", len(_errors) == 0,
            f"{len(_errors)} errors: {error_msgs()[:5]}" if _errors else "")
 
 
@@ -1029,6 +1143,7 @@ async def run_all():
     await feed("/erc", ALICE)
 
     await phase_dues()
+    await phase_remaining_surface()
 
     print("\n=== Phase 16: Lifecycle close (final) ===\n")
 

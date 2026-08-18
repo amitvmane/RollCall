@@ -31,19 +31,17 @@ _FUNCTIONAL_TEST = os.path.join(
     os.path.dirname(__file__), "..", "scripts", "functional_test.py"
 )
 
-# Commands not yet driven by scripts/functional_test.py. Pre-existing debt,
-# measured 2026-08-18 (40 of 92 commands were covered). Shrink this list as
-# coverage is added; a new command must never be appended here.
-KNOWN_UNCOVERED = {
-    # Web / token surfaces — mostly thin wrappers over URL generation.
-    "weblink", "mytoken", "weblogin", "gentoken",
-    # Stats / reporting extras.
-    "calendar", "summary", "export_stats", "card",
-    # Lifecycle & settings extras.
-    "repeat", "cancel_roll_call", "set_rollcall_time", "set_rollcall_reminder",
-    "delete_user", "set_status", "auto_buzz", "remind_before_close",
-    "remind_after_open", "mark_absent", "broadcast",
-}
+# Commands not yet driven by scripts/functional_test.py.
+#
+# EMPTY as of 2026-08-18 — every registered command is functionally covered
+# (it went 40/92 -> 73/92 -> 92/92 over two commits). Keep it empty. Anything
+# added here is a hole in the one layer that exercises real telebot routing,
+# and the guard below is the only thing standing between "we have a functional
+# test" and the two months it spent silently frozen.
+#
+# If a command genuinely cannot be driven offline, add it WITH a comment
+# explaining why — never as a shortcut to make CI green.
+KNOWN_UNCOVERED = set()
 
 
 def _covered_commands(source: str) -> set:

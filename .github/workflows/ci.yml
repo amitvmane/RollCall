@@ -98,7 +98,11 @@ jobs:
         run: python scripts/smoke_test.py
 
   functional:
-    name: Functional (real telebot, 121 scenarios)
+    # Deliberately no scenario count in the name — it went stale within a day
+    # of being written (121 -> 156), the same way the old
+    # functional_test_4_34.py filename went stale. The count belongs in the
+    # job output, not the label.
+    name: Functional (real telebot)
     runs-on: ubuntu-latest
     # Drives realistic Telegram Update payloads through the REAL telebot
     # router, middleware chain and handlers against a temp SQLite DB — only

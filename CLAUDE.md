@@ -61,8 +61,13 @@ Consequences:
 | `SENTRY_TRACES_SAMPLE_RATE` | `0.0` | sentry tracing % |
 | `RELEASE_VERSION`, `ENVIRONMENT` | unset / `production` | sentry tags |
 | `REST_API_ENABLED` | unset | `true`/`1` → start FastAPI on `REST_API_PORT` |
+| `API_DOCS_ENABLED` | unset | `true`/`1` → serve `/api/docs`, `/api/redoc`, OpenAPI schema. Off by default: unauthenticated **and** on the rate-limiter bypass list, so a tunnel-exposed deployment would otherwise publish a free, unthrottled map of every endpoint |
 | `REST_API_PORT` | `8081` | port for REST API + Mini App static files |
 | `REST_API_HOST` | `127.0.0.1` | bind address for REST API |
+| `CORS_ALLOWED_ORIGINS` | derived from `WEB_BASE_URL` | comma-separated allowed origins. Defaults to `WEB_BASE_URL` (not `*`) because identity tokens are long-lived — a wildcard origin lets a leaked token read authenticated responses cross-origin. Falls back to `*` only when `WEB_BASE_URL` is also unset |
+| `REST_API_RATE_LIMIT_WINDOW_SECONDS` | `60` | sliding-window length for the REST rate limiter |
+| `REST_API_RATE_LIMIT_MAX_REQUESTS` | `60` | max requests per window, per bearer token (hashed) or client IP |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | unset | Web-Push keypair. Unset → push notifications silently disabled; rotating them invalidates existing subscriptions (members must re-subscribe) |
 | `TRUSTED_PROXY_IPS` | `*` | direct peers trusted to set `X-Forwarded-For` (so `request.client`/rate-limit buckets see the real visitor IP, not the proxy's). `*` is safe only because `REST_API_PORT` is never published to the host in `docker-compose.yml` — tighten to the proxy's actual IP/CIDR if that ever changes |
 | `MINIAPP_URL` | unset | public URL of `/miniapp/` — sets Telegram menu button on startup |
 | `WEB_BASE_URL` | unset | public base URL (e.g. `https://yourdomain.com`) — enables magic-link web voting; if unset `/weblink` shows a config warning and no link is appended to panels |

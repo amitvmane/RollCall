@@ -5,7 +5,7 @@ A feature-rich Telegram bot for tracking event attendance in group chats. Member
 [![CI](https://github.com/amitvmane/RollCall/actions/workflows/ci.yml/badge.svg)](https://github.com/amitvmane/RollCall/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-9.9-green)](rollCall/version.json)
+[![Version](https://img.shields.io/badge/version-10.0-green)](rollCall/version.json)
 
 ---
 
@@ -142,6 +142,16 @@ variables:
 | `WEB_BASE_URL` | No | Your public HTTPS base URL — enables web voting links in panels and `/weblink` |
 | `MINIAPP_URL` | No | Public URL of `/miniapp/` — wires the Telegram menu button on startup |
 | `GHOST_AUTOFORGIVE_DAYS` | No | Days before an unreviewed session counts as "everyone attended" (default: `7`, `0` disables) |
+| `API_DOCS_ENABLED` | No | `true` to serve `/api/docs`, `/api/redoc` and the OpenAPI schema. **Off by default** — they're unauthenticated and rate-limit-exempt, so on a publicly reachable deployment they hand any visitor a full map of every endpoint |
+| `REST_API_HOST` | No | Bind address for the REST API (default: `127.0.0.1`) |
+| `WEBHOOK_SECRET_TOKEN` | No | Auto-generated when `WEBHOOK_URL` is set — verifies `/webhook` POSTs really came from Telegram |
+| `CORS_ALLOWED_ORIGINS` | No | Comma-separated allowed origins (default: your `WEB_BASE_URL`, not `*`) |
+| `REST_API_RATE_LIMIT_WINDOW_SECONDS` | No | Rate-limit window in seconds (default: `60`) |
+| `REST_API_RATE_LIMIT_MAX_REQUESTS` | No | Max requests per window per token/IP (default: `60`) |
+| `TRUSTED_PROXY_IPS` | No | Peers trusted to set `X-Forwarded-For` (default: `*`, safe only because port 8081 isn't published to the host) |
+| `DB_POOL_MINCONN` / `DB_POOL_MAXCONN` | No | PostgreSQL pool bounds (default: `1` / `5`) — raise max if `/health` reports `db_pool_saturated` |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | No | Web-Push keypair. Unset disables push; rotating them forces members to re-subscribe |
+| `MEMORY_MODE` | No | `true` for in-memory SQLite — **all data is lost on restart**; overrides `DATABASE_URL` |
 
 **SQLite** (default) stores the database at `/app/data/rollcall.db`.  
 **PostgreSQL** example: `postgresql://user:password@host:5432/dbname`
@@ -195,6 +205,8 @@ Append `::N` to most commands to target a specific rollcall when multiple are ac
 | `/individual_fee [::N]` | `/if` | Show per-person fee split |
 | `/location place [::N]` | `/loc` | Set event location |
 | `/when [::N]` | `/w` | Show event time |
+| `/remind_before_close hours\|off` | | DM anyone who hasn't voted, this many hours before close |
+| `/remind_after_open hours\|off` | | DM anyone who hasn't voted, this many hours after the rollcall opens |
 
 ### Proxy Voting (admin only)
 
@@ -267,12 +279,22 @@ entries, never deletes, and every money mutation is announced in the chat.
 | `/mark_late name minutes` / `/mark_ditch name` | | Assess late/no-show penalty by tier |
 | `/mark_paid name [amount]` | `/paid` | Record a payment (admin or designated collector; user-scoped panel with no args) |
 | `/waive` `/reimburse` `/add_adhoc` `/cancel_game_dues` | | Corrections — all as compensating entries |
+| `/adjust_dues name amount [reason]` | `/adj` | Add or credit a balance directly — e.g. dues the group was already carrying before it started using the bot. Positive = owes more, negative = credit. Balances only; the fund is untouched |
+| `/import_dues` + one `name amount [reason]` per line | | Bulk backfill. `/import_dues preview` parses without writing; a malformed line aborts the whole batch |
 | `/my_dues` | `/md` | Your own balance (everyone) |
 | `/dues` / `/dues_snapshot` / `/dues_export` | `/ds` `/de` | Full ledger view / group snapshot / CSV export |
 | `/fund` `/fund_history` `/fund_topup` `/log_expense` | | Group fund (penalties + rounding accumulate here) |
 | `/dues_report weekly\|off` | `/dr` | Auto-post a snapshot every Sunday evening |
 | `/new_season` | `/dues_reset` | Season reset — zero all balances via compensating entries, fund carry/zero choice, history preserved |
 | `/dues_setup` | | Re-open the guided setup status card |
+| `/enable_dues` / `/disable_dues` | | Turn the dues system on or off for this chat |
+| `/set_upi vpa@bank` / `/set_treasury_upi vpa@bank` | | Collection VPA / treasury VPA for QR codes |
+| `/penalties` `/add_penalty` `/remove_penalty` | | List, create and delete penalty tiers (any number, any names) |
+| `/mark_penalty tier name` | | Apply a specific tier by name |
+| `/rotate_collector on\|off` | | Rotate the collector automatically between members |
+| `/set_round_step N` | | Round per-head amounts to the nearest N (remainder goes to the fund) |
+| `/remind_dues` | | DM everyone carrying a balance |
+| `/dues_nudges on\|off` | | Weekly nudge to members who still owe |
 
 ### Web Access
 
@@ -289,6 +311,8 @@ entries, never deletes, and every money mutation is announced in the chat.
 | `/stats [name\|@user\|group\|top\|bot]` | `/s` | Attendance rate, streaks, IN/OUT/MAYBE counts |
 | `/history [N] [page]` | | Paginated ended rollcalls with counts (default 10 per page) |
 | `/card` | `/mc` | Shareable match-day card image of the IN list |
+| `/calendar` | | One merged view of everything upcoming — active rollcalls closing, scheduled games, recurring templates |
+| `/export_stats` | | CSV of the leaderboard — attendance, ghosts, streaks, one row per member |
 | `/version` | `/v` | Show bot version |
 
 ### Chat Settings
@@ -547,6 +571,8 @@ See [version.json](rollCall/version.json) for the full version history.
 
 | Version | Highlights |
 |---|---|
+| **10.1** | `/adjust_dues` and `/import_dues` — backfill dues the group was already carrying before it started using the bot, one member at a time or in bulk; plus all dependency CVEs cleared, security headers on every web response, and OpenAPI docs closed by default |
+| **10.0** | Recurring rollcalls (`/src … repeat=weekly`, `/repeat`), `/calendar`, reminder DMs (`/remind_before_close`, `/remind_after_open`), `/export_stats` CSV, a searchable web command reference, admin console fully retired, identity tokens off URLs, and unreviewed sessions auto-forgiving stale ghost prompts |
 | **9.9** | Group web page now does everything the admin console used to — voter management, template creation, deep stats (session history, ghost/response-time leaderboards); admin sign-in matches the portal (Telegram verify, widget, or code); multi-group switcher |
 | **9.8** | Security fix — Mini App proxy-vote endpoint enforced admin rights like `/sif`; landing page gained Sign in / Admin links; admin console sign-in via Telegram (no more `/gentoken` token paste); portal Dues tab promoted to its own tab |
 | **9.7** | Merge identities — fold a repeated proxy name into a real member/proxy, one tap on the group web page, with retroactive stats/dues/streak/ghost merge and safe unmerge; template delete from web/admin/Telegram; one-time "Schedule → Once" auto-close fix |

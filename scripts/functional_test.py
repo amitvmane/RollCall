@@ -382,6 +382,49 @@ async def phase_dues():
     out = await feed("/mark_penalty late_short Carol", ALICE)
     record("/mark_penalty responds (valid or curated error)", bool(out))
 
+    print("\n=== Phase 20b: Backfilling pre-existing dues ===\n")
+
+    # Opening balance for a name with no prior ledger history — the actual
+    # backfill case (a group adopting the bot mid-season).
+    out = await feed("/adjust_dues Alice 300 dues from June games", ALICE)
+    ok, d = contains(out, "300")
+    record("/adjust_dues adds an opening balance", ok, d)
+
+    # Append-only correction: opposite sign, never an edit.
+    out = await feed("/adjust_dues Alice -300 correction", ALICE)
+    ok, d = contains(out, "300")
+    record("/adjust_dues credits back (append-only correction)", ok, d)
+
+    out = await feed("/adjust_dues Alice 0 nope", ALICE)
+    record("/adjust_dues rejects a zero amount", bool(out))
+
+    out = await feed("/adjust_dues Alice 99999999 typo", ALICE)
+    record("/adjust_dues rejects an implausibly large amount", bool(out))
+
+    out = await feed("/adjust_dues Alice", ALICE)
+    record("/adjust_dues without an amount explains usage", bool(out))
+
+    # Multi-word name must survive the amount scan.
+    out = await feed("/adjust_dues Ravi Kumar 150 old dues", ALICE)
+    ok, d = contains(out, "Ravi")
+    record("/adjust_dues handles a multi-word name", ok, d)
+
+    out = await feed("/import_dues preview\nAlice 100 a\nBob 200 b", ALICE)
+    ok, d = contains(out, "preview")
+    record("/import_dues preview parses without writing", ok, d)
+
+    out = await feed("/import_dues\nAlice 100 a\nBob 200 b\nCarol -50 overpaid", ALICE)
+    ok, d = contains(out, "3")
+    record("/import_dues writes a multi-line batch", ok, d)
+
+    # A malformed line must abort the WHOLE import, not half-apply it.
+    out = await feed("/import_dues\nAlice 100\nBobbb\nCarol 50", ALICE)
+    ok, d = contains(out, "line")
+    record("/import_dues rejects the batch when a line is malformed", ok, d)
+
+    out = await feed("/import_dues", ALICE)
+    record("/import_dues with no lines explains usage", bool(out))
+
     print("\n=== Phase 21: Fund / treasury ===\n")
 
     out = await feed("/fund", ALICE)

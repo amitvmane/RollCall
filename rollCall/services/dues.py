@@ -1595,3 +1595,170 @@ def remind_dues(chat_id: int) -> dict:
         "no_dm":        no_dm,
         "announcement": announcement,
     }
+
+
+# ── Backfilling pre-existing dues ────────────────────────────────────────────
+# Groups adopting the bot mid-season already have balances owed from games
+# played before any of this was tracked. Every other ledger writer is tied to a
+# game (settle/adhoc/waive/reimburse/cancel), so there was no way to state an
+# opening balance. These two functions are that missing primitive.
+#
+# Deliberately NO fund transaction is written here, matching mark_paid: the
+# fund tracks treasury movement (game closures, expenses, top-ups) while
+# dues_entries tracks who owes whom. Historic dues never passed through the
+# fund, so crediting it would invent money. If a group also wants the cash it
+# already collected reflected in the fund, /fund_topup is the right tool.
+
+_ADJUST_MAX = 1_000_000  # paise-free sanity bound; a typo'd extra zero is likelier than a real ₹1M due
+
+
+def adjust_dues(
+    chat_id: int,
+    token: str,
+    amount: int,
+    reason: str,
+    admin_uid: int,
+    admin_name: str,
+) -> dict:
+    """Append an arbitrary balance adjustment for one member.
+
+    Positive amount = member owes more (an opening balance carried in from
+    before the bot). Negative = credit them.
+
+    Append-only: this never edits existing rows, and a mistake is corrected by
+    calling again with the opposite sign — same discipline as every other
+    dues writer.
+
+    Name resolution falls back to creating the entry under the literal name
+    when the token matches nobody known. That is required, not sloppy: the
+    whole point of a backfill is naming people who have no ledger history and
+    may not be on any current rollcall. A typo therefore creates a balance
+    under a misspelling — recoverable two ways, by adjusting it back to zero,
+    or by folding the misspelling into the right person in the identity merge
+    panel (balances resolve across an alias group, so the merge carries the
+    money over).
+    """
+    if not isinstance(amount, int) or amount == 0:
+        raise incorrectParameter("Adjustment amount must be a non-zero whole number.")
+    if abs(amount) > _ADJUST_MAX:
+        raise incorrectParameter(
+            f"That's over ₹{_ADJUST_MAX:,} — check for an extra zero. "
+            f"Split it into smaller entries if it really is that large."
+        )
+    token = (token or "").strip()
+    if not token:
+        raise parameterMissing("Who is this adjustment for? Usage: /adjust_dues <name> <amount> [reason]")
+
+    try:
+        member = _resolve_member(chat_id, token, dues_names=_known_proxy_names(chat_id))
+        is_new_name = False
+    except incorrectParameter as exc:
+        # Ambiguity is a real error (two people match) — only a clean "not
+        # found" may fall through to creating a new name.
+        if "not found" not in str(exc).lower():
+            raise
+        member = _canonicalize_member(chat_id, None, token.lstrip("@").strip())
+        is_new_name = True
+
+    memo = reason.strip() if reason and reason.strip() else "opening balance (pre-bot dues)"
+    db.add_dues_entry(
+        chat_id, None, member["user_id"], member["member_name"],
+        "adjustment", amount, memo, admin_uid, admin_name,
+    )
+    db.log_admin_action(chat_id, admin_uid, admin_name, "adjust_dues",
+                        target_name=member["member_name"],
+                        details=f"{'+' if amount > 0 else ''}{amount} — {memo}")
+
+    balance = db.get_dues_balance(chat_id, user_id=member["user_id"],
+                                  member_name=member["member_name"])
+    return {
+        "member_name": member["member_name"],
+        "user_id": member["user_id"],
+        "amount": amount,
+        "reason": memo,
+        "balance": balance,
+        "is_new_name": is_new_name,
+    }
+
+
+def parse_import_lines(raw: str) -> list[dict]:
+    """Parse a multi-line '<name> <amount> [reason]' block for import_dues.
+
+    Split from the writer so /import_dues can offer a no-write preview using
+    exactly the same parsing the real run uses — a preview that parsed
+    differently would be worse than none.
+
+    The amount is located as the LAST bare numeric token so that multi-word
+    names work ("Ravi Kumar 300 old dues" -> Ravi Kumar / 300 / old dues).
+    """
+    entries: list[dict] = []
+    for lineno, line in enumerate(str(raw or "").splitlines(), start=1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        amt_idx = next(
+            (i for i in range(len(parts) - 1, -1, -1)
+             if re.fullmatch(r"[+-]?\d+", parts[i])),
+            None,
+        )
+        if amt_idx is None or amt_idx == 0:
+            entries.append({"line": lineno, "raw": line, "error": "expected '<name> <amount> [reason]'"})
+            continue
+        entries.append({
+            "line": lineno,
+            "raw": line,
+            "name": " ".join(parts[:amt_idx]),
+            "amount": int(parts[amt_idx]),
+            "reason": " ".join(parts[amt_idx + 1:]),
+            "error": None,
+        })
+    return entries
+
+
+def import_dues(
+    chat_id: int,
+    raw: str,
+    admin_uid: int,
+    admin_name: str,
+    preview: bool = False,
+) -> dict:
+    """Bulk backfill: one '<name> <amount> [reason]' per line.
+
+    All-or-nothing on PARSING (a malformed line aborts before anything is
+    written, so a typo halfway down can't leave a half-applied import), but
+    each valid line is then its own append-only entry via adjust_dues.
+
+    preview=True parses and reports without writing.
+    """
+    parsed = parse_import_lines(raw)
+    if not parsed:
+        raise parameterMissing(
+            "Nothing to import. Put one '<name> <amount> [reason]' per line "
+            "under the command."
+        )
+    bad = [p for p in parsed if p["error"]]
+    if bad:
+        detail = "; ".join(f"line {p['line']}: {p['error']}" for p in bad[:5])
+        raise incorrectParameter(f"Couldn't read {len(bad)} line(s) — nothing was imported. {detail}")
+
+    if preview:
+        return {
+            "preview": True,
+            "entries": [{"member_name": p["name"], "amount": p["amount"], "reason": p["reason"]}
+                        for p in parsed],
+            "total": sum(p["amount"] for p in parsed),
+            "count": len(parsed),
+        }
+
+    applied = []
+    for p in parsed:
+        applied.append(adjust_dues(chat_id, p["name"], p["amount"], p["reason"],
+                                    admin_uid, admin_name))
+    return {
+        "preview": False,
+        "entries": applied,
+        "total": sum(a["amount"] for a in applied),
+        "count": len(applied),
+        "new_names": [a["member_name"] for a in applied if a["is_new_name"]],
+    }

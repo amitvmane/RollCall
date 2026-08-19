@@ -638,6 +638,42 @@ COMMANDS = [
         ),
     },
     {
+        "name": "adjust_dues", "aliases": ["adj"], "scope": "admin", "category": "Dues & Fund",
+        "args": "name amount [reason]", "sample": "/adjust_dues Alice 300 dues from June games",
+        "summary": "Add or credit a balance directly (e.g. dues from before the bot)",
+        "details": (
+            "Records a balance that didn't come from a tracked game — most often the dues "
+            "a group was already carrying before it started using the bot.\n\n"
+            "Positive = they owe more. Negative = credit them.\n\n"
+            "Affects member balances ONLY; the fund is untouched, because that money never "
+            "passed through the fund. Use /fund_topup separately if you also want cash "
+            "you've already collected reflected there.\n\n"
+            "Append-only like every dues write: to correct a mistake, run it again with the "
+            "opposite sign. If the name matches nobody yet it's created as-is — fix a typo "
+            "by adjusting it back to zero, or merge it into the right person in the web panel.\n\n"
+            "Example: /adjust_dues Alice 300 dues from June games"
+        ),
+    },
+    {
+        "name": "import_dues", "aliases": [], "scope": "admin", "category": "Dues & Fund",
+        "args": "[preview] + one 'name amount [reason]' per line",
+        "sample": "/import_dues preview",
+        "summary": "Bulk-add existing balances, one member per line",
+        "details": (
+            "Backfills several members at once. Put one entry per line underneath the command:\n\n"
+            "/import_dues\n"
+            "Alice 300 June games\n"
+            "Ravi Kumar 150\n"
+            "Bob -50 overpaid\n\n"
+            "Add 'preview' (/import_dues preview) to check how the lines parse without "
+            "writing anything.\n\n"
+            "If any line can't be read, nothing is imported — so a typo halfway down can't "
+            "leave a half-applied import. Multi-word names work; the amount is the last "
+            "number on the line.\n\n"
+            "Same rules as /adjust_dues: balances only, fund untouched, append-only."
+        ),
+    },
+    {
         "name": "set_collector", "aliases": [], "scope": "admin", "category": "Dues & Fund",
         "args": "name [paid] [upi@bank] [::N]", "sample": "/set_collector Ravi paid ravi@upi",
         "summary": "Designate a member as the game's cash collector",

@@ -28,6 +28,7 @@ Ledger mutation announcements always post, even in shh mode (durability).
 """
 import asyncio
 import logging
+import re
 from datetime import datetime
 
 import db as _db
@@ -59,8 +60,21 @@ def _require_dues_enabled(cid: int) -> None:
 
 
 def _cmd(text: str) -> str:
-    """Extract the bare command name from a message (strips /cmd@botname prefix)."""
-    return (text.split(" ")[0]).split("@")[0].lower()
+    """Extract the bare command name from a message (strips /cmd@botname prefix).
+
+    Splits on ANY whitespace, not just " ". A multi-line message such as
+
+        /import_dues
+        Alice 300
+
+    left the newline attached to the first token under the old split(" "),
+    yielding "/import_dues\\nalice" — which matched no handler at all, so the
+    bot replied nothing and logged nothing. Latent for every command in this
+    module, not just the multi-line ones; surfaced by the /import_dues
+    functional scenarios.
+    """
+    parts = (text or "").split()
+    return parts[0].split("@")[0].lower() if parts else ""
 
 
 def _parse_args(text: str) -> list[str]:
@@ -2060,3 +2074,129 @@ async def _send_dues_dms(cid: int, result: dict) -> None:
             await bot.send_message(cid, summary)
         except Exception:
             logging.exception("_send_dues_dms summary failed")
+
+
+# ── /adjust_dues + /import_dues — backfilling pre-existing balances ──────────
+
+@bot.message_handler(func=lambda m: _cmd(m.text) in ("/adjust_dues", "/adj"))
+async def adjust_dues(message):
+    try:
+        if await admin_rights(message, manager) is False:
+            raise insufficientPermissions("Admin only: /adjust_dues")
+        cid = message.chat.id
+        _require_dues_enabled(cid)
+        args = _parse_args(message.text)
+        if len(args) < 2:
+            raise parameterMissing(
+                "Usage: /adjust_dues <name> <amount> [reason]\n"
+                "Positive = they owe more, negative = credit them.\n"
+                "Example: /adjust_dues Alice 300 dues from June games"
+            )
+        # Same scan-for-the-amount approach as /waive so multi-word names work
+        # ("Ravi Kumar 300 old dues"). Signed, because a credit is valid here.
+        amount_idx = next(
+            (i for i, tok in enumerate(args)
+             if i > 0 and re.fullmatch(r"[+-]?\d+", tok)),
+            None,
+        )
+        if amount_idx is None:
+            raise incorrectParameter(
+                "Amount must be a whole number. Example: /adjust_dues Alice 300 old dues"
+            )
+        name = " ".join(args[:amount_idx])
+        amount = int(args[amount_idx])
+        reason = " ".join(args[amount_idx + 1:])
+
+        async with manager.get_chat_write_lock(cid):
+            r = dues_svc.adjust_dues(
+                cid, name, amount, reason,
+                message.from_user.id,
+                message.from_user.first_name or "Admin",
+            )
+
+        sign = "+" if r["amount"] > 0 else "−"
+        lines = [
+            f"🧾 *Dues adjusted* — {_esc_md(r['member_name'])}",
+            f"{sign}₹{abs(r['amount'])} · {_esc_md(r['reason'])}",
+            f"Balance now: *₹{r['balance']}*",
+        ]
+        if r["is_new_name"]:
+            lines.append(
+                f"\n_New name — nobody known matched '{_esc_md(r['member_name'])}'._ "
+                f"_If that's a typo, adjust it back to zero or merge it in the web panel._"
+            )
+        await send_md_fallback(cid, "\n".join(lines))
+    except Exception as e:
+        await reply_error(message, e)
+
+
+@bot.message_handler(func=lambda m: _cmd(m.text) == "/import_dues")
+async def import_dues(message):
+    try:
+        if await admin_rights(message, manager) is False:
+            raise insufficientPermissions("Admin only: /import_dues")
+        cid = message.chat.id
+        _require_dues_enabled(cid)
+
+        raw_lines = (message.text or "").splitlines()
+        first = raw_lines[0] if raw_lines else ""
+        # "preview" on the command line parses and reports without writing.
+        # Stateless on purpose — a confirm button would need pending in-memory
+        # state, which is exactly the kind of thing that doesn't survive a
+        # restart (and blocks running more than one instance).
+        preview = "preview" in first.lower().split()[1:] if len(first.split()) > 1 else False
+        payload = "\n".join(raw_lines[1:])
+        if not payload.strip():
+            raise parameterMissing(
+                "Put one entry per line under the command:\n\n"
+                "/import_dues\n"
+                "Alice 300 June games\n"
+                "Ravi Kumar 150\n"
+                "Bob -50 overpaid\n\n"
+                "Add `preview` (`/import_dues preview`) to check the parse without writing."
+            )
+
+        if preview:
+            r = dues_svc.import_dues(cid, payload, message.from_user.id,
+                                      message.from_user.first_name or "Admin",
+                                      preview=True)
+            rows = "\n".join(
+                f"  • {_esc_md(e['member_name'])} — "
+                f"{'+' if e['amount'] > 0 else '−'}₹{abs(e['amount'])}"
+                f"{(' · ' + _esc_md(e['reason'])) if e['reason'] else ''}"
+                for e in r["entries"]
+            )
+            await send_md_fallback(
+                cid,
+                f"👀 *Preview — nothing written*\n{rows}\n\n"
+                f"{r['count']} entr{'y' if r['count'] == 1 else 'ies'}, "
+                f"net *₹{r['total']}*.\nRe-send without `preview` to apply."
+            )
+            return
+
+        async with manager.get_chat_write_lock(cid):
+            r = dues_svc.import_dues(cid, payload, message.from_user.id,
+                                      message.from_user.first_name or "Admin")
+
+        rows = "\n".join(
+            f"  • {_esc_md(e['member_name'])} — "
+            f"{'+' if e['amount'] > 0 else '−'}₹{abs(e['amount'])} "
+            f"→ balance ₹{e['balance']}"
+            for e in r["entries"]
+        )
+        msg = [
+            f"🧾 *Dues imported* — {r['count']} entr{'y' if r['count'] == 1 else 'ies'}, "
+            f"net *₹{r['total']}*",
+            rows,
+        ]
+        if r["new_names"]:
+            msg.append(
+                "\n_New names (no prior history): "
+                + ", ".join(_esc_md(n) for n in r["new_names"])
+                + "._ _Merge any misspellings in the web panel._"
+            )
+        msg.append("\n_Balances only — the fund is unchanged. Use /fund\\_topup "
+                   "if you also want collected cash reflected in the fund._")
+        await send_md_fallback(cid, "\n".join(msg))
+    except Exception as e:
+        await reply_error(message, e)

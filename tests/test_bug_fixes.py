@@ -832,15 +832,22 @@ class TestScheduleExpiryAutoDisable(unittest.TestCase):
 
     @staticmethod
     def _controlled_sleep_after_one_pass():
-        """The alignment sleep before the while-loop (conditional on the
-        current second) is usually the first asyncio.sleep call — let it
-        (and only it) pass through so the loop body actually runs once,
-        then cancel on the loop's own end-of-iteration sleep(60)."""
-        calls = [0]
+        """Run the scheduler loop body exactly once, then cancel.
 
+        Keyed on sleep DURATION, not call count. check_template_schedules
+        aligns to the next minute with `sleep(60 - current_sec)` — but only
+        `if current_sec != 0`. Counting calls therefore assumed that alignment
+        sleep always happens: at exactly second 00 it is skipped, call #1
+        becomes the loop's own sleep(60), and the body runs TWICE before
+        cancellation. That made these tests fail roughly 1 run in 60,
+        independent of any code change (it reddened main on 74a78de).
+
+        Duration is unambiguous: alignment is 60 - current_sec, i.e. 1..59;
+        the loop tick is exactly 60. Cancel on 60, pass anything else through,
+        and the body runs exactly once whatever the wall clock says.
+        """
         async def _sleep(seconds):
-            calls[0] += 1
-            if calls[0] >= 2:
+            if seconds >= 60:
                 raise asyncio.CancelledError()
         return _sleep
 
@@ -872,6 +879,46 @@ class TestScheduleExpiryAutoDisable(unittest.TestCase):
         self.assertEqual(disable_sched.call_args.args[1], "sunday-game")
         auto_start.assert_not_called()
         update_last.assert_not_called()
+
+    def test_loop_runs_once_even_at_second_zero(self):
+        """Regression for a 1-in-60 flake that reddened main on 74a78de.
+
+        check_template_schedules aligns to the next minute with
+        `sleep(60 - current_sec)` but ONLY `if current_sec != 0`. The old
+        sleep controller counted calls and assumed that alignment sleep always
+        happened, so at exactly second 00 it cancelled one sleep too late and
+        the loop body ran twice — every `assert_called_once` in this file
+        failed, on a clock, with no code change involved.
+
+        Forcing second 00 is the case that used to break; the body must still
+        run exactly once.
+        """
+        import rollcall_manager as _rcm
+
+        real_mod = self._load_real_module()
+        mgr = _rcm.manager
+
+        class _FixedDatetime(real_mod.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return cls(2026, 1, 5, 9, 0, 0)  # second == 00
+
+        with patch.object(real_mod, 'datetime', _FixedDatetime), \
+             patch.object(real_mod, 'get_all_scheduled_templates', return_value=[]), \
+             patch.object(real_mod, '_fire_scheduled_rollcalls',
+                          new_callable=AsyncMock) as fire, \
+             patch.object(mgr, 'get_chat', return_value={"timezone": "Asia/Kolkata"}), \
+             patch('periodic_jobs.run_periodic_jobs', new_callable=AsyncMock, create=True), \
+             patch.object(real_mod.asyncio, 'sleep',
+                          side_effect=self._controlled_sleep_after_one_pass()):
+            loop = asyncio.new_event_loop()
+            try:
+                with self.assertRaises(asyncio.CancelledError):
+                    loop.run_until_complete(real_mod.check_template_schedules())
+            finally:
+                loop.close()
+
+        fire.assert_called_once()
 
     def test_non_expired_schedule_not_disabled(self):
         import rollcall_manager as _rcm
@@ -928,11 +975,22 @@ class TestCapReachedDoesNotStampSchedule(unittest.TestCase):
 
     @staticmethod
     def _controlled_sleep_after_one_pass():
-        calls = [0]
+        """Run the scheduler loop body exactly once, then cancel.
 
+        Keyed on sleep DURATION, not call count. check_template_schedules
+        aligns to the next minute with `sleep(60 - current_sec)` — but only
+        `if current_sec != 0`. Counting calls therefore assumed that alignment
+        sleep always happens: at exactly second 00 it is skipped, call #1
+        becomes the loop's own sleep(60), and the body runs TWICE before
+        cancellation. That made these tests fail roughly 1 run in 60,
+        independent of any code change (it reddened main on 74a78de).
+
+        Duration is unambiguous: alignment is 60 - current_sec, i.e. 1..59;
+        the loop tick is exactly 60. Cancel on 60, pass anything else through,
+        and the body runs exactly once whatever the wall clock says.
+        """
         async def _sleep(seconds):
-            calls[0] += 1
-            if calls[0] >= 2:
+            if seconds >= 60:
                 raise asyncio.CancelledError()
         return _sleep
 
@@ -1077,11 +1135,22 @@ class TestDueCheckIsolatedPerTemplate(unittest.TestCase):
 
     @staticmethod
     def _controlled_sleep_after_one_pass():
-        calls = [0]
+        """Run the scheduler loop body exactly once, then cancel.
 
+        Keyed on sleep DURATION, not call count. check_template_schedules
+        aligns to the next minute with `sleep(60 - current_sec)` — but only
+        `if current_sec != 0`. Counting calls therefore assumed that alignment
+        sleep always happens: at exactly second 00 it is skipped, call #1
+        becomes the loop's own sleep(60), and the body runs TWICE before
+        cancellation. That made these tests fail roughly 1 run in 60,
+        independent of any code change (it reddened main on 74a78de).
+
+        Duration is unambiguous: alignment is 60 - current_sec, i.e. 1..59;
+        the loop tick is exactly 60. Cancel on 60, pass anything else through,
+        and the body runs exactly once whatever the wall clock says.
+        """
         async def _sleep(seconds):
-            calls[0] += 1
-            if calls[0] >= 2:
+            if seconds >= 60:
                 raise asyncio.CancelledError()
         return _sleep
 

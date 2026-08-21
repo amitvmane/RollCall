@@ -13617,3 +13617,4 @@ Exception: db down
 2026-08-21 04:26:18,596 - root - INFO - [weblogin_redeem_post] redeemed token for user=42 chat=-100
 2026-08-21 04:26:18,598 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/auth/weblogin/redeem "HTTP/1.1 200 OK"
 2026-08-21 04:26:40,182 - runner - INFO - aiohttp session TTL set to 300s, retry-on-error enabled
+2026-08-21 04:36:32,964 - runner - INFO - aiohttp session TTL set to 300s, retry-on-error enabled

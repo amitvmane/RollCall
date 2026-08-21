@@ -39,7 +39,12 @@ def main() -> int:
     os.environ.setdefault("TELEGRAM_TOKEN", "123:smoke-test")
     tmp_db = tempfile.NamedTemporaryFile(prefix="rollcall-smoke-", suffix=".db", delete=False)
     tmp_db.close()
-    os.environ["DATABASE_URL"] = f"sqlite:///{tmp_db.name}"
+    # setdefault so an inherited DATABASE_URL wins and this can run against real
+    # Postgres in CI. Booting the app builds the whole schema, so on Postgres
+    # this is what actually exercises every CREATE TABLE / ALTER TABLE / partial
+    # index branch in the postgresql arm of db.py, plus construction of the
+    # connection pool itself — none of which the SQLite arm can prove.
+    os.environ.setdefault("DATABASE_URL", f"sqlite:///{tmp_db.name}")
 
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, os.path.join(repo_root, "rollCall"))

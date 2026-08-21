@@ -86,5 +86,22 @@ class TestFunctionalTestCanTargetPostgres(unittest.TestCase):
                       "the Postgres CI job should run the functional suite too")
 
 
+class TestSmokeCanTargetPostgres(unittest.TestCase):
+    """Booting the app builds the schema, so smoke-on-Postgres is the only
+    thing that proves the postgresql arm of db.py — every CREATE TABLE,
+    ALTER TABLE and partial index, plus pool construction — actually runs."""
+
+    def test_database_url_is_not_hard_assigned(self):
+        src = _read("scripts", "smoke_test.py")
+        self.assertIn('os.environ.setdefault("DATABASE_URL"', src)
+        self.assertNotIn('os.environ["DATABASE_URL"] = f"sqlite', src)
+
+    def test_ci_runs_smoke_against_postgres(self):
+        ci = _read(".github", "workflows", "ci.yml")
+        postgres_job = ci[ci.index("  postgres:"):]
+        self.assertIn("scripts/smoke_test.py", postgres_job,
+                      "the Postgres CI job should boot the app against Postgres")
+
+
 if __name__ == "__main__":
     unittest.main()

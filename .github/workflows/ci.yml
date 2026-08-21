@@ -218,6 +218,14 @@ jobs:
       - name: Install dependencies (locked)
         run: pip install -r requirements.lock pytest
 
+      # Booting the app builds the schema, so this is what proves the
+      # postgresql arm of db.py — every CREATE TABLE / ALTER TABLE / partial
+      # index, and the connection pool construction — actually executes.
+      - name: Run smoke test against Postgres
+        env:
+          TELEGRAM_TOKEN: "123:ci-smoke"
+        run: python scripts/smoke_test.py
+
       - name: Run integration tests against Postgres
         run: python -m pytest integration_tests/ -v --tb=short
 

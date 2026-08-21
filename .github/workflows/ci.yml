@@ -221,6 +221,13 @@ jobs:
       - name: Run integration tests against Postgres
         run: python -m pytest integration_tests/ -v --tb=short
 
+      # The functional suite drives real telebot routing/middleware/handlers.
+      # It pinned itself to SQLite until 2026-08-21, so that layer had never
+      # run against Postgres despite every historical parity bug being a
+      # data-layer difference that only shows up under real PG.
+      - name: Run functional test against Postgres
+        run: python scripts/functional_test.py
+
       - name: Run load test against Postgres
         run: python scripts/load_test_50_users.py
 

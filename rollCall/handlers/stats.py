@@ -86,17 +86,16 @@ async def stats_command(message):
         elif scope == "ghost":
             out = _fmt_ghost_stats(cid)
         elif scope == "bot":
-            # Full/near-full table scans across every chat — offloaded off
-            # the event loop on SQLite (the prod path) so this admin-only,
-            # rare command doesn't stall Telegram polling/REST/scheduler
-            # for its whole duration. Postgres pool thread-safety wasn't
-            # verified, so it stays on the direct synchronous call.
-            if db.db_type == "sqlite":
-                bot_stats_data = await asyncio.get_running_loop().run_in_executor(
-                    db._stats_executor, stats_svc.bot_stats
-                )
-            else:
-                bot_stats_data = stats_svc.bot_stats()
+            # Full/near-full table scans across every chat — offloaded off the
+            # event loop so this admin-only, rare command doesn't stall
+            # Telegram polling/REST/scheduler for its whole duration. Applies
+            # to BOTH backends: this used to be SQLite-only because psycopg2's
+            # SimpleConnectionPool isn't thread-safe, so Postgres deployments
+            # blocked the loop on the slowest query in the app. db.py now uses
+            # ThreadedConnectionPool, so both take the same path.
+            bot_stats_data = await asyncio.get_running_loop().run_in_executor(
+                db._stats_executor, stats_svc.bot_stats
+            )
             out = _fmt_bot_stats(bot_stats_data)
         elif scope == "proxy":
             out = _fmt_proxy_stats(stats_svc.proxy_stats(cid, target_proxy_name), display_name)

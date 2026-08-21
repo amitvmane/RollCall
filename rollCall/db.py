@@ -34,7 +34,14 @@ try:
     # dict(row) and row["column_name"] both work too. RealDictRow only
     # supports the mapping side, which would break the positional sites.
     from psycopg2.extras import DictCursor
-    from psycopg2.pool import SimpleConnectionPool
+    # ThreadedConnectionPool, not SimpleConnectionPool: SimpleConnectionPool is
+    # explicitly not thread-safe, which forced two hot paths (bot-wide /stats
+    # and the daily idle-chat sweep) to skip the thread offload on Postgres and
+    # block the event loop instead — stalling Telegram polling, the REST API
+    # and the scheduler for the duration of a heavy query. Same getconn /
+    # putconn / closeall API, so this is a drop-in that lets both backends take
+    # the same offloaded path.
+    from psycopg2.pool import ThreadedConnectionPool
     HAS_POSTGRES = True
 except ImportError:
     HAS_POSTGRES = False
@@ -116,13 +123,13 @@ def init_postgresql():
     if maxconn < minconn:
         maxconn = minconn
     try:
-        # cursor_factory=DictCursor: forwarded by SimpleConnectionPool to every
+        # cursor_factory=DictCursor: forwarded by the pool to every
         # psycopg2.connect() call it makes, so every connection it hands out
         # already returns DictRow rows — no per-cursor wiring needed anywhere
         # else in this file. See the import comment above for why DictCursor
         # specifically (not RealDictCursor).
-        db_pool = SimpleConnectionPool(minconn=minconn, maxconn=maxconn, dsn=DATABASE_URL,
-                                        cursor_factory=DictCursor)
+        db_pool = ThreadedConnectionPool(minconn=minconn, maxconn=maxconn, dsn=DATABASE_URL,
+                                          cursor_factory=DictCursor)
         _pool_max = maxconn
         logging.info(f"PostgreSQL connection pool created (min={minconn}, max={maxconn})")
     except Exception as e:

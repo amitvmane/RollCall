@@ -300,16 +300,15 @@ async def _idle_reengagement() -> None:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=IDLE_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
     now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
-    # Bot-wide, unscoped-by-design join — offloaded off the event loop on
-    # SQLite (the prod path) so this once-a-day scheduler sweep doesn't
-    # stall Telegram polling/REST for its whole duration. Postgres pool
-    # thread-safety wasn't verified, so it stays on the direct call.
-    if _db.db_type == "sqlite":
-        idle_chats = await asyncio.get_running_loop().run_in_executor(
-            _db._stats_executor, _db.get_idle_chats, cutoff
-        )
-    else:
-        idle_chats = _db.get_idle_chats(cutoff)
+    # Bot-wide, unscoped-by-design join — offloaded off the event loop so this
+    # once-a-day scheduler sweep doesn't stall Telegram polling/REST for its
+    # whole duration. Applies to BOTH backends: this used to be SQLite-only
+    # because psycopg2's SimpleConnectionPool isn't thread-safe, which left
+    # Postgres deployments blocking the loop here. db.py now uses
+    # ThreadedConnectionPool, so both take the same path.
+    idle_chats = await asyncio.get_running_loop().run_in_executor(
+        _db._stats_executor, _db.get_idle_chats, cutoff
+    )
 
     for row in idle_chats:
         chat_id = row["chat_id"]

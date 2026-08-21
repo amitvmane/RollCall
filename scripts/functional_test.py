@@ -37,7 +37,14 @@ from unittest.mock import AsyncMock, MagicMock
 # ─── Env setup BEFORE any rollCall imports ───────────────────────────────────
 _DB_FILE = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
 os.environ["TELEGRAM_TOKEN"] = "999999:dummy_token_for_functional_test"
-os.environ["DATABASE_URL"] = f"sqlite:///{_DB_FILE}"
+# setdefault, not a hard assignment: an inherited DATABASE_URL wins so the same
+# scenarios can be driven against real Postgres in CI. This used to overwrite
+# it unconditionally, which meant the ONE layer exercising real telebot routing
+# through real handlers had never touched Postgres — and every historical
+# parity bug in this project (BOOLEAN rejecting 0/1, jsonb pre-decoded,
+# TIMESTAMP as datetime, FKs actually enforced) was a data-layer difference
+# that only appears under real PG. Matches load_test_50_users.py.
+os.environ.setdefault("DATABASE_URL", f"sqlite:///{_DB_FILE}")
 os.environ["ADMIN1"] = "100"  # bot-owner / super admin
 
 # Make rollCall/ importable as top-level modules

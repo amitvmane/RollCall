@@ -207,6 +207,17 @@
     <div id="stats-card" class="card hidden"></div>
 
     <!-- Admin action — visible only to web admins -->
+    <!-- Shown only when the admin-status check could not be completed (network
+         or a slow Telegram round-trip), so "couldn't check" is never rendered
+         as the silent member-only view — that ambiguity is what made missing
+         admin controls look random. -->
+    <div id="admin-check-warning" class="card hidden"
+         style="border:1.5px dashed var(--warn,#c98a00);font-size:.85rem">
+      ⚠️ Couldn't verify your admin access just now — Telegram may be slow.
+      Admin controls are hidden until this succeeds.
+      <button class="btn" style="margin-top:8px" onclick="retryAdminCheck()">Retry</button>
+    </div>
+
     <div id="admin-card" class="card hidden" style="border:1.5px dashed var(--border)">
       <div style="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:10px">Admin actions</div>
       <!-- Other-groups switcher — only rendered when this admin manages

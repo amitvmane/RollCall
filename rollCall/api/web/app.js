@@ -1399,20 +1399,80 @@ window.homeOpenLink=function(){
 // ── Web admin check + start rollcall ─────────────────────────────────────
 let _isWebAdmin=false;
 
+// Admin controls appearing only sometimes was reported as "I log in and don't
+// see the options, then later I do". It had two independent causes, both of
+// which ended in a silent `return` that left the admin card hidden with no
+// indication anything had gone wrong:
+//
+//   1. RACE — opening the page from a /weblogin link sets _idToken inside an
+//      async redemption (_weblogInRedeemPromise). The initial call here fired
+//      first, hit `!_idToken`, gave up, and never retried; only the
+//      Telegram-verify path re-invoked it. Reloading "fixed" it, which is
+//      exactly what made it look random.
+//   2. TIMEOUT — in a group locked down with /set_admins, admin-status makes a
+//      live bot.get_chat_member round-trip to Telegram. A 5s abort against a
+//      slow Telegram, or any non-2xx, was swallowed by `catch(_){}`.
+//
+// So: wait for a pending redemption, retry transient failures, and never fail
+// silently — an unknown result now says so instead of rendering as "not admin".
 async function _checkWebAdmin(){
-  if(!IS_GROUP||!_idToken)return;
-  try{
-    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/admin-status`,{headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(5000)});
-    if(!res.ok)return;
-    const d=await res.json();
-    _isWebAdmin=!!d.is_admin;
-    const card=document.getElementById("admin-card");
-    if(card)card.classList.toggle("hidden",!_isWebAdmin);
-    if(_isWebAdmin){_syncShhToggle();_syncGroupSettingsCard();_syncTimezoneDisplay();_renderWeekdayHint();_loadWeblogInMembers();_loadAdminGroupSwitcher();renderLists();}
-  }catch(_){}
-  // Load dues after admin status is resolved — both member and admin sections
+  if(!IS_GROUP)return;
+  // 1. A /weblogin redemption may still be in flight and is what sets _idToken.
+  if(!_idToken&&_weblogInRedeemPromise){
+    try{await _weblogInRedeemPromise;}catch(_){}
+  }
+  if(!_idToken){_setAdminCheckFailed(false);return;}  // genuinely signed out — not an error
+
+  // 2. Telegram round-trips can be slow; retry rather than hide the UI on one
+  //    unlucky request. Delays are short because this gates visible controls.
+  let lastErr=null;
+  for(const delay of [0,600,1800]){
+    if(delay)await new Promise(r=>setTimeout(r,delay));
+    try{
+      const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/admin-status`,
+        {headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(12000)});
+      if(!res.ok){
+        // 401/403 are real answers ("you are not an admin"), not failures to retry.
+        if(res.status>=400&&res.status<500){_applyAdminStatus(false);return;}
+        lastErr=new Error(`HTTP ${res.status}`);
+        continue;
+      }
+      const d=await res.json();
+      _applyAdminStatus(!!d.is_admin);
+      return;
+    }catch(e){lastErr=e;}
+  }
+  console.warn("admin-status check failed after retries:",lastErr&&lastErr.message);
+  _setAdminCheckFailed(true);
+}
+
+function _applyAdminStatus(isAdmin){
+  _isWebAdmin=isAdmin;
+  const card=document.getElementById("admin-card");
+  if(card)card.classList.toggle("hidden",!_isWebAdmin);
+  const warn=document.getElementById("admin-check-warning");
+  if(warn)warn.classList.add("hidden");
+  if(_isWebAdmin){_syncShhToggle();_syncGroupSettingsCard();_syncTimezoneDisplay();_renderWeekdayHint();_loadWeblogInMembers();_loadAdminGroupSwitcher();renderLists();}
   loadDuesSection().catch(()=>{});
 }
+
+// Couldn't determine admin status. Distinct from "not an admin": say so, and
+// offer a retry, rather than silently rendering the member-only view — the
+// silent version is what made this look intermittent and unexplainable.
+function _setAdminCheckFailed(showWarning){
+  _isWebAdmin=false;
+  const card=document.getElementById("admin-card");
+  if(card)card.classList.add("hidden");
+  const warn=document.getElementById("admin-check-warning");
+  if(warn)warn.classList.toggle("hidden",!showWarning);
+  loadDuesSection().catch(()=>{});
+}
+
+window.retryAdminCheck=function(){
+  const warn=document.getElementById("admin-check-warning");
+  if(warn)warn.classList.add("hidden");
+  _checkWebAdmin().catch(()=>{});
+};
 
 function _syncShhToggle(){
   const tog=document.getElementById("shh-toggle");

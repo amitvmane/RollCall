@@ -682,7 +682,6 @@ def dues_snapshot(chat_id: int) -> dict:
     balances = db.get_all_dues_balances(chat_id, nonzero_only=False)
     fund_balance = db.get_fund_balance(chat_id)
     last_closure = db.get_nth_game_closure(chat_id, 0)
-    tz_label = "UTC"
 
     owed   = [b for b in balances if b["balance"] > 0]
     credit = [b for b in balances if b["balance"] < 0]

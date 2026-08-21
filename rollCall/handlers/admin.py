@@ -104,11 +104,11 @@ async def _send_audit_page(cid: int, page: int, per_page: int, edit_msg_id: int 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/delete_user")
 async def delete_user(message):
     try:
-        if roll_call_not_started(message, manager) == False:
+        if roll_call_not_started(message, manager) is False:
             raise rollCallNotStarted("Roll call is not active")
         elif len(message.text.split(" ")) <= 1:
             raise parameterMissing("Input username is missing")
-        if await admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
 
         msg = message.text
@@ -152,7 +152,7 @@ async def delete_user(message):
 @bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/audit_log")
 async def audit_log_command(message):
     try:
-        if await admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
         cid = message.chat.id
         parts = message.text.strip().split()
@@ -174,9 +174,9 @@ async def audit_log_command(message):
 async def set_status_override(message):
     cid = message.chat.id
     try:
-        if roll_call_not_started(message, manager) == False:
+        if roll_call_not_started(message, manager) is False:
             raise rollCallNotStarted("Roll call is not active")
-        if await admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
 
         parts = message.text.strip().split()

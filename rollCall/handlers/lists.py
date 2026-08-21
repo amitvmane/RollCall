@@ -27,7 +27,7 @@ from datetime import datetime
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/wi")
 async def whos_in(message):
     try:
-        if roll_call_not_started(message, manager) == False:
+        if roll_call_not_started(message, manager) is False:
             raise rollCallNotStarted("Roll call is not active")
 
         cid = message.chat.id
@@ -51,7 +51,7 @@ async def whos_in(message):
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/wo")
 async def whos_out(message):
     try:
-        if roll_call_not_started(message, manager) == False:
+        if roll_call_not_started(message, manager) is False:
             raise rollCallNotStarted("Roll call is not active")
 
         cid = message.chat.id
@@ -75,7 +75,7 @@ async def whos_out(message):
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/wm")
 async def whos_maybe(message):
     try:
-        if roll_call_not_started(message, manager) == False:
+        if roll_call_not_started(message, manager) is False:
             raise rollCallNotStarted("Roll call is not active")
 
         cid = message.chat.id
@@ -99,7 +99,7 @@ async def whos_maybe(message):
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/ww")
 async def whos_waiting(message):
     try:
-        if roll_call_not_started(message, manager) == False:
+        if roll_call_not_started(message, manager) is False:
             raise rollCallNotStarted("Roll call is not active")
 
         cid = message.chat.id
@@ -159,7 +159,7 @@ async def history_command(message):
             lines.append(f"\n_Use /history {limit} {page + 1} to see more_")
 
         await bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
-    except Exception as e:
+    except Exception:
         logging.exception("Error in /history")
         await bot.send_message(cid, "Error fetching history, please try again later.")
 
@@ -168,7 +168,7 @@ async def history_command(message):
 async def buzz_command(message):
     cid = message.chat.id
     try:
-        if await admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
 
         if _is_buzz_rate_limited(cid):
@@ -195,7 +195,7 @@ async def buzz_command(message):
         if filtered:
             custom_msg = " ".join(filtered)
 
-        no_rollcall = roll_call_not_started(message, manager) == False
+        no_rollcall = roll_call_not_started(message, manager) is False
 
         svc = lists_svc.get_non_responders(cid, rc_number)
         candidates = svc["candidates"]
@@ -218,8 +218,6 @@ async def buzz_command(message):
                 "No known group members yet. Members are recorded the first time they vote in any rollcall."
             )
             return
-
-        rollcalls = manager.get_rollcalls(cid)
 
         if not no_rollcall and not candidates:
             if rc_number is not None or len(rollcall_titles) == 1:
@@ -314,7 +312,7 @@ async def auto_buzz_command(message):
     """Configure automatic non-voter pings N hours before a rollcall's close time."""
     cid = message.chat.id
     try:
-        if await admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Admin only: /auto_buzz")
 
         from db import update_chat_settings, get_or_create_chat
@@ -367,7 +365,7 @@ async def auto_buzz_command(message):
 async def _reminder_hours_command(message, field: str, label: str, usage_example: str):
     cid = message.chat.id
     try:
-        if await admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) is False:
             raise insufficientPermissions(f"Admin only: {usage_example.split()[0]}")
 
         from db import update_chat_settings, get_or_create_chat

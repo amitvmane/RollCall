@@ -61,7 +61,7 @@ async def _send_promoted(cid: int, promoted: dict, rc_title: str, rc_number_1bas
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/in")
 async def in_user(message):
     try:
-        if roll_call_not_started(message, manager) == False:
+        if roll_call_not_started(message, manager) is False:
             raise rollCallNotStarted("Roll call is not active")
         if _is_rate_limited(message.chat.id, message.from_user.id):
             return
@@ -135,7 +135,7 @@ async def in_user(message):
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/out")
 async def out_user(message):
     try:
-        if roll_call_not_started(message, manager) == False:
+        if roll_call_not_started(message, manager) is False:
             raise rollCallNotStarted("Roll call is not active")
         if _is_rate_limited(message.chat.id, message.from_user.id):
             return
@@ -195,7 +195,7 @@ async def out_user(message):
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/maybe")
 async def maybe_user(message):
     try:
-        if roll_call_not_started(message, manager) == False:
+        if roll_call_not_started(message, manager) is False:
             raise rollCallNotStarted("Roll call is not active")
         if _is_rate_limited(message.chat.id, message.from_user.id):
             return

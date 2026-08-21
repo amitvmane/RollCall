@@ -65,9 +65,9 @@ async def _send_promoted_proxy(cid: int, promoted: dict, rc_title: str, rc_numbe
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/sif")
 async def set_in_for(message):
     try:
-        if roll_call_not_started(message, manager) == False:
+        if roll_call_not_started(message, manager) is False:
             raise rollCallNotStarted("Roll call is not active")
-        if await admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
 
         cid = message.chat.id
@@ -121,9 +121,9 @@ async def set_in_for(message):
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/sof")
 async def set_out_for(message):
     try:
-        if roll_call_not_started(message, manager) == False:
+        if roll_call_not_started(message, manager) is False:
             raise rollCallNotStarted("Roll call is not active")
-        if await admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
 
         cid = message.chat.id
@@ -165,9 +165,9 @@ async def set_out_for(message):
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/smf")
 async def set_maybe_for(message):
     try:
-        if roll_call_not_started(message, manager) == False:
+        if roll_call_not_started(message, manager) is False:
             raise rollCallNotStarted("Roll call is not active")
-        if await admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
 
         cid = message.chat.id

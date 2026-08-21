@@ -337,7 +337,7 @@ async def start_roll_call(message):
     msg = message.text
 
     try:
-        if await admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
 
         arr = msg.split(" ")
@@ -392,7 +392,7 @@ async def repeat_roll_call(message):
     """Clone the last ended rollcall's settings (title, fee, location, limit) into a new one."""
     cid = message.chat.id
     try:
-        if await admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
 
         _tokens, repeat_type = _extract_repeat_flag(message.text.split(" ")[1:])
@@ -457,9 +457,9 @@ async def repeat_roll_call(message):
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/erc")
 async def end_roll_call(message):
     try:
-        if roll_call_not_started(message, manager) == False:
+        if roll_call_not_started(message, manager) is False:
             raise rollCallNotStarted("Roll call is not active")
-        if await admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
         cid = message.chat.id
         pmts = message.text.split(" ")[1:]
@@ -512,9 +512,9 @@ async def end_roll_call(message):
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/xrc")
 async def cancel_roll_call(message):
     try:
-        if roll_call_not_started(message, manager) == False:
+        if roll_call_not_started(message, manager) is False:
             raise rollCallNotStarted("Roll call is not active")
-        if await admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
         cid = message.chat.id
         pmts = message.text.split(" ")[1:]
@@ -578,9 +578,9 @@ async def cancel_roll_call(message):
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/st")
 async def set_title(message):
     try:
-        if roll_call_not_started(message, manager) == False:
+        if roll_call_not_started(message, manager) is False:
             raise rollCallNotStarted("Roll call is not active")
-        if await admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
         elif len(message.text.split(" ")) <= 1:
             await bot.send_message(message.chat.id, "Input title is missing")
@@ -629,7 +629,7 @@ async def show_panel(message):
     try:
         cid = message.chat.id
 
-        if await admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
 
         pmts = message.text.split(" ")[1:]

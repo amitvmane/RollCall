@@ -5630,7 +5630,6 @@ def get_pending_scheduled_rollcalls() -> List[Dict]:
     """Return all unfired scheduled rollcalls whose fire time has passed (UTC)."""
     try:
         with _cursor() as cursor:
-            ph = "%s" if db_type == "postgresql" else "?"
             now = _utcnow_naive().strftime("%Y-%m-%dT%H:%M:%SZ")
             if db_type == "postgresql":
                 cursor.execute(
@@ -5653,7 +5652,6 @@ def get_upcoming_scheduled_rollcalls(chat_id: int) -> List[Dict]:
     """Return unfired future scheduled rollcalls for a chat, sorted by fire time."""
     try:
         with _cursor() as cursor:
-            ph = "%s" if db_type == "postgresql" else "?"
             if db_type == "postgresql":
                 cursor.execute(
                     "SELECT * FROM scheduled_rollcalls WHERE chat_id = %s AND is_fired = FALSE ORDER BY scheduled_at",

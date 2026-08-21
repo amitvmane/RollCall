@@ -274,7 +274,7 @@ async def on_new_chat_members(message):
 async def welcome_and_explanation(message):
     cid = message.chat.id
     manager.get_chat(cid)
-    if await admin_rights(message, manager) == False:
+    if await admin_rights(message, manager) is False:
         await bot.send_message(cid, "Error - User does not have sufficient permissions for this operation")
         return
     await bot.send_message(cid, 'Hi! im RollCall!\n\nUse /help to see all the commands')

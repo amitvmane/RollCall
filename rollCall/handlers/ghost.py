@@ -97,7 +97,7 @@ def _decrement_attended(cid: int, in_users: list, selected: set) -> int:
 @bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/toggle_ghost_tracking")
 async def toggle_ghost_tracking(message):
     try:
-        if await admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
         cid = message.chat.id
         parts = message.text.strip().split()
@@ -124,7 +124,7 @@ async def toggle_ghost_tracking(message):
 @bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/set_absent_limit")
 async def set_absent_limit(message):
     try:
-        if await admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
         cid = message.chat.id
         parts = message.text.strip().split()
@@ -152,7 +152,7 @@ async def set_absent_limit(message):
 @bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/clear_absent")
 async def clear_absent(message):
     try:
-        if await admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
         cid = message.chat.id
         parts = message.text.strip().split(None, 1)
@@ -184,7 +184,7 @@ async def clear_absent(message):
 @bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/mark_absent")
 async def mark_absent(message):
     try:
-        if await admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
         cid = message.chat.id
 

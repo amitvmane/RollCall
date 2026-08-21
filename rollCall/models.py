@@ -646,7 +646,6 @@ class User:
                     self.name = f"{self.name} ({suffix})"
     
     def __str__(self):
-        backslash = "\n"
         return f"{self.name + (' (' + self.comment + ')' if self.comment != '' else '')}"
     
     def __repr__(self):

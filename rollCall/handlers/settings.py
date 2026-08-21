@@ -31,9 +31,9 @@ def _ts() -> str:
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/srt")
 async def set_rollcall_time(message):
     try:
-        if roll_call_not_started(message, manager) == False:
+        if roll_call_not_started(message, manager) is False:
             raise rollCallNotStarted("Roll call is not active")
-        if await admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
         if len(message.text.split(" ")) == 1:
             raise parameterMissing("invalid datetime format, refer help section for details")
@@ -93,9 +93,9 @@ async def reminder(message):
     pmts = msg.split(" ")[1:]
 
     try:
-        if roll_call_not_started(message, manager) == False:
+        if roll_call_not_started(message, manager) is False:
             raise rollCallNotStarted("Roll call is not active")
-        if await admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
 
         if len(pmts) > 0 and pmts[0] != 'cancel' and len(pmts[0]) == 2:
@@ -151,7 +151,7 @@ async def event_fee(message):
     rc_number = 0
 
     try:
-        if await admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
 
         has_active = roll_call_not_started(message, manager)  # True = rollcall running
@@ -220,9 +220,9 @@ async def individual_fee(message):
     rc_number = 0
 
     try:
-        if roll_call_not_started(message, manager) == False:
+        if roll_call_not_started(message, manager) is False:
             raise rollCallNotStarted("Roll call is not active")
-        if await admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
 
         if len(pmts) > 0 and "::" in pmts[-1]:
@@ -251,9 +251,9 @@ async def when(message):
     rc_number = 0
 
     try:
-        if roll_call_not_started(message, manager) == False:
+        if roll_call_not_started(message, manager) is False:
             raise rollCallNotStarted("Roll call is not active")
-        if await admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
 
         if len(pmts) > 0 and "::" in pmts[-1]:
@@ -282,9 +282,9 @@ async def when(message):
 async def set_location(message):
     cid = message.chat.id
     try:
-        if roll_call_not_started(message, manager) == False:
+        if roll_call_not_started(message, manager) is False:
             raise rollCallNotStarted("Roll call is not active")
-        if await admin_rights(message, manager) == False:
+        if await admin_rights(message, manager) is False:
             raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
         if len(message.text.split(" ")) < 2:
             raise incorrectParameter("The correct format is /location <place>")
@@ -326,7 +326,7 @@ async def wait_limit(message):
         await bot.send_message(message.chat.id, "You don't have permission to use this command.")
         return
     try:
-        if roll_call_not_started(message, manager) == False:
+        if roll_call_not_started(message, manager) is False:
             raise rollCallNotStarted("Roll call is not active")
 
         msg = message.text

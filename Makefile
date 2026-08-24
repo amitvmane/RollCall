@@ -10,7 +10,6 @@
 COMPOSE  := docker compose
 BOT      := rollcall-bot
 BACKUP   := db-backup
-DB       := ./data/rollcall.db
 
 # Services that must come back up together. `make down` stops everything, so
 # any target that starts the bot must also restart the backup sidecar —
@@ -27,16 +26,24 @@ HC_PORT := $(or $(call _env,HEALTH_CHECK_HOST_PORT),8080)
 # auto-detected trycloudflare.com URL. Override via WEB_BASE_URL in .env.
 WEB_URL := $(or $(call _env,WEB_BASE_URL),https://rbot.blobsystems.xyz)
 
+# Where the database lives on the HOST. Must match DATA_DIR in docker-compose.yml
+# (both read it from .env). Defaults outside the git working tree on purpose —
+# see the volumes comment in docker-compose.yml for the incident that motivated
+# it. Everything inside the container is still /app/data.
+DATA_DIR := $(or $(call _env,DATA_DIR),../rollcall-data)
+DB       := $(DATA_DIR)/rollcall.db
+
 .DEFAULT_GOAL := help
 
-BACKUP_DIR  := ./data/backups
+BACKUP_DIR  := $(DATA_DIR)/backups
 # make backup-check fails if the newest snapshot is older than this. The
 # sidecar snapshots every 24h, so 48 gives one missed cycle of slack before
 # it complains.
 BACKUP_MAX_AGE_HOURS ?= 48
 
 .PHONY: help up down restart build rebuild logs logs-cf status url notify token group-token chats \
-        backup-now backup-check backup-list backup-remote backup-remote-logs
+        backup-now backup-check backup-list backup-remote backup-remote-logs \
+        migrate-data check-data-dir
 
 help: ## Show this help
 	@printf "\n\033[1mRollCall — deployment manager\033[0m\n"
@@ -59,8 +66,10 @@ help: ## Show this help
 	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-check"  "Alarm if newest snapshot is stale (exit 1) — put this in cron"
 	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-remote" "Start off-site rclone sync (needs RCLONE_REMOTE in .env)"
 	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-remote-logs" "Tail the off-site sync sidecar"
+	@printf "  \033[36m%-20s\033[0m %s\n" "make migrate-data"  "Move the DB out of the git tree into DATA_DIR"
 	@printf "    Options:\n"
 	@printf "      BACKUP_MAX_AGE_HOURS=N   staleness limit for backup-check  (default: 48)\n"
+	@printf "    Current DATA_DIR: $(DATA_DIR)\n"
 	@printf "\n\033[4mTOKENS\033[0m\n"
 	@printf "  \033[36mmake token\033[0m\n"
 	@printf "    Issue a \033[1mglobal\033[0m admin token (chat-id 0, all scopes — works across all groups)\n"
@@ -84,7 +93,46 @@ help: ## Show this help
 	@printf "      make group-token CHAT=-1001234567890 SCOPES=read,vote LABEL=\"Webapp\" DAYS=30\n"
 	@printf "\n"
 
-up: ## Start/recreate bot + backup sidecar (tunnel is managed by the blobsystems repo)
+# Docker creates a missing bind-mount source as an empty root-owned directory
+# rather than failing, so a wrong or unmigrated DATA_DIR would start the bot on
+# a blank database and look identical to catastrophic data loss. Refuse instead.
+check-data-dir:
+	@if [ ! -d "$(DATA_DIR)" ]; then \
+	  echo "❌  DATA_DIR does not exist: $(DATA_DIR)"; \
+	  echo "    Docker would create it empty and the bot would boot on a blank DB."; \
+	  echo "    Run: make migrate-data"; \
+	  exit 1; \
+	fi
+	@if [ ! -f "$(DB)" ] && [ -f ./data/rollcall.db ]; then \
+	  echo "❌  $(DB) is missing, but ./data/rollcall.db still exists."; \
+	  echo "    Your database has not been migrated out of the git tree yet."; \
+	  echo "    Run: make migrate-data"; \
+	  exit 1; \
+	fi
+
+migrate-data: ## Move the database out of the git tree into DATA_DIR (idempotent)
+	@echo "DATA_DIR = $(DATA_DIR)"
+	@mkdir -p "$(DATA_DIR)/backups"
+	@if [ -f "$(DB)" ]; then \
+	  echo "✅  already migrated — $(DB) exists ($$(stat -c %s "$(DB)" 2>/dev/null || stat -f %z "$(DB)") bytes)"; \
+	elif [ -f ./data/rollcall.db ]; then \
+	  echo "Moving ./data/ → $(DATA_DIR)/ (bot must be stopped)"; \
+	  $(COMPOSE) stop $(SERVICES) 2>/dev/null || true; \
+	  cp -a ./data/rollcall.db "$(DB)"; \
+	  [ -d ./data/backups ] && cp -an ./data/backups/. "$(DATA_DIR)/backups/" 2>/dev/null || true; \
+	  rm -f ./data/rollcall.db-wal ./data/rollcall.db-shm; \
+	  echo "✅  copied. The originals are left in ./data/ — delete them once you've"; \
+	  echo "    confirmed the bot is healthy on the new location."; \
+	else \
+	  echo "✅  fresh install — created empty $(DATA_DIR), bot will initialise the DB"; \
+	fi
+	@chmod 777 "$(DATA_DIR)" 2>/dev/null || true
+	@[ -f "$(DB)" ] && chmod 666 "$(DB)" || true
+	@echo ""
+	@echo "Pin it explicitly in .env so it never depends on the working directory:"
+	@echo "    DATA_DIR=$$(cd "$(DATA_DIR)" && pwd)"
+
+up: check-data-dir ## Start/recreate bot + backup sidecar (tunnel is managed by the blobsystems repo)
 	@echo "Starting bot and backup sidecar..."
 	@$(COMPOSE) up -d --force-recreate $(SERVICES)
 	@echo ""
@@ -97,7 +145,7 @@ restart: ## Restart bot (picks up .env changes)
 	$(COMPOSE) restart $(BOT)
 	@echo "Bot restarted"
 
-build: ## Rebuild bot image and restart
+build: check-data-dir ## Rebuild bot image and restart
 	$(COMPOSE) up -d --build $(SERVICES)
 
 rebuild: ## Clean start: stop everything, rebuild image from current code, start bot

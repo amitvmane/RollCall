@@ -46,8 +46,20 @@ services:
       - MINIAPP_URL=${MINIAPP_URL:-}
 
     volumes:
-      # Persist database across container restarts
-      - ./data:/app/data
+      # Persist database across container restarts.
+      #
+      # DATA_DIR deliberately defaults OUTSIDE the git working tree. It used to
+      # be ./data, and on 2026-08-24 a deploy checked out the repo and replaced
+      # the live production database with the near-empty copy that had been
+      # committed to git months earlier. Untracking that file removed the
+      # trigger; keeping the database out of the tree entirely removes the
+      # whole class of hazard — no checkout, `git clean -fdx`, or stash can
+      # reach it. Override with DATA_DIR=/var/lib/rollcall in .env.
+      #
+      # Docker silently creates a missing bind-mount source as an empty
+      # root-owned directory, which would look exactly like total data loss,
+      # so `make up` refuses to start unless DATA_DIR already exists.
+      - ${DATA_DIR:-../rollcall-data}:/app/data
 
       # Persist logs
       - ./logs:/app/logs
@@ -106,7 +118,7 @@ services:
       - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-7}
       - TZ=${TZ:-Asia/Kolkata}
     volumes:
-      - ./data:/app/data
+      - ${DATA_DIR:-../rollcall-data}:/app/data
     entrypoint: ["/bin/sh", "-c"]
     # Run once immediately, then daily. Override the cadence with BACKUP_INTERVAL_SECONDS.
     command:
@@ -149,7 +161,7 @@ services:
       - BACKUP_SYNC_INTERVAL_SECONDS=${BACKUP_SYNC_INTERVAL_SECONDS:-3600}
     volumes:
       # Local backups written by db-backup sidecar (read-only here)
-      - ./data/backups:/backups:ro
+      - ${DATA_DIR:-../rollcall-data}/backups:/backups:ro
       # Host rclone config (must already be configured via `rclone config`)
       - ${RCLONE_CONFIG_PATH:-~/.config/rclone}:/config/rclone:ro
     entrypoint: ["/bin/sh", "-c"]

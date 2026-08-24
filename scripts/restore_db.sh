@@ -1,10 +1,12 @@
 #!/bin/sh
 # Restore a gzipped SQLite backup produced by backup_db.sh.
 #
-# Run this on the HOST (the data directory is bind-mounted from ./data),
-# with the bot stopped:
+# Run this on the HOST (the data directory is bind-mounted from DATA_DIR,
+# which lives outside the git tree — see docker-compose.yml), with the bot
+# stopped:
 #   docker-compose stop rollcall-bot
-#   ./scripts/restore_db.sh data/backups/rollcall-20260804-120000.db.gz
+#   BACKUP_DB_PATH=../rollcall-data/rollcall.db \
+#     ./scripts/restore_db.sh ../rollcall-data/backups/rollcall-20260804-120000.db.gz
 #   docker-compose start rollcall-bot
 #
 # Why this script exists instead of "just gunzip the file over rollcall.db":
@@ -22,10 +24,11 @@
 # comes from whatever created it, not from the directory it's dropped into.
 #
 # Env (optional):
-#   BACKUP_DB_PATH   path to restore into (default ./data/rollcall.db)
+#   BACKUP_DB_PATH   path to restore into (default $DATA_DIR/rollcall.db,
+#                    falling back to ../rollcall-data/rollcall.db)
 set -eu
 
-DB_PATH="${BACKUP_DB_PATH:-./data/rollcall.db}"
+DB_PATH="${BACKUP_DB_PATH:-${DATA_DIR:-../rollcall-data}/rollcall.db}"
 
 if [ $# -ne 1 ]; then
     echo "Usage: $0 <path-to-backup.db.gz>" >&2

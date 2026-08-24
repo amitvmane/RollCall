@@ -9,7 +9,13 @@
 
 COMPOSE  := docker compose
 BOT      := rollcall-bot
+BACKUP   := db-backup
 DB       := ./data/rollcall.db
+
+# Services that must come back up together. `make down` stops everything, so
+# any target that starts the bot must also restart the backup sidecar —
+# otherwise it stays stopped silently and daily snapshots quietly cease.
+SERVICES := $(BOT) $(BACKUP)
 
 # Read a value from .env, stripping surrounding quotes
 _env = $(shell grep -m1 '^$(1)=' .env 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'")
@@ -63,9 +69,9 @@ help: ## Show this help
 	@printf "      make group-token CHAT=-1001234567890 SCOPES=read,vote LABEL=\"Webapp\" DAYS=30\n"
 	@printf "\n"
 
-up: ## Start/recreate bot (tunnel is managed by the blobsystems repo)
-	@echo "Starting bot..."
-	@$(COMPOSE) up -d --force-recreate $(BOT)
+up: ## Start/recreate bot + backup sidecar (tunnel is managed by the blobsystems repo)
+	@echo "Starting bot and backup sidecar..."
+	@$(COMPOSE) up -d --force-recreate $(SERVICES)
 	@echo ""
 	@$(MAKE) -s url
 
@@ -77,7 +83,7 @@ restart: ## Restart bot (picks up .env changes)
 	@echo "Bot restarted"
 
 build: ## Rebuild bot image and restart
-	$(COMPOSE) up -d --build $(BOT)
+	$(COMPOSE) up -d --build $(SERVICES)
 
 rebuild: ## Clean start: stop everything, rebuild image from current code, start bot
 	@echo "Stopping containers..."

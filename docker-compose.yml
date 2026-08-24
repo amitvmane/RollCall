@@ -156,7 +156,7 @@ services:
     command:
       - |
         while true; do
-          echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) rclone copy /backups $${RCLONE_REMOTE}"
+          echo "$$(date -u +%Y-%m-%dT%H:%M:%SZ) rclone copy /backups $${RCLONE_REMOTE}"
           rclone copy /backups "$${RCLONE_REMOTE}" \
             --config /config/rclone/rclone.conf \
             --log-level INFO || true

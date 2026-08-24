@@ -29,7 +29,14 @@ WEB_URL := $(or $(call _env,WEB_BASE_URL),https://rbot.blobsystems.xyz)
 
 .DEFAULT_GOAL := help
 
-.PHONY: help up down restart build rebuild logs logs-cf status url notify token group-token chats
+BACKUP_DIR  := ./data/backups
+# make backup-check fails if the newest snapshot is older than this. The
+# sidecar snapshots every 24h, so 48 gives one missed cycle of slack before
+# it complains.
+BACKUP_MAX_AGE_HOURS ?= 48
+
+.PHONY: help up down restart build rebuild logs logs-cf status url notify token group-token chats \
+        backup-now backup-check backup-list backup-remote backup-remote-logs
 
 help: ## Show this help
 	@printf "\n\033[1mRollCall — deployment manager\033[0m\n"
@@ -46,6 +53,14 @@ help: ## Show this help
 	@printf "  \033[36m%-16s\033[0m %s\n" "make url"     "Public URL and all group voting links"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make notify"  "Send all voting links to Telegram admin"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make chats"   "List all known groups with their chat IDs"
+	@printf "\n\033[4mBACKUPS\033[0m\n"
+	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-now"    "Take a snapshot right now"
+	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-list"   "List local snapshots, newest last"
+	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-check"  "Alarm if newest snapshot is stale (exit 1) — put this in cron"
+	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-remote" "Start off-site rclone sync (needs RCLONE_REMOTE in .env)"
+	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-remote-logs" "Tail the off-site sync sidecar"
+	@printf "    Options:\n"
+	@printf "      BACKUP_MAX_AGE_HOURS=N   staleness limit for backup-check  (default: 48)\n"
 	@printf "\n\033[4mTOKENS\033[0m\n"
 	@printf "  \033[36mmake token\033[0m\n"
 	@printf "    Issue a \033[1mglobal\033[0m admin token (chat-id 0, all scopes — works across all groups)\n"
@@ -125,6 +140,56 @@ status: ## Show container status + external service reachability
 	  echo "  $$HEALTH" | fold -s -w 100; \
 	fi
 	@echo ""
+	@echo "=== Backups ==="
+	@printf "  "; $(MAKE) -s backup-check || true
+	@echo ""
+
+backup-now: ## Take a snapshot immediately (does not wait for the 24h cycle)
+	@$(COMPOSE) exec $(BACKUP) /app/scripts/backup_db.sh
+
+backup-list: ## List local snapshots, newest last
+	@ls -ltr $(BACKUP_DIR)/rollcall-*.db.gz 2>/dev/null || echo "no snapshots in $(BACKUP_DIR)"
+
+# Exits non-zero when the newest snapshot is stale or missing, so cron mails
+# you / a monitor alerts. The silent failure this guards against is real: the
+# db-backup sidecar sat stopped from 2026-08-03 to 2026-08-24 without emitting
+# a single signal, and was three weeks stale at the moment it was needed.
+backup-check: ## Verify a recent snapshot exists (exit 1 if stale) — run from cron
+	@newest=$$(ls -t $(BACKUP_DIR)/rollcall-*.db.gz 2>/dev/null | head -1); \
+	if [ -z "$$newest" ]; then \
+	  echo "❌  BACKUP MISSING — no snapshots at all in $(BACKUP_DIR)"; \
+	  $(COMPOSE) ps $(BACKUP); \
+	  exit 1; \
+	fi; \
+	mtime=$$(stat -c %Y "$$newest" 2>/dev/null || stat -f %m "$$newest"); \
+	size=$$(stat -c %s "$$newest" 2>/dev/null || stat -f %z "$$newest"); \
+	age_h=$$(( ( $$(date +%s) - $$mtime ) / 3600 )); \
+	if [ "$$size" -lt 1024 ]; then \
+	  echo "❌  BACKUP CORRUPT — newest snapshot is only $$size bytes: $$newest"; \
+	  exit 1; \
+	fi; \
+	if [ "$$age_h" -ge "$(BACKUP_MAX_AGE_HOURS)" ]; then \
+	  echo "❌  BACKUP STALE — newest is $${age_h}h old (limit $(BACKUP_MAX_AGE_HOURS)h): $$newest"; \
+	  echo "    the db-backup sidecar is probably not running:"; \
+	  $(COMPOSE) ps $(BACKUP); \
+	  exit 1; \
+	fi; \
+	echo "✅  backup ok — $${age_h}h old, $$size bytes: $$newest"
+
+backup-remote: ## Start the off-site rclone sync sidecar (needs RCLONE_REMOTE in .env)
+	@if [ -z "$(call _env,RCLONE_REMOTE)" ]; then \
+	  echo "❌  RCLONE_REMOTE is not set in .env"; \
+	  echo "    1. rclone config                       (create a remote on the host)"; \
+	  echo "    2. echo 'RCLONE_REMOTE=gdrive:rollcall-backups' >> .env"; \
+	  echo "    3. make backup-remote"; \
+	  exit 1; \
+	fi
+	@echo "Starting off-site sync → $(call _env,RCLONE_REMOTE)"
+	@$(COMPOSE) --profile backup-remote up -d backup-sync
+	@echo "Verify with: make backup-remote-logs"
+
+backup-remote-logs: ## Tail the off-site sync sidecar
+	@docker logs -f rollcall-backup-sync
 
 url: ## Show public URL and all group voting links
 	@URL="$(WEB_URL)"; \

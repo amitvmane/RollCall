@@ -105,17 +105,25 @@ class TestWebVoterManagement(unittest.TestCase):
         self.assertNotIn("Bob", roster["maybe"])
 
     def test_non_admin_cannot_move_or_remove(self):
+        # Bob has to be a genuine non-admin: no cached web_admins grant AND
+        # not a Telegram admin. setUp leaves the shared mock reporting
+        # "administrator", which in an open group is now itself sufficient
+        # for web-admin, so it has to be overridden here.
         bob_token = self.issue_identity_token(BOB_ID)
-        r1 = self.client.post(
-            f"/api/v1/web/group/{self.chat['group_web_token']}/rollcalls/move-user",
-            json={"id_token": bob_token, "rollcall_num": 1, "name": "Bob", "new_status": "out"},
-        )
-        self.assertEqual(r1.status_code, 403)
-        r2 = self.client.post(
-            f"/api/v1/web/group/{self.chat['group_web_token']}/rollcalls/remove-user",
-            json={"id_token": bob_token, "rollcall_num": 1, "name": "Bob"},
-        )
-        self.assertEqual(r2.status_code, 403)
+        mock_bot.get_chat_member.return_value.status = "member"
+        try:
+            r1 = self.client.post(
+                f"/api/v1/web/group/{self.chat['group_web_token']}/rollcalls/move-user",
+                json={"id_token": bob_token, "rollcall_num": 1, "name": "Bob", "new_status": "out"},
+            )
+            self.assertEqual(r1.status_code, 403)
+            r2 = self.client.post(
+                f"/api/v1/web/group/{self.chat['group_web_token']}/rollcalls/remove-user",
+                json={"id_token": bob_token, "rollcall_num": 1, "name": "Bob"},
+            )
+            self.assertEqual(r2.status_code, 403)
+        finally:
+            mock_bot.get_chat_member.return_value.status = "administrator"
         # Confirm nothing actually changed.
         self.assertIn("Bob", self._roster()["in"])
 

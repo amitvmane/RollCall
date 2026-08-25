@@ -15,24 +15,51 @@ import db as _db
 async def check_web_admin_live(chat_id: int, tg_user_id: int) -> bool:
     """Return whether tg_user_id is currently a web admin of chat_id.
 
-    Only live-checks Telegram when the group has locked itself down with
-    /set_admins (get_admin_rights) — same gate functions.admin_rights()
-    uses for every Telegram-side admin command. In a default-open group
-    (the default), Telegram admin/creator status was never the criterion
-    for granting web-admin in the first place (/weblink hands it to
-    anyone), so treating "not a Telegram admin" as "revoke" here would
-    silently undo that grant for the common case.
+    Two modes, matching the gate functions.admin_rights() uses for every
+    Telegram-side admin command.
 
-    When the group *is* locked down, live-checks against Telegram on every
-    call instead of trusting a snapshot forever — promotes a real Telegram
-    admin automatically and revokes anyone who's lost their admin role
-    since the cache was last set. Falls back to the cached flag if
-    Telegram itself is unreachable, so an outage doesn't lock an admin out
-    of the one surface meant to keep working when Telegram is down.
+    DEFAULT-OPEN GROUP (no /set_admins). A cached grant wins outright and
+    costs nothing — that's how an ordinary member who ran /weblink keeps
+    the access the open default deliberately hands out. Without a cached
+    grant, a real Telegram admin/creator is still recognised on the spot:
+    requiring the group owner to run an unrelated link-sharing command
+    before the web page would show them admin controls was surprising, and
+    a reasonable person reads "I own this group" as sufficient. This grants
+    no authority that wasn't already reachable — anyone passing
+    admin_rights() could self-grant by running /weblink, and in an open
+    group that is everyone. Crucially it never *revokes*: a non-admin's
+    cached grant is left alone, since Telegram admin status was never the
+    criterion for issuing it.
+
+    LOCKED-DOWN GROUP (/set_admins). Live-checks Telegram on every call
+    rather than trusting a snapshot forever — promotes a real admin
+    automatically and revokes anyone who has lost the role since the cache
+    was set. Falls back to the cached flag when Telegram is unreachable, so
+    an outage doesn't lock an admin out of the one surface meant to keep
+    working when Telegram is down.
     """
     from rollcall_manager import manager as _mgr
     if not _mgr.get_admin_rights(chat_id):
-        return _db.is_web_admin(chat_id, tg_user_id)
+        if _db.is_web_admin(chat_id, tg_user_id):
+            return True
+        try:
+            from bot_state import bot
+            member = await bot.get_chat_member(chat_id, tg_user_id)
+        except Exception:
+            # The cache already said "no" and Telegram can't confirm
+            # otherwise. Answer no — never worse than the old behaviour,
+            # which never asked Telegram at all here.
+            logging.warning(
+                "[check_web_admin_live] open-group live check failed chat=%s user=%s"
+                " — falling back to uncached 'not admin'",
+                chat_id, tg_user_id, exc_info=True,
+            )
+            return False
+        if member.status not in ("administrator", "creator"):
+            return False
+        name = getattr(getattr(member, "user", None), "first_name", None) or f"user{tg_user_id}"
+        _db.set_web_admin(chat_id, tg_user_id, name)
+        return True
 
     try:
         from bot_state import bot

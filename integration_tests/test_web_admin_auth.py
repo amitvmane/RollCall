@@ -74,15 +74,55 @@ class TestCheckWebAdminLive(WebAdminAuthBase):
         from api.web_admin import check_web_admin_live
         return asyncio.run(check_web_admin_live(chat_id, user_id))
 
-    def test_default_open_group_trusts_cache_no_live_call(self):
-        # admin_rights is off (default) — must not call Telegram at all.
+    def test_default_open_group_cached_grant_costs_no_live_call(self):
+        # A cached grant is answered from the DB alone — the common path
+        # must not pay for a Telegram round-trip on every page load.
+        self.db.set_web_admin(CHAT_ID, ALICE_ID, "Alice")
         mock_bot.get_chat_member.reset_mock()
-        self.assertFalse(self._call(CHAT_ID, ALICE_ID))
+        self.assertTrue(self._call(CHAT_ID, ALICE_ID))
         mock_bot.get_chat_member.assert_not_called()
 
     def test_default_open_group_true_once_cached(self):
         self.db.set_web_admin(CHAT_ID, ALICE_ID, "Alice")
         self.assertTrue(self._call(CHAT_ID, ALICE_ID))
+
+    def test_default_open_group_promotes_real_telegram_admin_without_weblink(self):
+        # The group owner should not have to run /weblink — an unrelated
+        # link-sharing command — before the web page shows admin controls.
+        self.assertFalse(self.db.is_web_admin(CHAT_ID, ALICE_ID))
+        mock_bot.get_chat_member.return_value.status = "creator"
+        self.assertTrue(self._call(CHAT_ID, ALICE_ID))
+        self.assertTrue(self.db.is_web_admin(CHAT_ID, ALICE_ID))
+
+    def test_default_open_group_plain_member_still_denied(self):
+        mock_bot.get_chat_member.return_value.status = "member"
+        try:
+            self.assertFalse(self._call(CHAT_ID, ALICE_ID))
+            self.assertFalse(self.db.is_web_admin(CHAT_ID, ALICE_ID))
+        finally:
+            mock_bot.get_chat_member.return_value.status = "administrator"
+
+    def test_default_open_group_never_revokes_a_cached_member_grant(self):
+        # /weblink deliberately grants web-admin to anyone in an open group.
+        # Recognising real Telegram admins must not quietly undo that: this
+        # member is not a Telegram admin but holds a legitimate grant.
+        self.db.set_web_admin(CHAT_ID, ALICE_ID, "Alice")
+        mock_bot.get_chat_member.return_value.status = "member"
+        try:
+            self.assertTrue(self._call(CHAT_ID, ALICE_ID))
+            self.assertTrue(self.db.is_web_admin(CHAT_ID, ALICE_ID))
+        finally:
+            mock_bot.get_chat_member.return_value.status = "administrator"
+
+    def test_default_open_group_telegram_failure_denies_uncached_user(self):
+        # No cached grant and Telegram can't confirm — answer "no", which is
+        # exactly what this path returned before it asked Telegram at all.
+        mock_bot.get_chat_member.side_effect = Exception("Telegram unreachable")
+        try:
+            self.assertFalse(self._call(CHAT_ID, ALICE_ID))
+        finally:
+            mock_bot.get_chat_member.side_effect = None
+            mock_bot.get_chat_member.return_value.status = "administrator"
 
     def test_locked_group_live_checks_and_promotes(self):
         self.manager.set_admin_rights(CHAT_ID, True)
@@ -122,15 +162,22 @@ class TestWebAdminStatusEndpoint(WebAdminAuthBase):
         self.assertEqual(r.status_code, 200)
         self.assertTrue(r.json()["is_admin"])
 
-    def test_admin_status_false_when_not_cached(self):
+    def test_admin_status_false_for_plain_member(self):
+        # Not cached AND not a Telegram admin. "Not cached" alone is no
+        # longer the criterion — a real admin is recognised without having
+        # run /weblink — so this has to construct an actual plain member.
         chat = self.db.get_or_create_chat(CHAT_ID)
         token = self._id_token(BOB_ID)
-        r = self.client.get(
-            f"/api/v1/web/group/{chat['group_web_token']}/admin-status",
-            headers={"X-Identity-Token": token},
-        )
-        self.assertEqual(r.status_code, 200)
-        self.assertFalse(r.json()["is_admin"])
+        mock_bot.get_chat_member.return_value.status = "member"
+        try:
+            r = self.client.get(
+                f"/api/v1/web/group/{chat['group_web_token']}/admin-status",
+                headers={"X-Identity-Token": token},
+            )
+            self.assertEqual(r.status_code, 200)
+            self.assertFalse(r.json()["is_admin"])
+        finally:
+            mock_bot.get_chat_member.return_value.status = "administrator"
 
 
 class TestGroupSettingsExtendedFields(WebAdminAuthBase):
@@ -185,12 +232,19 @@ class TestGroupSettingsExtendedFields(WebAdminAuthBase):
         self.assertEqual(r.status_code, 422)
 
     def test_non_admin_cannot_patch_settings(self):
+        # Bob must be a genuine non-admin: uncached *and* not a Telegram
+        # admin. The shared mock reports "administrator" by default, which
+        # would make him legitimately privileged under the open-group rule.
         bob_token = self._id_token(BOB_ID)
-        r = self.client.patch(
-            f"/api/v1/web/group/{self.chat['group_web_token']}/settings",
-            json={"id_token": bob_token, "admin_rights": True},
-        )
-        self.assertEqual(r.status_code, 403)
+        mock_bot.get_chat_member.return_value.status = "member"
+        try:
+            r = self.client.patch(
+                f"/api/v1/web/group/{self.chat['group_web_token']}/settings",
+                json={"id_token": bob_token, "admin_rights": True},
+            )
+            self.assertEqual(r.status_code, 403)
+        finally:
+            mock_bot.get_chat_member.return_value.status = "administrator"
 
     def test_admin_who_lost_telegram_admin_status_is_rejected_on_locked_group(self):
         """The actual gap this fix closes: a stale web_admins cache entry

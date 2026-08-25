@@ -41,42 +41,47 @@ A feature-rich Telegram bot for tracking event attendance in group chats. Member
 
 ## Quick Start
 
+> **Setting this up from scratch?** [**docs/SETUP.md**](docs/SETUP.md) is the
+> full walkthrough — prerequisites, the BotFather steps (including the privacy
+> setting people always miss), SQLite *and* PostgreSQL, how to verify it
+> worked, backups, and troubleshooting. The rest of this section is the short
+> version for people who've done this before.
+
 ### Prerequisites
 
-- Python 3.10 or higher
-- A Telegram Bot Token from [@BotFather](https://t.me/BotFather)
-- The bot must be added as an **admin** in your Telegram group
+- Docker 20.10+ with the Compose **v2** plugin (`docker compose version`), or
+  Python 3.12 to run it directly
+- A Telegram Bot Token from [@BotFather](https://t.me/BotFather), with
+  **privacy mode disabled** (`/setprivacy` → Disable) — otherwise the bot can't
+  see group messages and every command silently does nothing
+- The bot added as an **admin** in your Telegram group
+- `sqlite3` and `make` on the host for the convenience targets
 
-### Local Setup
+### Docker (recommended)
 
 ```bash
-# 1. Clone the repository
 git clone https://github.com/amitvmane/RollCall.git
 cd RollCall
+cp .env.example .env      # set API_KEY (bot token) and ADMIN1 (your user ID)
 
-# 2. Install dependencies
-pip install -r requirements.txt
-
-# 3. Configure environment variables
-cp .env.example .env
-# Edit .env and set your TELEGRAM_TOKEN and other options
-
-# 4. Run the bot
-cd rollCall
-python runner.py
+make migrate-data         # create the data directory outside the git tree
+make up                   # start the bot + backup sidecar
+make logs
 ```
 
-### Docker (Recommended)
+For PostgreSQL instead of SQLite, set
+`DATABASE_URL=postgresql://rollcall:rollcall@postgres:5432/rollcall` in `.env`
+and use `make up-postgres` — it starts a Postgres container, waits for it to be
+healthy, then starts the bot. See
+[docs/SETUP.md](docs/SETUP.md#option-b--docker--postgresql).
+
+### Bare Python
 
 ```bash
-# Build and start with Docker Compose
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# Stop
-docker-compose down
+python3.12 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env      # set API_KEY
+cd rollCall && python runner.py
 ```
 
 ### Using the Makefile (recommended)
@@ -103,22 +108,32 @@ make down       # stop all containers
 
 | Group | Target | What it does |
 |---|---|---|
-| **Lifecycle** | `make up` | Start/recreate the bot container |
+| **Lifecycle** | `make up` | Start/recreate the bot + backup sidecars |
+| | `make up-postgres` | Start PostgreSQL, wait for it, then start the bot |
 | | `make down` | Stop all containers |
 | | `make restart` | Restart the bot (picks up `.env` changes) |
 | | `make build` | Rebuild the bot image and restart |
 | **Observability** | `make logs` | Tail bot logs |
 | | `make logs-cf` ⚠️ | Tails the maintainer's own tunnel container — not present on a fresh clone |
-| | `make status` | Container status + `/health`; the "Cloudflare" line ⚠️ checks the maintainer's own tunnel/proxy |
+| | `make status` | Container status + `/health` + backup freshness; the "Cloudflare" line ⚠️ checks the maintainer's own tunnel/proxy |
 | | `make url` ⚠️ | Prints `WEB_BASE_URL` if you've set it, otherwise the maintainer's own domain |
 | | `make chats` | List known groups with their chat IDs |
 | | `make notify` | DM all voting links to `ADMIN1` (prints them if Telegram is unreachable) |
+| | `make db-counts` | Row counts for the main tables (SQLite or Postgres) |
+| | `make db-shell` | SQL shell on whichever database this deployment uses |
+| **Backups** | `make backup-now` | Take a snapshot immediately |
+| | `make backup-list` | List local snapshots, newest last |
+| | `make backup-check` | Exit 1 if the newest snapshot is missing/stale/truncated — **put this in cron** |
+| | `make backup-remote` | Start the off-site rclone sync sidecar |
+| | `make backup-remote-ls` | List what's actually on the remote |
+| | `make restore FILE=<path>` | Restore a snapshot (stops the bot, keeps a pre-restore copy) |
+| | `make restore-remote` | Fetch the newest off-site snapshot and restore it |
+| | `make migrate-data` | Move the database out of the git tree into `DATA_DIR` |
 | **Tokens** | `make token [LABEL="..."] [DAYS=N]` | Issue a **global** admin API token (all groups) |
 | | `make group-token CHAT=<id> [SCOPES=read,vote] [LABEL="..."] [DAYS=N]` | Issue a token scoped to one group (`make chats` for the ID) |
 
-> `make up`/`down`/`restart`/`build`/`logs`/`chats`/`notify`/`token`/`group-token`
-> are plain, generic wrappers — safe to use regardless of how you're exposing
-> the bot. The daily DB-backup sidecar starts automatically with `make up`.
+> Everything except the ⚠️ targets is a plain, generic wrapper — safe to use
+> regardless of how you're exposing the bot.
 
 ---
 
@@ -135,6 +150,10 @@ variables:
 | `ADMIN1` | No | Telegram user ID of first super-admin |
 | `ADMIN2` | No | Telegram user ID of second super-admin |
 | `DATABASE_URL` | No | PostgreSQL URL — omit to use SQLite |
+| `DATA_DIR` | No | Host directory for the SQLite DB and snapshots (default: `../rollcall-data`, outside the git tree) |
+| `BACKUP_INTERVAL_SECONDS` | No | Seconds between local snapshots (default: `86400`) |
+| `BACKUP_RETENTION_DAYS` | No | Days of local snapshots to keep (default: `7`); off-site copies are kept forever |
+| `RCLONE_REMOTE` | No | rclone remote for off-site backups, e.g. `b2:rollcall-backups` — unset disables off-site sync |
 | `WEBHOOK_URL` | No | Public HTTPS URL to enable webhook mode |
 | `HEALTH_CHECK_PORT` | No | HTTP port for health endpoints (default: `8080`) |
 | `REST_API_ENABLED` | No | `true` to start FastAPI on port 8081 (required for web voting + Mini App) |
@@ -153,10 +172,68 @@ variables:
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | No | Web-Push keypair. Unset disables push; rotating them forces members to re-subscribe |
 | `MEMORY_MODE` | No | `true` for in-memory SQLite — **all data is lost on restart**; overrides `DATABASE_URL` |
 
-**SQLite** (default) stores the database at `/app/data/rollcall.db`.  
-**PostgreSQL** example: `postgresql://user:password@host:5432/dbname`
+**SQLite** (default) stores the database at `/app/data/rollcall.db` inside the
+container, which is `$DATA_DIR/rollcall.db` on the host.  
+**PostgreSQL** example: `postgresql://rollcall:rollcall@postgres:5432/rollcall`
+(use `make up-postgres`, or point at any existing server).
+
+### Where your data lives
+
+`DATA_DIR` sets the host directory holding the SQLite database and its
+snapshots. It defaults to `../rollcall-data` — deliberately **outside the git
+working tree**, so no `git checkout`, `git clean -fdx`, or stash can reach
+production data. Pin it to an absolute path in `.env` on a server:
+
+```bash
+DATA_DIR=/home/you/rollcall-data
+```
+
+`make up` refuses to start if `DATA_DIR` doesn't exist. Docker would otherwise
+create it as an empty root-owned directory and the bot would boot on a blank
+database — indistinguishable from total data loss. Run `make migrate-data` to
+create it, or to move an existing `./data` deployment across.
+
+Postgres deployments keep their data in the `pgdata` Docker volume instead;
+`DATA_DIR` still holds logs and scratch space.
 
 **Webhook mode:** set `WEBHOOK_URL` to switch from long-polling to webhook delivery. Leave unset (default) to use long-polling.
+
+---
+
+## Backups & Recovery
+
+Three layers, all driven from the Makefile. Full walkthrough in
+[docs/SETUP.md](docs/SETUP.md#step-6--set-up-backups).
+
+| Layer | What runs | When | Retention |
+|---|---|---|---|
+| **Local snapshots** | `db-backup` sidecar — `sqlite3 .backup` + gzip into `$DATA_DIR/backups/` | On start, then every `BACKUP_INTERVAL_SECONDS` (default 24h) | `BACKUP_RETENTION_DAYS`, default 7 |
+| **Off-site copies** | `backup-sync` sidecar — `rclone copy` to any remote | On start, then hourly | **Forever** — `copy` never deletes, so local pruning doesn't propagate |
+| **Staleness alarm** | `make backup-check` | Whenever you run it — put it in cron | Exits 1 if newest is missing, >48h old, or truncated |
+
+Both sidecars restart with `make up`. `make status` reports snapshot age and
+whether off-site sync is actually running.
+
+```bash
+make backup-now                       # snapshot on demand
+make backup-check                     # cron this: 0 9 * * * cd /path && make -s backup-check
+make backup-remote                    # enable off-site sync (needs RCLONE_REMOTE in .env)
+make backup-remote-ls                 # proof the off-site copies exist
+
+make restore FILE=<snapshot.db.gz>    # roll back to a local snapshot
+make restore-remote                   # fetch the newest off-site snapshot and restore it
+```
+
+Restores copy the current database aside as `*.pre-restore-<timestamp>`, clear
+stale WAL files, print `integrity_check` and row counts — and deliberately do
+**not** start the bot, so you can check the numbers first.
+
+If the database file is lost but an orphaned `-wal` survives,
+`scripts/wal_recover.py` rebuilds a database directly from its frames.
+
+> **Postgres:** the snapshot sidecar is SQLite-specific and no-ops on Postgres
+> (`make backup-check` says so rather than false-alarming). Schedule `pg_dump`
+> instead.
 
 ---
 

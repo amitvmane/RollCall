@@ -1,4 +1,50 @@
 services:
+  # ---------------------------------------------------------------------------
+  # Optional PostgreSQL, for running or developing against the Postgres code
+  # path instead of SQLite. Profile-gated, so it NEVER starts on a normal
+  # `docker compose up` — an existing SQLite deployment is unaffected by its
+  # presence here.
+  #
+  #   make up-postgres      start Postgres, wait for it, then start the bot
+  #
+  # Point the bot at it by setting this in .env (the hostname is the service
+  # name, resolved on the compose network):
+  #   DATABASE_URL=postgresql://rollcall:rollcall@postgres:5432/rollcall
+  #
+  # Deliberately NOT wired up with depends_on: a depends_on pointing at a
+  # profile-gated service makes plain `docker compose up` fail when that
+  # profile is inactive. `make up-postgres` sequences the two instead.
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: rollcall-postgres
+    restart: unless-stopped
+    profiles:
+      - postgres
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-rollcall}
+      - POSTGRES_USER=${POSTGRES_USER:-rollcall}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-rollcall}
+      - TZ=${TZ:-Asia/Kolkata}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Bound to loopback only, so a local psql/GUI client works but the database
+    # is never reachable from outside the machine. Change the port (not the IP)
+    # with POSTGRES_HOST_PORT if 5432 is already taken on your host.
+    ports:
+      - "${POSTGRES_HOST_IP:-127.0.0.1}:${POSTGRES_HOST_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rollcall} -d ${POSTGRES_DB:-rollcall}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
   rollcall-bot:
     build:
       context: .
@@ -184,3 +230,8 @@ services:
   # now owns the tunnel (container blobsystems-cloudflared) and Nginx proxies
   # rbot.blobsystems.xyz to this container's REST API (port 8081) over a
   # shared Docker network. See ../blobsystems/docker-compose.yml.
+
+volumes:
+  # Only created when the `postgres` profile is used. SQLite deployments keep
+  # their data in the DATA_DIR bind mount instead and never touch this.
+  pgdata:

@@ -35,6 +35,11 @@ DATA_DIR := $(or $(call _env,DATA_DIR),../rollcall-data)
 RCLONE_CONFIG_PATH := $(or $(call _env,RCLONE_CONFIG_PATH),$(HOME)/.config/rclone)
 DB       := $(DATA_DIR)/rollcall.db
 
+# Postgres deployments have no SQLite file, so the snapshot sidecar no-ops and
+# the local-backup targets have nothing to check. Detect it once here so those
+# targets can say "not applicable" instead of raising a false alarm.
+IS_POSTGRES := $(shell grep -q '^DATABASE_URL=postgres' .env 2>/dev/null && echo yes)
+
 .DEFAULT_GOAL := help
 
 BACKUP_DIR  := $(DATA_DIR)/backups
@@ -45,7 +50,8 @@ BACKUP_MAX_AGE_HOURS ?= 48
 
 .PHONY: help up down restart build rebuild logs logs-cf status url notify token group-token chats \
         backup-now backup-check backup-list backup-remote backup-remote-logs backup-remote-ls \
-        migrate-data check-data-dir restore backup-remote-get backup-remote-latest restore-remote
+        migrate-data check-data-dir restore backup-remote-get backup-remote-latest restore-remote \
+        up-postgres db-shell db-counts
 
 help: ## Show this help
 	@printf "\n\033[1mRollCall — deployment manager\033[0m\n"
@@ -55,6 +61,7 @@ help: ## Show this help
 	@printf "  \033[36m%-16s\033[0m %s\n" "make restart" "Restart bot (picks up .env changes)"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make build"   "Rebuild bot image and restart"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make rebuild" "Clean start: down, rebuild image, up (use after git pull)"
+	@printf "  \033[36m%-16s\033[0m %s\n" "make up-postgres" "Start PostgreSQL, wait for it, then start the bot"
 	@printf "\n\033[4mOBSERVABILITY\033[0m\n"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make logs"    "Tail bot logs (Ctrl+C to stop)"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make logs-cf" "Tail Cloudflare tunnel logs (blobsystems-cloudflared container)"
@@ -62,6 +69,8 @@ help: ## Show this help
 	@printf "  \033[36m%-16s\033[0m %s\n" "make url"     "Public URL and all group voting links"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make notify"  "Send all voting links to Telegram admin"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make chats"   "List all known groups with their chat IDs"
+	@printf "  \033[36m%-16s\033[0m %s\n" "make db-counts" "Row counts for the main tables (works on SQLite or Postgres)"
+	@printf "  \033[36m%-16s\033[0m %s\n" "make db-shell" "Open a SQL shell on whichever DB this deployment uses"
 	@printf "\n\033[4mBACKUPS\033[0m\n"
 	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-now"    "Take a snapshot right now"
 	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-list"   "List local snapshots, newest last"
@@ -139,6 +148,24 @@ migrate-data: ## Move the database out of the git tree into DATA_DIR (idempotent
 	@echo "Pin it explicitly in .env so it never depends on the working directory:"
 	@echo "    DATA_DIR=$$(cd "$(DATA_DIR)" && pwd)"
 
+up-postgres: ## Start PostgreSQL, wait for it, then start the bot
+	@if ! grep -q '^DATABASE_URL=postgres' .env 2>/dev/null; then \
+	  echo "⚠️   .env has no postgres DATABASE_URL — the bot will still use SQLite."; \
+	  echo "    Add this line to .env first:"; \
+	  echo "    DATABASE_URL=postgresql://rollcall:rollcall@postgres:5432/rollcall"; \
+	  echo ""; \
+	fi
+	@$(COMPOSE) --profile postgres up -d postgres
+	@printf "Waiting for Postgres to accept connections"
+	@for i in $$(seq 1 30); do \
+	  if [ "$$(docker inspect -f '{{.State.Health.Status}}' rollcall-postgres 2>/dev/null)" = "healthy" ]; then \
+	    echo " ✅"; break; \
+	  fi; \
+	  printf "."; sleep 2; \
+	  if [ "$$i" = "30" ]; then echo " ❌ timed out"; docker logs --tail 20 rollcall-postgres; exit 1; fi; \
+	done
+	@$(MAKE) -s up
+
 up: check-data-dir ## Start/recreate bot + backup sidecars (tunnel is managed by the blobsystems repo)
 	@echo "Starting bot and backup sidecar..."
 	@$(COMPOSE) up -d --force-recreate $(SERVICES)
@@ -215,6 +242,24 @@ status: ## Show container status + external service reachability
 	fi
 	@echo ""
 
+db-shell: ## Open a SQL shell on whichever database this deployment uses
+	@if [ -n "$(IS_POSTGRES)" ]; then \
+	  $(COMPOSE) --profile postgres exec postgres \
+	    psql -U "$(or $(call _env,POSTGRES_USER),rollcall)" -d "$(or $(call _env,POSTGRES_DB),rollcall)"; \
+	else \
+	  echo "SQLite: $(DB)"; sqlite3 "$(DB)"; \
+	fi
+
+db-counts: ## Row counts for the main tables — quick "is my setup working" check
+	@if [ -n "$(IS_POSTGRES)" ]; then \
+	  $(COMPOSE) --profile postgres exec -T postgres \
+	    psql -U "$(or $(call _env,POSTGRES_USER),rollcall)" -d "$(or $(call _env,POSTGRES_DB),rollcall)" -c \
+	    "select 'users' t, count(*) from users union all select 'rollcalls', count(*) from rollcalls union all select 'chats', count(*) from chats union all select 'dues_entries', count(*) from dues_entries union all select 'fund_transactions', count(*) from fund_transactions;"; \
+	else \
+	  sqlite3 "$(DB)" \
+	    'select "users", count(*) from users union all select "rollcalls", count(*) from rollcalls union all select "chats", count(*) from chats union all select "dues_entries", count(*) from dues_entries union all select "fund_transactions", count(*) from fund_transactions;'; \
+	fi
+
 backup-now: ## Take a snapshot immediately (does not wait for the 24h cycle)
 	@$(COMPOSE) exec $(BACKUP) /app/scripts/backup_db.sh
 
@@ -226,7 +271,14 @@ backup-list: ## List local snapshots, newest last
 # db-backup sidecar sat stopped from 2026-08-03 to 2026-08-24 without emitting
 # a single signal, and was three weeks stale at the moment it was needed.
 backup-check: ## Verify a recent snapshot exists (exit 1 if stale) — run from cron
-	@newest=$$(ls -t $(BACKUP_DIR)/rollcall-*.db.gz 2>/dev/null | head -1); \
+	# One shell for the whole check: `exit` in a make recipe only ends that
+	# line's shell, so an early return has to live in the same invocation as
+	# everything it is short-circuiting.
+	@if [ -n "$(IS_POSTGRES)" ]; then \
+	  echo "ℹ️   Postgres deployment — SQLite snapshots not applicable (use pg_dump)"; \
+	  exit 0; \
+	fi; \
+	newest=$$(ls -t $(BACKUP_DIR)/rollcall-*.db.gz 2>/dev/null | head -1); \
 	if [ -z "$$newest" ]; then \
 	  echo "❌  BACKUP MISSING — no snapshots at all in $(BACKUP_DIR)"; \
 	  $(COMPOSE) ps $(BACKUP); \

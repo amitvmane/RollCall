@@ -135,9 +135,17 @@ migrate-data: ## Move the database out of the git tree into DATA_DIR (idempotent
 	@echo "Pin it explicitly in .env so it never depends on the working directory:"
 	@echo "    DATA_DIR=$$(cd "$(DATA_DIR)" && pwd)"
 
-up: check-data-dir ## Start/recreate bot + backup sidecar (tunnel is managed by the blobsystems repo)
+up: check-data-dir ## Start/recreate bot + backup sidecars (tunnel is managed by the blobsystems repo)
 	@echo "Starting bot and backup sidecar..."
 	@$(COMPOSE) up -d --force-recreate $(SERVICES)
+	# backup-sync sits behind the backup-remote profile, so a plain `up` skips
+	# it while `down` still stops it — the same silent-death trap that left
+	# db-backup stopped for three weeks. If the remote is configured, the
+	# sidecar is not optional; bring it back every time.
+	@if [ -n "$(call _env,RCLONE_REMOTE)" ]; then \
+	  echo "Starting off-site sync → $(call _env,RCLONE_REMOTE)"; \
+	  $(COMPOSE) --profile backup-remote up -d --no-deps backup-sync; \
+	fi
 	@echo ""
 	@$(MAKE) -s url
 
@@ -193,6 +201,14 @@ status: ## Show container status + external service reachability
 	@echo ""
 	@echo "=== Backups ==="
 	@printf "  "; $(MAKE) -s backup-check || true
+	@printf "  off-site:  "; \
+	if [ -z "$(call _env,RCLONE_REMOTE)" ]; then \
+	  echo "⚠️   not configured — everything lives on this one disk (make backup-remote)"; \
+	elif [ -n "$$(docker ps -q -f name=rollcall-backup-sync -f status=running)" ]; then \
+	  echo "✅  syncing to $(call _env,RCLONE_REMOTE)  (verify: make backup-remote-ls)"; \
+	else \
+	  echo "❌  RCLONE_REMOTE is set but rollcall-backup-sync is NOT running — run: make up"; \
+	fi
 	@echo ""
 
 backup-now: ## Take a snapshot immediately (does not wait for the 24h cycle)

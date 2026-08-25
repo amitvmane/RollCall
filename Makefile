@@ -31,6 +31,8 @@ WEB_URL := $(or $(call _env,WEB_BASE_URL),https://rbot.blobsystems.xyz)
 # see the volumes comment in docker-compose.yml for the incident that motivated
 # it. Everything inside the container is still /app/data.
 DATA_DIR := $(or $(call _env,DATA_DIR),../rollcall-data)
+# Host dir holding rclone.conf, mounted read-only into the sync sidecar.
+RCLONE_CONFIG_PATH := $(or $(call _env,RCLONE_CONFIG_PATH),$(HOME)/.config/rclone)
 DB       := $(DATA_DIR)/rollcall.db
 
 .DEFAULT_GOAL := help
@@ -42,7 +44,7 @@ BACKUP_DIR  := $(DATA_DIR)/backups
 BACKUP_MAX_AGE_HOURS ?= 48
 
 .PHONY: help up down restart build rebuild logs logs-cf status url notify token group-token chats \
-        backup-now backup-check backup-list backup-remote backup-remote-logs \
+        backup-now backup-check backup-list backup-remote backup-remote-logs backup-remote-ls \
         migrate-data check-data-dir
 
 help: ## Show this help
@@ -66,6 +68,7 @@ help: ## Show this help
 	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-check"  "Alarm if newest snapshot is stale (exit 1) — put this in cron"
 	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-remote" "Start off-site rclone sync (needs RCLONE_REMOTE in .env)"
 	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-remote-logs" "Tail the off-site sync sidecar"
+	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-remote-ls" "List what's actually on the remote (proof it works)"
 	@printf "  \033[36m%-20s\033[0m %s\n" "make migrate-data"  "Move the DB out of the git tree into DATA_DIR"
 	@printf "    Options:\n"
 	@printf "      BACKUP_MAX_AGE_HOURS=N   staleness limit for backup-check  (default: 48)\n"
@@ -227,17 +230,36 @@ backup-check: ## Verify a recent snapshot exists (exit 1 if stale) — run from 
 backup-remote: ## Start the off-site rclone sync sidecar (needs RCLONE_REMOTE in .env)
 	@if [ -z "$(call _env,RCLONE_REMOTE)" ]; then \
 	  echo "❌  RCLONE_REMOTE is not set in .env"; \
-	  echo "    1. rclone config                       (create a remote on the host)"; \
-	  echo "    2. echo 'RCLONE_REMOTE=gdrive:rollcall-backups' >> .env"; \
-	  echo "    3. make backup-remote"; \
+	  echo "    1. mkdir -p $(RCLONE_CONFIG_PATH)"; \
+	  echo "    2. docker run --rm -it -v $(RCLONE_CONFIG_PATH):/config/rclone \\"; \
+	  echo "         rclone/rclone config --config /config/rclone/rclone.conf"; \
+	  echo "       (the remote's NAME is what goes before the colon below —"; \
+	  echo "        name it 'b2', not 'storage b2')"; \
+	  echo "    3. echo 'RCLONE_REMOTE=b2:rollcall-backups' >> .env"; \
+	  echo "    4. make backup-remote"; \
 	  exit 1; \
 	fi
 	@echo "Starting off-site sync → $(call _env,RCLONE_REMOTE)"
-	@$(COMPOSE) --profile backup-remote up -d backup-sync
+	# --no-deps: backup-sync depends_on db-backup, which in turn depends_on the
+	# bot, so without this compose recreates the running bot — a pointless
+	# production restart just to start a backup sidecar. `make up` is what owns
+	# starting those two.
+	@$(COMPOSE) --profile backup-remote up -d --no-deps backup-sync
 	@echo "Verify with: make backup-remote-logs"
 
 backup-remote-logs: ## Tail the off-site sync sidecar
 	@docker logs -f rollcall-backup-sync
+
+# An off-site backup you haven't listed is an off-site backup you don't have.
+# Uses the sidecar's own image so there's nothing to install on the host.
+backup-remote-ls: ## List what's actually on the remote (the real proof it works)
+	@if [ -z "$(call _env,RCLONE_REMOTE)" ]; then \
+	  echo "❌  RCLONE_REMOTE is not set in .env — run: make backup-remote"; exit 1; \
+	fi
+	@echo "Listing $(call _env,RCLONE_REMOTE) ..."
+	@docker run --rm -v "$(RCLONE_CONFIG_PATH):/config/rclone:ro" rclone/rclone \
+	  ls "$(call _env,RCLONE_REMOTE)" --config /config/rclone/rclone.conf \
+	  || { echo "❌  could not list the remote — check 'make backup-remote-logs'"; exit 1; }
 
 url: ## Show public URL and all group voting links
 	@URL="$(WEB_URL)"; \

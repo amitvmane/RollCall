@@ -235,8 +235,11 @@ backup-remote: ## Start the off-site rclone sync sidecar (needs RCLONE_REMOTE in
 	  echo "         rclone/rclone config --config /config/rclone/rclone.conf"; \
 	  echo "       (the remote's NAME is what goes before the colon below —"; \
 	  echo "        name it 'b2', not 'storage b2')"; \
-	  echo "    3. echo 'RCLONE_REMOTE=b2:rollcall-backups' >> .env"; \
-	  echo "    4. make backup-remote"; \
+	  echo "       (for B2, 'account' is the keyID — the ~25-char string, NOT"; \
+	  echo "        the friendly name you gave the key. Wrong value => 401)"; \
+	  echo "    3. sudo chown -R \$$(id -un): $(RCLONE_CONFIG_PATH)   # docker wrote it as root"; \
+	  echo "    4. echo 'RCLONE_REMOTE=b2:rollcall-backups' >> .env"; \
+	  echo "    5. make backup-remote"; \
 	  exit 1; \
 	fi
 	@echo "Starting off-site sync → $(call _env,RCLONE_REMOTE)"

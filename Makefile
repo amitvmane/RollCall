@@ -45,7 +45,7 @@ BACKUP_MAX_AGE_HOURS ?= 48
 
 .PHONY: help up down restart build rebuild logs logs-cf status url notify token group-token chats \
         backup-now backup-check backup-list backup-remote backup-remote-logs backup-remote-ls \
-        migrate-data check-data-dir
+        migrate-data check-data-dir restore backup-remote-get
 
 help: ## Show this help
 	@printf "\n\033[1mRollCall — deployment manager\033[0m\n"
@@ -69,6 +69,8 @@ help: ## Show this help
 	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-remote" "Start off-site rclone sync (needs RCLONE_REMOTE in .env)"
 	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-remote-logs" "Tail the off-site sync sidecar"
 	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-remote-ls" "List what's actually on the remote (proof it works)"
+	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-remote-get" "Download one snapshot from the remote  FILE=<name>"
+	@printf "  \033[36m%-20s\033[0m %s\n" "make restore"       "Restore a snapshot  FILE=<path>  (stops the bot first)"
 	@printf "  \033[36m%-20s\033[0m %s\n" "make migrate-data"  "Move the DB out of the git tree into DATA_DIR"
 	@printf "    Options:\n"
 	@printf "      BACKUP_MAX_AGE_HOURS=N   staleness limit for backup-check  (default: 48)\n"
@@ -268,6 +270,36 @@ backup-remote: ## Start the off-site rclone sync sidecar (needs RCLONE_REMOTE in
 
 backup-remote-logs: ## Tail the off-site sync sidecar
 	@docker logs -f rollcall-backup-sync
+
+restore: ## Restore a snapshot: make restore FILE=<path-to-.db.gz>
+	@if [ -z "$(FILE)" ]; then \
+	  echo "❌  usage: make restore FILE=<snapshot>"; \
+	  echo ""; \
+	  echo "Available local snapshots:"; \
+	  $(MAKE) -s backup-list; \
+	  echo ""; \
+	  echo "To restore one from off-site first: make backup-remote-get FILE=<name>"; \
+	  exit 1; \
+	fi
+	@if [ ! -f "$(FILE)" ]; then echo "❌  no such file: $(FILE)"; exit 1; fi
+	@echo "Restoring $(FILE) → $(DB)"
+	@echo "(the current database is copied to *.pre-restore-* first)"
+	@$(COMPOSE) stop $(SERVICES)
+	@DATA_DIR="$(DATA_DIR)" ./scripts/restore_db.sh "$(FILE)"
+	@echo ""
+	@printf "integrity_check: "; sqlite3 "$(DB)" 'PRAGMA integrity_check;'
+	@sqlite3 "$(DB)" 'select "  users="||count(*) from users;' 2>/dev/null || true
+	@echo ""
+	@echo "If that says 'ok' and the counts look right:  make up"
+
+backup-remote-get: ## Download one snapshot from the remote: make backup-remote-get FILE=<name>
+	@if [ -z "$(FILE)" ]; then \
+	  echo "❌  usage: make backup-remote-get FILE=<name-from-backup-remote-ls>"; exit 1; \
+	fi
+	@docker run --rm -v "$(RCLONE_CONFIG_PATH):/config/rclone:ro" -v "$(PWD):/out" \
+	  rclone/rclone copy "$(call _env,RCLONE_REMOTE)/$(FILE)" /out \
+	  --config /config/rclone/rclone.conf
+	@echo "✅  downloaded ./$(FILE) — restore with: make restore FILE=./$(FILE)"
 
 # An off-site backup you haven't listed is an off-site backup you don't have.
 # Uses the sidecar's own image so there's nothing to install on the host.

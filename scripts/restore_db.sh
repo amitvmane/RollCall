@@ -48,8 +48,26 @@ if [ -f "$DB_PATH" ]; then
     cp "$DB_PATH" "$safety"
 fi
 
+# Clear any leftover write-ahead log FIRST. A -wal/-shm pair belongs to the
+# database file it was created beside; if the bot crashed rather than shut
+# down cleanly, those files survive, and SQLite will happily checkpoint them
+# onto whatever now sits at $DB_PATH. Restoring a snapshot next to a stale WAL
+# therefore corrupts the very backup you are restoring — this is not
+# theoretical, it destroyed a recovery candidate during the 2026-08-24
+# incident. The snapshot is already a fully checkpointed image and needs no
+# WAL of its own.
+for stale in "${DB_PATH}-wal" "${DB_PATH}-shm"; do
+    if [ -e "$stale" ]; then
+        echo "[restore] removing stale $stale (belongs to the old database)"
+        rm -f "$stale"
+    fi
+done
+
 echo "[restore] restoring $SRC -> $DB_PATH"
-gunzip -c "$SRC" > "$DB_PATH"
+case "$SRC" in
+    *.gz) gunzip -c "$SRC" > "$DB_PATH" ;;
+    *)    cp "$SRC" "$DB_PATH" ;;   # plain .db snapshots restore too
+esac
 
 # The fix: match the data directory's own chmod 777 (dockerfile) so the
 # container's root-without-capabilities process can write to this file
@@ -57,4 +75,4 @@ gunzip -c "$SRC" > "$DB_PATH"
 chmod 666 "$DB_PATH"
 
 echo "[restore] done. Verify with: sqlite3 \"$DB_PATH\" 'PRAGMA integrity_check;'"
-echo "[restore] then: docker-compose start rollcall-bot"
+echo "[restore] then: make up"

@@ -45,7 +45,7 @@ BACKUP_MAX_AGE_HOURS ?= 48
 
 .PHONY: help up down restart build rebuild logs logs-cf status url notify token group-token chats \
         backup-now backup-check backup-list backup-remote backup-remote-logs backup-remote-ls \
-        migrate-data check-data-dir restore backup-remote-get
+        migrate-data check-data-dir restore backup-remote-get backup-remote-latest restore-remote
 
 help: ## Show this help
 	@printf "\n\033[1mRollCall — deployment manager\033[0m\n"
@@ -70,7 +70,9 @@ help: ## Show this help
 	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-remote-logs" "Tail the off-site sync sidecar"
 	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-remote-ls" "List what's actually on the remote (proof it works)"
 	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-remote-get" "Download one snapshot from the remote  FILE=<name>"
+	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-remote-latest" "Print the newest snapshot name on the remote"
 	@printf "  \033[36m%-20s\033[0m %s\n" "make restore"       "Restore a snapshot  FILE=<path>  (stops the bot first)"
+	@printf "  \033[36m%-20s\033[0m %s\n" "make restore-remote" "Fetch the NEWEST off-site snapshot and restore it"
 	@printf "  \033[36m%-20s\033[0m %s\n" "make migrate-data"  "Move the DB out of the git tree into DATA_DIR"
 	@printf "    Options:\n"
 	@printf "      BACKUP_MAX_AGE_HOURS=N   staleness limit for backup-check  (default: 48)\n"
@@ -271,6 +273,38 @@ backup-remote: ## Start the off-site rclone sync sidecar (needs RCLONE_REMOTE in
 backup-remote-logs: ## Tail the off-site sync sidecar
 	@docker logs -f rollcall-backup-sync
 
+# Snapshot names are rollcall-YYYYmmdd-HHMMSS.db.gz in UTC, so a plain
+# lexicographic sort is a chronological sort. That's deliberately preferred
+# over the remote's modification times, which reflect when rclone uploaded a
+# file rather than when the snapshot was actually taken.
+_remote_latest = docker run --rm -v "$(RCLONE_CONFIG_PATH):/config/rclone:ro" rclone/rclone \
+	  lsf --files-only --include 'rollcall-*.db.gz' "$(call _env,RCLONE_REMOTE)" \
+	  --config /config/rclone/rclone.conf 2>/dev/null | sort | tail -1
+
+backup-remote-latest: ## Print the newest snapshot name on the remote
+	@if [ -z "$(call _env,RCLONE_REMOTE)" ]; then \
+	  echo "❌  RCLONE_REMOTE is not set in .env"; exit 1; fi
+	@newest=$$($(_remote_latest)); \
+	if [ -z "$$newest" ]; then \
+	  echo "❌  no rollcall-*.db.gz found on $(call _env,RCLONE_REMOTE)"; exit 1; \
+	fi; \
+	echo "$$newest"
+
+restore-remote: ## Download the NEWEST off-site snapshot and restore it (YES=1 to skip prompt)
+	@if [ -z "$(call _env,RCLONE_REMOTE)" ]; then \
+	  echo "❌  RCLONE_REMOTE is not set in .env"; exit 1; fi
+	@newest=$$($(_remote_latest)); \
+	if [ -z "$$newest" ]; then \
+	  echo "❌  no rollcall-*.db.gz found on $(call _env,RCLONE_REMOTE)"; exit 1; \
+	fi; \
+	echo "Newest off-site snapshot: $$newest"; \
+	if [ -z "$(YES)" ]; then \
+	  printf "Restore it over %s? [y/N] " "$(DB)"; \
+	  read ans; case "$$ans" in y|Y|yes|YES) ;; *) echo "aborted"; exit 1 ;; esac; \
+	fi; \
+	$(MAKE) -s backup-remote-get FILE="$$newest" DEST="$(BACKUP_DIR)" && \
+	$(MAKE) -s restore FILE="$(BACKUP_DIR)/$$newest" YES=1
+
 restore: ## Restore a snapshot: make restore FILE=<path-to-.db.gz>
 	@if [ -z "$(FILE)" ]; then \
 	  echo "❌  usage: make restore FILE=<snapshot>"; \
@@ -292,14 +326,17 @@ restore: ## Restore a snapshot: make restore FILE=<path-to-.db.gz>
 	@echo ""
 	@echo "If that says 'ok' and the counts look right:  make up"
 
-backup-remote-get: ## Download one snapshot from the remote: make backup-remote-get FILE=<name>
+backup-remote-get: ## Download one snapshot from the remote: make backup-remote-get FILE=<name> [DEST=<dir>]
 	@if [ -z "$(FILE)" ]; then \
-	  echo "❌  usage: make backup-remote-get FILE=<name-from-backup-remote-ls>"; exit 1; \
+	  echo "❌  usage: make backup-remote-get FILE=<name-from-backup-remote-ls> [DEST=<dir>]"; exit 1; \
 	fi
-	@docker run --rm -v "$(RCLONE_CONFIG_PATH):/config/rclone:ro" -v "$(PWD):/out" \
+	@dest="$(or $(DEST),.)"; mkdir -p "$$dest"; \
+	docker run --rm -v "$(RCLONE_CONFIG_PATH):/config/rclone:ro" \
+	  -v "$$(cd "$$dest" && pwd):/out" \
 	  rclone/rclone copy "$(call _env,RCLONE_REMOTE)/$(FILE)" /out \
-	  --config /config/rclone/rclone.conf
-	@echo "✅  downloaded ./$(FILE) — restore with: make restore FILE=./$(FILE)"
+	  --config /config/rclone/rclone.conf; \
+	echo "✅  downloaded $$dest/$(FILE)"; \
+	[ -n "$(DEST)" ] || echo "   restore with: make restore FILE=./$(FILE)"
 
 # An off-site backup you haven't listed is an off-site backup you don't have.
 # Uses the sidecar's own image so there's nothing to install on the host.

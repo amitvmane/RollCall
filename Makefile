@@ -51,7 +51,7 @@ BACKUP_MAX_AGE_HOURS ?= 48
 .PHONY: help up down restart build rebuild logs logs-cf status url notify token group-token chats \
         backup-now backup-check backup-list backup-remote backup-remote-logs backup-remote-ls \
         migrate-data check-data-dir restore backup-remote-get backup-remote-latest restore-remote \
-        up-postgres db-shell db-counts
+        up-postgres db-shell db-counts backup-remote-prune backup-remote-size
 
 help: ## Show this help
 	@printf "\n\033[1mRollCall — deployment manager\033[0m\n"
@@ -80,11 +80,15 @@ help: ## Show this help
 	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-remote-ls" "List what's actually on the remote (proof it works)"
 	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-remote-get" "Download one snapshot from the remote  FILE=<name>"
 	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-remote-latest" "Print the newest snapshot name on the remote"
+	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-remote-size" "How much space the off-site backups use"
+	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-remote-prune" "Delete remote snapshots older than REMOTE_RETENTION_DAYS"
 	@printf "  \033[36m%-20s\033[0m %s\n" "make restore"       "Restore a snapshot  FILE=<path>  (stops the bot first)"
 	@printf "  \033[36m%-20s\033[0m %s\n" "make restore-remote" "Fetch the NEWEST off-site snapshot and restore it"
 	@printf "  \033[36m%-20s\033[0m %s\n" "make migrate-data"  "Move the DB out of the git tree into DATA_DIR"
 	@printf "    Options:\n"
 	@printf "      BACKUP_MAX_AGE_HOURS=N   staleness limit for backup-check  (default: 48)\n"
+	@printf "      REMOTE_RETENTION_DAYS=N  age cutoff for backup-remote-prune  (default: 90)\n"
+	@printf "      YES=1                    skip the confirm/dry-run on prune and restore-remote\n"
 	@printf "    Current DATA_DIR: $(DATA_DIR)\n"
 	@printf "\n\033[4mTOKENS\033[0m\n"
 	@printf "  \033[36mmake token\033[0m\n"
@@ -298,6 +302,46 @@ backup-check: ## Verify a recent snapshot exists (exit 1 if stale) — run from 
 	  exit 1; \
 	fi; \
 	echo "✅  backup ok — $${age_h}h old, $$size bytes: $$newest"
+
+# Remote retention is OFF by default and stays that way: the sidecar uses
+# `rclone copy`, never `sync`, precisely so local 7-day pruning can't reach the
+# off-site history. This target is the deliberate, manual exception.
+#
+# Safe to delete old snapshots because each one is a FULL database image, not
+# an increment — the newest snapshot already contains the entire append-only
+# dues/fund ledger. Retention limits how far back you can rewind, not what data
+# you hold. Dry-run unless YES=1.
+REMOTE_RETENTION_DAYS ?= 90
+
+backup-remote-prune: ## Delete remote snapshots older than REMOTE_RETENTION_DAYS (dry-run unless YES=1)
+	@if [ -z "$(call _env,RCLONE_REMOTE)" ]; then \
+	  echo "❌  RCLONE_REMOTE is not set in .env"; exit 1; fi
+	@remaining=$$(docker run --rm -v "$(RCLONE_CONFIG_PATH):/config/rclone:ro" rclone/rclone \
+	   lsf --files-only --include 'rollcall-*.db.gz' --max-age $(REMOTE_RETENTION_DAYS)d \
+	   "$(call _env,RCLONE_REMOTE)" --config /config/rclone/rclone.conf 2>/dev/null | wc -l | tr -d ' '); \
+	if [ "$$remaining" = "0" ]; then \
+	  echo "❌  refusing to prune — nothing on the remote is NEWER than $(REMOTE_RETENTION_DAYS)d."; \
+	  echo "    That would delete every off-site copy you have."; \
+	  exit 1; \
+	fi; \
+	echo "$$remaining snapshot(s) newer than $(REMOTE_RETENTION_DAYS)d will be kept."
+	@if [ -z "$(YES)" ]; then \
+	  echo "DRY RUN — would delete (re-run with YES=1 to apply):"; \
+	  docker run --rm -v "$(RCLONE_CONFIG_PATH):/config/rclone:ro" rclone/rclone \
+	    delete --dry-run --min-age $(REMOTE_RETENTION_DAYS)d --include 'rollcall-*.db.gz' \
+	    "$(call _env,RCLONE_REMOTE)" --config /config/rclone/rclone.conf; \
+	else \
+	  docker run --rm -v "$(RCLONE_CONFIG_PATH):/config/rclone:ro" rclone/rclone \
+	    delete --min-age $(REMOTE_RETENTION_DAYS)d --include 'rollcall-*.db.gz' \
+	    "$(call _env,RCLONE_REMOTE)" --config /config/rclone/rclone.conf; \
+	  echo "✅  pruned. Remaining:"; $(MAKE) -s backup-remote-ls; \
+	fi
+
+backup-remote-size: ## How much space the off-site backups use
+	@if [ -z "$(call _env,RCLONE_REMOTE)" ]; then \
+	  echo "❌  RCLONE_REMOTE is not set in .env"; exit 1; fi
+	@docker run --rm -v "$(RCLONE_CONFIG_PATH):/config/rclone:ro" rclone/rclone \
+	  size "$(call _env,RCLONE_REMOTE)" --config /config/rclone/rclone.conf
 
 backup-remote: ## Start the off-site rclone sync sidecar (needs RCLONE_REMOTE in .env)
 	@if [ -z "$(call _env,RCLONE_REMOTE)" ]; then \

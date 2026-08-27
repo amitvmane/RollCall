@@ -218,6 +218,17 @@
       <button class="btn" style="margin-top:8px" onclick="retryAdminCheck()">Retry</button>
     </div>
 
+    <!-- Signed out is NOT the same as "not an admin", but both used to render
+         as the plain member view with nothing said. A group owner then sees no
+         admin controls, no explanation, and no request is ever sent — so the
+         server logs are empty too and there is nothing to debug. Say it. -->
+    <div id="admin-signedout-note" class="card hidden"
+         style="border:1.5px dashed var(--border);font-size:.85rem">
+      🔑 You're not signed in on this device, so admin controls are hidden.
+      Sign in to manage this group.
+      <button class="btn" style="margin-top:8px" onclick="startTgVerify()">Sign in with Telegram</button>
+    </div>
+
     <div id="admin-card" class="card hidden" style="border:1.5px dashed var(--border)">
       <div style="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:10px">Admin actions</div>
       <!-- Other-groups switcher — only rendered when this admin manages

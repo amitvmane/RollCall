@@ -1421,7 +1421,7 @@ async function _checkWebAdmin(){
   if(!_idToken&&_weblogInRedeemPromise){
     try{await _weblogInRedeemPromise;}catch(_){}
   }
-  if(!_idToken){_setAdminCheckFailed(false);return;}  // genuinely signed out — not an error
+  if(!_idToken){_setAdminCheckFailed("signed-out");return;}
 
   // 2. Telegram round-trips can be slow; retry rather than hide the UI on one
   //    unlucky request. Delays are short because this gates visible controls.
@@ -1443,7 +1443,7 @@ async function _checkWebAdmin(){
     }catch(e){lastErr=e;}
   }
   console.warn("admin-status check failed after retries:",lastErr&&lastErr.message);
-  _setAdminCheckFailed(true);
+  _setAdminCheckFailed("error");
 }
 
 function _applyAdminStatus(isAdmin){
@@ -1452,19 +1452,31 @@ function _applyAdminStatus(isAdmin){
   if(card)card.classList.toggle("hidden",!_isWebAdmin);
   const warn=document.getElementById("admin-check-warning");
   if(warn)warn.classList.add("hidden");
+  // The server gave a real answer, so neither "couldn't check" nor "signed
+  // out" applies any more — clear both, including after a mid-page sign-in.
+  const note=document.getElementById("admin-signedout-note");
+  if(note)note.classList.add("hidden");
   if(_isWebAdmin){_syncShhToggle();_syncGroupSettingsCard();_syncTimezoneDisplay();_renderWeekdayHint();_loadWeblogInMembers();_loadAdminGroupSwitcher();renderLists();}
   loadDuesSection().catch(()=>{});
 }
 
-// Couldn't determine admin status. Distinct from "not an admin": say so, and
-// offer a retry, rather than silently rendering the member-only view — the
-// silent version is what made this look intermittent and unexplainable.
-function _setAdminCheckFailed(showWarning){
+// Admin controls are hidden — but WHY matters, and the three reasons are not
+// interchangeable:
+//   "signed-out" no identity token on this device. No request is ever sent, so
+//               nothing appears in the server logs either; the UI is the only
+//               place this can possibly be surfaced. A group owner hitting
+//               this saw an ordinary member view and had no way to tell.
+//   "error"     the check ran and genuinely failed (5xx / network). Offer a retry.
+//   "not-admin" the server answered, and the answer is no. Say nothing — this
+//               is the normal case for most members.
+function _setAdminCheckFailed(reason){
   _isWebAdmin=false;
   const card=document.getElementById("admin-card");
   if(card)card.classList.add("hidden");
   const warn=document.getElementById("admin-check-warning");
-  if(warn)warn.classList.toggle("hidden",!showWarning);
+  if(warn)warn.classList.toggle("hidden",reason!=="error");
+  const note=document.getElementById("admin-signedout-note");
+  if(note)note.classList.toggle("hidden",reason!=="signed-out");
   loadDuesSection().catch(()=>{});
 }
 

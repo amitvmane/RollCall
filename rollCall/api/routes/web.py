@@ -236,6 +236,14 @@ async def web_admin_status(
     tg_user_id = verify_identity_token(id_token)
     chat = _db.get_chat_by_group_web_token(group_token)
     if not chat or not tg_user_id:
+        # Both of these used to return a bare False, indistinguishable in the
+        # logs from a legitimate "you are not an admin" — so an expired token
+        # looked exactly like a permissions decision. Name which one it was.
+        logging.info(
+            "[web-admin] admin-status DENY before check: token_present=%s"
+            " token_valid=%s group_token_known=%s",
+            bool(id_token), bool(tg_user_id), bool(chat),
+        )
         return WebAdminStatusResponse(is_admin=False)
     chat_id = int(chat["chat_id"])
     return WebAdminStatusResponse(is_admin=await check_web_admin_live(chat_id, tg_user_id))

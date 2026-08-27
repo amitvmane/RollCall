@@ -41,6 +41,10 @@ async def check_web_admin_live(chat_id: int, tg_user_id: int) -> bool:
     from rollcall_manager import manager as _mgr
     if not _mgr.get_admin_rights(chat_id):
         if _db.is_web_admin(chat_id, tg_user_id):
+            logging.info(
+                "[web-admin] chat=%s user=%s -> ALLOW (cached grant, open group)",
+                chat_id, tg_user_id,
+            )
             return True
         try:
             from bot_state import bot
@@ -56,9 +60,18 @@ async def check_web_admin_live(chat_id: int, tg_user_id: int) -> bool:
             )
             return False
         if member.status not in ("administrator", "creator"):
+            logging.info(
+                "[web-admin] chat=%s user=%s -> DENY (open group, no cached grant,"
+                " Telegram says status=%r)",
+                chat_id, tg_user_id, getattr(member, "status", None),
+            )
             return False
         name = getattr(getattr(member, "user", None), "first_name", None) or f"user{tg_user_id}"
         _db.set_web_admin(chat_id, tg_user_id, name)
+        logging.info(
+            "[web-admin] chat=%s user=%s -> ALLOW (open group, Telegram status=%r, cached)",
+            chat_id, tg_user_id, member.status,
+        )
         return True
 
     try:

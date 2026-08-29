@@ -75,9 +75,26 @@
     <div class="brand-actions">
       <button class="brand-install-btn hidden" id="install-btn" title="Add RollCall to your home screen" onclick="triggerInstall()">⬇ Install</button>
       <button class="brand-notify-btn hidden" id="notify-btn" title="Get notified when a rollcall opens" onclick="toggleNotifications()">🔔</button>
+      <!-- Admin entry point. The admin card used to sit inline near the bottom
+           of a long scroll, below the leaderboard, with nothing at the top
+           indicating it existed. Rendered only for web admins. -->
+      <button class="brand-admin-btn hidden" id="admin-nav-btn" title="Admin controls" onclick="toggleAdminPanel()">⚙ Admin</button>
       <button class="brand-theme-btn" id="help-btn" title="Command reference" onclick="window.location.href='/help'">❓</button>
       <button class="brand-theme-btn" id="home-btn" title="All your groups" onclick="window.location.href='/web/'">🏠</button>
       <button class="brand-theme-btn" id="theme-btn" title="Toggle dark mode" onclick="toggleTheme()">🌙</button>
+      <!-- Account control — the single, always-present place to see who you
+           are and to sign out. Previously the only sign-out path was a button
+           labelled "🔒 Locked" rendered at 55% opacity (so it read as
+           disabled) inside the identity card, whose confirm dialog talked
+           about changing your name rather than signing out. -->
+      <div class="acct-wrap" id="acct-wrap">
+        <button class="brand-acct-btn" id="acct-btn" title="Your account"
+                aria-haspopup="true" aria-expanded="false" onclick="toggleAcctMenu(event)">
+          <span class="acct-av" id="acct-av">?</span>
+          <span class="acct-label" id="acct-label">Sign in</span>
+        </button>
+        <div class="acct-menu hidden" id="acct-menu" role="menu"></div>
+      </div>
     </div>
   </div>
   <div id="loading" class="center">
@@ -229,8 +246,12 @@
       <button class="btn" style="margin-top:8px" onclick="startTgVerify()">Sign in with Telegram</button>
     </div>
 
-    <div id="admin-card" class="card hidden" style="border:1.5px dashed var(--border)">
-      <div style="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:10px">Admin actions</div>
+    <div id="admin-card" class="card hidden adm-collapsed" style="border:1.5px dashed var(--border)">
+      <div class="admin-card-hdr" id="admin-card-hdr" onclick="toggleAdminPanel()" role="button" tabindex="0"
+           aria-controls="admin-card-body" aria-expanded="false">
+        <span>⚙ Admin actions</span><span class="admin-chevron" id="admin-chevron">▼</span>
+      </div>
+      <div id="admin-card-body">
       <!-- Other-groups switcher — only rendered when this admin manages
            more than one group, so a multi-group admin can move between
            their groups' own pages without a separate admin app. -->
@@ -353,6 +374,7 @@
         </div>
         <div id="identity-merge-body" class="hidden"></div>
       </div>
+      </div><!-- /#admin-card-body -->
     </div>
 
     <!-- Dues member card — shown when dues enabled and identity verified -->

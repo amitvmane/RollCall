@@ -266,6 +266,9 @@ function renderIdentity(){
     widgetWrap.classList.toggle("hidden",!showWidget);
     if(showWidget)_loadLoginWidget();
   }
+  // Header chip mirrors whatever the identity card just decided, so the two
+  // can never disagree about who you are.
+  renderAcctControl();
 }
 
 $("name-save-btn").addEventListener("click",saveName);
@@ -280,9 +283,7 @@ $("name-change-btn").addEventListener("click",()=>{
   if(_verifiedUserId){
     const ok=confirm("Changing your name will unlink your Telegram verification.\nYou can re-verify after setting a new name.");
     if(!ok)return;
-    _verifiedUserId=null;_verifiedName=null;_verifiedUsername=null;_idToken=null;
-    localStorage.removeItem(LS_TG_USER_ID);localStorage.removeItem(LS_TG_NAME);localStorage.removeItem(LS_TG_USERNAME);localStorage.removeItem(LS_ID_TOKEN);
-    _stopVerifyPoll();
+    _clearStoredIdentity();
   }
   currentName="";
   if(TG_NAME)localStorage.removeItem(LS_NAME_OVERRIDE);
@@ -305,6 +306,142 @@ function saveName(){
   else localStorage.setItem(LS_NAME,currentName);
   renderIdentity();detectCurrentVote();
   if(IS_GROUP)loadWebStats();
+}
+
+// ── Account control (header) ───────────────────────────────────────────────
+// One always-visible place showing who you are, with an unambiguous Sign out.
+// The previous sign-out was a "🔒 Locked" button at 55% opacity inside the
+// identity card — labelled with a state rather than an action, styled as if
+// disabled, and reachable only by guessing it was clickable.
+
+// Drops every stored credential and identity hint. Shared by Sign out and by
+// the identity card's Change-name path so the two can't drift apart.
+function _clearStoredIdentity(){
+  _verifiedUserId=null;_verifiedName=null;_verifiedUsername=null;_idToken=null;
+  localStorage.removeItem(LS_TG_USER_ID);
+  localStorage.removeItem(LS_TG_NAME);
+  localStorage.removeItem(LS_TG_USERNAME);
+  localStorage.removeItem(LS_ID_TOKEN);
+  _stopVerifyPoll();
+}
+
+window.signOut=function(){
+  if(!confirm("Sign out of RollCall on this device?\n\nYour votes stay on the group — you'll just need to sign in again to vote or manage the group."))return;
+  _clearStoredIdentity();
+  currentName="";
+  localStorage.removeItem(LS_NAME);
+  localStorage.removeItem(LS_NAME_OVERRIDE);
+  closeAcctMenu();
+  // Admin state is derived from identity, so it has to go with it — otherwise
+  // the admin card stays on screen for a signed-out user until a reload.
+  _isWebAdmin=false;
+  const ac=document.getElementById("admin-card");if(ac)ac.classList.add("hidden");
+  const dac=document.getElementById("dues-admin-card");if(dac)dac.classList.add("hidden");
+  const nb=document.getElementById("admin-nav-btn");if(nb)nb.classList.add("hidden");
+  const ntr=document.getElementById("name-tag-row");if(ntr)ntr.classList.add("hidden");
+  if(IS_GROUP&&!TG_NAME){
+    const pr=document.getElementById("identity-picker-row");if(pr)pr.classList.remove("hidden");
+    const nir=document.getElementById("name-input-row");if(nir)nir.classList.add("hidden");
+  }
+  renderIdentity();
+  if(typeof detectCurrentVote==="function")detectCurrentVote();
+  toast("Signed out",2500);
+};
+
+window.toggleAcctMenu=function(ev){
+  if(ev)ev.stopPropagation();
+  const menu=document.getElementById("acct-menu");
+  if(!menu)return;
+  if(menu.classList.contains("hidden"))openAcctMenu();
+  else closeAcctMenu();
+};
+
+function openAcctMenu(){
+  const menu=document.getElementById("acct-menu");
+  if(!menu)return;
+  renderAcctMenu();
+  menu.classList.remove("hidden");
+  const btn=document.getElementById("acct-btn");
+  if(btn)btn.setAttribute("aria-expanded","true");
+  if(!document.getElementById("acct-backdrop")){
+    const bd=document.createElement("div");
+    bd.id="acct-backdrop";bd.className="acct-backdrop";
+    bd.addEventListener("click",closeAcctMenu);
+    document.body.appendChild(bd);
+  }
+}
+
+window.closeAcctMenu=function(){
+  const menu=document.getElementById("acct-menu");
+  if(menu)menu.classList.add("hidden");
+  const btn=document.getElementById("acct-btn");
+  if(btn)btn.setAttribute("aria-expanded","false");
+  const bd=document.getElementById("acct-backdrop");
+  if(bd)bd.remove();
+};
+
+document.addEventListener("keydown",e=>{if(e.key==="Escape")closeAcctMenu();});
+
+// Three states, deliberately distinct: Telegram-verified, guest (a name but no
+// proof), and nothing at all.
+function renderAcctMenu(){
+  const menu=document.getElementById("acct-menu");
+  if(!menu)return;
+  const verified=!!(_verifiedUserId||(TG_NAME&&_idToken));
+  const who=_verifiedName||currentName||TG_NAME||"";
+  let html="";
+  if(who){
+    html+=`<div class="acct-menu-hdr">
+      <div class="acct-menu-name">${esc(who)}</div>
+      <div class="acct-menu-sub">${verified?"✅ Telegram verified":"👤 Guest on this device"}</div>
+    </div>`;
+  }
+  if(!verified){
+    html+=`<button class="acct-menu-item" role="menuitem" onclick="closeAcctMenu();startTgVerify()">✈ Sign in with Telegram</button>`;
+  }
+  if(who&&!TG_NAME){
+    html+=`<button class="acct-menu-item" role="menuitem" onclick="closeAcctMenu();acctChangeName()">✎ Change name</button>`;
+  }
+  if(_isWebAdmin){
+    html+=`<button class="acct-menu-item" role="menuitem" onclick="closeAcctMenu();toggleAdminPanel()">⚙ Admin controls</button>`;
+  }
+  if(who||_idToken){
+    html+=`<button class="acct-menu-item danger" role="menuitem" onclick="signOut()">⏻ Sign out</button>`;
+  }
+  if(!html)html=`<div class="acct-menu-hdr"><div class="acct-menu-sub">Not signed in</div></div>`;
+  menu.innerHTML=html;
+}
+
+// Same intent as the identity card's Change button, reachable from the header.
+window.acctChangeName=function(){
+  const btn=document.getElementById("name-change-btn");
+  if(btn){btn.click();return;}
+  _clearStoredIdentity();
+};
+
+// Keeps the header chip in sync with whatever identity render just happened.
+function renderAcctControl(){
+  const av=document.getElementById("acct-av");
+  const label=document.getElementById("acct-label");
+  if(!av||!label)return;
+  const verified=!!(_verifiedUserId||(TG_NAME&&_idToken));
+  const who=_verifiedName||currentName||TG_NAME||"";
+  if(who){
+    av.textContent=(who[0]||"?").toUpperCase();
+    av.style.background=typeof avColor==="function"?avColor(who):"";
+    label.textContent=who.length>12?who.slice(0,11)+"…":who;
+    const btn=document.getElementById("acct-btn");
+    if(btn)btn.title=verified?`Signed in as ${who} (Telegram verified)`:`${who} — guest on this device`;
+  }else{
+    av.textContent="?";
+    av.style.background="";
+    label.textContent="Sign in";
+    const btn=document.getElementById("acct-btn");
+    if(btn)btn.title="Sign in";
+  }
+  // Re-render an open menu in place so it can't show stale state.
+  const menu=document.getElementById("acct-menu");
+  if(menu&&!menu.classList.contains("hidden"))renderAcctMenu();
 }
 
 window.showGuestInput=function(){
@@ -1456,9 +1593,38 @@ function _applyAdminStatus(isAdmin){
   // out" applies any more — clear both, including after a mid-page sign-in.
   const note=document.getElementById("admin-signedout-note");
   if(note)note.classList.add("hidden");
+  // The header Admin button is the discoverable entry point; it only exists
+  // for actual admins.
+  const navBtn=document.getElementById("admin-nav-btn");
+  if(navBtn)navBtn.classList.toggle("hidden",!_isWebAdmin);
   if(_isWebAdmin){_syncShhToggle();_syncGroupSettingsCard();_syncTimezoneDisplay();_renderWeekdayHint();_loadWeblogInMembers();_loadAdminGroupSwitcher();renderLists();}
+  renderAcctControl();
   loadDuesSection().catch(()=>{});
 }
+
+// Opens (or closes) the admin panel from the header. The panel starts
+// collapsed: it's long, and for a page whose main job is voting it shouldn't
+// push the rollcall off screen just because you happen to be an admin.
+window.toggleAdminPanel=function(){
+  const card=document.getElementById("admin-card");
+  if(!card)return;
+  if(card.classList.contains("hidden")){
+    toast(_idToken?"You're not an admin of this group":"Sign in to manage this group",3000);
+    return;
+  }
+  const opening=card.classList.contains("adm-collapsed");
+  card.classList.toggle("adm-collapsed",!opening);
+  const hdr=document.getElementById("admin-card-hdr");
+  if(hdr)hdr.setAttribute("aria-expanded",String(opening));
+  const navBtn=document.getElementById("admin-nav-btn");
+  if(navBtn)navBtn.classList.toggle("active",opening);
+  if(opening){
+    card.scrollIntoView({behavior:"smooth",block:"start"});
+    card.classList.remove("adm-flash");
+    void card.offsetWidth;              // restart the animation
+    card.classList.add("adm-flash");
+  }
+};
 
 // Admin controls are hidden — but WHY matters, and the three reasons are not
 // interchangeable:
@@ -1477,6 +1643,9 @@ function _setAdminCheckFailed(reason){
   if(warn)warn.classList.toggle("hidden",reason!=="error");
   const note=document.getElementById("admin-signedout-note");
   if(note)note.classList.toggle("hidden",reason!=="signed-out");
+  const navBtn=document.getElementById("admin-nav-btn");
+  if(navBtn){navBtn.classList.add("hidden");navBtn.classList.remove("active");}
+  renderAcctControl();
   loadDuesSection().catch(()=>{});
 }
 

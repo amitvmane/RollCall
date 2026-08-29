@@ -46,6 +46,38 @@ html.dark .brand-bar{background:linear-gradient(180deg,#0D1712 0%,#000 220%)}
 .brand-notify-btn.notify-on{background:var(--accent);color:#fff}
 .brand-notify-btn.notify-blocked{opacity:.5;cursor:default}
 .brand-install-btn{background:transparent;border:1.5px solid var(--accent);color:var(--accent);font-size:.75rem;font-weight:700;padding:5px 10px;border-radius:8px;cursor:pointer;white-space:nowrap;letter-spacing:.03em;text-transform:uppercase;transition:all .15s;line-height:1}
+
+/* ── Admin entry in the header ──────────────────────────────────────────── */
+.brand-admin-btn{background:rgba(255,255,255,.12);border:none;color:#fff;font-size:.75rem;font-weight:700;padding:0 10px;height:32px;border-radius:8px;cursor:pointer;white-space:nowrap;letter-spacing:.02em;transition:background .15s;display:flex;align-items:center;gap:4px}
+.brand-admin-btn:hover{background:var(--accent)}
+.brand-admin-btn.active{background:var(--accent)}
+
+/* ── Admin panel (collapsible) ──────────────────────────────────────────── */
+.admin-card-hdr{display:flex;align-items:center;justify-content:space-between;cursor:pointer;font-size:.85rem;font-weight:700;color:var(--text);user-select:none;gap:8px}
+.admin-card-hdr:hover{color:var(--accent)}
+.admin-chevron{font-size:.7rem;color:var(--sub);transition:transform .18s}
+#admin-card.adm-collapsed #admin-card-body{display:none}
+#admin-card.adm-collapsed .admin-chevron{transform:rotate(-90deg)}
+#admin-card:not(.adm-collapsed) #admin-card-body{margin-top:12px}
+/* Brief highlight when jumped to from the header, so it's obvious what opened. */
+@keyframes admFlash{0%{box-shadow:0 0 0 0 var(--accent)}100%{box-shadow:0 0 0 6px transparent}}
+#admin-card.adm-flash{animation:admFlash .9s ease-out}
+
+/* ── Account control ────────────────────────────────────────────────────── */
+.acct-wrap{position:relative;display:flex;align-items:center}
+.brand-acct-btn{background:rgba(255,255,255,.12);border:none;color:#fff;height:32px;padding:0 9px 0 4px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:6px;transition:background .15s;max-width:150px}
+.brand-acct-btn:hover{background:var(--accent)}
+.acct-av{width:24px;height:24px;border-radius:6px;background:var(--accent);color:#fff;font-size:.72rem;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;text-transform:uppercase}
+.acct-label{font-size:.78rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.acct-menu{position:absolute;top:calc(100% + 8px);right:0;min-width:230px;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-md);padding:8px;z-index:300}
+.acct-menu-hdr{padding:8px 10px 10px;border-bottom:1px solid var(--border);margin-bottom:6px}
+.acct-menu-name{font-size:.92rem;font-weight:700;color:var(--text);word-break:break-word}
+.acct-menu-sub{font-size:.74rem;color:var(--sub);margin-top:2px}
+.acct-menu-item{display:flex;align-items:center;gap:8px;width:100%;background:none;border:none;text-align:left;padding:9px 10px;border-radius:8px;font-size:.85rem;font-weight:600;color:var(--text);cursor:pointer;font-family:inherit}
+.acct-menu-item:hover{background:var(--border)}
+.acct-menu-item.danger{color:var(--out,#dc2626)}
+/* Tap-anywhere-to-close backdrop. Transparent, sits under the menu. */
+.acct-backdrop{position:fixed;inset:0;z-index:299;background:transparent}
 .brand-install-btn:hover{background:var(--accent);color:#fff}
 body.tg-mode .brand-bar{display:none}
 body.tg-mode #app{padding:12px 14px 32px}

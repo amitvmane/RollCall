@@ -172,22 +172,83 @@ function showApp(){
   // login with zero errors anywhere (nothing to catch: this is a display
   // computation, not an exception). Must set an explicit value.
   $id("app").style.display="block";
-  $id("portal-identity").textContent=_userName||"";
+  renderAcctControl();
   loadGroups();
 }
 
-$id("logout-btn").addEventListener("click",()=>{
-  if(!confirm("Log out? You'll need to verify again to see your groups."))return;
+// ── Account control ───────────────────────────────────────────────────────
+// Mirrors the group page's chip-and-menu (markup + /shared/account.css) so
+// identity looks and behaves the same on both surfaces. Handlers are bound
+// here rather than inline because this file is an IIFE — nothing in it is
+// global, so an onclick="…" in the HTML would not resolve.
+
+function _portalSignOut(){
+  if(!confirm("Sign out? You'll need to verify again to see your groups."))return;
   localStorage.removeItem(LS_TG_USER_ID);
   localStorage.removeItem(LS_TG_NAME);
   localStorage.removeItem(LS_ID_TOKEN);
   localStorage.removeItem(LS_VERIFY_CODE);
   _userId=null;_userName=null;_idToken=null;
+  closeAcctMenu();
   $id("groups-list").innerHTML="";
   $id("summary-card").style.display="none";
   $id("upcoming-section").style.display="none";
   showVerifyScreen();
+}
+
+function renderAcctMenu(){
+  const menu=$id("acct-menu");
+  if(!menu)return;
+  menu.innerHTML=
+    (_userName?`<div class="acct-menu-hdr">
+       <div class="acct-menu-name">${esc(_userName)}</div>
+       <div class="acct-menu-sub">✅ Telegram verified</div>
+     </div>`:"")+
+    `<button class="acct-menu-item" role="menuitem" id="acct-groups-item">🗓 My groups</button>`+
+    `<button class="acct-menu-item danger" role="menuitem" id="acct-signout-item">⏻ Sign out</button>`;
+  const g=$id("acct-groups-item");if(g)g.addEventListener("click",()=>{closeAcctMenu();window.scrollTo({top:0,behavior:"smooth"});});
+  const s=$id("acct-signout-item");if(s)s.addEventListener("click",_portalSignOut);
+}
+
+function openAcctMenu(){
+  const menu=$id("acct-menu");
+  if(!menu)return;
+  renderAcctMenu();
+  menu.classList.remove("hidden");
+  const btn=$id("acct-btn");if(btn)btn.setAttribute("aria-expanded","true");
+  if(!$id("acct-backdrop")){
+    const bd=document.createElement("div");
+    bd.id="acct-backdrop";bd.className="acct-backdrop";
+    bd.addEventListener("click",closeAcctMenu);
+    document.body.appendChild(bd);
+  }
+}
+
+function closeAcctMenu(){
+  const menu=$id("acct-menu");if(menu)menu.classList.add("hidden");
+  const btn=$id("acct-btn");if(btn)btn.setAttribute("aria-expanded","false");
+  const bd=$id("acct-backdrop");if(bd)bd.remove();
+}
+
+function renderAcctControl(){
+  const av=$id("acct-av"),label=$id("acct-label");
+  if(!av||!label)return;
+  const who=_userName||"";
+  av.textContent=(who[0]||"?").toUpperCase();
+  label.textContent=who?(who.length>12?who.slice(0,11)+"…":who):"Signed in";
+  const btn=$id("acct-btn");
+  if(btn)btn.title=who?`Signed in as ${who}`:"Your account";
+  const menu=$id("acct-menu");
+  if(menu&&!menu.classList.contains("hidden"))renderAcctMenu();
+}
+
+$id("acct-btn").addEventListener("click",e=>{
+  e.stopPropagation();
+  const menu=$id("acct-menu");
+  if(menu&&menu.classList.contains("hidden"))openAcctMenu();
+  else closeAcctMenu();
 });
+document.addEventListener("keydown",e=>{if(e.key==="Escape")closeAcctMenu();});
 
 // ── Cross-group summary ───────────────────────────────────────────────────────
 

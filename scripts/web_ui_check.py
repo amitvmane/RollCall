@@ -85,9 +85,13 @@ def check_element_ids(html, js, label, errors):
     """Every id the JS looks up must exist in the HTML or be built at runtime."""
     static_ids = set(re.findall(r'id="([^"]+)"', html))
 
+    # Each app wraps getElementById in its own helper: the group page uses
+    # $("x"), the portal uses $id("x"). Missing the second meant none of the
+    # portal's lookups were checked at all — which let a stale
+    # $id("portal-identity") through after that element was removed.
     looked_up = set()
     looked_up |= set(re.findall(r'getElementById\(["\']([^"\']+)["\']\)', js))
-    looked_up |= set(re.findall(r'\$\(["\']([^"\']+)["\']\)', js))
+    looked_up |= set(re.findall(r'\$(?:id)?\(["\']([^"\']+)["\']\)', js))
 
     for eid in sorted(looked_up - static_ids):
         if DYNAMIC_OK.match(eid):

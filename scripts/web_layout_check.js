@@ -327,6 +327,98 @@ const WIDTHS = [
     await page.close();
   }
 
+  // ── Home screen (/web/ with no group token) ─────────────────────────────
+  // Had no account control and no theme toggle at all. The chip is MOVED here
+  // rather than cloned, so this also guards against a second #acct-wrap
+  // appearing — which would break every getElementById that touches it.
+  {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1280, height: 900 });
+    await page.setRequestInterception(true);
+    page.on("request", req =>
+      req.url().startsWith(BASE) ? req.continue()
+                                 : req.respond({ status: 200, contentType: "text/plain", body: "" }));
+    const errs = [];
+    page.on("pageerror", e => errs.push(String(e.message)));
+
+    await page.goto(`${BASE}/web/`, { waitUntil: "load" });
+    await new Promise(r => setTimeout(r, 400));
+
+    const s = await page.evaluate(() => {
+      const wraps = document.querySelectorAll("#acct-wrap, .acct-wrap");
+      const acct = document.getElementById("acct-wrap");
+      const home = document.getElementById("home-brand-actions");
+      return {
+        homeVisible: !document.getElementById("home-screen").classList.contains("hidden"),
+        wrapCount: wraps.length,
+        inHomeHeader: !!(acct && home && home.contains(acct)),
+        chipVisible: acct ? acct.getBoundingClientRect().width > 0 : false,
+        hasTheme: !!document.getElementById("theme-btn-home"),
+      };
+    });
+
+    if (!s.homeVisible) failures.push("home: home screen did not render at /web/");
+    if (s.wrapCount !== 1) failures.push(`home: expected exactly one .acct-wrap in the document, found ${s.wrapCount}`);
+    if (!s.inHomeHeader) failures.push("home: account chip was not moved into the home header");
+    if (!s.chipVisible) failures.push("home: account chip is present but not visible");
+    if (!s.hasTheme) failures.push("home: no theme toggle in the home header");
+    if (errs.length) failures.push(`home: JS error — ${errs[0]}`);
+
+    console.log(`  home: account chip relocated into the home header`);
+    await page.close();
+  }
+
+  // ── Portal ──────────────────────────────────────────────────────────────
+  // The portal is a separate app with its own IIFE-scoped JS, so none of the
+  // group page's coverage says anything about it. It now carries the same
+  // account control, which means the same failure modes.
+  {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1280, height: 900 });
+    await page.setRequestInterception(true);
+    page.on("request", req =>
+      req.url().startsWith(BASE) ? req.continue()
+                                 : req.respond({ status: 200, contentType: "text/plain", body: "" }));
+    const errs = [];
+    page.on("pageerror", e => errs.push(String(e.message)));
+
+    await page.goto(`${BASE}/portal/index.html`, { waitUntil: "load" });
+    await page.evaluate(() => {
+      localStorage.setItem("rc_verified_tg_user_id", "168415137");
+      localStorage.setItem("rc_verified_tg_name", "Amit");
+      localStorage.setItem("rc_identity_token", "168415137.9999999999.deadbeef");
+    });
+    await page.goto(`${BASE}/portal/index.html`, { waitUntil: "load" });
+    await new Promise(r => setTimeout(r, 400));
+
+    const s = await page.evaluate(() => {
+      const btn = document.getElementById("acct-btn");
+      if (btn) btn.click();
+      const m = document.getElementById("acct-menu");
+      return {
+        hasChip: !!btn,
+        label: (document.getElementById("acct-label") || {}).innerText,
+        av: (document.getElementById("acct-av") || {}).innerText,
+        open: m ? !m.classList.contains("hidden") : false,
+        text: m ? m.innerText : "",
+        oldLogout: !!document.getElementById("logout-btn"),
+      };
+    });
+
+    if (!s.hasChip) failures.push("portal: account chip missing");
+    if (!s.open) failures.push("portal: account menu did not open");
+    if (!/sign out/i.test(s.text)) failures.push(`portal: menu has no Sign out — got "${s.text.replace(/\n/g, " | ")}"`);
+    if (!/amit/i.test(s.text)) failures.push("portal: menu doesn't name the signed-in user");
+    if (s.av !== "A") failures.push(`portal: avatar initial should be A, got "${s.av}"`);
+    if (s.oldLogout) failures.push("portal: old #logout-btn still present alongside the new control");
+    // A pageerror here would previously have been the stale
+    // $id("portal-identity") throwing on load.
+    if (errs.length) failures.push(`portal: JS error — ${errs[0]}`);
+
+    console.log(`  portal: account chip and menu exercised`);
+    await page.close();
+  }
+
   await browser.close();
   server.close();
 

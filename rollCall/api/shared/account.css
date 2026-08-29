@@ -1,0 +1,62 @@
+/* ── Account control ───────────────────────────────────────────────────────
+   Shared by the group page (/web) and the portal (/portal) so "who am I and
+   how do I sign out" looks and behaves the same on both. It previously did
+   not: the group page hid sign-out behind a "🔒 Locked" button at 55% opacity,
+   the portal used a plain "Logout" button, and neither showed an avatar.
+
+   The two headers have opposite palettes — the group page's brand bar is white
+   on a dark gradient, the portal's topbar is text-on-card — so the chip reads
+   its colours from two custom properties and the dark context overrides them.
+   One component, two skins, no duplicated rules. */
+
+:root{
+  --acct-fg:var(--text);
+  --acct-bg:var(--hover,rgba(0,0,0,.06));
+}
+/* Dark header context (the group page's brand bar). */
+.brand-bar{
+  --acct-fg:#fff;
+  --acct-bg:rgba(255,255,255,.12);
+}
+
+.acct-wrap{position:relative;display:flex;align-items:center}
+
+.brand-acct-btn{
+  background:var(--acct-bg);border:none;color:var(--acct-fg);
+  height:32px;padding:0 9px 0 4px;border-radius:8px;cursor:pointer;
+  display:flex;align-items:center;gap:6px;transition:background .15s;
+  max-width:150px;font-family:inherit;
+}
+.brand-acct-btn:hover{background:var(--accent);color:#fff}
+.acct-av{
+  width:24px;height:24px;border-radius:6px;background:var(--accent);color:#fff;
+  font-size:.72rem;font-weight:700;display:flex;align-items:center;
+  justify-content:center;flex-shrink:0;text-transform:uppercase;
+}
+.acct-label{font-size:.78rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.acct-menu{
+  position:absolute;top:calc(100% + 8px);right:0;min-width:230px;
+  background:var(--card);border:1px solid var(--border);border-radius:12px;
+  box-shadow:var(--shadow-md,0 8px 24px rgba(0,0,0,.14));padding:8px;z-index:300;
+}
+.acct-menu-hdr{padding:8px 10px 10px;border-bottom:1px solid var(--border);margin-bottom:6px}
+.acct-menu-name{font-size:.92rem;font-weight:700;color:var(--text);word-break:break-word}
+.acct-menu-sub{font-size:.74rem;color:var(--sub);margin-top:2px}
+.acct-menu-item{
+  display:flex;align-items:center;gap:8px;width:100%;background:none;border:none;
+  text-align:left;padding:9px 10px;border-radius:8px;font-size:.85rem;
+  font-weight:600;color:var(--text);cursor:pointer;font-family:inherit;
+}
+.acct-menu-item:hover{background:var(--border)}
+.acct-menu-item.danger{color:var(--out,#dc2626)}
+
+/* Tap-anywhere-to-close backdrop. Transparent, sits under the menu. */
+.acct-backdrop{position:fixed;inset:0;z-index:299;background:transparent}
+
+/* Narrow screens: the label goes, the avatar stays. Headers run out of room
+   long before the avatar becomes the problem. */
+@media(max-width:720px){
+  .brand-acct-btn{padding:0 4px;max-width:none}
+  .acct-label{display:none}
+}

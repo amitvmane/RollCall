@@ -18,6 +18,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800;900&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet"/>
   <link rel="stylesheet" href="/shared/tokens.css"/>
+  <link rel="stylesheet" href="/shared/account.css"/>
   <link rel="stylesheet" href="/web/style.css"/>
 </head>
 <body>
@@ -28,8 +29,14 @@
       <img src="/web/logo.svg" alt="RollCall" class="brand-logo" width="28" height="28"/>
       <span class="brand-name">RollCall</span>
     </div>
-    <div class="brand-actions">
+    <!-- Same controls as the group page's header. The account chip itself is
+         not duplicated here — duplicate ids would break every getElementById
+         and silently wire the menu to whichever copy came first — instead
+         #acct-wrap is moved into whichever header is on screen. -->
+    <div class="brand-actions" id="home-brand-actions">
       <button class="brand-install-btn hidden" id="install-btn-home" title="Add RollCall to your home screen" onclick="triggerInstall()">⬇<span class="inst-word">&nbsp;Install</span></button>
+      <button class="brand-theme-btn" id="help-btn-home" title="Command reference" onclick="window.location.href='/help'">❓</button>
+      <button class="brand-theme-btn" id="theme-btn-home" title="Toggle dark mode" onclick="toggleTheme()">🌙</button>
     </div>
   </div>
   <div id="home-content" style="padding:16px;max-width:480px;margin:0 auto">

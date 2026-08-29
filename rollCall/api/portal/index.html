@@ -14,6 +14,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800;900&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet"/>
   <link rel="stylesheet" href="/shared/tokens.css"/>
   <link rel="stylesheet" href="/shared/base.css"/>
+  <link rel="stylesheet" href="/shared/account.css"/>
   <link rel="stylesheet" href="/portal/style.css"/>
 </head>
 <body>
@@ -57,10 +58,20 @@
       <span class="logo">My Groups</span>
     </div>
     <div class="topbar-right">
-      <span id="portal-identity" style="font-size:.8rem;color:var(--sub);margin-right:8px"></span>
       <button class="rc-help-btn" title="Help" aria-label="Help" onclick="rcOpenHelp()">❓</button>
       <button class="btn-theme" title="Toggle dark mode" onclick="toggleTheme()">🌙</button>
-      <button class="btn-logout" id="logout-btn" title="Log out of this browser">Logout</button>
+      <!-- Same account control as the group page (/shared/account.css). This
+           was a bare name label plus a "Logout" button — functional, but a
+           different shape from the group page's chip-and-menu, so the two
+           surfaces disagreed about where identity lives. -->
+      <div class="acct-wrap" id="acct-wrap">
+        <button class="brand-acct-btn" id="acct-btn" title="Your account"
+                aria-haspopup="true" aria-expanded="false">
+          <span class="acct-av" id="acct-av">?</span>
+          <span class="acct-label" id="acct-label">Signed in</span>
+        </button>
+        <div class="acct-menu hidden" id="acct-menu" role="menu"></div>
+      </div>
     </div>
   </div>
 

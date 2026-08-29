@@ -1543,6 +1543,18 @@ function renderHomeScreen(){
   if(!hs)return;
   hs.classList.remove("hidden");
   document.getElementById("app").classList.add("hidden");
+  // The home screen had no account control and no theme toggle at all — you
+  // couldn't see who you were signed in as, sign out, or switch to dark mode
+  // without first opening a group. Move the one account chip into this
+  // header rather than cloning it, so there is still exactly one #acct-wrap
+  // in the document and the menu keeps working from either screen.
+  const acct=document.getElementById("acct-wrap");
+  const homeActions=document.getElementById("home-brand-actions");
+  if(acct&&homeActions&&acct.parentElement!==homeActions){
+    closeAcctMenu();
+    homeActions.appendChild(acct);
+  }
+  renderAcctControl();
   const groups=_loadGroups();
   const container=document.getElementById("home-groups");
   if(!container)return;

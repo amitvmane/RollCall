@@ -97,6 +97,45 @@ jobs:
           TELEGRAM_TOKEN: "123:ci-smoke"
         run: python scripts/smoke_test.py
 
+  web-ui:
+    name: Web UI (wiring + layout)
+    runs-on: ubuntu-latest
+    # The Python suite never loads app.js, so nothing here was covered: a
+    # handler wired to a function that doesn't exist, a lookup of a DOM id
+    # that isn't there, or a layout that silently collapses. Both of the
+    # bugs that motivated these scripts reached production.
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # Static: ids, inline handlers, duplicate ids, div balance. No deps.
+      - name: Check web UI wiring
+        run: python scripts/web_ui_check.py
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Check JS parses
+        run: |
+          node --check rollCall/api/web/app.js
+          node --check rollCall/api/web/sw.js
+          node --check rollCall/api/portal/app.js
+
+      - name: Install puppeteer
+        run: npm i --no-save puppeteer@23
+
+      # Real Chromium, real layout, 5 viewports from 320 to 1680.
+      - name: Check web layout
+        run: node scripts/web_layout_check.js
+
   functional:
     # Deliberately no scenario count in the name — it went stale within a day
     # of being written (121 -> 156), the same way the old

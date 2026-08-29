@@ -101,6 +101,9 @@ html.dark .brand-bar{background:linear-gradient(180deg,#0D1712 0%,#000 220%)}
 /* Brief highlight when jumped to from the header, so it's obvious what opened. */
 @keyframes admFlash{0%{box-shadow:0 0 0 0 var(--accent)}100%{box-shadow:0 0 0 6px transparent}}
 #admin-card.adm-flash{animation:admFlash .9s ease-out}
+/* Same cue when openSignIn() jumps to the identity card, so it's obvious which
+   card the "Sign in" you just pressed was talking about. */
+#identity-card.id-flash{animation:admFlash .9s ease-out}
 
 /* ── Account control ────────────────────────────────────────────────────── */
 .acct-wrap{position:relative;display:flex;align-items:center}

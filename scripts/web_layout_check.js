@@ -233,6 +233,100 @@ const WIDTHS = [
     await page.close();
   }
 
+  // ── Identity behaviour ──────────────────────────────────────────────────
+  // Layout alone can't tell you the account menu opens, offers the right
+  // items for each identity state, or that Sign out actually clears the
+  // stored credentials. Those are the point of the change, so assert them.
+  {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1280, height: 900 });
+    await page.setRequestInterception(true);
+    page.on("request", req =>
+      req.url().startsWith(BASE) ? req.continue()
+                                 : req.respond({ status: 200, contentType: "text/plain", body: "" }));
+    const errs = [];
+    page.on("pageerror", e => errs.push(String(e.message)));
+
+    // A) Signed out.
+    await page.goto(`${BASE}/web/group/testtoken123`, { waitUntil: "load" });
+    await new Promise(r => setTimeout(r, 400));
+    let s = await page.evaluate(() => {
+      document.getElementById("acct-btn").click();
+      const m = document.getElementById("acct-menu");
+      return { open: !m.classList.contains("hidden"), text: m.innerText,
+               label: document.getElementById("acct-label").innerText };
+    });
+    if (!s.open) failures.push("identity: account menu did not open when signed out");
+    if (!/sign in/i.test(s.text)) failures.push(`identity: signed-out menu has no Sign in — got "${s.text.replace(/\n/g, " | ")}"`);
+    if (/sign out/i.test(s.text)) failures.push("identity: signed-out menu offers Sign out");
+    if (!/sign in/i.test(s.label)) failures.push(`identity: chip should read "Sign in", got "${s.label}"`);
+
+    // Backdrop click closes it.
+    s = await page.evaluate(() => {
+      const bd = document.getElementById("acct-backdrop");
+      if (bd) bd.click();
+      return { closed: document.getElementById("acct-menu").classList.contains("hidden"),
+               backdropGone: !document.getElementById("acct-backdrop") };
+    });
+    if (!s.closed) failures.push("identity: backdrop click did not close the menu");
+    if (!s.backdropGone) failures.push("identity: backdrop left behind after close");
+
+    // B) Signed in as a verified Telegram user.
+    await page.evaluate(() => {
+      localStorage.setItem("rc_verified_tg_user_id", "168415137");
+      localStorage.setItem("rc_verified_tg_name", "Amit");
+      localStorage.setItem("rc_identity_token", "168415137.9999999999.deadbeef");
+    });
+    await page.goto(`${BASE}/web/group/testtoken123`, { waitUntil: "load" });
+    await new Promise(r => setTimeout(r, 400));
+    s = await page.evaluate(() => {
+      document.getElementById("acct-btn").click();
+      const m = document.getElementById("acct-menu");
+      return { text: m.innerText, label: document.getElementById("acct-label").innerText,
+               av: document.getElementById("acct-av").innerText };
+    });
+    if (!/sign out/i.test(s.text)) failures.push(`identity: signed-in menu has no Sign out — got "${s.text.replace(/\n/g, " | ")}"`);
+    if (!/amit/i.test(s.text)) failures.push("identity: signed-in menu doesn't name the user");
+    if (!/amit/i.test(s.label)) failures.push(`identity: chip should show the name, got "${s.label}"`);
+    if (s.av !== "A") failures.push(`identity: avatar initial should be A, got "${s.av}"`);
+
+    // C) Sign out really clears everything.
+    s = await page.evaluate(() => {
+      window.confirm = () => true;          // auto-accept the confirmation
+      signOut();
+      return {
+        tok: localStorage.getItem("rc_identity_token"),
+        uid: localStorage.getItem("rc_verified_tg_user_id"),
+        name: localStorage.getItem("rc_verified_tg_name"),
+        label: document.getElementById("acct-label").innerText,
+        adminHidden: document.getElementById("admin-card").classList.contains("hidden"),
+        navHidden: document.getElementById("admin-nav-btn").classList.contains("hidden"),
+        menuClosed: document.getElementById("acct-menu").classList.contains("hidden"),
+      };
+    });
+    if (s.tok || s.uid || s.name) failures.push(`identity: sign out left credentials behind (token=${s.tok} uid=${s.uid} name=${s.name})`);
+    if (!/sign in/i.test(s.label)) failures.push(`identity: chip after sign out should read "Sign in", got "${s.label}"`);
+    if (!s.adminHidden) failures.push("identity: admin card still visible after sign out");
+    if (!s.navHidden) failures.push("identity: admin nav button still visible after sign out");
+    if (!s.menuClosed) failures.push("identity: menu left open after sign out");
+
+    // D) The unified sign-in entry reveals the chooser rather than committing
+    //    the user to one method.
+    s = await page.evaluate(() => {
+      openSignIn();
+      return {
+        picker: !document.getElementById("identity-picker-row").classList.contains("hidden"),
+        card: !document.getElementById("identity-card").classList.contains("hidden"),
+      };
+    });
+    if (!s.picker) failures.push("identity: openSignIn() did not reveal the Telegram/Guest chooser");
+    if (!s.card) failures.push("identity: openSignIn() left the identity card hidden");
+
+    if (errs.length) failures.push(`identity: JS error — ${errs[0]}`);
+    console.log(`  identity: menu, sign-out and sign-in flows exercised`);
+    await page.close();
+  }
+
   await browser.close();
   server.close();
 

@@ -214,18 +214,16 @@ function renderIdentity(){
         badge.innerHTML=`👤 ${esc(currentName)}`;
       }
     }
-    // Style change button: lock icon + muted when identity is Telegram-verified
+    // One label, one destination. This button used to read "🔒 Locked" at 55%
+    // opacity for verified users — a state, not an action, styled as if
+    // disabled — and it was the only route to signing out. Now it opens the
+    // same account menu the header chip does, so identity actions exist in
+    // exactly one place regardless of where you reach them from.
     const changeBtn=$("name-change-btn");
     if(changeBtn){
-      if(_verifiedUserId||(TG_NAME&&_idToken)){
-        changeBtn.textContent="🔒 Locked";
-        changeBtn.style.opacity="0.55";
-        changeBtn.title="Your name is locked to your Telegram identity. Click to unlink.";
-      }else{
-        changeBtn.textContent="✎ Change";
-        changeBtn.style.opacity="";
-        changeBtn.title="Change name";
-      }
+      changeBtn.textContent="Manage ▾";
+      changeBtn.style.opacity="";
+      changeBtn.title="Change name, or sign out";
     }
     // Show "Verify with Telegram" only for non-TG, non-verified users in group mode
     const actions=document.querySelector(".id-inner .id-actions");
@@ -273,7 +271,15 @@ function renderIdentity(){
 
 $("name-save-btn").addEventListener("click",saveName);
 $("name-input").addEventListener("keydown",e=>{if(e.key==="Enter")saveName()});
-$("name-change-btn").addEventListener("click",()=>{
+// The identity strip's Manage button and the header chip open the same menu.
+$("name-change-btn").addEventListener("click",e=>{
+  e.stopPropagation();
+  openAcctMenu();
+});
+
+// The actual change-name flow, now reached from that menu rather than from a
+// button whose label described a state.
+function _doChangeName(){
   if(TG_NAME&&_idToken){
     // Inside Telegram Mini App: name is set by Telegram and cannot be changed
     // while the user is authenticated. There's no local override possible.
@@ -297,7 +303,7 @@ $("name-change-btn").addEventListener("click",()=>{
     $("name-input-row").classList.remove("hidden");
     $("name-input").focus();
   }
-});
+}
 
 function saveName(){
   const val=$("name-input").value.trim();if(!val){$("name-input").focus();return;}
@@ -397,7 +403,10 @@ function renderAcctMenu(){
     </div>`;
   }
   if(!verified){
-    html+=`<button class="acct-menu-item" role="menuitem" onclick="closeAcctMenu();startTgVerify()">✈ Sign in with Telegram</button>`;
+    // openSignIn(), not startTgVerify() directly: one entry point that offers
+    // every method this page supports, so "sign in" means the same thing
+    // wherever it's clicked.
+    html+=`<button class="acct-menu-item" role="menuitem" onclick="closeAcctMenu();openSignIn()">✈ Sign in</button>`;
   }
   if(who&&!TG_NAME){
     html+=`<button class="acct-menu-item" role="menuitem" onclick="closeAcctMenu();acctChangeName()">✎ Change name</button>`;
@@ -412,11 +421,40 @@ function renderAcctMenu(){
   menu.innerHTML=html;
 }
 
-// Same intent as the identity card's Change button, reachable from the header.
-window.acctChangeName=function(){
-  const btn=document.getElementById("name-change-btn");
-  if(btn){btn.click();return;}
-  _clearStoredIdentity();
+// Calls the flow directly. It must NOT click #name-change-btn any more —
+// that button now opens this very menu, so clicking it from a menu item
+// would just reopen the menu instead of changing anything.
+window.acctChangeName=function(){_doChangeName();};
+
+// The single sign-in entry point. Every "sign in" affordance on the page
+// routes here — the header menu, the signed-out admin note, and the identity
+// card itself — so they can't drift into offering different methods or
+// different wording. Reveals the chooser (Telegram / Guest, plus the QR
+// widget when Telegram isn't on this device) rather than committing the user
+// to one method, which is what the bare startTgVerify() calls used to do.
+window.openSignIn=function(){
+  closeAcctMenu();
+  if(_verifiedUserId||(TG_NAME&&_idToken)){
+    toast("You're already signed in",2200);
+    return;
+  }
+  const card=document.getElementById("identity-card");
+  const picker=document.getElementById("identity-picker-row");
+  const nameRow=document.getElementById("name-input-row");
+  const tagRow=document.getElementById("name-tag-row");
+  if(!card||!picker)return;
+  card.classList.remove("hidden");
+  picker.classList.remove("hidden");
+  if(nameRow)nameRow.classList.add("hidden");
+  if(tagRow)tagRow.classList.add("hidden");
+  // The QR widget is the answer to "Telegram isn't on this device", so it
+  // belongs with the other choices rather than only appearing further down.
+  const widget=document.getElementById("tg-widget-wrap");
+  if(widget){widget.classList.remove("hidden");if(typeof _loadLoginWidget==="function")_loadLoginWidget();}
+  card.scrollIntoView({behavior:"smooth",block:"center"});
+  card.classList.remove("id-flash");
+  void card.offsetWidth;
+  card.classList.add("id-flash");
 };
 
 // Keeps the header chip in sync with whatever identity render just happened.

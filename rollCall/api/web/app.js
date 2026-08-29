@@ -884,7 +884,11 @@ function renderGroupCta(){
     el=document.createElement("div");
     el.id="group-cta";
     el.className="group-cta";
-    const container=document.getElementById("bookmark-card")?.parentElement;
+    // #main, not bookmark-card's parent: since the two-column layout landed
+    // that parent is #col-side, which on desktop is a sticky sidebar — this
+    // is a page footer and belongs across the bottom of both columns
+    // (grid-column:1/-1 in the desktop block of style.css).
+    const container=document.getElementById("main");
     if(!container)return;
     container.appendChild(el);
   }

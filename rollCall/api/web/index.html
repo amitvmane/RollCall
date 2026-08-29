@@ -29,7 +29,7 @@
       <span class="brand-name">RollCall</span>
     </div>
     <div class="brand-actions">
-      <button class="brand-install-btn hidden" id="install-btn-home" title="Add RollCall to your home screen" onclick="triggerInstall()">⬇ Install</button>
+      <button class="brand-install-btn hidden" id="install-btn-home" title="Add RollCall to your home screen" onclick="triggerInstall()">⬇<span class="inst-word">&nbsp;Install</span></button>
     </div>
   </div>
   <div id="home-content" style="padding:16px;max-width:480px;margin:0 auto">
@@ -73,12 +73,12 @@
       <span id="presence-badge" class="presence-badge hidden"></span>
     </div>
     <div class="brand-actions">
-      <button class="brand-install-btn hidden" id="install-btn" title="Add RollCall to your home screen" onclick="triggerInstall()">⬇ Install</button>
+      <button class="brand-install-btn hidden" id="install-btn" title="Add RollCall to your home screen" onclick="triggerInstall()">⬇<span class="inst-word">&nbsp;Install</span></button>
       <button class="brand-notify-btn hidden" id="notify-btn" title="Get notified when a rollcall opens" onclick="toggleNotifications()">🔔</button>
       <!-- Admin entry point. The admin card used to sit inline near the bottom
            of a long scroll, below the leaderboard, with nothing at the top
            indicating it existed. Rendered only for web admins. -->
-      <button class="brand-admin-btn hidden" id="admin-nav-btn" title="Admin controls" onclick="toggleAdminPanel()">⚙ Admin</button>
+      <button class="brand-admin-btn hidden" id="admin-nav-btn" title="Admin controls" onclick="toggleAdminPanel()">⚙<span class="adm-word">&nbsp;Admin</span></button>
       <button class="brand-theme-btn" id="help-btn" title="Command reference" onclick="window.location.href='/help'">❓</button>
       <button class="brand-theme-btn" id="home-btn" title="All your groups" onclick="window.location.href='/web/'">🏠</button>
       <button class="brand-theme-btn" id="theme-btn" title="Toggle dark mode" onclick="toggleTheme()">🌙</button>
@@ -107,6 +107,13 @@
     <button id="retry-btn" class="btn btn-primary" style="margin-top:8px">Retry</button>
   </div>
   <div id="main" class="hidden">
+    <!-- Two-column wrappers. On narrow screens these are `display:contents`,
+         so the cards fall back to exactly the single-column DOM order they
+         had before; from 1024px up #main becomes a grid and each wrapper is
+         a real column, letting the two sides pack independently.
+         col-main = what you came here to do (see the game, vote, see who's in)
+         col-side = everything you consult rather than act on. -->
+    <div id="col-main">
     <!-- Tabs (multi-rollcall group mode) -->
     <div id="tab-card" class="card hidden">
       <div id="tab-bar" class="tab-bar"></div>
@@ -214,7 +221,9 @@
       <div class="refresh-bar"><div id="refresh-fill" class="refresh-fill"></div></div>
       <span id="refresh-label" class="refresh-label"></span>
     </div>
+    </div><!-- /#col-main -->
 
+    <div id="col-side">
     <!-- Upcoming scheduled rollcalls — demoted below the live game/vote
          action (was between the event card and identity, competing with
          the thing a visitor actually came to do). -->
@@ -441,6 +450,7 @@
         <button class="btn" id="share-btn" style="flex:1;padding:10px;background:var(--border);color:var(--text);border-radius:10px;font-weight:600;display:none" onclick="shareGroupLink()">↗ Share</button>
       </div>
     </div>
+    </div><!-- /#col-side -->
   </div>
 </div>
 <div class="toast-local" id="toast-local" role="alert" aria-live="assertive" aria-atomic="true"></div>

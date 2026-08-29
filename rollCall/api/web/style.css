@@ -19,15 +19,54 @@ body{
 h1,h2,h3,.rc-title,.brand-name{font-family:var(--font-display)}
 
 /* ── Load-in: one staggered reveal instead of scattered micro-animation ── */
+/* Selectors are :where(#col-main,#col-side)>… rather than #main>… because the
+   cards now live inside the two column wrappers. `display:contents` keeps them
+   visually direct children of #main on mobile, but CSS still matches on the
+   real DOM tree, so #main>.card stopped matching anything. */
 @keyframes riseIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
-#main>.card,#main>#no-rollcalls,#main>#upcoming-card{animation:riseIn .45s cubic-bezier(.16,1,.3,1) both}
-#main>.card:nth-child(1),#main>*:nth-child(1){animation-delay:0s}
-#main>.card:nth-child(2),#main>*:nth-child(2){animation-delay:.04s}
-#main>.card:nth-child(3),#main>*:nth-child(3){animation-delay:.08s}
-#main>.card:nth-child(4),#main>*:nth-child(4){animation-delay:.12s}
-#main>.card:nth-child(5),#main>*:nth-child(5){animation-delay:.16s}
-#main>.card:nth-child(n+6){animation-delay:.18s}
-@media (prefers-reduced-motion:reduce){#main>.card,#main>#no-rollcalls,#main>#upcoming-card{animation:none}}
+#col-main>.card,#col-side>.card,#col-main>#no-rollcalls,#col-side>#upcoming-card{animation:riseIn .45s cubic-bezier(.16,1,.3,1) both}
+#col-main>*:nth-child(1){animation-delay:0s}
+#col-main>*:nth-child(2){animation-delay:.04s}
+#col-main>*:nth-child(3){animation-delay:.08s}
+#col-main>*:nth-child(4){animation-delay:.12s}
+#col-main>*:nth-child(5){animation-delay:.16s}
+#col-main>*:nth-child(n+6),#col-side>*{animation-delay:.18s}
+@media (prefers-reduced-motion:reduce){#col-main>.card,#col-side>.card,#col-main>#no-rollcalls,#col-side>#upcoming-card{animation:none}}
+
+/* ── Layout: single column on phones, two columns on real screens ────────
+   Every breakpoint in this file used to be max-width, i.e. there was no
+   desktop layout at all — #app had no max-width either, so on a wide monitor
+   the cards stretched edge to edge and a row holding a 24px avatar and a name
+   ran the full width of the screen. */
+#col-main,#col-side{display:contents}
+
+@media(min-width:1024px){
+  #app{max-width:1180px;margin:0 auto;padding:0 20px}
+  .brand-bar{margin-left:-20px;margin-right:-20px;padding-left:20px;padding-right:20px}
+  #main{
+    display:grid;
+    /* Weighted, not equal: the left side carries the roster, which is by far
+       the tallest content. minmax(0,…) so long names can ellipsize instead of
+       forcing the column wider. */
+    grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);
+    gap:0 20px;
+    align-items:start;
+  }
+  #col-main,#col-side{display:block;min-width:0}
+  /* The side column trails the page as you scroll the (much taller) roster. */
+  #col-side{position:sticky;top:64px;max-height:calc(100vh - 80px);overflow-y:auto;
+            scrollbar-width:thin;padding-bottom:8px}
+  #col-side::-webkit-scrollbar{width:6px}
+  #col-side::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+  /* Page footer, appended straight to #main — spans under both columns. */
+  #main>#group-cta{grid-column:1/-1}
+}
+
+/* Very wide: give the roster more room rather than stretching both columns. */
+@media(min-width:1500px){
+  #app{max-width:1360px}
+  #main{grid-template-columns:minmax(0,1.7fr) minmax(0,1fr)}
+}
 
 /* ── Brand bar: stadium signage, not a flat SaaS header ── */
 .brand-bar{
@@ -78,6 +117,33 @@ html.dark .brand-bar{background:linear-gradient(180deg,#0D1712 0%,#000 220%)}
 .acct-menu-item.danger{color:var(--out,#dc2626)}
 /* Tap-anywhere-to-close backdrop. Transparent, sits under the menu. */
 .acct-backdrop{position:fixed;inset:0;z-index:299;background:transparent}
+
+/* The header was already full on a 390px phone; adding an Admin button and an
+   account chip pushed it 160px past the viewport and made the whole page
+   scroll sideways. Below 720px both collapse to their icons — the brand bar
+   has to fit first, and the labels are the affordance that can be spared. */
+@media(max-width:720px){
+  .brand-acct-btn{padding:0 4px;max-width:none}
+  .acct-label{display:none}
+  .brand-admin-btn{padding:0;width:32px;justify-content:center;font-size:1rem}
+  .brand-admin-btn .adm-word{display:none}
+  /* Install is 85px with its label and is shown whenever the PWA is
+     installable — with an admin signed in that alone pushed the bar past the
+     viewport on a 390px phone. */
+  .brand-install-btn{padding:0;width:32px;display:flex;align-items:center;justify-content:center;font-size:1rem}
+  .brand-install-btn .inst-word{display:none}
+  .brand-actions{gap:5px;flex-shrink:0}
+  /* Last resort: the wordmark truncates before any control is pushed off. */
+  .brand-inner{min-width:0}
+  .brand-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+}
+/* Tighter still on the smallest phones: the brand wordmark yields before any
+   control does, since the controls are what you came to press. */
+@media(max-width:400px){
+  .brand-name{font-size:1rem}
+  .brand-actions{gap:4px}
+  .brand-theme-btn,.brand-notify-btn,.brand-admin-btn{width:29px;height:29px}
+}
 .brand-install-btn:hover{background:var(--accent);color:#fff}
 body.tg-mode .brand-bar{display:none}
 body.tg-mode #app{padding:12px 14px 32px}
@@ -201,6 +267,24 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 /* ── Lists: roster pills ── */
 .list-sect{margin-bottom:14px}
 .list-sect:last-child{margin-bottom:0}
+
+/* Roster columns. A container query, not a media query: the roster should
+   split when the CARD is wide enough, which is not the same question as how
+   wide the window is — inside the desktop grid this card only gets ~60% of the
+   page. Where container queries aren't supported the block is simply ignored
+   and the roster stays stacked, which is the current behaviour.
+
+   Not three equal columns: real data is lopsided (IN 14, OUT 1, MAYBE 1), so
+   equal thirds would produce one crowded column beside two nearly empty ones.
+   IN takes a wider column of its own and the rest stack beside it. */
+#lists-card{container-type:inline-size;container-name:lists}
+@container lists (min-width:560px){
+  #lists-container{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);
+                   gap:0 20px;align-items:start}
+  #lists-container>.list-sect:first-child{grid-column:1;grid-row:1/span 99}
+  #lists-container>.list-sect:not(:first-child){grid-column:2}
+  #lists-container>.list-sect:last-child{margin-bottom:14px}
+}
 .list-lbl{font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:.07em;margin-bottom:7px;display:flex;align-items:center;gap:6px;font-family:var(--font-display)}
 .list-lbl.in{color:var(--in)}.list-lbl.out{color:var(--out)}.list-lbl.maybe{color:var(--maybe)}.list-lbl.wait{color:var(--sub)}
 .list-cnt{font-weight:400;opacity:.7;font-family:var(--font-mono)}

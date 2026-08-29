@@ -8,9 +8,11 @@ import json
 import logging
 import os
 import sys
+import time
 from datetime import datetime, timezone
 
 from db import init_db, db_ping
+from backup_status import backup_freshness
 from aiohttp import web
 
 
@@ -284,6 +286,10 @@ async def health_check(request):
     if pool_stats and pool_stats.get("saturated"):
         problems.append(f"db_pool_saturated_{pool_stats['in_use']}/{pool_stats['max']}")
 
+    backup_state = backup_freshness()
+    if backup_state["status"] in ("STALE", "MISSING"):
+        problems.append(f"backup_{backup_state['status'].lower()}")
+
     from check_reminders import _active_loops
     scheduler_ok = _task_alive(_health_state["scheduler_task"])
     prune_ok = _task_alive(_health_state["prune_task"])
@@ -305,6 +311,7 @@ async def health_check(request):
         f"bot={bot_status} db={'ok' if db_ok else 'FAIL'}{pool_part} "
         f"scheduler={'ok' if scheduler_ok else 'DEAD'} "
         f"prune={'ok' if prune_ok else 'DEAD'} "
+        f"backup={backup_state['label']} "
         f"chats={cache_size} reminder_loops={len(_active_loops)}"
     )
     if last_err:
@@ -313,7 +320,10 @@ async def health_check(request):
         status_text = "DEGRADED " + ",".join(problems) + " | " + status_text
 
     # 503 only when DB or Telegram are unreachable — degraded background
-    # tasks should be visible but not flap container restarts.
+    # tasks should be visible but not flap container restarts. A stale backup
+    # is deliberately NOT in this list: the bot is serving fine, and returning
+    # 503 would make Docker's healthcheck restart a healthy bot because a
+    # snapshot is old — which fixes nothing and loses the running state.
     status_code = 503 if ("db_ping_failed" in problems or "telegram_api_error" in [p.split(":")[0] for p in problems]) else 200
     return web.Response(text=status_text, status=status_code)
     

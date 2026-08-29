@@ -938,6 +938,17 @@ COMMANDS = [
 
     # ────────────────────────── SUPER ADMIN ─────────────────────────
     {
+        "name": "health", "aliases": [], "scope": "super_admin", "category": "Super Admin",
+        "args": "", "sample": "/health",
+        "summary": "Bot, database and backup status",
+        "details": (
+            "Bot-owner only. Reports database connectivity, background-task "
+            "liveness, and — most usefully — how old the newest database "
+            "backup is. Checking from Telegram means you don't need shell "
+            "access to find out whether backups are still running."
+        ),
+    },
+    {
         "name": "broadcast", "aliases": [], "scope": "super_admin", "category": "Super Admin",
         "args": '"message"', "sample": '/broadcast "scheduled maintenance tonight"',
         "summary": "Send a message to all bot chats",

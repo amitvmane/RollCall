@@ -154,6 +154,8 @@ variables:
 | `BACKUP_INTERVAL_SECONDS` | No | Seconds between local snapshots (default: `86400`) |
 | `BACKUP_RETENTION_DAYS` | No | Days of local snapshots to keep (default: `7`); off-site copies are kept forever |
 | `RCLONE_REMOTE` | No | rclone remote for off-site backups, e.g. `b2:rollcall-backups` — unset disables off-site sync |
+| `BACKUP_DIR` | No | Where snapshots live (default: `/app/data/backups`); also where `/health` reads backup age from |
+| `BACKUP_MAX_AGE_HOURS` | No | Snapshot older than this reports as `STALE` in `/health` and `make backup-check` (default: `48`). Never causes a 503 |
 | `WEBHOOK_URL` | No | Public HTTPS URL to enable webhook mode |
 | `HEALTH_CHECK_PORT` | No | HTTP port for health endpoints (default: `8080`) |
 | `REST_API_ENABLED` | No | `true` to start FastAPI on port 8081 (required for web voting + Mini App) |

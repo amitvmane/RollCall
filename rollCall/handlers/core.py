@@ -381,6 +381,48 @@ async def unset_admins(message):
         await reply_error(message, e)
 
 
+@bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/health" and message.from_user.id in ADMINS)
+async def health_command(message):
+    """Bot/DB/backup status, from Telegram.
+
+    The backup line is the point. A stopped backup sidecar produces no
+    symptom until the day you need a snapshot — the sidecar was dead for
+    three weeks in Aug 2026 and nothing said so. Making it answerable from
+    the phone you already have removes the "remember to SSH in and check"
+    step that no-one actually performs.
+    """
+    cid = message.chat.id
+    try:
+        import db as _db
+        from backup_status import backup_freshness, BACKUP_MAX_AGE_HOURS
+
+        db_ok = _db.db_ping()
+        b = backup_freshness()
+
+        icon = {"OK": "✅", "STALE": "🔴", "MISSING": "🔴", "NA": "➖"}.get(b["status"], "❓")
+        if b["status"] == "OK":
+            backup_line = f"{icon} Backup: {b['age_hours']}h old — `{b['newest']}`"
+        elif b["status"] == "STALE":
+            backup_line = (
+                f"{icon} *Backup STALE* — newest is {b['age_hours']}h old "
+                f"(limit {BACKUP_MAX_AGE_HOURS}h)\n"
+                f"   The db-backup sidecar is probably not running."
+            )
+        elif b["status"] == "MISSING":
+            backup_line = f"{icon} *No backups found* — the db-backup sidecar is not running."
+        else:
+            backup_line = f"{icon} Backup: not applicable ({b['label']})"
+
+        lines = [
+            "*Bot health*",
+            f"{'✅' if db_ok else '🔴'} Database: {'ok' if db_ok else 'FAILING'}",
+            backup_line,
+        ]
+        await bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
+    except Exception as e:
+        await reply_error(message, e)
+
+
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/broadcast" and message.from_user.id in ADMINS)
 async def broadcast(message):
     if len(message.text.split(" ")) < 2:

@@ -72,4 +72,6 @@ Consequences:
 | `MINIAPP_URL` | unset | public URL of `/miniapp/` — sets Telegram menu button on startup |
 | `WEB_BASE_URL` | unset | public base URL (e.g. `https://yourdomain.com`) — enables magic-link web voting; if unset `/weblink` shows a config warning and no link is appended to panels |
 | `MEMORY_MODE` | unset | `true`/`1` → in-memory SQLite, all data lost on restart (original v1 behaviour); overrides `DATABASE_URL` |
+| `BACKUP_DIR` | `/app/data/backups` | where the db-backup sidecar writes snapshots, and where `/health` + `/health` (bot command) look to report backup freshness |
+| `BACKUP_MAX_AGE_HOURS` | `48` | newest snapshot older than this is reported as `backup=STALE` by `/health` and `make backup-check`. Deliberately never causes a 503 — a stale backup doesn't mean the bot is unhealthy, and returning 503 would make Docker restart a working bot |
 | `GHOST_AUTOFORGIVE_DAYS` | `7` | days an ended rollcall may sit unreviewed before `periodic_jobs._ghost_auto_forgive` treats it as "everyone who was IN attended" and forgives one absence each; `0` disables. Only ever decrements — an unreviewed session never recorded a ghost against anyone |

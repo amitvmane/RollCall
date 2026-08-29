@@ -576,6 +576,17 @@ async def phase_remaining_surface():
     out = await feed('/broadcast "scheduled maintenance tonight"', ALICE)
     record("/broadcast responds for the bot owner", bool(out))
 
+    out = await feed("/health", ALICE)
+    record("/health responds for the bot owner", bool(out))
+    # The backup line is the reason this command exists — a reply that omits it
+    # would look fine while hiding exactly the signal it was added to surface.
+    record("/health reports backup status", any("Backup" in str(m) or "backup" in str(m) for m in out),
+           f"got: {str(out)[:160]}")
+    # And it must stay owner-only: it names file paths and infrastructure state.
+    out_nonadmin = await feed("/health", BOB)
+    record("/health is silent for non-owners", not out_nonadmin,
+           f"non-owner got a reply: {str(out_nonadmin)[:120]}")
+
     record("no ERROR-level logs during surface phases", len(_errors) == 0,
            f"{len(_errors)} errors: {error_msgs()[:5]}" if _errors else "")
 

@@ -265,6 +265,54 @@ def test_get_rollcall_in_users_includes_proxy_owner():
     assert unowned["proxy_owner_id"] is None
 
 
+def test_get_rollcall_out_users_returns_only_the_out_list():
+    """Ghost review can mark a late drop-out, which means reading the OUT list.
+
+    Same shape as get_rollcall_in_users (real users and proxies), and strictly
+    disjoint from it — otherwise a member would appear twice in the review
+    keyboard and could be ghosted twice for one session.
+    """
+    chat = CHAT - 21
+    rc_id = _mk_rollcall(chat_id=chat)
+    conn = db.get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO users (rollcall_id, user_id, first_name, username, status, in_pos)"
+        " VALUES (?, ?, ?, ?, 'in', 1)",
+        (rc_id, 111, "Amit", "amit_tg"),
+    )
+    cur.execute(
+        "INSERT INTO users (rollcall_id, user_id, first_name, username, status)"
+        " VALUES (?, ?, ?, ?, 'out')",
+        (rc_id, 222, "Kiran", "kiran_tg"),
+    )
+    cur.execute(
+        "INSERT INTO users (rollcall_id, user_id, first_name, username, status)"
+        " VALUES (?, ?, ?, ?, 'maybe')",
+        (rc_id, 333, "Prasad", "prasad_tg"),
+    )
+    cur.execute(
+        "INSERT INTO proxy_users (rollcall_id, name, status, proxy_owner_id)"
+        " VALUES (?, 'Guest Bailed', 'out', 444)",
+        (rc_id,),
+    )
+    conn.commit()
+    cur.close()
+
+    out = db.get_rollcall_out_users(rc_id)
+    names = sorted(m["first_name"] for m in out)
+    assert names == ["Guest Bailed", "Kiran"], names
+    proxy = [m for m in out if m.get("proxy_name")][0]
+    assert proxy["proxy_owner_id"] == 444
+    assert proxy["user_id"] is None
+
+    # Disjoint from the IN list, and MAYBE belongs to neither.
+    in_ids = {m["user_id"] for m in db.get_rollcall_in_users(rc_id)}
+    out_ids = {m["user_id"] for m in out}
+    assert in_ids & out_ids == set()
+    assert 333 not in in_ids | out_ids
+
+
 # ── schema reconciler backfills dues columns ─────────────────────────────────
 
 # ── penalty_tiers ────────────────────────────────────────────────────────────

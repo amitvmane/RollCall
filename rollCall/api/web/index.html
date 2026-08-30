@@ -194,15 +194,24 @@
            work needed on our side for that part. Same backend endpoints
            the portal already uses (/auth/tg-login[/config]). Shown/loaded
            lazily by renderIdentity() whenever verification would help. -->
+      <!-- Manual fallback for the Telegram deep link. window.open() after an
+           await gets swallowed by popup blockers with no error to catch, so
+           the button can appear to do nothing; this anchor is shown as soon
+           as a verification is started and always works. -->
+      <div id="tg-deeplink-row" class="hidden" style="margin-top:10px;text-align:center">
+        <a id="tg-deeplink-a" class="btn btn-primary" href="#" target="_blank" rel="noopener"
+           style="display:inline-block;padding:9px 16px;text-decoration:none">✈ Open Telegram to finish</a>
+        <div style="font-size:.7rem;color:var(--sub);margin-top:5px">Didn't open automatically? Use this link, then come back to this tab.</div>
+      </div>
       <div id="tg-widget-wrap" class="hidden" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
-        <div style="font-size:.74rem;color:var(--sub);text-align:center;margin-bottom:6px">No Telegram app on this device? Scan with your phone to sign in:</div>
+        <div id="tg-widget-hint" style="font-size:.74rem;color:var(--sub);text-align:center;margin-bottom:6px">No Telegram app on this device? Scan with your phone to sign in:</div>
         <div id="tg-login-widget" style="display:flex;justify-content:center;min-height:40px"></div>
-        <!-- Telegram's widget script is cross-origin — we can't detect from
-             here whether it rendered a working button or its own "Bot
-             domain invalid" error (happens if /setdomain in BotFather
-             hasn't been set for this deployment's domain). Always show
-             this so a silently-broken widget explains itself. -->
-        <div style="font-size:.68rem;color:var(--sub);text-align:center;margin-top:5px;opacity:.75">Nothing above? This sign-in method isn't set up yet — use Telegram or Guest instead.</div>
+        <!-- Telegram's widget renders into a cross-origin iframe. We can't read
+             it, but we CAN see whether an iframe ever appeared — if it didn't
+             (the usual cause is /setdomain never being set in BotFather for
+             this deployment's domain) the wrap replaces itself with the note
+             below instead of leaving a blank gap where a button should be. -->
+        <div id="tg-widget-note" class="hidden" style="font-size:.72rem;color:var(--sub);text-align:center;margin-top:5px">This sign-in method isn't set up for this site yet — use the Telegram button above, or continue as a guest.</div>
       </div>
     </div>
 
@@ -262,80 +271,151 @@
       <button class="btn" style="margin-top:8px" onclick="openSignIn()">Sign in</button>
     </div>
 
+    <!-- Admin actions. This used to be one long flat scroll — every toggle,
+         every generator and every collapsible section stacked in a single
+         card, with the group switcher buried in the middle of it. It is now
+         a two-level menu: a group picker + a short list of destinations, and
+         one submenu panel visible at a time (see openAdminSection in app.js).
+         Nothing was removed; everything moved into the panel it belongs to. -->
     <div id="admin-card" class="card hidden adm-collapsed" style="border:1.5px dashed var(--border)">
       <div class="admin-card-hdr" id="admin-card-hdr" onclick="toggleAdminPanel()" role="button" tabindex="0"
            aria-controls="admin-card-body" aria-expanded="false">
         <span>⚙ Admin actions</span><span class="admin-chevron" id="admin-chevron">▼</span>
       </div>
       <div id="admin-card-body">
-      <!-- Other-groups switcher — only rendered when this admin manages
-           more than one group, so a multi-group admin can move between
-           their groups' own pages without a separate admin app. -->
-      <div id="admin-group-switcher" class="hidden" style="margin-bottom:10px"></div>
-      <div style="margin-bottom:10px">
+
+      <!-- Which group am I administering? Always rendered (even for a
+           single-group admin, as a plain label) — it used to be hidden
+           entirely unless you had a SECOND group, so the panel never said
+           which group it was about, and a multi-group admin had to guess
+           whether they were editing the right one. -->
+      <div id="admin-group-switcher" class="adm-group-picker">
+        <div class="adm-group-lbl">Managing group</div>
+        <select id="admin-group-select" class="adm-select" onchange="onAdminGroupChange(this.value)"
+                aria-label="Choose which of your groups to manage">
+          <option value="">Loading your groups…</option>
+        </select>
+      </div>
+
+      <!-- Quick actions: the two things an admin comes here to do most. -->
+      <div class="adm-quick">
         <button class="btn btn-primary" style="width:100%;padding:12px" onclick="openNewRollcallModal()">＋ New Rollcall</button>
-      </div>
-      <div id="end-rc-row" style="display:none;margin-bottom:10px">
-        <button class="btn btn-danger" id="end-rc-btn" style="width:100%;padding:12px" onclick="doEndRcWeb()">⏹ End Active Rollcall</button>
-      </div>
-      <!-- Silent mode toggle -->
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border)">
-        <div>
-          <div style="font-size:.85rem;font-weight:600">🔇 Silent mode</div>
-          <div style="font-size:.75rem;color:var(--sub)">Suppress per-vote bot messages in group</div>
-        </div>
-        <label class="admin-toggle">
-          <input type="checkbox" id="shh-toggle" onchange="toggleShhMode(this.checked)"/>
-          <span class="admin-toggle-slider"></span>
-        </label>
-      </div>
-      <!-- Ghost tracking -->
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border)">
-        <div>
-          <div style="font-size:.85rem;font-weight:600">👻 Ghost tracking</div>
-          <div style="font-size:.75rem;color:var(--sub)">Track members who RSVP IN but don't show up</div>
-        </div>
-        <label class="admin-toggle">
-          <input type="checkbox" id="ghost-toggle" onchange="toggleGhostTracking(this.checked)"/>
-          <span class="admin-toggle-slider"></span>
-        </label>
-      </div>
-      <!-- Ghost limit -->
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border);gap:8px">
-        <div>
-          <div style="font-size:.85rem;font-weight:600">🔢 Ghost limit</div>
-          <div style="font-size:.75rem;color:var(--sub)">Missed sessions before a warning triggers</div>
-        </div>
-        <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
-          <input id="ghost-limit-input" type="number" min="1" max="99" inputmode="numeric" style="width:56px;padding:7px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg);color:var(--text);font-size:.85rem;text-align:center"/>
-          <button class="btn btn-secondary" style="padding:8px 12px" onclick="doSaveGhostLimit()">Save</button>
+        <div id="end-rc-row" style="display:none;margin-top:8px">
+          <button class="btn btn-danger" id="end-rc-btn" style="width:100%;padding:12px" onclick="doEndRcWeb()">⏹ End Active Rollcall</button>
         </div>
       </div>
-      <!-- Admin-only mode -->
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border)">
-        <div>
-          <div style="font-size:.85rem;font-weight:600">🔒 Admin-only mode</div>
-          <div style="font-size:.75rem;color:var(--sub)">Only Telegram admins can use bot commands</div>
-        </div>
-        <label class="admin-toggle">
-          <input type="checkbox" id="admin-rights-toggle" onchange="toggleAdminRights(this.checked)"/>
-          <span class="admin-toggle-slider"></span>
-        </label>
+
+      <!-- ── Level 1: the menu ────────────────────────────────────────── -->
+      <div class="adm-menu" id="admin-menu" role="menu">
+        <button class="adm-menu-item" role="menuitem" onclick="openAdminSection('settings')">
+          <span class="adm-mi-icon">⚙</span>
+          <span class="adm-mi-text"><span class="adm-mi-title">Group settings</span>
+            <span class="adm-mi-sub">Silent mode, ghost tracking, timezone</span></span>
+          <span class="adm-mi-chev">›</span>
+        </button>
+        <button class="adm-menu-item" role="menuitem" onclick="openAdminSection('access')">
+          <span class="adm-mi-icon">🔐</span>
+          <span class="adm-mi-text"><span class="adm-mi-title">Member access</span>
+            <span class="adm-mi-sub">Generate a login or voting link</span></span>
+          <span class="adm-mi-chev">›</span>
+        </button>
+        <button class="adm-menu-item" id="adm-mi-proxy" role="menuitem" style="display:none" onclick="openAdminSection('proxy')">
+          <span class="adm-mi-icon">🗳</span>
+          <span class="adm-mi-text"><span class="adm-mi-title">Proxy vote</span>
+            <span class="adm-mi-sub">Vote for someone who isn't on Telegram</span></span>
+          <span class="adm-mi-chev">›</span>
+        </button>
+        <button class="adm-menu-item" role="menuitem" onclick="openAdminSection('templates')">
+          <span class="adm-mi-icon">📋</span>
+          <span class="adm-mi-text"><span class="adm-mi-title">Templates</span>
+            <span class="adm-mi-sub">Saved rollcalls and recurring schedules</span></span>
+          <span class="adm-mi-chev">›</span>
+        </button>
+        <button class="adm-menu-item" role="menuitem" onclick="openAdminSection('scheduled')">
+          <span class="adm-mi-icon">📅</span>
+          <span class="adm-mi-text"><span class="adm-mi-title">Scheduled</span>
+            <span class="adm-mi-sub">One-time rollcalls waiting to fire</span></span>
+          <span class="adm-mi-chev">›</span>
+        </button>
+        <button class="adm-menu-item" role="menuitem" onclick="openAdminSection('merge')">
+          <span class="adm-mi-icon">🧬</span>
+          <span class="adm-mi-text"><span class="adm-mi-title">Merge identities</span>
+            <span class="adm-mi-sub">Fold guest names into real members</span></span>
+          <span class="adm-mi-chev">›</span>
+        </button>
+        <!-- Dues lives in its own card (it has a member-facing half too); the
+             menu still points at it so "where is dues admin" has one answer. -->
+        <button class="adm-menu-item" id="adm-mi-dues" role="menuitem" style="display:none" onclick="jumpToDuesAdmin()">
+          <span class="adm-mi-icon">💰</span>
+          <span class="adm-mi-text"><span class="adm-mi-title">Dues &amp; fund</span>
+            <span class="adm-mi-sub">Balances, close a game, penalties</span></span>
+          <span class="adm-mi-chev">›</span>
+        </button>
       </div>
-      <!-- Timezone -->
-      <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px">
-        <div style="font-size:.82rem;font-weight:600;color:var(--sub);margin-bottom:2px">🕐 Timezone</div>
-        <div style="font-size:.77rem;color:var(--sub);margin-bottom:10px">Used for scheduled templates and auto-close timing. Telegram doesn't expose a group's location — this detects your browser's timezone instead.</div>
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-          <div id="tz-current" style="font-size:.85rem;font-weight:600;font-family:var(--font-mono)"></div>
-          <button class="btn btn-secondary" style="padding:8px 12px;white-space:nowrap" onclick="doDetectTimezone()">📍 Detect from this browser</button>
+
+      <!-- ── Level 2: one panel at a time ─────────────────────────────── -->
+      <div class="adm-panel hidden" id="adm-panel-settings">
+        <div class="adm-panel-hdr">
+          <button class="adm-back" onclick="closeAdminSection()">‹ Back</button>
+          <span class="adm-panel-title">⚙ Group settings</span>
+        </div>
+        <div class="adm-row">
+          <div>
+            <div class="adm-row-t">🔇 Silent mode</div>
+            <div class="adm-row-s">Suppress per-vote bot messages in group</div>
+          </div>
+          <label class="admin-toggle">
+            <input type="checkbox" id="shh-toggle" onchange="toggleShhMode(this.checked)"/>
+            <span class="admin-toggle-slider"></span>
+          </label>
+        </div>
+        <div class="adm-row">
+          <div>
+            <div class="adm-row-t">👻 Ghost tracking</div>
+            <div class="adm-row-s">Track members who RSVP IN but don't show up</div>
+          </div>
+          <label class="admin-toggle">
+            <input type="checkbox" id="ghost-toggle" onchange="toggleGhostTracking(this.checked)"/>
+            <span class="admin-toggle-slider"></span>
+          </label>
+        </div>
+        <div class="adm-row">
+          <div>
+            <div class="adm-row-t">🔢 Ghost limit</div>
+            <div class="adm-row-s">Missed sessions before a warning triggers</div>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+            <input id="ghost-limit-input" type="number" min="1" max="99" inputmode="numeric" style="width:56px;padding:7px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg);color:var(--text);font-size:.85rem;text-align:center"/>
+            <button class="btn btn-secondary" style="padding:8px 12px" onclick="doSaveGhostLimit()">Save</button>
+          </div>
+        </div>
+        <div class="adm-row">
+          <div>
+            <div class="adm-row-t">🔒 Admin-only mode</div>
+            <div class="adm-row-s">Only Telegram admins can use bot commands</div>
+          </div>
+          <label class="admin-toggle">
+            <input type="checkbox" id="admin-rights-toggle" onchange="toggleAdminRights(this.checked)"/>
+            <span class="admin-toggle-slider"></span>
+          </label>
+        </div>
+        <div class="adm-sub">
+          <div class="adm-row-t">🕐 Timezone</div>
+          <div class="adm-row-s" style="margin:2px 0 10px">Used for scheduled templates and auto-close timing. Telegram doesn't expose a group's location — this detects your browser's timezone instead.</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+            <div id="tz-current" style="font-size:.85rem;font-weight:600;font-family:var(--font-mono)"></div>
+            <button class="btn btn-secondary" style="padding:8px 12px;white-space:nowrap" onclick="doDetectTimezone()">📍 Detect from this browser</button>
+          </div>
         </div>
       </div>
-      <!-- Member login links -->
-      <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px">
-        <div style="font-size:.82rem;font-weight:600;color:var(--sub);margin-bottom:2px">🔐 Member login link</div>
-        <div style="font-size:.77rem;color:var(--sub);margin-bottom:10px">Pick a member below for a 7-day single-use Telegram login link. For a guest or proxy who isn't on Telegram, choose "Someone else" — that generates a plain voting link with their name pre-filled (not a real login; guest voting never needed one, this just saves them typing).</div>
-        <select id="weblogin-member-select" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg);color:var(--text);font-size:.88rem;margin-bottom:8px" onchange="onWebloginSelectChange()">
+
+      <div class="adm-panel hidden" id="adm-panel-access">
+        <div class="adm-panel-hdr">
+          <button class="adm-back" onclick="closeAdminSection()">‹ Back</button>
+          <span class="adm-panel-title">🔐 Member access</span>
+        </div>
+        <div class="adm-row-s" style="margin-bottom:10px">Pick a member for a 7-day single-use Telegram login link. For a guest or proxy who isn't on Telegram, choose "Someone else" — that generates a plain voting link with their name pre-filled (not a real login; guest voting never needed one, this just saves them typing).</div>
+        <select id="weblogin-member-select" class="adm-select" style="margin-bottom:8px" onchange="onWebloginSelectChange()">
           <option value="">Loading members…</option>
         </select>
         <div id="weblogin-name-row" class="hidden" style="display:flex;gap:8px;margin-bottom:8px">
@@ -348,48 +428,58 @@
           <button class="btn btn-secondary" style="width:100%;padding:8px" onclick="copyWebloginUrl()">📋 Copy link</button>
         </div>
       </div>
-      <!-- Proxy vote (needs an active rollcall — toggled alongside end-rc-row) -->
-      <div id="proxy-vote-row" style="display:none;border-top:1px solid var(--border);padding-top:12px;margin-top:12px">
-        <div style="font-size:.82rem;font-weight:600;color:var(--sub);margin-bottom:8px">🗳 Proxy vote</div>
-        <div style="font-size:.77rem;color:var(--sub);margin-bottom:10px">Vote on behalf of a member who isn't on Telegram (guest, +1) — same as /sif in the group.</div>
-        <input id="proxy-name-input" type="text" placeholder="Member name" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg);color:var(--text);font-size:.88rem;margin-bottom:8px"/>
-        <div style="display:flex;gap:8px">
-          <button class="btn" style="flex:1;padding:9px;border-radius:8px;font-weight:600;background:var(--border);color:var(--text)" onclick="doProxyVoteWeb('in')">✅ IN</button>
-          <button class="btn" style="flex:1;padding:9px;border-radius:8px;font-weight:600;background:var(--border);color:var(--text)" onclick="doProxyVoteWeb('out')">❌ OUT</button>
-          <button class="btn" style="flex:1;padding:9px;border-radius:8px;font-weight:600;background:var(--border);color:var(--text)" onclick="doProxyVoteWeb('maybe')">🤔 MAYBE</button>
+
+      <!-- Proxy vote needs an active rollcall; its menu entry and this panel
+           are shown/hidden together with #end-rc-row. -->
+      <div class="adm-panel hidden" id="adm-panel-proxy">
+        <div class="adm-panel-hdr">
+          <button class="adm-back" onclick="closeAdminSection()">‹ Back</button>
+          <span class="adm-panel-title">🗳 Proxy vote</span>
+        </div>
+        <div id="proxy-vote-row">
+          <div class="adm-row-s" style="margin-bottom:10px">Vote on behalf of a member who isn't on Telegram (guest, +1) — same as /sif in the group.</div>
+          <input id="proxy-name-input" type="text" placeholder="Member name" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg);color:var(--text);font-size:.88rem;margin-bottom:8px"/>
+          <div style="display:flex;gap:8px">
+            <button class="btn" style="flex:1;padding:9px;border-radius:8px;font-weight:600;background:var(--border);color:var(--text)" onclick="doProxyVoteWeb('in')">✅ IN</button>
+            <button class="btn" style="flex:1;padding:9px;border-radius:8px;font-weight:600;background:var(--border);color:var(--text)" onclick="doProxyVoteWeb('out')">❌ OUT</button>
+            <button class="btn" style="flex:1;padding:9px;border-radius:8px;font-weight:600;background:var(--border);color:var(--text)" onclick="doProxyVoteWeb('maybe')">🤔 MAYBE</button>
+          </div>
         </div>
       </div>
+
       <!-- Templates: start now, edit content, or manage recurring schedule
            — self-serve editor (id_token + is_web_admin only, no separate
-           API token needed). -->
-      <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:12px">
-        <div class="dues-admin-section-hdr" onclick="toggleTemplatesSchedule()">
-          📋 Templates <span id="templates-chevron">▼</span>
+           API token needed). Body is rendered lazily on first open. -->
+      <div class="adm-panel hidden" id="adm-panel-templates">
+        <div class="adm-panel-hdr">
+          <button class="adm-back" onclick="closeAdminSection()">‹ Back</button>
+          <span class="adm-panel-title">📋 Templates</span>
         </div>
-        <div id="templates-schedule-body" class="hidden"></div>
+        <div id="templates-schedule-body"></div>
       </div>
+
       <!-- One-time future rollcalls created via the New Rollcall modal's
-           Schedule → Once path (recurring schedules live in Templates
-           above — this is only the one-off entries). -->
-      <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:12px">
-        <div class="dues-admin-section-hdr" onclick="toggleScheduledOnce()">
-          📅 Scheduled (one-time) <span id="scheduled-once-chevron">▼</span>
+           Schedule → Once path (recurring schedules live in Templates —
+           this is only the one-off entries). -->
+      <div class="adm-panel hidden" id="adm-panel-scheduled">
+        <div class="adm-panel-hdr">
+          <button class="adm-back" onclick="closeAdminSection()">‹ Back</button>
+          <span class="adm-panel-title">📅 Scheduled (one-time)</span>
         </div>
-        <div id="scheduled-once-body" class="hidden"></div>
+        <div id="scheduled-once-body"></div>
       </div>
+
       <!-- Merge Identities: fold a proxy name (added repeatedly via /sif for
            a regular sitting with the admin) into a real member or another
-           proxy name, so stats/dues/ghost-tracking count them once. Same
-           self-serve id_token + is_web_admin gate as Templates above.
-           Occasional-use cleanup tool, not core daily admin flow — kept
-           collapsed and placed last so it doesn't compete with Start/
-           Schedule/Templates for attention. -->
-      <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:12px">
-        <div class="dues-admin-section-hdr" onclick="toggleIdentityMerge()">
-          🧬 Merge Identities <span id="identity-merge-chevron">▼</span>
+           proxy name, so stats/dues/ghost-tracking count them once. -->
+      <div class="adm-panel hidden" id="adm-panel-merge">
+        <div class="adm-panel-hdr">
+          <button class="adm-back" onclick="closeAdminSection()">‹ Back</button>
+          <span class="adm-panel-title">🧬 Merge identities</span>
         </div>
-        <div id="identity-merge-body" class="hidden"></div>
+        <div id="identity-merge-body"></div>
       </div>
+
       </div><!-- /#admin-card-body -->
     </div>
 

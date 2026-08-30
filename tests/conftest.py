@@ -66,6 +66,10 @@ db_mock.mark_rollcall_absent_done.return_value = True
 db_mock.get_unprocessed_rollcalls.return_value = []
 db_mock.add_ghost_event.return_value = True
 db_mock.get_rollcall_in_users.return_value = []
+# Ghost review can also mark late drop-outs, so it reads the OUT list too.
+# Without an explicit [], MagicMock's default makes `in_users + out_users`
+# evaluate to a MagicMock that iterates empty — every ghost silently vanishes.
+db_mock.get_rollcall_out_users.return_value = []
 db_mock.get_active_rollcalls.return_value = []
 db_mock.end_rollcall.return_value = None
 db_mock.update_chat_settings.return_value = None

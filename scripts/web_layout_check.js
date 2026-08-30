@@ -82,9 +82,22 @@ const GROUP = {
   }],
 };
 
+const ADMIN_GROUPS = {
+  groups: [
+    { chat_id: -1001, group_name: "Test FC", group_web_token: "testtoken123" },
+    { chat_id: -1002, group_name: "Second Club", group_web_token: "othertoken456" },
+  ],
+};
+
 const ROUTES = [
   [/\/web\/group\/[^/]+$/, GROUP],
   [/admin-status/, { is_admin: true }],
+  [/\/auth\/admin\/groups/, ADMIN_GROUPS],
+  [/\/members$/, { members: [{ user_id: 1, first_name: "Amit", username: "amit" }] }],
+  [/\/templates$/, []],
+  [/\/scheduled-rollcalls/, { items: [] }],
+  [/\/identities\/suggestions$/, { suggestions: [] }],
+  [/\/identities$/, { identities: [], groups: [], discarded: [], standalone: [] }],
   [/\/stats/, { sessions: 81, avg_attendance: 11.1, members: 128, leaderboard: [], recent: [] }],
   [/\/presence/, { viewers: 1 }],
   [/\/dues\//, { enabled: false }],
@@ -324,6 +337,132 @@ const WIDTHS = [
 
     if (errs.length) failures.push(`identity: JS error — ${errs[0]}`);
     console.log(`  identity: menu, sign-out and sign-in flows exercised`);
+    await page.close();
+  }
+
+  // ── Admin menu ──────────────────────────────────────────────────────────
+  // The admin card is a two-level menu: a group picker + a list of entries at
+  // the root, and exactly one submenu panel below that. Before it was one flat
+  // scroll of every control at once, with the group switcher hidden unless you
+  // happened to administer a second group — so the panel never said which
+  // group it was editing. Both halves are asserted here because neither the
+  // static wiring check nor the layout assertions above can see them.
+  {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 420, height: 900 });
+    await page.setRequestInterception(true);
+    page.on("request", req =>
+      req.url().startsWith(BASE) ? req.continue()
+                                 : req.respond({ status: 200, contentType: "text/plain", body: "" }));
+    const errs = [];
+    page.on("pageerror", e => errs.push(String(e.message)));
+
+    await page.goto(`${BASE}/web/group/testtoken123`, { waitUntil: "load" });
+    await page.evaluate(() => {
+      localStorage.setItem("rc_verified_tg_user_id", "168415137");
+      localStorage.setItem("rc_verified_tg_name", "Amit");
+      localStorage.setItem("rc_identity_token", "168415137.9999999999.deadbeef");
+    });
+    await page.goto(`${BASE}/web/group/testtoken123`, { waitUntil: "load" });
+    await new Promise(r => setTimeout(r, 700));
+
+    const root = await page.evaluate(() => {
+      document.getElementById("admin-nav-btn").click();
+      const sel = document.getElementById("admin-group-select");
+      return {
+        open: !document.getElementById("admin-card").classList.contains("adm-collapsed"),
+        menuVisible: !document.getElementById("admin-menu").classList.contains("hidden"),
+        pickerVisible: !!(sel && sel.getBoundingClientRect().width > 0),
+        options: sel ? [...sel.options].map(o => o.value) : [],
+        selected: sel ? sel.value : null,
+        // End Active must appear on a cold load, not only after the next poll.
+        endVisible: document.getElementById("end-rc-row").style.display !== "none",
+      };
+    });
+    if (!root.open) failures.push("admin: header button did not open the panel");
+    if (!root.menuVisible) failures.push("admin: menu level not visible on open");
+    if (!root.pickerVisible) failures.push("admin: group picker not visible at the menu level");
+    if (root.options.length !== 2) failures.push(`admin: group picker should list both groups, got ${JSON.stringify(root.options)}`);
+    if (root.selected !== "testtoken123") failures.push(`admin: current group not selected, got "${root.selected}"`);
+    if (!root.endVisible) failures.push("admin: End Active Rollcall hidden for an admin with an open rollcall");
+
+    for (const name of ["settings", "access", "templates", "scheduled", "merge"]) {
+      const s = await page.evaluate(async n => {
+        await window.openAdminSection(n);
+        const p = document.getElementById(`adm-panel-${n}`);
+        return {
+          shown: !!p && !p.classList.contains("hidden"),
+          menuHidden: document.getElementById("admin-menu").classList.contains("hidden"),
+          others: [...document.querySelectorAll(".adm-panel")]
+            .filter(el => el.id !== `adm-panel-${n}` && !el.classList.contains("hidden")).length,
+        };
+      }, name);
+      if (!s.shown) failures.push(`admin: ${name} panel did not open`);
+      if (!s.menuHidden) failures.push(`admin: menu still shown behind the ${name} panel`);
+      if (s.others) failures.push(`admin: ${s.others} other panel(s) open alongside ${name}`);
+
+      const back = await page.evaluate(() => {
+        window.closeAdminSection();
+        return {
+          menuVisible: !document.getElementById("admin-menu").classList.contains("hidden"),
+          panelsOpen: [...document.querySelectorAll(".adm-panel")].filter(el => !el.classList.contains("hidden")).length,
+        };
+      });
+      if (!back.menuVisible) failures.push(`admin: Back from ${name} did not return to the menu`);
+      if (back.panelsOpen) failures.push(`admin: ${back.panelsOpen} panel(s) still open after Back from ${name}`);
+    }
+
+    if (errs.length) failures.push(`admin: JS error — ${errs[0]}`);
+    console.log("  admin: two-level menu, group picker and all submenu panels exercised");
+    await page.close();
+  }
+
+  // ── Telegram Mini App mode ──────────────────────────────────────────────
+  // body.tg-mode used to hide the whole brand bar, on the reasoning that
+  // Telegram already draws a title bar. But the bar is also where the account
+  // chip and the Admin button live, so an admin opening the group from the
+  // Telegram menu button had no top-level menu at all and no route to admin
+  // controls. Only a browser can see this — the CSS rule reads as harmless.
+  {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 420, height: 900 });
+    await page.setRequestInterception(true);
+    page.on("request", req =>
+      req.url().startsWith(BASE) ? req.continue()
+                                 : req.respond({ status: 200, contentType: "text/plain", body: "" }));
+    const errs = [];
+    page.on("pageerror", e => errs.push(String(e.message)));
+
+    await page.evaluateOnNewDocument(() => {
+      window.Telegram = { WebApp: {
+        initData: "", initDataUnsafe: { user: { id: 168415137, first_name: "Amit" } },
+        ready() {}, expand() {},
+      } };
+      localStorage.setItem("rc_verified_tg_user_id", "168415137");
+      localStorage.setItem("rc_verified_tg_name", "Amit");
+      localStorage.setItem("rc_identity_token", "168415137.9999999999.deadbeef");
+    });
+    await page.goto(`${BASE}/web/group/testtoken123`, { waitUntil: "load" });
+    await new Promise(r => setTimeout(r, 700));
+
+    const s = await page.evaluate(() => {
+      const admin = document.getElementById("admin-nav-btn");
+      return {
+        tgMode: document.body.classList.contains("tg-mode"),
+        barHeight: document.getElementById("brand-bar").getBoundingClientRect().height,
+        acctWidth: document.getElementById("acct-btn").getBoundingClientRect().width,
+        adminWidth: admin.classList.contains("hidden") ? 0 : admin.getBoundingClientRect().width,
+        overflow: document.documentElement.scrollWidth - window.innerWidth,
+      };
+    });
+    if (!s.tgMode) failures.push("tg-mode: Telegram Mini App not detected from initDataUnsafe");
+    if (!(s.barHeight > 0)) failures.push("tg-mode: header not rendered inside the Mini App");
+    if (!(s.acctWidth > 0)) failures.push("tg-mode: account chip not reachable inside the Mini App");
+    if (!(s.adminWidth > 0)) failures.push("tg-mode: Admin button not reachable inside the Mini App");
+    if (s.overflow > 1) failures.push(`tg-mode: page overflows by ${s.overflow}px`);
+    if (errs.length) failures.push(`tg-mode: JS error — ${errs[0]}`);
+
+    console.log("  tg-mode: header controls survive inside the Telegram Mini App");
     await page.close();
   }
 

@@ -203,6 +203,41 @@ class TestDuesGetRoutesRequireHeaderIdentity(unittest.TestCase):
             r = _client().get("/api/v1/web/group/grp123/dues/qr-token")
         self.assertEqual(r.status_code, 401)
 
+    # ── /dues/qr (the image itself) ──────────────────────────────────────
+    # The token routes above were covered; the route that actually renders
+    # the PNG was not, and it 500'd in production on every single call —
+    # qr_png() returns a BytesIO and Response only renders str/bytes, so
+    # starlette raised "'_io.BytesIO' object has no attribute 'encode'".
+    # Assert real PNG bytes come back, not just a 200.
+    def _qr_token(self):
+        from api.identity import issue_scoped_token
+        return issue_scoped_token(42, "dues_qr", ttl_seconds=300)
+
+    def test_qr_returns_real_png_bytes(self):
+        with patch("api.routes.dues._db.get_chat_by_group_web_token", return_value=CHAT), \
+             patch("api.routes.dues.dues_svc.get_dues_settings", return_value={"upi_vpa": "someone@upi"}):
+            r = _client().get(f"/api/v1/web/group/grp123/dues/qr?id_token={self._qr_token()}&amount=250")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.headers["content-type"], "image/png")
+        self.assertTrue(r.content.startswith(b"\x89PNG"), "body is not a PNG")
+
+    def test_qr_without_amount_also_renders(self):
+        """amount=0 means 'payer types the amount' — it must not blow up and
+        must not put a literal `am=None` in the UPI URL."""
+        with patch("api.routes.dues._db.get_chat_by_group_web_token", return_value=CHAT), \
+             patch("api.routes.dues.dues_svc.get_dues_settings", return_value={"upi_vpa": "someone@upi"}):
+            r = _client().get(f"/api/v1/web/group/grp123/dues/qr?id_token={self._qr_token()}")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.content.startswith(b"\x89PNG"))
+
+    def test_qr_rejects_a_plain_identity_token(self):
+        """The image URL carries its token in the query string, so only the
+        narrow dues_qr scope may open it."""
+        with patch("api.routes.dues._db.get_chat_by_group_web_token", return_value=CHAT), \
+             patch("api.routes.dues.dues_svc.get_dues_settings", return_value={"upi_vpa": "someone@upi"}):
+            r = _client().get(f"/api/v1/web/group/grp123/dues/qr?id_token={self.token}")
+        self.assertEqual(r.status_code, 401)
+
     # ── Sanity: an invalid (garbage, not just missing) header is also 401 ─
     def test_invalid_header_token_also_401(self):
         with patch("api.routes.dues._db.get_chat_by_group_web_token", return_value=CHAT):

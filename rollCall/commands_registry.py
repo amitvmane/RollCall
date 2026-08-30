@@ -498,6 +498,9 @@ COMMANDS = [
         "summary": "Review & mark no-shows from a past session",
         "details": "Walks through recently-ended rollcalls and lets you pick who actually didn't show. "
                    "Resets streaks on selected users.\n\n"
+                   "The IN list is shown first. Tap '＋ Someone who dropped out late' to also mark "
+                   "someone who moved to OUT too late for a replacement to be arranged — that leaves "
+                   "the side short just like a no-show does, and it counts as a ghost too.\n\n"
                    "Answering this also FORGIVES everyone you don't select — each of them gets one "
                    "absence removed. That's why it's worth answering even when nobody ghosted: "
                    "'no ghosts' is what clears past absences for the people who did turn up.\n\n"

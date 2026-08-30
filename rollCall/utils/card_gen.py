@@ -141,10 +141,16 @@ def _text_h(draw: ImageDraw.Draw, text: str, font) -> int:
 
 # ── QR code ──────────────────────────────────────────────────────────────────
 
-def qr_png(vpa: str, amount: int) -> BytesIO:
-    """Return a PNG BytesIO of a UPI QR for the given VPA and amount."""
+def qr_png(vpa: str, amount: Optional[int] = None) -> BytesIO:
+    """Return a PNG BytesIO of a UPI QR for the given VPA and amount.
+
+    `amount=None` (or 0) means "let the payer type the amount" — the `am`
+    parameter is omitted entirely rather than interpolated, which is what
+    produced `am=None` in the URL and a QR that every UPI app rejected.
+    """
     import qrcode  # soft import — already in requirements
-    upi_url = f"upi://pay?pa={vpa}&am={amount}&cu=INR&tn=RollCall"
+    amt_part = f"&am={amount}" if amount else ""
+    upi_url = f"upi://pay?pa={vpa}{amt_part}&cu=INR&tn=RollCall"
     img = qrcode.make(upi_url)
     buf = BytesIO()
     img.save(buf, format="PNG")

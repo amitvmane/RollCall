@@ -457,6 +457,109 @@ class TestGhostCallbackDone(GhostTestBase):
 
 
 # ===========================================================================
+# 7b. Late drop-outs — a player who moved to OUT too late to be replaced
+# ===========================================================================
+
+class TestGhostLateDropOut(GhostTestBase):
+    """A no-show isn't always someone who stayed IN.
+
+    Dropping to OUT at the last minute, when it's too late to find a
+    replacement, leaves the side short exactly like a ghost does — but every
+    ghost path read the IN list only, so it could not be recorded at all.
+    """
+
+    IN_USERS = [{'user_id': 5, 'first_name': 'Bob', 'username': 'bob'}]
+    OUT_USERS = [{'user_id': 7, 'first_name': 'Kiran', 'username': 'kiran'}]
+
+    def setUp(self):
+        super().setUp()
+        self.bot_state._ghost_show_out.clear()
+        # telebot's types are MagicMocks here, so a built keyboard can't be
+        # walked — read the button labels off the constructor calls instead.
+        self.bot_state.InlineKeyboardButton.reset_mock()
+
+    def _button_labels(self):
+        return [c.args[0] if c.args else c.kwargs.get("text")
+                for c in self.bot_state.InlineKeyboardButton.call_args_list]
+
+    async def test_out_members_hidden_behind_an_expander_by_default(self):
+        c = self._make_call(data="ghost_yes_42", chat_id=100)
+        with patch('handlers.ghost.get_rollcall_in_users', return_value=self.IN_USERS), \
+             patch('handlers.ghost.get_rollcall_out_users', return_value=self.OUT_USERS):
+            await self.ghost_callback_handler(c)
+
+        labels = self._button_labels()
+        self.assertIn("Bob", labels)
+        self.assertNotIn("Kiran (was OUT)", labels)
+        self.assertTrue(any("dropped out late" in l for l in labels),
+                        f"no expander offered: {labels}")
+
+    async def test_expander_reveals_the_out_members(self):
+        c = self._make_call(data="ghost_moreout_42", chat_id=100)
+        with patch('handlers.ghost.get_rollcall_in_users', return_value=self.IN_USERS), \
+             patch('handlers.ghost.get_rollcall_out_users', return_value=self.OUT_USERS):
+            await self.ghost_callback_handler(c)
+
+        labels = self._button_labels()
+        self.assertIn("Kiran (was OUT)", labels)
+        self.assertIn((100, 42), self.bot_state._ghost_show_out)
+
+    async def test_out_member_can_be_toggled_and_stays_selected(self):
+        self.bot_state._ghost_show_out.add((100, 42))
+        c = self._make_call(data="ghost_tog_42_7", chat_id=100)
+        with patch('handlers.ghost.get_rollcall_in_users', return_value=self.IN_USERS), \
+             patch('handlers.ghost.get_rollcall_out_users', return_value=self.OUT_USERS):
+            await self.ghost_callback_handler(c)
+
+        self.assertIn(7, self.bot_state._ghost_selections[(100, 42)])
+        self.assertIn("👻 Kiran (was OUT)", self._button_labels())
+
+    async def test_done_records_a_ghost_for_the_late_drop_out(self):
+        """The regression that matters: apply_ghost_marking resolves names from
+        the candidate list, so an OUT member used to be dropped with a warning
+        and no ghost was ever written."""
+        self.bot_state._ghost_selections[(100, 42)] = {7}
+        c = self._make_call(data="ghost_done_42", chat_id=100)
+        with patch('handlers.ghost.get_rollcall_in_users', return_value=self.IN_USERS), \
+             patch('handlers.ghost.get_rollcall_out_users', return_value=self.OUT_USERS), \
+             patch('handlers.ghost.mark_rollcall_absent_done'), \
+             patch('handlers.ghost.increment_ghost_count') as mock_inc, \
+             patch('handlers.ghost.add_ghost_event') as mock_event, \
+             patch('handlers.ghost.decrement_ghost_count') as mock_dec, \
+             patch('handlers.ghost.reset_user_streak'), \
+             patch('handlers.ghost.get_ghost_count', return_value=2):
+            await self.ghost_callback_handler(c)
+
+        mock_inc.assert_called_once_with(100, 7, 'Kiran')
+        mock_event.assert_called_once_with(42, 100, 7, 'Kiran')
+        # Bob stayed IN and wasn't marked, so he's forgiven one absence.
+        # Kiran was never on the attendance hook and must not be forgiven.
+        forgiven = [call.args[1] for call in mock_dec.call_args_list]
+        self.assertEqual(forgiven, [5])
+
+    async def test_mark_absent_review_also_offers_late_drop_outs(self):
+        """/mark_absent reviews an old session through the same keyboard."""
+        c = self._make_call(data="mabs_sel_42", chat_id=100)
+        with patch('handlers.ghost.get_rollcall_in_users', return_value=self.IN_USERS), \
+             patch('handlers.ghost.get_rollcall_out_users', return_value=self.OUT_USERS):
+            await self.ghost_callback_handler(c)
+
+        labels = self._button_labels()
+        self.assertTrue(any("dropped out late" in l for l in labels),
+                        f"no expander offered: {labels}")
+
+    async def test_session_with_only_out_members_still_opens(self):
+        """Everyone bailed: there's no IN list, but there is still something
+        to record. This used to answer 'No IN users found' and stop."""
+        c = self._make_call(data="ghost_yes_42", chat_id=100)
+        with patch('handlers.ghost.get_rollcall_in_users', return_value=[]), \
+             patch('handlers.ghost.get_rollcall_out_users', return_value=self.OUT_USERS):
+            await self.ghost_callback_handler(c)
+
+        self.assertTrue(self.bot_state.bot.edit_message_text.called)
+
+
+# ===========================================================================
 # 8. /set_absent_limit command
 # ===========================================================================
 

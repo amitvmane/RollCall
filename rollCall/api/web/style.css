@@ -105,6 +105,48 @@ html.dark .brand-bar{background:linear-gradient(180deg,#0D1712 0%,#000 220%)}
    card the "Sign in" you just pressed was talking about. */
 #identity-card.id-flash{animation:admFlash .9s ease-out}
 
+/* ── Admin menu (level 1) and its submenu panels (level 2) ───────────────── */
+.adm-group-picker{margin-bottom:12px}
+.adm-group-lbl{font-size:.7rem;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px}
+.adm-select{
+  width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;
+  border:1.5px solid var(--border);background:var(--bg);color:var(--text);
+  font-size:.88rem;font-family:inherit;font-weight:600;
+}
+/* A single-group admin still gets the label — it names the group being
+   edited — but there is nothing to switch to, so it reads as a field, not
+   a broken control. */
+.adm-select:disabled{opacity:1;-webkit-text-fill-color:var(--text);appearance:none;font-weight:700}
+
+.adm-quick{margin-bottom:12px}
+
+.adm-menu{display:flex;flex-direction:column;gap:6px}
+.adm-menu-item{
+  display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+  padding:11px 12px;border-radius:10px;border:1px solid var(--border);
+  background:var(--bg);color:var(--text);cursor:pointer;font-family:inherit;
+  transition:border-color .15s,background .15s;
+}
+.adm-menu-item:hover{border-color:var(--accent);background:var(--card)}
+.adm-mi-icon{font-size:1rem;width:20px;text-align:center;flex-shrink:0}
+.adm-mi-text{flex:1;min-width:0}
+.adm-mi-title{display:block;font-size:.85rem;font-weight:700}
+.adm-mi-sub{display:block;font-size:.72rem;color:var(--sub);margin-top:1px}
+.adm-mi-chev{color:var(--sub);font-size:1.1rem;flex-shrink:0}
+
+.adm-panel-hdr{display:flex;align-items:center;gap:10px;padding-bottom:10px;margin-bottom:6px;border-bottom:1px solid var(--border)}
+.adm-back{
+  background:var(--border);border:none;border-radius:8px;padding:6px 11px;
+  font-size:.78rem;font-weight:700;color:var(--text);cursor:pointer;font-family:inherit;
+}
+.adm-back:hover{background:var(--accent);color:#fff}
+.adm-panel-title{font-size:.9rem;font-weight:700}
+.adm-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 0;border-bottom:1px solid var(--border)}
+.adm-row:last-child{border-bottom:none}
+.adm-row-t{font-size:.85rem;font-weight:600}
+.adm-row-s{font-size:.75rem;color:var(--sub)}
+.adm-sub{padding-top:12px}
+
 /* The account control lives in /shared/account.css — same component on the
    portal, which has an opposite (light) header palette. */
 
@@ -135,7 +177,28 @@ html.dark .brand-bar{background:linear-gradient(180deg,#0D1712 0%,#000 220%)}
   .brand-theme-btn,.brand-notify-btn,.brand-admin-btn{width:29px;height:29px}
 }
 .brand-install-btn:hover{background:var(--accent);color:#fff}
-body.tg-mode .brand-bar{display:none}
+/* Inside the Telegram Mini App the whole brand bar used to be display:none —
+   Telegram already draws a title bar, so the wordmark was redundant. But the
+   bar is also where the account chip and the Admin button live, so hiding it
+   took every top-level menu with it: an admin opening the group from the
+   Telegram menu button had no way to reach admin controls at all. Keep the
+   bar, drop only the branding, and re-skin it for Telegram's palette (the
+   dark-gradient version's white-on-dark chip is unreadable on a light
+   Telegram theme). */
+body.tg-mode .brand-bar{
+  background:none;box-shadow:none;padding:8px 0 4px;margin:0 0 8px;
+  justify-content:flex-end;position:static;
+  --acct-fg:var(--text);--acct-bg:rgba(127,127,127,.16);
+}
+body.tg-mode .brand-inner{display:none}
+body.tg-mode .brand-theme-btn,
+body.tg-mode .brand-notify-btn,
+body.tg-mode .brand-admin-btn{background:rgba(127,127,127,.16);color:var(--text)}
+body.tg-mode .brand-theme-btn:hover,
+body.tg-mode .brand-notify-btn:hover,
+body.tg-mode .brand-admin-btn:hover{background:var(--accent);color:#fff}
+/* Install and Home are meaningless inside the Mini App container. */
+body.tg-mode #install-btn,body.tg-mode #home-btn{display:none}
 body.tg-mode #app{padding:12px 14px 32px}
 body.tg-mode{
   --bg:var(--tg-theme-bg-color,#f0f4f8);

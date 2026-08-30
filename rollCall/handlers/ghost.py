@@ -9,8 +9,9 @@ from datetime import datetime
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot_state import (
-    bot, _ghost_selections, _pending_reconf, _pending_deletes, _pending_overrides,
-    _pending_proxy_add, _log_task_exc, _get_display_name, format_mention_with_name,
+    bot, _ghost_selections, _ghost_show_out, _pending_reconf, _pending_deletes,
+    _pending_overrides, _pending_proxy_add, _log_task_exc, _get_display_name,
+    format_mention_with_name,
     _esc_md, get_rc_db_id, _build_ghost_select_keyboard, _fmt_ended_at,
     reply_error, safe_edit_text, safe_edit_markup,
 )
@@ -22,7 +23,8 @@ from db import (
     get_ghost_count, increment_ghost_count, reset_ghost_count, decrement_ghost_count,
     get_ghost_leaderboard, get_ghost_count_by_proxy_name,
     mark_rollcall_absent_done, get_unprocessed_rollcalls,
-    add_ghost_event, get_rollcall_in_users, save_ghost_selections, load_ghost_selections,
+    add_ghost_event, get_rollcall_in_users, get_rollcall_out_users,
+    save_ghost_selections, load_ghost_selections,
     reset_user_streak, log_admin_action, upsert_chat_member,
     increment_user_stat, increment_rollcall_stat,
 )
@@ -35,11 +37,30 @@ def _ts() -> str:
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 
+_GHOST_PROMPT = (
+    "👻 Who ghosted? Tap to select, then tap Done.\n"
+    "Someone who dropped to OUT too late to be replaced counts too — "
+    "use the ＋ button to add them."
+)
+
+
+def _ghost_candidates(rc_db_id: int) -> list:
+    """Everyone who can be marked a ghost for this session.
+
+    IN members first (the usual no-show), then members who ended up OUT — a
+    drop-out so late that no replacement could be arranged is a no-show the
+    admin still wants on record, and it used to be unrecordable because every
+    ghost path read the IN list only.
+    """
+    return get_rollcall_in_users(rc_db_id) + get_rollcall_out_users(rc_db_id)
+
+
 def apply_ghost_marking(cid: int, rc_db_id: int, selected: set, in_users: list) -> list:
     """Write ghost tracking records for `selected` members and return summary lines.
 
     `selected` is a set of user_id (int) for real users or proxy_name (str) for proxies.
-    `in_users` is the output of get_rollcall_in_users(rc_db_id).
+    `in_users` is the candidate list — pass _ghost_candidates(rc_db_id) to allow
+    marking late drop-outs as well as the IN list.
     Does NOT call mark_rollcall_absent_done or _decrement_attended — caller handles those.
     """
     user_map  = {u['user_id']:   u for u in in_users if u['user_id'] is not None}
@@ -251,14 +272,35 @@ async def ghost_callback_handler(call):
         if data.startswith("ghost_yes_"):
             rc_db_id = int(data.split("_", 2)[2])
             in_users = get_rollcall_in_users(rc_db_id)
-            if not in_users:
+            out_users = get_rollcall_out_users(rc_db_id)
+            if not in_users and not out_users:
                 await bot.answer_callback_query(call.id, "No IN users found for this session.")
                 return
             saved = load_ghost_selections(cid, rc_db_id)
             _ghost_selections[(cid, rc_db_id)] = saved if saved else set()
-            markup = _build_ghost_select_keyboard(rc_db_id, in_users, _ghost_selections[(cid, rc_db_id)])
+            markup = _build_ghost_select_keyboard(
+                rc_db_id, in_users, _ghost_selections[(cid, rc_db_id)],
+                out_users=out_users, show_out=(cid, rc_db_id) in _ghost_show_out)
             await bot.answer_callback_query(call.id)
-            await safe_edit_text(cid, call.message.message_id, "👻 Who ghosted? Tap to select, then tap Done.", reply_markup=markup)
+            await safe_edit_text(cid, call.message.message_id, _GHOST_PROMPT, reply_markup=markup)
+            return
+
+        # ── ghost_moreout / ghost_lessout — show or hide the late drop-outs ──
+        if data.startswith("ghost_moreout_") or data.startswith("ghost_lessout_"):
+            rc_db_id = int(data.split("_", 2)[2])
+            key = (cid, rc_db_id)
+            if data.startswith("ghost_moreout_"):
+                _ghost_show_out.add(key)
+            else:
+                _ghost_show_out.discard(key)
+            if key not in _ghost_selections:
+                saved = load_ghost_selections(cid, rc_db_id)
+                _ghost_selections[key] = saved if saved else set()
+            markup = _build_ghost_select_keyboard(
+                rc_db_id, get_rollcall_in_users(rc_db_id), _ghost_selections[key],
+                out_users=get_rollcall_out_users(rc_db_id), show_out=key in _ghost_show_out)
+            await bot.answer_callback_query(call.id)
+            await safe_edit_markup(cid, call.message.message_id, reply_markup=markup)
             return
 
         # ── ghost_togp (proxy) ───────────────────────────────────────────────
@@ -276,8 +318,9 @@ async def ghost_callback_handler(call):
                 _ghost_selections[key].add(proxy_name)
             logging.info(f"[{_ts()}] ghost_togp: {proxy_name}, key={key}, selected now={_ghost_selections[key]}")
             save_ghost_selections(cid, rc_db_id, _ghost_selections[key])
-            in_users = get_rollcall_in_users(rc_db_id)
-            markup = _build_ghost_select_keyboard(rc_db_id, in_users, _ghost_selections[key])
+            markup = _build_ghost_select_keyboard(
+                rc_db_id, get_rollcall_in_users(rc_db_id), _ghost_selections[key],
+                out_users=get_rollcall_out_users(rc_db_id), show_out=key in _ghost_show_out)
             await bot.answer_callback_query(call.id)
             await safe_edit_markup(cid, call.message.message_id, reply_markup=markup)
             return
@@ -299,8 +342,9 @@ async def ghost_callback_handler(call):
             else:
                 _ghost_selections[key].add(user_id)
             save_ghost_selections(cid, rc_db_id, _ghost_selections[key])
-            in_users = get_rollcall_in_users(rc_db_id)
-            markup = _build_ghost_select_keyboard(rc_db_id, in_users, _ghost_selections[key])
+            markup = _build_ghost_select_keyboard(
+                rc_db_id, get_rollcall_in_users(rc_db_id), _ghost_selections[key],
+                out_users=get_rollcall_out_users(rc_db_id), show_out=key in _ghost_show_out)
             await bot.answer_callback_query(call.id)
             await safe_edit_markup(cid, call.message.message_id, reply_markup=markup)
             return
@@ -314,6 +358,7 @@ async def ghost_callback_handler(call):
                 if saved:
                     _ghost_selections[key] = saved
             selected = _ghost_selections.pop(key, set())
+            _ghost_show_out.discard(key)
             mark_rollcall_absent_done(rc_db_id)
 
             logging.info(f"[{_ts()}] ghost_done: key={key}, selected from map={selected}")
@@ -325,11 +370,15 @@ async def ghost_callback_handler(call):
                 await safe_edit_text(cid, call.message.message_id, "✅ No ghosts selected — all marked as attended.")
                 return
 
-            in_users = get_rollcall_in_users(rc_db_id)
-            logging.info(f"[{_ts()}] Ghost callback: in_users={[u.get('first_name') or u.get('proxy_name') for u in in_users]}, selected={selected}")
+            candidates = _ghost_candidates(rc_db_id)
+            logging.info(f"[{_ts()}] Ghost callback: candidates={[u.get('first_name') or u.get('proxy_name') for u in candidates]}, selected={selected}")
 
-            lines = apply_ghost_marking(cid, rc_db_id, selected, in_users)
-            _decrement_attended(cid, in_users, selected)
+            lines = apply_ghost_marking(cid, rc_db_id, selected, candidates)
+            # Forgiveness is only ever owed to people who said IN — a late
+            # drop-out was never on the attendance hook to begin with, so the
+            # IN list stays the input here even though ghosts can come from
+            # the OUT list too.
+            _decrement_attended(cid, get_rollcall_in_users(rc_db_id), selected)
 
             summary = "\n".join(lines)
             await bot.answer_callback_query(call.id, f"{len(selected)} ghost(s) recorded.")
@@ -526,14 +575,16 @@ async def ghost_callback_handler(call):
         if data.startswith("mabs_sel_"):
             rc_db_id = int(data.split("_", 2)[2])
             in_users = get_rollcall_in_users(rc_db_id)
-            if not in_users:
+            out_users = get_rollcall_out_users(rc_db_id)
+            if not in_users and not out_users:
                 await bot.answer_callback_query(call.id, "No IN users found for this session.")
                 await safe_edit_text(cid, call.message.message_id, "⚠️ No IN users were found for this session.")
                 return
             _ghost_selections[(cid, rc_db_id)] = set()
-            markup = _build_ghost_select_keyboard(rc_db_id, in_users, set())
+            _ghost_show_out.discard((cid, rc_db_id))
+            markup = _build_ghost_select_keyboard(rc_db_id, in_users, set(), out_users=out_users)
             await bot.answer_callback_query(call.id)
-            await safe_edit_text(cid, call.message.message_id, "👻 Who ghosted? Tap to select, then tap Done.", reply_markup=markup)
+            await safe_edit_text(cid, call.message.message_id, _GHOST_PROMPT, reply_markup=markup)
             return
 
         await bot.answer_callback_query(call.id, "Unknown ghost action")

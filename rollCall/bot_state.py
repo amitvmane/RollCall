@@ -99,6 +99,11 @@ def data_file_path(filename: str) -> str:
 # (chat_id, rollcall_db_id) -> set of user_ids selected as ghosts
 _ghost_selections: dict = {}
 
+# (chat_id, rollcall_db_id) keys whose ghost keyboard has the late-drop-out
+# section expanded. Pure display state — selections themselves live in
+# _ghost_selections and are persisted, this is not.
+_ghost_show_out: set = set()
+
 # (chat_id, user_id) -> {'rc_number': int, 'comment': str, '_ts': float} for pending reconfirmation.
 # _ts is required so the memory_prune_loop drops abandoned entries via _prune_pending.
 _pending_reconf: dict = {}
@@ -470,24 +475,55 @@ def _fmt_ended_at(ended_at) -> str:
 
 # ── Ghost keyboard builder ────────────────────────────────────────────────────
 
-def _build_ghost_select_keyboard(rc_db_id: int, in_users: list, selected_ids: set) -> InlineKeyboardMarkup:
-    """Build the ghost selection keyboard. Handles both real users and proxy users."""
+def _ghost_row(rc_db_id: int, u: dict, selected_ids: set, suffix: str = "") -> InlineKeyboardButton:
+    """One selectable candidate button for the ghost keyboard."""
+    proxy_name = u.get('proxy_name')
+    if proxy_name is not None:
+        tick = "👻 " if proxy_name in selected_ids else ""
+        return InlineKeyboardButton(
+            f"{tick}{proxy_name}{suffix}",
+            callback_data=f"ghost_togp_{rc_db_id}_{proxy_name}"
+        )
+    uid = u['user_id']
+    name = u.get('first_name') or u.get('username') or str(uid)
+    tick = "👻 " if uid in selected_ids else ""
+    return InlineKeyboardButton(
+        f"{tick}{name}{suffix}",
+        callback_data=f"ghost_tog_{rc_db_id}_{uid}"
+    )
+
+
+def _build_ghost_select_keyboard(rc_db_id: int, in_users: list, selected_ids: set,
+                                 out_users: list = None, show_out: bool = False) -> InlineKeyboardMarkup:
+    """Build the ghost selection keyboard. Handles both real users and proxy users.
+
+    `out_users` are members who ended the session in the OUT list. They are not
+    shown by default — the normal question is "who said IN and didn't turn up"
+    — but a late drop-out that left the side short is a no-show too, and there
+    was previously no way to record one. The "＋ Someone who dropped out late"
+    button reveals them; once revealed they toggle through exactly the same
+    callbacks, so a selected OUT member survives a keyboard rebuild.
+    """
     markup = InlineKeyboardMarkup(row_width=2)
     for u in in_users:
-        proxy_name = u.get('proxy_name')
-        if proxy_name is not None:
-            tick = "👻 " if proxy_name in selected_ids else ""
+        markup.add(_ghost_row(rc_db_id, u, selected_ids))
+
+    out_users = out_users or []
+    if out_users:
+        if show_out:
             markup.add(InlineKeyboardButton(
-                f"{tick}{proxy_name}",
-                callback_data=f"ghost_togp_{rc_db_id}_{proxy_name}"
-            ))
+                "— dropped out late —", callback_data=f"ghost_lessout_{rc_db_id}"))
+            for u in out_users:
+                markup.add(_ghost_row(rc_db_id, u, selected_ids, suffix=" (was OUT)"))
         else:
-            uid = u['user_id']
-            name = u.get('first_name') or u.get('username') or str(uid)
-            tick = "👻 " if uid in selected_ids else ""
-            markup.add(InlineKeyboardButton(
-                f"{tick}{name}",
-                callback_data=f"ghost_tog_{rc_db_id}_{uid}"
-            ))
+            n_sel = sum(
+                1 for u in out_users
+                if (u.get('proxy_name') or u.get('user_id')) in selected_ids
+            )
+            label = "＋ Someone who dropped out late"
+            if n_sel:
+                label += f" ({n_sel} 👻)"
+            markup.add(InlineKeyboardButton(label, callback_data=f"ghost_moreout_{rc_db_id}"))
+
     markup.add(InlineKeyboardButton("✅ Done", callback_data=f"ghost_done_{rc_db_id}"))
     return markup

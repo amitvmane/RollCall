@@ -131,6 +131,8 @@ def _player_view(
 
     if is_ditch and session.ghost_eligible:
         ghost_note = "\n_Selecting these players also records them as ghosts._"
+        if any(m.get("was_out") for m in session.members):
+            ghost_note += "\n_⤵ = ended up OUT (late drop-out) — selectable too._"
     elif is_ditch:
         ghost_note = (
             "\n_Ghost tracking is off — this only charges the penalty, no ghost "
@@ -154,7 +156,10 @@ def _player_view(
             )
             continue
         check = "✅" if idx in selected else "◻"
-        label = f"{check} {m['member_name']}"[:24]
+        # Late drop-outs are selectable but flagged — the admin should never
+        # charge one without noticing which list they were in.
+        tag   = " ⤵" if m.get("was_out") else ""
+        label = f"{check} {m['member_name']}{tag}"[:24]
         buttons.append(
             InlineKeyboardButton(label, callback_data=f"pen_g:{rc}:{idx}")
         )
@@ -363,9 +368,11 @@ async def penalty_panel_callback(call):
                         if session.members[i]["_identity"] is not None
                     }
                     if ghost_identities:
-                        in_users = get_rollcall_in_users(rc)
-                        from handlers.ghost import apply_ghost_marking
-                        apply_ghost_marking(cid, rc, ghost_identities, in_users)
+                        from handlers.ghost import apply_ghost_marking, _ghost_candidates
+                        # Candidates, not just the IN list: a late drop-out
+                        # selected above would otherwise be silently skipped
+                        # by apply_ghost_marking's name lookup.
+                        apply_ghost_marking(cid, rc, ghost_identities, _ghost_candidates(rc))
                         session.ghost_marked.update(ghost_identities)
 
             count = len(applied_names)
@@ -430,29 +437,36 @@ async def penalty_panel_callback(call):
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _members_for_rollcall(rollcall_id: int) -> list:
-    """Return IN members as [{user_id, member_name, _identity}].
+    """Return markable members as [{user_id, member_name, _identity, was_out}].
 
     _identity is the value used for ghost tracking:
       - real user  → user_id (int)
       - proxy      → proxy_name (str)
+
+    IN members first, then anyone who ended the session OUT. A late drop-out
+    is exactly the case this panel could not express: the player pulled out
+    too late for a replacement to be found, so the side played short — a ditch
+    in everything but the list they ended up in. They're listed last and
+    labelled, so nobody gets charged by mistake, and no penalty is ever
+    applied without an admin explicitly tapping them.
     """
-    rows    = get_rollcall_in_users(rollcall_id)
-    members = []
-    for r in rows:
+    def _pack(r, was_out):
         proxy_name = r.get("proxy_name")
         if proxy_name is not None:
-            members.append({
-                "user_id":     None,
-                "member_name": proxy_name,
-                "_identity":   proxy_name,
-            })
-        else:
-            uid = r["user_id"]
-            members.append({
-                "user_id":     uid,
-                "member_name": r.get("first_name") or str(uid),
-                "_identity":   uid,
-            })
+            return {"user_id": None, "member_name": proxy_name,
+                    "_identity": proxy_name, "was_out": was_out}
+        uid = r["user_id"]
+        return {"user_id": uid, "member_name": r.get("first_name") or str(uid),
+                "_identity": uid, "was_out": was_out}
+
+    members = [_pack(r, False) for r in get_rollcall_in_users(rollcall_id)]
+    seen = {m["_identity"] for m in members}
+    for r in db.get_rollcall_out_users(rollcall_id):
+        m = _pack(r, True)
+        if m["_identity"] in seen:
+            continue          # can't be both; IN wins
+        seen.add(m["_identity"])
+        members.append(m)
     return members
 
 

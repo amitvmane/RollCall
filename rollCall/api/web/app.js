@@ -683,10 +683,7 @@ function renderRollcall(rc){
   $("identity-card").classList.remove("hidden");
   $("vote-card").classList.remove("hidden");
   $("lists-card").classList.remove("hidden");
-  const endRow=document.getElementById("end-rc-row");
-  if(endRow)endRow.style.display=_isWebAdmin?"":"none";
-  const proxyRow=document.getElementById("proxy-vote-row");
-  if(proxyRow)proxyRow.style.display=_isWebAdmin?"":"none";
+  _syncAdminRcControls();
   detectCurrentVote();renderLists();
 }
 
@@ -898,8 +895,8 @@ async function loadGroup(){
     $("tab-card").classList.add("hidden");
     $("no-rollcalls").classList.remove("hidden");
     ["identity-card","vote-card","lists-card"].forEach(id=>$(id)?.classList.add("hidden"));
-    const endRow=document.getElementById("end-rc-row");
-    if(endRow)endRow.style.display="none";
+    activeRcData=null;
+    _syncAdminRcControls();
   }else if(rcs.length===1){$("tab-card").classList.add("hidden");renderRollcall(rcs[0]);}
   else{$("tab-card").classList.remove("hidden");if(activeTabIdx>=rcs.length)activeTabIdx=0;renderTabs(rcs);renderRollcall(rcs[activeTabIdx]);}
   loadWebStats();
@@ -1235,6 +1232,23 @@ if (IS_GROUP) {
 // ── Telegram deep-link identity verification ───────────────────────────────
 let _verifyCode=null, _verifyPollTimer=null;
 
+// Always-visible escape hatch: a real anchor the user can click themselves.
+// A programmatic window.open can be refused for reasons the page cannot see
+// (popup blocker, in-app webview, iOS Safari) and there is no error to catch —
+// the click just appears to do nothing, which is exactly the "sign-in works
+// sometimes" report. An <a> click always carries its own user activation.
+function _showVerifyDeepLink(deepLink){
+  const row=document.getElementById("tg-deeplink-row");
+  const link=document.getElementById("tg-deeplink-a");
+  if(!row||!link)return;
+  link.href=deepLink;
+  row.classList.remove("hidden");
+}
+function _hideVerifyDeepLink(){
+  const row=document.getElementById("tg-deeplink-row");
+  if(row)row.classList.add("hidden");
+}
+
 window.startTgVerify=async function(){
   const btn=document.getElementById("verify-tg-btn")||document.getElementById("picker-tg-btn");
   const _origBtnText=btn?.textContent||"";
@@ -1243,6 +1257,13 @@ window.startTgVerify=async function(){
   // can't accidentally type a different name after starting the flow.
   const nameInput=$("name-input");
   if(nameInput){nameInput.disabled=true;nameInput.placeholder="Verifying with Telegram…";}
+  // Claim the popup NOW, while the click that triggered this is still the
+  // current user activation. Browsers drop that activation across an await,
+  // so the old `window.open(deep_link)` after the fetch was blocked on
+  // Safari and often on Chrome — silently, since a blocked open just
+  // returns null. Open blank first, redirect it once the link is known.
+  let win=null;
+  try{win=window.open("","_blank");}catch(_){win=null;}
   try{
     const res=await fetch("/api/v1/auth/tg-verify/start",{
       method:"POST",headers:{"Content-Type":"application/json"},
@@ -1251,8 +1272,12 @@ window.startTgVerify=async function(){
     if(!res.ok)throw new Error("Server error");
     const{code,deep_link}=await res.json();
     _verifyCode=code;
-    window.open(deep_link,"_blank");
-    toast("Telegram opened — tap the verify button, then return here",5000);
+    if(win){try{win.location.href=deep_link;}catch(_){win=null;}}
+    // Shown whether or not the popup landed: even when it works, the tab can
+    // open behind, and the user needs a way back to it.
+    _showVerifyDeepLink(deep_link);
+    toast(win?"Telegram opened — tap the verify button, then return here"
+             :"Tap “Open Telegram” below to finish signing in",5000);
     if(btn){btn.textContent="⏳ Waiting for Telegram…";}
     _verifyPollTimer=setInterval(_pollVerify,2000);
     // Auto-stop after 11 minutes (code TTL is 10 min)
@@ -1264,6 +1289,7 @@ window.startTgVerify=async function(){
       }
     },660000);
   }catch(e){
+    if(win){try{win.close();}catch(_){}}
     toast("Could not start verification — try again",3500);
     if(nameInput){nameInput.disabled=false;nameInput.placeholder="";}
     if(btn){btn.textContent=_origBtnText||"🔗 Verify with Telegram";btn.disabled=false;}
@@ -1285,6 +1311,7 @@ function _adoptVerifiedIdentity(data){
   // Auto-populate name from verified Telegram identity and lock it
   currentName=_verifiedName;
   localStorage.setItem(LS_NAME,currentName);
+  _hideVerifyDeepLink();
   toast(`✅ Verified as ${data.name}! Your identity is now locked to your Telegram account.`,4500);
   renderIdentity();detectCurrentVote();
   _checkWebAdmin().catch(()=>{});
@@ -1342,7 +1369,18 @@ async function _loadLoginWidget(){
     s.setAttribute("data-onauth","onTelegramAuth(user)");
     s.setAttribute("data-request-access","write");
     const mount=$("tg-login-widget");
-    if(mount)mount.appendChild(s);
+    if(!mount)return;
+    mount.appendChild(s);
+    // The widget either injects an iframe or renders nothing at all (bot
+    // domain not registered via /setdomain). "Nothing at all" used to look
+    // like a missing logo with a dead click area, so say what happened.
+    setTimeout(()=>{
+      if(mount.querySelector("iframe"))return;
+      const hint=$("tg-widget-hint");
+      const note=$("tg-widget-note");
+      if(hint)hint.classList.add("hidden");
+      if(note)note.classList.remove("hidden");
+    },4000);
   }catch(_){}
 }
 
@@ -1652,6 +1690,7 @@ function _applyAdminStatus(isAdmin){
   const navBtn=document.getElementById("admin-nav-btn");
   if(navBtn)navBtn.classList.toggle("hidden",!_isWebAdmin);
   if(_isWebAdmin){_syncShhToggle();_syncGroupSettingsCard();_syncTimezoneDisplay();_renderWeekdayHint();_loadWeblogInMembers();_loadAdminGroupSwitcher();renderLists();}
+  _syncAdminRcControls();
   renderAcctControl();
   loadDuesSection().catch(()=>{});
 }
@@ -1668,6 +1707,9 @@ window.toggleAdminPanel=function(){
   }
   const opening=card.classList.contains("adm-collapsed");
   card.classList.toggle("adm-collapsed",!opening);
+  // Always reopen at the menu level — landing back inside whichever submenu
+  // was open last time is disorienting when you got here from the header.
+  if(opening)_showAdminLevel(null);
   const hdr=document.getElementById("admin-card-hdr");
   if(hdr)hdr.setAttribute("aria-expanded",String(opening));
   const navBtn=document.getElementById("admin-nav-btn");
@@ -1715,24 +1757,110 @@ function _syncShhToggle(){
   tog.checked=!!groupData.shh_mode;
 }
 
-// Lets an admin who manages more than one group jump between their
-// groups' own pages — the "breadcrumb" a multi-group admin needs, without
-// a separate admin app to host it in. Reuses the same /auth/admin/groups
-// endpoint the admin console's sign-in group-picker uses.
+// The two admin controls that only make sense while a rollcall is open. Both
+// used to be set from renderRollcall() alone, which runs BEFORE the
+// admin-status round-trip finishes on a cold load — so a real admin saw no
+// End button until the next poll happened to re-render. Driven from both
+// sides now: whichever of the two facts (is-admin, has-rollcall) lands last.
+function _syncAdminRcControls(){
+  const show=_isWebAdmin&&!!activeRcData;
+  const endRow=document.getElementById("end-rc-row");
+  if(endRow)endRow.style.display=show?"":"none";
+  const proxyItem=document.getElementById("adm-mi-proxy");
+  if(proxyItem)proxyItem.style.display=show?"":"none";
+}
+
+// ── Admin menu: two levels, one panel at a time ───────────────────────────
+// The card used to be a single flat scroll of every control at once. Now the
+// card body shows a group picker + a menu, and opening an entry swaps in that
+// entry's panel — so "which group am I editing" and "what can I do" are both
+// answerable without scrolling the whole thing.
+const ADMIN_SECTIONS={
+  settings:{},
+  access:{},
+  proxy:{},
+  templates:{load:()=>_ensureTemplatesLoaded()},
+  scheduled:{load:()=>_ensureScheduledOnceLoaded()},
+  merge:{load:()=>_ensureIdentityMergeLoaded()},
+};
+let _adminSection=null;
+
+function _showAdminLevel(section){
+  const menu=document.getElementById("admin-menu");
+  const quick=document.querySelector("#admin-card-body .adm-quick");
+  const picker=document.getElementById("admin-group-switcher");
+  Object.keys(ADMIN_SECTIONS).forEach(k=>{
+    const p=document.getElementById(`adm-panel-${k}`);
+    if(p)p.classList.toggle("hidden",k!==section);
+  });
+  // The menu level and the panel level are mutually exclusive: leaving both
+  // on screen is what made the old card endless.
+  const atRoot=!section;
+  if(menu)menu.classList.toggle("hidden",!atRoot);
+  if(quick)quick.classList.toggle("hidden",!atRoot);
+  if(picker)picker.classList.toggle("hidden",!atRoot);
+  _adminSection=section||null;
+}
+
+window.openAdminSection=async function(name){
+  const def=ADMIN_SECTIONS[name];
+  if(!def)return;
+  _showAdminLevel(name);
+  const card=document.getElementById("admin-card");
+  if(card)card.scrollIntoView({behavior:"smooth",block:"start"});
+  if(def.load)await def.load();
+};
+
+window.closeAdminSection=function(){
+  _showAdminLevel(null);
+  const card=document.getElementById("admin-card");
+  if(card)card.scrollIntoView({behavior:"smooth",block:"start"});
+};
+
+// Dues has its own card (it has a member-facing half), so the menu entry
+// reveals and jumps to it rather than duplicating the controls here.
+window.jumpToDuesAdmin=function(){
+  const card=document.getElementById("dues-admin-card");
+  if(!card||card.classList.contains("hidden")){toast("Dues isn't enabled for this group",3000);return;}
+  const body=document.getElementById("dues-admin-body");
+  const btn=document.getElementById("dues-admin-toggle");
+  if(body&&body.classList.contains("hidden")){body.classList.remove("hidden");if(btn)btn.textContent="▲";}
+  card.scrollIntoView({behavior:"smooth",block:"start"});
+};
+
+// Lets an admin who manages more than one group jump between their groups'
+// own pages — the "breadcrumb" a multi-group admin needs, without a separate
+// admin app to host it in. Reuses the same /auth/admin/groups endpoint the
+// admin console's sign-in group-picker uses.
+//
+// This used to render as a link list that was hidden whenever you had no
+// OTHER group, which meant the panel never named the group it was editing.
+// It's now a select that always includes the current group, selected.
 async function _loadAdminGroupSwitcher(){
-  const el=document.getElementById("admin-group-switcher");
-  if(!el||!_idToken)return;
+  const sel=document.getElementById("admin-group-select");
+  if(!sel||!_idToken)return;
+  const here=(groupData&&groupData.group_name)||"This group";
+  const only=()=>{sel.innerHTML=`<option value="${esc(URL_TOKEN)}">${esc(here)}</option>`;sel.disabled=true;};
   try{
     const res=await fetch(`/api/v1/auth/admin/groups`,{headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(5000)});
-    if(!res.ok)return;
+    if(!res.ok){only();return;}
     const data=await res.json();
-    const groups=(data.groups||[]).filter(g=>g.group_web_token&&g.group_web_token!==URL_TOKEN);
-    if(!groups.length){el.classList.add("hidden");return;}
-    el.innerHTML=`<div style="font-size:.72rem;font-weight:600;color:var(--sub);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Your other groups</div>`+
-      groups.map(g=>`<a href="/web/group/${esc(g.group_web_token)}" style="display:block;padding:8px 10px;margin-bottom:4px;border-radius:8px;border:1px solid var(--border);font-size:.85rem;font-weight:600;text-decoration:none;color:var(--text)">${esc(g.group_name)}</a>`).join("");
-    el.classList.remove("hidden");
-  }catch(_){}
+    const groups=(data.groups||[]).filter(g=>g.group_web_token);
+    if(!groups.some(g=>g.group_web_token===URL_TOKEN)){
+      groups.unshift({group_name:here,group_web_token:URL_TOKEN});
+    }
+    if(groups.length<2){only();return;}
+    sel.disabled=false;
+    sel.innerHTML=groups.map(g=>
+      `<option value="${esc(g.group_web_token)}"${g.group_web_token===URL_TOKEN?" selected":""}>${esc(g.group_name)}</option>`
+    ).join("");
+  }catch(_){only();}
 }
+
+window.onAdminGroupChange=function(token){
+  if(!token||token===URL_TOKEN)return;
+  window.location.href=`/web/group/${encodeURIComponent(token)}`;
+};
 
 function _syncGroupSettingsCard(){
   if(!groupData)return;
@@ -2379,14 +2507,13 @@ window.doProxyVoteWeb=async function(voteType){
 // does) get the template's real fields from the backend for a richer row.
 let _scheduledOnceOpen=false,_scheduledOnceCache=null;
 
-window.toggleScheduledOnce=async function(){
-  _scheduledOnceOpen=!_scheduledOnceOpen;
-  const body=document.getElementById("scheduled-once-body");
-  const ch=document.getElementById("scheduled-once-chevron");
-  if(body)body.classList.toggle("hidden",!_scheduledOnceOpen);
-  if(ch)ch.textContent=_scheduledOnceOpen?"▲":"▼";
-  if(_scheduledOnceOpen)await _loadScheduledOnceList();
-};
+// Called when the Scheduled panel is opened from the admin menu. Always
+// refetches: a one-off that already fired should disappear from the list the
+// next time you look at it.
+async function _ensureScheduledOnceLoaded(){
+  _scheduledOnceOpen=true;
+  await _loadScheduledOnceList();
+}
 
 async function _loadScheduledOnceList(){
   const body=document.getElementById("scheduled-once-body");
@@ -2546,6 +2673,10 @@ async function loadDuesSection(){
       if(balBody)balBody.classList.remove("hidden");
       if(balCh)balCh.textContent="▲";
       adminCard?.classList.remove("hidden");
+      // The dues card is a sibling of the admin menu, so the menu links to
+      // it — but only once we know it's actually there to link to.
+      const duesItem=document.getElementById("adm-mi-dues");
+      if(duesItem)duesItem.style.display="";
     }catch(e){console.warn("dues/summary failed:",e.message);}
   }
 }
@@ -2912,14 +3043,14 @@ window.toggleAdminSection=function(name){
 const WEEKDAYS=["monday","tuesday","wednesday","thursday","friday","saturday","sunday"];
 let _templatesScheduleOpen=false, _templatesCache=null, _templatesEditingName=null, _templatesCreatingNew=false;
 
-window.toggleTemplatesSchedule=async function(){
-  _templatesScheduleOpen=!_templatesScheduleOpen;
-  const body=document.getElementById("templates-schedule-body");
-  const ch=document.getElementById("templates-chevron");
-  if(body)body.classList.toggle("hidden",!_templatesScheduleOpen);
-  if(ch)ch.textContent=_templatesScheduleOpen?"▲":"▼";
-  if(_templatesScheduleOpen&&!_templatesCache)await loadTemplatesSchedule();
-};
+// Called when the Templates panel is opened from the admin menu. The cache is
+// reused (templates change rarely and edits update it in place); the polling
+// refresh at the top of the file keys off _templatesScheduleOpen.
+async function _ensureTemplatesLoaded(){
+  _templatesScheduleOpen=true;
+  if(!_templatesCache)await loadTemplatesSchedule();
+  else renderTemplatesSchedule();
+}
 
 async function loadTemplatesSchedule(){
   const body=document.getElementById("templates-schedule-body");
@@ -3334,14 +3465,12 @@ window.toggleIdentityUnmatched=function(){
   if(ch)ch.textContent=_identityUnmatchedOpen?"▲":"▼";
 };
 
-window.toggleIdentityMerge=async function(){
-  _identityMergeOpen=!_identityMergeOpen;
-  const body=document.getElementById("identity-merge-body");
-  const ch=document.getElementById("identity-merge-chevron");
-  if(body)body.classList.toggle("hidden",!_identityMergeOpen);
-  if(ch)ch.textContent=_identityMergeOpen?"▲":"▼";
-  if(_identityMergeOpen&&!_identitiesCache)await loadIdentityMerge();
-};
+// Called when the Merge identities panel is opened from the admin menu.
+async function _ensureIdentityMergeLoaded(){
+  _identityMergeOpen=true;
+  if(!_identitiesCache)await loadIdentityMerge();
+  else renderIdentityMerge();
+}
 
 async function loadIdentityMerge(){
   const body=document.getElementById("identity-merge-body");

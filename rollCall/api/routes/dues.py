@@ -753,7 +753,11 @@ async def dues_qr(
 
     try:
         from utils.card_gen import qr_png
-        png_bytes = qr_png(vpa, amount if amount > 0 else None)
+        # qr_png returns a BytesIO (it feeds bot.send_photo elsewhere). Response
+        # renders `str`/`bytes` only, so handing it the buffer raised
+        # AttributeError: '_io.BytesIO' object has no attribute 'encode' AFTER
+        # the try block — a 500 on every QR load, not the curated 500 below.
+        png_bytes = qr_png(vpa, amount if amount > 0 else None).getvalue()
     except Exception:
         log.exception("QR generation failed for chat %s", chat_id)
         raise HTTPException(status_code=500, detail="QR generation failed")

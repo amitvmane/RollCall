@@ -3748,6 +3748,44 @@ def get_rollcall_in_users(rollcall_id: int) -> List[Dict]:
         return []
 
 
+def get_rollcall_out_users(rollcall_id: int) -> List[Dict]:
+    """Return all users (real + proxy) with status='out' for a given rollcall.
+
+    Same shape as get_rollcall_in_users. Ghost review needs these because a
+    no-show is not always someone who stayed IN: dropping to OUT so late that
+    no replacement could be arranged is the case admins actually want to
+    record, and nothing in the IN list can see it.
+    """
+    try:
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+
+            cursor.execute(
+                f"""SELECT user_id, first_name, username
+                    FROM users
+                    WHERE rollcall_id = {ph} AND status = 'out'""",
+                (rollcall_id,)
+            )
+            real_rows = [dict(row) for row in cursor.fetchall()]
+
+            cursor.execute(
+                f"""SELECT name, proxy_owner_id
+                    FROM proxy_users
+                    WHERE rollcall_id = {ph} AND status = 'out'""",
+                (rollcall_id,)
+            )
+            proxy_rows = [
+                {'user_id': None, 'first_name': row['name'], 'username': None,
+                 'proxy_name': row['name'], 'proxy_owner_id': row['proxy_owner_id']}
+                for row in cursor.fetchall()
+            ]
+
+            return real_rows + proxy_rows
+    except Exception as e:
+        logging.error(f"Error getting rollcall OUT users: {e}")
+        return []
+
+
 # Ghost selection persistence: save/load selections to DB
 def save_ghost_selections(chat_id: int, rc_db_id: int, selected_ids: set) -> bool:
     """Save ghost selections to database for crash recovery"""

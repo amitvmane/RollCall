@@ -13,3 +13,6 @@ rollcall.db
 .venv*/
 __pycache__/
 *.pyc
+
+# Local puppeteer install for scripts/web_layout_check.js (CI installs its own)
+node_modules/

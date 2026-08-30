@@ -82,6 +82,13 @@ const GROUP = {
   }],
 };
 
+const GROUP_EMPTY = {
+  group_name: "Test FC",
+  bot_username: "TestBot",
+  rollcalls: [],
+  upcoming: [{ display_title: "Sunday Turf", scheduled_at: "2030-09-06T13:00:00Z" }],
+};
+
 const ADMIN_GROUPS = {
   groups: [
     { chat_id: -1001, group_name: "Test FC", group_web_token: "testtoken123" },
@@ -90,6 +97,7 @@ const ADMIN_GROUPS = {
 };
 
 const ROUTES = [
+  [/\/web\/group\/emptytoken$/, GROUP_EMPTY],
   [/\/web\/group\/[^/]+$/, GROUP],
   [/admin-status/, { is_admin: true }],
   [/\/auth\/admin\/groups/, ADMIN_GROUPS],
@@ -165,6 +173,7 @@ const WIDTHS = [
         sect("OUT", "out", g.rollcalls[0].out) +
         sect("MAYBE", "maybe", g.rollcalls[0].maybe);
       document.getElementById("admin-card").classList.remove("hidden");
+      document.getElementById("no-rollcalls").classList.remove("hidden");
       document.getElementById("stats-card").classList.remove("hidden");
       document.getElementById("bookmark-card").classList.remove("hidden");
       // Worst-case header: every optional control visible at once. Install is
@@ -193,7 +202,7 @@ const WIDTHS = [
         main: box("col-main"),
         acct: box("acct-btn"),
         adminNav: box("admin-nav-btn"),
-        adminBodyVisible: !!document.querySelector("#admin-card:not(.adm-collapsed) #admin-card-body"),
+        adminViewActive: document.getElementById("view-admin").classList.contains("active"),
         sects,
         docScrollW: document.documentElement.scrollWidth,
         innerW: window.innerWidth,
@@ -213,8 +222,9 @@ const WIDTHS = [
     if (!m.acct || m.acct.w === 0) failures.push(`${tag}: account button not visible`);
     // Admin entry is in the header, i.e. near the top of the page.
     if (!m.adminNav || m.adminNav.y > 80) failures.push(`${tag}: admin nav button not in the header`);
-    // Admin panel starts collapsed.
-    if (m.adminBodyVisible) failures.push(`${tag}: admin panel should start collapsed`);
+    // Rollcall is the landing view; admin is somewhere you go, not something
+    // you have to scroll past.
+    if (m.adminViewActive) failures.push(`${tag}: admin view should not be the default`);
 
     // Two-column expectations.
     const sideBesideMain = m.side && m.main && m.side.x > m.main.x + 100;
@@ -329,9 +339,11 @@ const WIDTHS = [
     if (s.av !== "A") failures.push(`identity: avatar initial should be A, got "${s.av}"`);
 
     // C) Sign out really clears everything.
-    s = await page.evaluate(() => {
+    s = await page.evaluate(async () => {
       window.confirm = () => true;          // auto-accept the confirmation
-      signOut();
+      // signOut awaits the confirmation (Telegram's webview needs an async
+      // dialog), so the assertions below have to await it too.
+      await signOut();
       return {
         tok: localStorage.getItem("rc_identity_token"),
         uid: localStorage.getItem("rc_verified_tg_user_id"),
@@ -449,7 +461,7 @@ const WIDTHS = [
       document.getElementById("admin-nav-btn").click();
       const sel = document.getElementById("admin-group-select");
       return {
-        open: !document.getElementById("admin-card").classList.contains("adm-collapsed"),
+        open: document.getElementById("view-admin").classList.contains("active"),
         menuVisible: !document.getElementById("admin-menu").classList.contains("hidden"),
         pickerVisible: !!(sel && sel.getBoundingClientRect().width > 0),
         options: sel ? [...sel.options].map(o => o.value) : [],
@@ -493,6 +505,91 @@ const WIDTHS = [
 
     if (errs.length) failures.push(`admin: JS error — ${errs[0]}`);
     console.log("  admin: two-level menu, group picker and all submenu panels exercised");
+    await page.close();
+  }
+
+  // ── Views + empty state ─────────────────────────────────────────────────
+  // The page was one long scroll: game, vote, roster, stats, dues, admin. It
+  // is four destinations now, and exactly one may be on screen at a time —
+  // if two ever render together the whole point is lost and nothing else
+  // here would notice. The empty state is checked in the same pass because
+  // "no rollcall" used to leave the main column blank while the rest of the
+  // page carried on below it.
+  {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 420, height: 900 });
+    await page.setRequestInterception(true);
+    page.on("request", req =>
+      req.url().startsWith(BASE) ? req.continue()
+                                 : req.respond({ status: 200, contentType: "text/plain", body: "" }));
+    const errs = [];
+    page.on("pageerror", e => errs.push(String(e.message)));
+
+    await page.goto(`${BASE}/web/group/testtoken123`, { waitUntil: "load" });
+    await page.evaluate(() => {
+      localStorage.setItem("rc_verified_tg_user_id", "168415137");
+      localStorage.setItem("rc_verified_tg_name", "Amit");
+      localStorage.setItem("rc_identity_token", "168415137.9999999999.deadbeef");
+    });
+    await page.goto(`${BASE}/web/group/testtoken123`, { waitUntil: "load" });
+    await page.waitForFunction(() => !document.getElementById("vn-admin").classList.contains("hidden"),
+                               { timeout: 8000 })
+              .catch(() => failures.push("views: Admin tab never appeared for an admin"));
+
+    const VIEWS = ["rollcall", "stats", "dues", "admin"];
+    for (const v of VIEWS) {
+      const s = await page.evaluate(name => {
+        const before = (document.querySelector(".view.active") || {}).id;
+        window.showView(name);
+        return {
+          before,
+          active: [...document.querySelectorAll(".view")]
+            .filter(el => el.classList.contains("active")).map(el => el.id),
+          tabActive: [...document.querySelectorAll(".vn-item")]
+            .filter(el => el.classList.contains("active")).map(el => el.id),
+        };
+      }, v);
+      // Dues is off in the fixture, so its tab is hidden and showView must
+      // refuse — leaving you exactly where you were, not on a blank panel.
+      const expected = v === "dues" ? s.before : `view-${v}`;
+      if (s.active.length !== 1) {
+        failures.push(`views: ${s.active.length} views active at once after showView("${v}") — ${s.active.join(", ")}`);
+      } else if (s.active[0] !== expected) {
+        failures.push(`views: showView("${v}") landed on ${s.active[0]}, expected ${expected}`);
+      }
+      if (s.tabActive.length !== 1) {
+        failures.push(`views: ${s.tabActive.length} tabs highlighted after showView("${v}")`);
+      }
+    }
+
+    // Empty state: it is the column's content, not a footnote under one.
+    // Loaded through the real path from a fixture group with nothing running,
+    // rather than by reaching into the page's variables.
+    await page.goto(`${BASE}/web/group/emptytoken`, { waitUntil: "load" });
+    await new Promise(r => setTimeout(r, 900));
+    const es = await page.evaluate(() => {
+      const box = document.getElementById("no-rollcalls");
+      return {
+        shown: !box.classList.contains("hidden"),
+        text: box.innerText.replace(/\n/g, " | "),
+        actions: [...box.querySelectorAll("button")].map(b => b.innerText.trim()),
+        // Things that only make sense while a rollcall exists.
+        voteVisible: !document.getElementById("vote-card").classList.contains("hidden"),
+        rcCardVisible: !document.getElementById("rc-card").classList.contains("hidden"),
+        identityVisible: !document.getElementById("identity-card").classList.contains("hidden"),
+        refreshVisible: !document.getElementById("refresh-bar-wrap").classList.contains("hidden"),
+      };
+    });
+    if (!es.shown) failures.push("views: empty state not shown when there are no rollcalls");
+    if (!/next/i.test(es.text)) failures.push(`views: empty state doesn't name the next scheduled rollcall — "${es.text}"`);
+    if (!es.actions.length) failures.push("views: empty state offers no action at all");
+    if (es.voteVisible) failures.push("views: vote buttons still shown with no rollcall");
+    if (es.rcCardVisible) failures.push("views: rollcall header card still shown with no rollcall");
+    if (es.identityVisible) failures.push("views: identity strip still shown with no rollcall");
+    if (es.refreshVisible) failures.push("views: refresh countdown still shown with no rollcall");
+
+    if (errs.length) failures.push(`views: JS error — ${errs[0]}`);
+    console.log("  views: four destinations, one at a time, plus the empty state");
     await page.close();
   }
 

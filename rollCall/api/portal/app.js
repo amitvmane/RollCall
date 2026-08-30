@@ -24,6 +24,22 @@ let _filterText="";
 function $id(id){return document.getElementById(id);}
 function esc(s){const d=document.createElement("div");d.textContent=s||"";return d.innerHTML;}
 
+// Native confirm() is unavailable in some webviews (notably Telegram's,
+// where it returns undefined without ever asking) — see the same helper on
+// the group page. Without this, Sign out here silently does nothing.
+function _confirmAction(msg){
+  return new Promise(resolve=>{
+    const w=window.Telegram&&window.Telegram.WebApp;
+    if(w&&typeof w.showConfirm==="function"){
+      try{w.showConfirm(msg,ok=>resolve(!!ok));return;}catch(_){/* fall through */}
+    }
+    let r;
+    try{r=window.confirm(msg);}catch(_){r=undefined;}
+    resolve(r===undefined?true:!!r);
+  });
+}
+
+
 function toast(msg,dur=2800){
   const el=$id("toast");el.textContent=msg;el.classList.add("show");
   setTimeout(()=>el.classList.remove("show"),dur);
@@ -187,8 +203,8 @@ function showApp(){
 // here rather than inline because this file is an IIFE — nothing in it is
 // global, so an onclick="…" in the HTML would not resolve.
 
-function _portalSignOut(){
-  if(!confirm("Sign out? You'll need to verify again to see your groups."))return;
+async function _portalSignOut(){
+  if(!await _confirmAction("Sign out? You'll need to verify again to see your groups."))return;
   localStorage.removeItem(LS_TG_USER_ID);
   localStorage.removeItem(LS_TG_NAME);
   localStorage.removeItem(LS_ID_TOKEN);

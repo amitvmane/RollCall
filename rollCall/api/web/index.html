@@ -136,6 +136,34 @@
     <button id="retry-btn" class="btn btn-primary" style="margin-top:8px">Retry</button>
   </div>
   <div id="main" class="hidden">
+
+    <!-- Top-level navigation. The page used to be ONE long stack: game,
+         identity, vote, roster, upcoming, stats, admin, dues, bookmark — so
+         an admin scrolled past everything to reach admin controls, a member
+         scrolled past stats to find the roster, and with no rollcall running
+         the main column was simply empty while the rest of the page carried
+         on below it. These are four destinations now, one on screen at a
+         time; each tab is a place, not a section heading. -->
+    <nav id="view-nav" class="viewnav" role="tablist" aria-label="Sections">
+      <button class="vn-item active" id="vn-rollcall" role="tab" aria-selected="true"
+              data-view="rollcall" onclick="showView('rollcall')">
+        <span class="vn-ico">📋</span><span class="vn-lbl">Rollcall</span>
+      </button>
+      <button class="vn-item" id="vn-stats" role="tab" aria-selected="false"
+              data-view="stats" onclick="showView('stats')">
+        <span class="vn-ico">📊</span><span class="vn-lbl">Stats</span>
+      </button>
+      <button class="vn-item hidden" id="vn-dues" role="tab" aria-selected="false"
+              data-view="dues" onclick="showView('dues')">
+        <span class="vn-ico">💰</span><span class="vn-lbl">Dues</span>
+      </button>
+      <button class="vn-item hidden" id="vn-admin" role="tab" aria-selected="false"
+              data-view="admin" onclick="showView('admin')">
+        <span class="vn-ico">⚙</span><span class="vn-lbl">Admin</span>
+      </button>
+    </nav>
+
+    <section class="view active" id="view-rollcall" role="tabpanel" aria-labelledby="vn-rollcall">
     <!-- Two-column wrappers. On narrow screens these are `display:contents`,
          so the cards fall back to exactly the single-column DOM order they
          had before; from 1024px up #main becomes a grid and each wrapper is
@@ -149,7 +177,7 @@
     </div>
 
     <!-- Rollcall header -->
-    <div class="card">
+    <div class="card" id="rc-card">
       <div class="hdr-row">
         <h1 id="rc-title" class="rc-title">RollCall</h1>
         <span id="count-badge" class="count-badge"></span>
@@ -165,10 +193,18 @@
     </div>
 
     <!-- No active rollcalls -->
-    <div id="no-rollcalls" class="card hidden">
-      <div class="no-rc"><span class="icon">📋</span>
-        <span>No active rollcalls right now — check back later or ask an admin to start one.</span>
-      </div>
+    <!-- Nothing running. This was one grey line in a card while the rest of
+         the page (identity, vote buttons, empty roster) was hidden around it,
+         leaving the main column blank and the eye with nowhere to go. It is
+         now the whole column's content and answers the three questions the
+         visitor actually has: is anything on, when is the next one, and what
+         can I do about it. Filled in by renderEmptyState() in app.js. -->
+    <div id="no-rollcalls" class="empty-state hidden">
+      <div class="es-icon">📋</div>
+      <div class="es-title">No rollcall running</div>
+      <div class="es-sub" id="es-sub">Nothing to vote on right now.</div>
+      <div id="es-next" class="es-next hidden"></div>
+      <div id="es-actions" class="es-actions"></div>
     </div>
 
     <!-- Identity — compact single-row strip, right above the vote buttons.
@@ -268,7 +304,7 @@
     <div class="card" id="lists-card">
       <div id="lists-container"></div>
     </div>
-    <div class="refresh-bar-wrap">
+    <div class="refresh-bar-wrap" id="refresh-bar-wrap">
       <div class="refresh-bar"><div id="refresh-fill" class="refresh-fill"></div></div>
       <span id="refresh-label" class="refresh-label"></span>
     </div>
@@ -279,9 +315,82 @@
          action (was between the event card and identity, competing with
          the thing a visitor actually came to do). -->
     <div id="upcoming-card" class="card hidden"></div>
+    <div id="bookmark-card" class="card hidden">
+      <div style="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:8px">📌 Permanent group link</div>
+      <p style="font-size:.8rem;color:var(--sub);margin-bottom:10px">Bookmark or share this link — it always works, even when Telegram is down.</p>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary" style="flex:1;padding:10px" onclick="copyGroupLink()">📋 Copy link</button>
+        <button class="btn" id="share-btn" style="flex:1;padding:10px;background:var(--border);color:var(--text);border-radius:10px;font-weight:600;display:none" onclick="shareGroupLink()">↗ Share</button>
+      </div>
+    </div>
+    </div><!-- /#col-side -->
+    </section><!-- /#view-rollcall -->
+
+    <section class="view" id="view-stats" role="tabpanel" aria-labelledby="vn-stats">
 
     <!-- Stats card — group mode only, lazy-loaded after identity is known -->
     <div id="stats-card" class="card hidden"></div>
+    </section><!-- /#view-stats -->
+
+    <section class="view" id="view-dues" role="tabpanel" aria-labelledby="vn-dues">
+    <div id="dues-member-card" class="card hidden">
+      <div class="dues-hdr">
+        <span class="dues-hdr-title">💰 Dues</span>
+        <button class="dues-hdr-toggle" id="dues-member-toggle" onclick="toggleDuesMember()">▲</button>
+      </div>
+      <div id="dues-member-body">
+        <div id="dues-balance-row" class="dues-balance-row"></div>
+        <div id="dues-pay-row" class="dues-pay-row hidden"></div>
+        <div id="dues-ledger-section">
+          <button class="dues-section-toggle" onclick="toggleDuesLedger()">My ledger <span id="dues-ledger-chevron">▼</span></button>
+          <div id="dues-ledger-body" class="hidden"></div>
+        </div>
+        <div id="dues-fund-row" class="dues-fund-row"></div>
+      </div>
+    </div>
+
+    <!-- Dues admin card — shown when is_web_admin and dues enabled -->
+    <div id="dues-admin-card" class="card hidden" style="border:1.5px dashed var(--border)">
+      <div class="dues-hdr">
+        <span class="dues-hdr-title">⚙️ Dues Admin</span>
+        <button class="dues-hdr-toggle" id="dues-admin-toggle" onclick="toggleDuesAdmin()">▲</button>
+      </div>
+      <div id="dues-admin-body">
+        <!-- Balances table -->
+        <div class="dues-admin-section">
+          <div class="dues-admin-section-hdr" onclick="toggleAdminSection('balances')">
+            Members <span id="balances-chevron">▼</span>
+          </div>
+          <div id="dues-balances-body" class="hidden"></div>
+        </div>
+        <!-- Close game -->
+        <div class="dues-admin-section">
+          <div class="dues-admin-section-hdr" onclick="toggleAdminSection('close')">
+            Close Game <span id="close-chevron">▼</span>
+          </div>
+          <div id="dues-close-body" class="hidden"></div>
+        </div>
+        <!-- Fund -->
+        <div class="dues-admin-section">
+          <div class="dues-admin-section-hdr" onclick="toggleAdminSection('fund')">
+            Fund <span id="fund-chevron">▼</span>
+          </div>
+          <div id="dues-fund-admin-body" class="hidden"></div>
+        </div>
+        <!-- Settings -->
+        <div class="dues-admin-section" style="border-bottom:none">
+          <div class="dues-admin-section-hdr" onclick="toggleAdminSection('settings')">
+            Settings <span id="settings-chevron">▼</span>
+          </div>
+          <div id="dues-settings-body" class="hidden"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bookmark section — always visible in group mode -->
+    </section><!-- /#view-dues -->
+
+    <section class="view" id="view-admin" role="tabpanel" aria-labelledby="vn-admin">
 
     <!-- Admin action — visible only to web admins -->
     <!-- Shown only when the admin-status check could not be completed (network
@@ -313,10 +422,9 @@
          a two-level menu: a group picker + a short list of destinations, and
          one submenu panel visible at a time (see openAdminSection in app.js).
          Nothing was removed; everything moved into the panel it belongs to. -->
-    <div id="admin-card" class="card hidden adm-collapsed" style="border:1.5px dashed var(--border)">
-      <div class="admin-card-hdr" id="admin-card-hdr" onclick="toggleAdminPanel()" role="button" tabindex="0"
-           aria-controls="admin-card-body" aria-expanded="false">
-        <span>⚙ Admin actions</span><span class="admin-chevron" id="admin-chevron">▼</span>
+    <div id="admin-card" class="card hidden">
+      <div class="admin-card-hdr" id="admin-card-hdr">
+        <span>⚙ Admin actions</span>
       </div>
       <div id="admin-card-body">
 
@@ -520,70 +628,7 @@
     </div>
 
     <!-- Dues member card — shown when dues enabled and identity verified -->
-    <div id="dues-member-card" class="card hidden">
-      <div class="dues-hdr">
-        <span class="dues-hdr-title">💰 Dues</span>
-        <button class="dues-hdr-toggle" id="dues-member-toggle" onclick="toggleDuesMember()">▲</button>
-      </div>
-      <div id="dues-member-body">
-        <div id="dues-balance-row" class="dues-balance-row"></div>
-        <div id="dues-pay-row" class="dues-pay-row hidden"></div>
-        <div id="dues-ledger-section">
-          <button class="dues-section-toggle" onclick="toggleDuesLedger()">My ledger <span id="dues-ledger-chevron">▼</span></button>
-          <div id="dues-ledger-body" class="hidden"></div>
-        </div>
-        <div id="dues-fund-row" class="dues-fund-row"></div>
-      </div>
-    </div>
-
-    <!-- Dues admin card — shown when is_web_admin and dues enabled -->
-    <div id="dues-admin-card" class="card hidden" style="border:1.5px dashed var(--border)">
-      <div class="dues-hdr">
-        <span class="dues-hdr-title">⚙️ Dues Admin</span>
-        <button class="dues-hdr-toggle" id="dues-admin-toggle" onclick="toggleDuesAdmin()">▲</button>
-      </div>
-      <div id="dues-admin-body">
-        <!-- Balances table -->
-        <div class="dues-admin-section">
-          <div class="dues-admin-section-hdr" onclick="toggleAdminSection('balances')">
-            Members <span id="balances-chevron">▼</span>
-          </div>
-          <div id="dues-balances-body" class="hidden"></div>
-        </div>
-        <!-- Close game -->
-        <div class="dues-admin-section">
-          <div class="dues-admin-section-hdr" onclick="toggleAdminSection('close')">
-            Close Game <span id="close-chevron">▼</span>
-          </div>
-          <div id="dues-close-body" class="hidden"></div>
-        </div>
-        <!-- Fund -->
-        <div class="dues-admin-section">
-          <div class="dues-admin-section-hdr" onclick="toggleAdminSection('fund')">
-            Fund <span id="fund-chevron">▼</span>
-          </div>
-          <div id="dues-fund-admin-body" class="hidden"></div>
-        </div>
-        <!-- Settings -->
-        <div class="dues-admin-section" style="border-bottom:none">
-          <div class="dues-admin-section-hdr" onclick="toggleAdminSection('settings')">
-            Settings <span id="settings-chevron">▼</span>
-          </div>
-          <div id="dues-settings-body" class="hidden"></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Bookmark section — always visible in group mode -->
-    <div id="bookmark-card" class="card hidden">
-      <div style="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:8px">📌 Permanent group link</div>
-      <p style="font-size:.8rem;color:var(--sub);margin-bottom:10px">Bookmark or share this link — it always works, even when Telegram is down.</p>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-primary" style="flex:1;padding:10px" onclick="copyGroupLink()">📋 Copy link</button>
-        <button class="btn" id="share-btn" style="flex:1;padding:10px;background:var(--border);color:var(--text);border-radius:10px;font-weight:600;display:none" onclick="shareGroupLink()">↗ Share</button>
-      </div>
-    </div>
-    </div><!-- /#col-side -->
+    </section><!-- /#view-admin -->
   </div>
 </div>
 <div class="toast-local" id="toast-local" role="alert" aria-live="assertive" aria-atomic="true"></div>

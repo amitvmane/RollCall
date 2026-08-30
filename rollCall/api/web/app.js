@@ -148,6 +148,31 @@ let _signinHome=null;   // [{el, parent, next}] — where each row came from
 
 // ── DOM ────────────────────────────────────────────────────────────────────
 function $(x){return document.getElementById(x)}
+
+// Native confirm() is not universally available. Telegram's in-app webview
+// (and some iOS webviews) neuter it: it returns undefined without ever
+// showing a dialog, so `if(!await _confirmAction(...))return;` silently bails and the
+// button looks dead. That is every destructive action in this app — sign
+// out, end rollcall, delete template, merge identity — and it only became
+// reachable inside Telegram once the Mini App header was restored.
+//
+// Prefer Telegram's own dialog when we're in the Mini App; fall back to
+// confirm(); and if confirm() answers `undefined` (i.e. it never asked),
+// treat that as "go ahead" — the user pressed the button, and no dialog
+// was ever shown for them to cancel. A real Cancel returns false, which is
+// distinguishable from undefined.
+function _confirmAction(msg){
+  return new Promise(resolve=>{
+    const w=window.Telegram&&window.Telegram.WebApp;
+    if(w&&typeof w.showConfirm==="function"){
+      try{w.showConfirm(msg,ok=>resolve(!!ok));return;}catch(_){/* fall through */}
+    }
+    let r;
+    try{r=window.confirm(msg);}catch(_){r=undefined;}
+    resolve(r===undefined?true:!!r);
+  });
+}
+
 function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
 // For interpolating free-text (e.g. a template name) inside a single-quoted
 // JS string literal that itself sits inside an inline onclick="..." HTML
@@ -308,6 +333,10 @@ function renderIdentity(){
 function _syncIdentityCardVisibility(){
   const card=$("identity-card");
   if(!card)return;
+  // With no rollcall there is nothing to identify yourself FOR, so the strip
+  // is just another line of text in a column whose whole job is to say
+  // "nothing is on right now".
+  if(IS_GROUP&&!activeRcData&&!_signinHome){card.classList.add("hidden");return;}
   const anyVisible=[...card.children].some(el=>!el.classList.contains("hidden"));
   card.classList.toggle("hidden",!anyVisible);
 }
@@ -322,7 +351,7 @@ $("name-change-btn").addEventListener("click",e=>{
 
 // The actual change-name flow, now reached from that menu rather than from a
 // button whose label described a state.
-function _doChangeName(){
+async function _doChangeName(){
   if(TG_NAME&&_idToken){
     // Inside Telegram Mini App: name is set by Telegram and cannot be changed
     // while the user is authenticated. There's no local override possible.
@@ -330,7 +359,7 @@ function _doChangeName(){
     return;
   }
   if(_verifiedUserId){
-    const ok=confirm("Changing your name will unlink your Telegram verification.\nYou can re-verify after setting a new name.");
+    const ok=await _confirmAction("Changing your name will unlink your Telegram verification.\nYou can re-verify after setting a new name.");
     if(!ok)return;
     _clearStoredIdentity();
   }
@@ -376,8 +405,8 @@ function _clearStoredIdentity(){
   _stopVerifyPoll();
 }
 
-window.signOut=function(){
-  if(!confirm("Sign out of RollCall on this device?\n\nYour votes stay on the group — you'll just need to sign in again to vote or manage the group."))return;
+window.signOut=async function(){
+  if(!await _confirmAction("Sign out of RollCall on this device?\n\nYour votes stay on the group — you'll just need to sign in again to vote or manage the group."))return;
   _clearStoredIdentity();
   currentName="";
   localStorage.removeItem(LS_NAME);
@@ -776,6 +805,8 @@ function renderRollcall(rc){
 
   renderCapBar(rc);
   $("no-rollcalls").classList.add("hidden");
+  $("refresh-bar-wrap")?.classList.remove("hidden");
+  $("rc-card")?.classList.remove("hidden");
   $("identity-card").classList.remove("hidden");
   // ...but only if it has a row to show — see _syncIdentityCardVisibility.
   _syncIdentityCardVisibility();
@@ -809,8 +840,8 @@ function _wireRowAdminActs(){
       doMoveUser(name,sel.value);
       sel.value="";
     });
-    delBtn.addEventListener("click",()=>{
-      if(!confirm(`Remove ${name} from this rollcall?`))return;
+    delBtn.addEventListener("click",async()=>{
+      if(!await _confirmAction(`Remove ${name} from this rollcall?`))return;
       doRemoveUser(name);
     });
   });
@@ -982,7 +1013,16 @@ async function loadGroup(){
   const res=await fetch(API_GROUP);
   if(!res.ok){const d=await res.json().catch(()=>({}));throw new Error(d.detail||"This group link is invalid.");}
   groupData=await res.json();
-  const rcs=groupData.rollcalls;
+  renderGroup();
+}
+
+// Everything loadGroup() does once the data is in hand. Split out so the
+// page can be re-rendered from a known groupData without a round trip —
+// which is also the only way a headless check can exercise states the
+// fixtures don't happen to produce, like "no rollcall running".
+function renderGroup(){
+  if(!groupData)return;
+  const rcs=groupData.rollcalls||[];
   // Persist this group in recents + update page title
   const gname=groupData.group_name||"RollCall Group";
   _saveGroup(URL_TOKEN,gname);
@@ -991,12 +1031,21 @@ async function loadGroup(){
   if(!rcs.length){
     ["rc-title","rc-meta","count-badge"].forEach(id=>{$(id)&&($(id).textContent="")});
     $("tab-card").classList.add("hidden");
+    // The rollcall header card is part of the "there is a game" story; with
+    // no game it was an empty bordered box above an empty column.
+    $("rc-card")?.classList.add("hidden");
     $("no-rollcalls").classList.remove("hidden");
     ["identity-card","vote-card","lists-card"].forEach(id=>$(id)?.classList.add("hidden"));
     activeRcData=null;
+    // Nothing is counting down, so the refresh bar is a progress indicator
+    // for no progress — and the identity strip asks "who's voting?" about a
+    // vote that doesn't exist. The empty state carries the column alone.
+    $("refresh-bar-wrap")?.classList.add("hidden");
+    renderEmptyState();
     _syncAdminRcControls();
   }else if(rcs.length===1){$("tab-card").classList.add("hidden");renderRollcall(rcs[0]);}
   else{$("tab-card").classList.remove("hidden");if(activeTabIdx>=rcs.length)activeTabIdx=0;renderTabs(rcs);renderRollcall(rcs[activeTabIdx]);}
+  _syncViewTabs();
   loadWebStats();
   // Show bookmark card + share button in group mode
   const bc=document.getElementById("bookmark-card");
@@ -1802,6 +1851,10 @@ function _applyAdminStatus(isAdmin){
   if(navBtn)navBtn.classList.toggle("hidden",!_isWebAdmin);
   if(_isWebAdmin){_syncShhToggle();_syncGroupSettingsCard();_syncTimezoneDisplay();_renderWeekdayHint();_loadWeblogInMembers();_loadAdminGroupSwitcher();renderLists();}
   _syncAdminRcControls();
+  _syncViewTabs();
+  // The empty state offers "＋ New Rollcall" to admins, and admin status
+  // usually lands after it was first rendered.
+  if(!activeRcData)renderEmptyState();
   renderAcctControl();
   loadDuesSection().catch(()=>{});
 }
@@ -1809,28 +1862,12 @@ function _applyAdminStatus(isAdmin){
 // Opens (or closes) the admin panel from the header. The panel starts
 // collapsed: it's long, and for a page whose main job is voting it shouldn't
 // push the rollcall off screen just because you happen to be an admin.
+// Admin is a top-level view now, so "open the admin panel" is just
+// navigation. Kept under its old name because the header button and the
+// account menu both call it, and both mean the same thing: take me there.
 window.toggleAdminPanel=function(){
-  const card=document.getElementById("admin-card");
-  if(!card)return;
-  if(card.classList.contains("hidden")){
-    toast(_idToken?"You're not an admin of this group":"Sign in to manage this group",3000);
-    return;
-  }
-  const opening=card.classList.contains("adm-collapsed");
-  card.classList.toggle("adm-collapsed",!opening);
-  // Always reopen at the menu level — landing back inside whichever submenu
-  // was open last time is disorienting when you got here from the header.
-  if(opening)_showAdminLevel(null);
-  const hdr=document.getElementById("admin-card-hdr");
-  if(hdr)hdr.setAttribute("aria-expanded",String(opening));
-  const navBtn=document.getElementById("admin-nav-btn");
-  if(navBtn)navBtn.classList.toggle("active",opening);
-  if(opening){
-    card.scrollIntoView({behavior:"smooth",block:"start"});
-    card.classList.remove("adm-flash");
-    void card.offsetWidth;              // restart the animation
-    card.classList.add("adm-flash");
-  }
+  if(_view==="admin"){showView("rollcall");return;}
+  showView("admin");
 };
 
 // Admin controls are hidden — but WHY matters, and the three reasons are not
@@ -1852,6 +1889,8 @@ function _setAdminCheckFailed(reason){
   if(note)note.classList.toggle("hidden",reason!=="signed-out");
   const navBtn=document.getElementById("admin-nav-btn");
   if(navBtn){navBtn.classList.add("hidden");navBtn.classList.remove("active");}
+  _syncViewTabs();
+  if(!activeRcData)renderEmptyState();
   renderAcctControl();
   loadDuesSection().catch(()=>{});
 }
@@ -1866,6 +1905,97 @@ function _syncShhToggle(){
   const tog=document.getElementById("shh-toggle");
   if(!tog||!groupData)return;
   tog.checked=!!groupData.shh_mode;
+}
+
+// Nothing running. Rather than one grey sentence in an otherwise blank
+// column, answer what the visitor came to find out — when is the next one,
+// and what can I do now — and give the two roles their own next step: an
+// admin can start one, a member can ask to be told when someone does.
+function renderEmptyState(){
+  const sub=document.getElementById("es-sub");
+  const next=document.getElementById("es-next");
+  const acts=document.getElementById("es-actions");
+  if(!sub||!next||!acts)return;
+
+  const upcoming=(groupData&&groupData.upcoming)||[];
+  const soonest=upcoming.filter(u=>u&&u.scheduled_at)
+    .sort((a,b)=>new Date(a.scheduled_at)-new Date(b.scheduled_at))[0];
+
+  if(soonest){
+    const dt=new Date(soonest.scheduled_at.endsWith("Z")?soonest.scheduled_at:soonest.scheduled_at+"Z");
+    const when=isNaN(dt)?soonest.scheduled_at
+      :dt.toLocaleString(undefined,{weekday:"short",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
+    sub.textContent="Nothing to vote on yet — the next one is already scheduled.";
+    next.innerHTML=`<span class="es-next-lbl">Next</span> <span>${esc(soonest.display_title||soonest.title||"Rollcall")}</span> <span class="es-next-lbl">·</span> <span>${esc(when)}</span>`;
+    next.classList.remove("hidden");
+  }else{
+    sub.textContent=_isWebAdmin
+      ?"Start one and the group gets the panel straight away."
+      :"Nobody has opened one yet. You'll see it here the moment they do.";
+    next.classList.add("hidden");
+  }
+
+  let html="";
+  if(_isWebAdmin){
+    html+=`<button class="btn btn-primary" onclick="openNewRollcallModal()">＋ New Rollcall</button>`;
+    html+=`<button class="btn btn-secondary" onclick="showView('admin')">⚙ Admin controls</button>`;
+  }else if(_pushSupported()){
+    html+=`<button class="btn btn-primary" onclick="toggleNotifications()">🔔 Notify me when one opens</button>`;
+  }
+  acts.innerHTML=html;
+}
+
+// Push is only worth offering where it can actually work.
+function _pushSupported(){
+  return typeof Notification!=="undefined"&&"serviceWorker" in navigator&&!!_swReg;
+}
+
+// ── Top-level views ───────────────────────────────────────────────────────
+// Rollcall / Stats / Dues / Admin. One on screen at a time; the tab bar is
+// the only navigation. Replaces a single scroll that put every feature on
+// every visitor's screen at once and pushed the admin panel to the bottom of
+// a sidebar.
+const VIEWS=["rollcall","stats","dues","admin"];
+let _view="rollcall";
+
+window.showView=function(name){
+  if(!VIEWS.includes(name))return;
+  // Tabs for surfaces you don't have are hidden, so asking for one by other
+  // means (the header Admin button, a stale call) shouldn't strand you on a
+  // blank panel.
+  const tab=document.getElementById(`vn-${name}`);
+  if(tab&&tab.classList.contains("hidden")){
+    toast(name==="admin"
+      ?(_idToken?"You're not an admin of this group":"Sign in to manage this group")
+      :"Not available for this group",3000);
+    return;
+  }
+  _view=name;
+  VIEWS.forEach(v=>{
+    const sec=document.getElementById(`view-${v}`);
+    if(sec)sec.classList.toggle("active",v===name);
+    const t=document.getElementById(`vn-${v}`);
+    if(t){t.classList.toggle("active",v===name);t.setAttribute("aria-selected",String(v===name));}
+  });
+  const navBtn=document.getElementById("admin-nav-btn");
+  if(navBtn)navBtn.classList.toggle("active",name==="admin");
+  // A view swap is a page change as far as the reader is concerned.
+  window.scrollTo({top:0,behavior:"smooth"});
+  if(name==="admin")_showAdminLevel(null);
+  if(name==="stats"&&IS_GROUP)loadWebStats();
+};
+
+// Tabs appear as their surface becomes real: Dues once the group has it on,
+// Admin once the server has confirmed you are one.
+function _syncViewTabs(){
+  const duesTab=document.getElementById("vn-dues");
+  if(duesTab)duesTab.classList.toggle("hidden",!(groupData&&groupData.dues_enabled));
+  const adminTab=document.getElementById("vn-admin");
+  if(adminTab)adminTab.classList.toggle("hidden",!_isWebAdmin);
+  // Don't leave someone stranded on a view that just disappeared (signing
+  // out is the obvious way to get here).
+  const cur=document.getElementById(`vn-${_view}`);
+  if(cur&&cur.classList.contains("hidden"))showView("rollcall");
 }
 
 // The two admin controls that only make sense while a rollcall is open. Both
@@ -1936,7 +2066,10 @@ window.jumpToDuesAdmin=function(){
   const body=document.getElementById("dues-admin-body");
   const btn=document.getElementById("dues-admin-toggle");
   if(body&&body.classList.contains("hidden")){body.classList.remove("hidden");if(btn)btn.textContent="▲";}
-  card.scrollIntoView({behavior:"smooth",block:"start"});
+  // The dues cards live in the Dues view now, so this is a change of
+  // destination — scrolling to an element inside a hidden section would
+  // simply do nothing.
+  showView("dues");
 };
 
 // Lets an admin who manages more than one group jump between their groups'
@@ -1998,7 +2131,7 @@ window.doDetectTimezone=async function(){
   if(!detected){toast("Couldn't detect a timezone from this browser.",3000);return;}
   const current=groupData?.timezone||"Asia/Kolkata";
   if(detected===current){toast(`Already set to ${detected}.`,2500);return;}
-  if(!confirm(`Detected ${detected} from this browser.\n\nSet this as the group's timezone? (Currently: ${current})`))return;
+  if(!await _confirmAction(`Detected ${detected} from this browser.\n\nSet this as the group's timezone? (Currently: ${current})`))return;
   try{
     const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/settings`,{
       method:"PATCH",headers:{"Content-Type":"application/json"},
@@ -2553,7 +2686,7 @@ window.submitNewRollcall=async function(){
 window.doEndRcWeb=async function(){
   if(!_idToken){toast("Verify your Telegram identity first.",3500);return;}
   if(!activeRcData){toast("No active rollcall to end.",2500);return;}
-  if(!confirm(`End rollcall "${activeRcData.title}"? This cannot be undone.`))return;
+  if(!await _confirmAction(`End rollcall "${activeRcData.title}"? This cannot be undone.`))return;
   const btn=document.getElementById("end-rc-btn");
   if(btn){btn.disabled=true;btn.textContent="Ending…";}
   try{
@@ -2664,7 +2797,7 @@ function _renderScheduledOnceList(){
 
 window.cancelScheduledOnce=async function(id){
   if(!_idToken)return;
-  if(!confirm("Cancel this scheduled rollcall?"))return;
+  if(!await _confirmAction("Cancel this scheduled rollcall?"))return;
   try{
     const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/scheduled-rollcalls/${id}`,{
       method:"DELETE",headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(8000),
@@ -3373,7 +3506,7 @@ function renderTemplateEditForm(t,isNew){
 }
 
 window.startTemplateNow=async function(name){
-  if(!confirm(`Start a rollcall from "${name}" now?`))return;
+  if(!await _confirmAction(`Start a rollcall from "${name}" now?`))return;
   try{
     const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/templates/${encodeURIComponent(name)}/start`,{
       method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id_token:_idToken}),
@@ -3387,7 +3520,7 @@ window.startTemplateNow=async function(name){
 };
 
 window.deleteTemplate=async function(name){
-  if(!confirm(`Delete template "${name}"? This cannot be undone — any recurring schedule on it will stop too.`))return;
+  if(!await _confirmAction(`Delete template "${name}"? This cannot be undone — any recurring schedule on it will stop too.`))return;
   try{
     const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/templates/${encodeURIComponent(name)}`,{
       method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({id_token:_idToken}),
@@ -3963,7 +4096,7 @@ function renderIdentityMerge(){
 }
 
 window.doMergeIdentity=async function(aliasProxyName,candidateKind,candidateUserId,candidateProxyName){
-  if(!confirm(`Merge "${aliasProxyName}" into this identity? Their stats and dues history will combine.`))return;
+  if(!await _confirmAction(`Merge "${aliasProxyName}" into this identity? Their stats and dues history will combine.`))return;
   try{
     const payload={id_token:_idToken,alias_proxy_name:aliasProxyName};
     if(candidateKind==="user")payload.canonical_user_id=candidateUserId;
@@ -3990,7 +4123,7 @@ window.doMergeIdentityManual=async function(){
 };
 
 window.doUnmergeIdentity=async function(aliasProxyName){
-  if(!confirm(`Unmerge "${aliasProxyName}"? Its stats/dues will show separately again.`))return;
+  if(!await _confirmAction(`Unmerge "${aliasProxyName}"? Its stats/dues will show separately again.`))return;
   try{
     const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/identities/unmerge`,{
       method:"POST",headers:{"Content-Type":"application/json"},
@@ -4024,7 +4157,7 @@ window.doDismissSuggestion=async function(index){
 };
 
 window.doDiscardIdentity=async function(aliasProxyName){
-  if(!confirm(`Discard "${aliasProxyName}"? It won't show up in suggestions or the merge picker anymore (this is reversible).`))return;
+  if(!await _confirmAction(`Discard "${aliasProxyName}"? It won't show up in suggestions or the merge picker anymore (this is reversible).`))return;
   try{
     const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/identities/discard`,{
       method:"POST",headers:{"Content-Type":"application/json"},
@@ -4053,7 +4186,7 @@ window.doUndiscardIdentity=async function(aliasProxyName){
 };
 
 window.doMarkStandalone=async function(aliasProxyName){
-  if(!confirm(`Mark "${aliasProxyName}" as a real person with no Telegram account? It leaves the review queue but stays available as a merge target if a similar name shows up later.`))return;
+  if(!await _confirmAction(`Mark "${aliasProxyName}" as a real person with no Telegram account? It leaves the review queue but stays available as a merge target if a similar name shows up later.`))return;
   try{
     const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/identities/standalone`,{
       method:"POST",headers:{"Content-Type":"application/json"},

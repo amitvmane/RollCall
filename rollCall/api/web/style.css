@@ -40,10 +40,61 @@ h1,h2,h3,.rc-title,.brand-name{font-family:var(--font-display)}
    ran the full width of the screen. */
 #col-main,#col-side{display:contents}
 
+/* ── Views ────────────────────────────────────────────────────────────────
+   One destination on screen at a time. Everything used to be stacked into a
+   single scroll, so every visitor met every feature at once — the roster
+   below the vote buttons, then stats, then dues, then the admin panel last.
+   Splitting it costs one tap and removes the wall of text. */
+.view{display:none}
+.view.active{display:block}
+
+.viewnav{
+  display:flex;gap:6px;margin:0 0 14px;padding:4px;border-radius:12px;
+  background:var(--card);border:1px solid var(--border);
+  overflow-x:auto;scrollbar-width:none;
+}
+.viewnav::-webkit-scrollbar{display:none}
+.vn-item{
+  flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:7px;
+  padding:9px 12px;border:none;border-radius:9px;background:none;color:var(--sub);
+  font-family:inherit;font-size:.85rem;font-weight:700;cursor:pointer;white-space:nowrap;
+  transition:background .15s,color .15s;
+}
+.vn-item:hover{color:var(--text)}
+.vn-item.active{background:var(--accent);color:#fff}
+.vn-ico{font-size:.95rem;line-height:1}
+/* Below 380px the four labels stop fitting; the icons carry it, and the
+   active tab keeps its label so you always know where you are. */
+@media(max-width:379px){
+  .vn-item .vn-lbl{display:none}
+  .vn-item.active .vn-lbl{display:inline}
+}
+
+/* ── Empty state (no rollcall running) ───────────────────────────────────── */
+.empty-state{
+  background:var(--card);border:1px solid var(--border);border-radius:var(--radius,14px);
+  padding:38px 22px;text-align:center;margin-bottom:12px;
+}
+.es-icon{font-size:2.6rem;line-height:1;margin-bottom:12px;opacity:.85}
+.es-title{font-size:1.05rem;font-weight:800;margin-bottom:5px}
+.es-sub{font-size:.85rem;color:var(--sub);max-width:34ch;margin:0 auto 16px}
+.es-next{
+  display:inline-flex;align-items:center;gap:8px;margin-bottom:16px;padding:9px 14px;
+  border-radius:10px;background:var(--bg);border:1px solid var(--border);
+  font-size:.83rem;font-weight:600;
+}
+.es-next .es-next-lbl{color:var(--sub);font-weight:600}
+.es-actions{display:flex;flex-direction:column;gap:8px;align-items:center}
+.es-actions .btn{min-width:220px;padding:11px 18px}
+
 @media(min-width:1024px){
   #app{max-width:1180px;margin:0 auto;padding:0 20px}
   .brand-bar{margin-left:-20px;margin-right:-20px;padding-left:20px;padding-right:20px}
-  #main{
+  /* The two-column grid belongs to the Rollcall view, not to #main — the
+     other views are single, centred columns. When it lived on #main it also
+     governed Stats, Dues and Admin, which is how the admin panel ended up as
+     a narrow strip in the bottom of the right-hand column. */
+  #view-rollcall.active{
     display:grid;
     /* Weighted, not equal: the left side carries the roster, which is by far
        the tallest content. minmax(0,…) so long names can ellipsize instead of
@@ -52,6 +103,9 @@ h1,h2,h3,.rc-title,.brand-name{font-family:var(--font-display)}
     gap:0 20px;
     align-items:start;
   }
+  /* Everything that is read or configured rather than acted on gets one
+     comfortable measure instead of a cramped sidebar. */
+  #view-stats.active,#view-dues.active,#view-admin.active{max-width:720px;margin:0 auto}
   #col-main,#col-side{display:block;min-width:0}
   /* The side column trails the page as you scroll the (much taller) roster. */
   #col-side{position:sticky;top:64px;max-height:calc(100vh - 80px);overflow-y:auto;
@@ -92,12 +146,11 @@ html.dark .brand-bar{background:linear-gradient(180deg,#0D1712 0%,#000 220%)}
 .brand-admin-btn.active{background:var(--accent)}
 
 /* ── Admin panel (collapsible) ──────────────────────────────────────────── */
-.admin-card-hdr{display:flex;align-items:center;justify-content:space-between;cursor:pointer;font-size:.85rem;font-weight:700;color:var(--text);user-select:none;gap:8px}
-.admin-card-hdr:hover{color:var(--accent)}
-.admin-chevron{font-size:.7rem;color:var(--sub);transition:transform .18s}
-#admin-card.adm-collapsed #admin-card-body{display:none}
-#admin-card.adm-collapsed .admin-chevron{transform:rotate(-90deg)}
-#admin-card:not(.adm-collapsed) #admin-card-body{margin-top:12px}
+/* The admin card is the whole Admin view now, so it is never collapsed —
+   the collapse existed only to stop a long panel shoving the rollcall off
+   screen when both lived in the same scroll. */
+.admin-card-hdr{display:flex;align-items:center;justify-content:space-between;font-size:.85rem;font-weight:700;color:var(--text);user-select:none;gap:8px}
+#admin-card-body{margin-top:12px}
 /* Brief highlight when jumped to from the header, so it's obvious what opened. */
 @keyframes admFlash{0%{box-shadow:0 0 0 0 var(--accent)}100%{box-shadow:0 0 0 6px transparent}}
 #admin-card.adm-flash{animation:admFlash .9s ease-out}
@@ -150,6 +203,12 @@ body.modal-open{overflow:hidden}
 .adm-select:disabled{opacity:1;-webkit-text-fill-color:var(--text);appearance:none;font-weight:700}
 
 .adm-quick{margin-bottom:12px}
+/* Two solid buttons stacked read as equals, and in dark mode --danger is a
+   pale red that filled with white — louder than the primary action it sits
+   under. Ending a rollcall is destructive and occasional: outline it, so
+   "New Rollcall" is clearly the thing you came to press. */
+.adm-quick .btn-danger{background:transparent;border:1.5px solid var(--danger);color:var(--danger)}
+.adm-quick .btn-danger:hover{background:var(--danger);color:#fff;opacity:1}
 
 .adm-menu{display:flex;flex-direction:column;gap:6px}
 .adm-menu-item{

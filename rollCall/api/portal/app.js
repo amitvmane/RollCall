@@ -248,7 +248,11 @@ function openAcctMenu(){
     const bd=document.createElement("div");
     bd.id="acct-backdrop";bd.className="acct-backdrop";
     bd.addEventListener("click",closeAcctMenu);
-    document.body.appendChild(bd);
+    // Same stacking-context trap as the group page: .topbar is sticky with
+    // z-index:200, so the menu's 300 is only meaningful INSIDE the topbar,
+    // and a body-level backdrop at 299 covered the whole thing. Keep the two
+    // in one context by appending next to the menu.
+    (menu.parentNode||document.body).appendChild(bd);
   }
 }
 

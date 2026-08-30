@@ -274,6 +274,31 @@ const WIDTHS = [
     if (/sign out/i.test(s.text)) failures.push("identity: signed-out menu offers Sign out");
     if (!/sign in/i.test(s.label)) failures.push(`identity: chip should read "Sign in", got "${s.label}"`);
 
+    // The menu items must be the topmost thing at their own coordinates.
+    //
+    // This is the assertion the rest of this file could not make: every check
+    // here drives the UI with el.click(), which dispatches straight at the
+    // node and never hit-tests. The tap-to-close backdrop was appended to
+    // <body> at z-index 299 while the menu sits inside .brand-bar — sticky,
+    // z-index:100, therefore a stacking context — so the menu's 300 only ever
+    // ranked it among the bar's own children, and the backdrop covered the
+    // whole bar. Every item was dead to a real mouse: the click hit the
+    // backdrop, the menu closed, nothing happened. Sign out "not working" was
+    // this; so were Sign in, Change name and Admin controls.
+    s = await page.evaluate(() => {
+      const items = [...document.querySelectorAll("#acct-menu .acct-menu-item")];
+      return items.map(it => {
+        const r = it.getBoundingClientRect();
+        const top = document.elementFromPoint(Math.round(r.x + r.width / 2),
+                                              Math.round(r.y + r.height / 2));
+        return { label: it.innerText.trim().replace(/\s+/g, " "),
+                 reachable: top === it || it.contains(top),
+                 blockedBy: top ? (top.id || top.className) : "nothing" };
+      });
+    });
+    s.filter(i => !i.reachable).forEach(i =>
+      failures.push(`identity: menu item "${i.label}" is not clickable — covered by ${i.blockedBy}`));
+
     // Backdrop click closes it.
     s = await page.evaluate(() => {
       const bd = document.getElementById("acct-backdrop");
@@ -604,6 +629,22 @@ const WIDTHS = [
     if (!/amit/i.test(s.text)) failures.push("portal: menu doesn't name the signed-in user");
     if (s.av !== "A") failures.push(`portal: avatar initial should be A, got "${s.av}"`);
     if (s.oldLogout) failures.push("portal: old #logout-btn still present alongside the new control");
+
+    // Same hit-test as the group page. The portal's .topbar is sticky at
+    // z-index:200, so it has the identical stacking-context trap.
+    const reach = await page.evaluate(() => {
+      const items = [...document.querySelectorAll("#acct-menu .acct-menu-item")];
+      return items.map(it => {
+        const r = it.getBoundingClientRect();
+        const top = document.elementFromPoint(Math.round(r.x + r.width / 2),
+                                              Math.round(r.y + r.height / 2));
+        return { label: it.innerText.trim().replace(/\s+/g, " "),
+                 reachable: top === it || it.contains(top),
+                 blockedBy: top ? (top.id || top.className) : "nothing" };
+      });
+    });
+    reach.filter(i => !i.reachable).forEach(i =>
+      failures.push(`portal: menu item "${i.label}" is not clickable — covered by ${i.blockedBy}`));
 
     // Sign out must actually sign you out — and be redrawn afterwards. It
     // cleared storage but left the chip showing the name of the account you

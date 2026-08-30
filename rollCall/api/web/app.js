@@ -418,7 +418,18 @@ function openAcctMenu(){
     const bd=document.createElement("div");
     bd.id="acct-backdrop";bd.className="acct-backdrop";
     bd.addEventListener("click",closeAcctMenu);
-    document.body.appendChild(bd);
+    // Into the menu's OWN parent, not document.body. z-index only orders
+    // elements within one stacking context, and .brand-bar is
+    // position:sticky with z-index:100 — which makes it a context. The menu's
+    // z-index:300 is therefore compared against its siblings inside the bar,
+    // while the bar as a whole sits at 100; a backdrop appended to <body> at
+    // 299 outranks the entire bar and painted over the menu. Every item was
+    // then unclickable: the click landed on the backdrop, which closed the
+    // menu and did nothing else, so Sign out looked broken (and so did Sign
+    // in, Change name and Admin controls). Scripted .click() calls don't
+    // hit-test, which is why this survived the browser checks — see the
+    // elementFromPoint assertion in web_layout_check.js.
+    (menu.parentNode||document.body).appendChild(bd);
   }
 }
 

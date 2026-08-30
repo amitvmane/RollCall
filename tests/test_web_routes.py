@@ -501,6 +501,14 @@ class TestRouteOrdering(unittest.TestCase):
 @unittest.skipUnless(FASTAPI_AVAILABLE, "fastapi not installed")
 class TestWebRollcallFeeField(unittest.TestCase):
 
+    # Every other class here resets the limiter; this one didn't, so it was
+    # silently spending whatever budget the rest of the suite had left. Adding
+    # tests ANYWHERE earlier in the run could push it over and fail it with a
+    # 429 that looks like a bug in the fee field.
+    def setUp(self):
+        from api.rate_limit import reset_buckets_for_tests
+        reset_buckets_for_tests()
+
     def test_fee_included_when_set(self):
         rc_with_fee = {**_WEB_RC_DICT, "fee": "₹150"}
         with patch("services.web.get_rollcall_by_token", return_value=rc_with_fee):

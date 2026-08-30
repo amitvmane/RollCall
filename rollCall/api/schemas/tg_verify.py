@@ -10,8 +10,18 @@ class TgVerifyStartResponse(BaseModel):
 
 
 class TgLoginConfigResponse(BaseModel):
-    """Bot username needed to render the Telegram Login Widget script tag."""
+    """Bot username needed to render the Telegram Login Widget script tag.
+
+    ``widget_enabled`` reports whether this deployment has actually completed
+    the widget's other half — /setdomain in BotFather, which registers the
+    site's domain against the bot. Telegram gives the browser no way to ask:
+    an unregistered domain simply renders Telegram's own error text ("Bot
+    domain invalid" / "Username invalid") inside a cross-origin iframe we
+    can't read. So the deployment declares it, and the UI offers the widget
+    only when it will work rather than showing a stranger's error message.
+    """
     bot_username: str
+    widget_enabled: bool = False
 
 
 class TgLoginRequest(BaseModel):

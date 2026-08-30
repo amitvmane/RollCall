@@ -137,6 +137,15 @@ if(TG_NAME){
 }
 let currentVote=null, activeRcData=null, groupData=null, activeTabIdx=0, voting=false;
 
+// Sign-in dialog. The rows it shows are BORROWED from the identity card, in
+// card order — moved, never cloned, because two copies of #name-input would
+// make every getElementById a coin toss (the same reason #acct-wrap is moved
+// between headers rather than duplicated). _signinHome records where each row
+// came from, and doubles as the "dialog is open" flag; it's declared up here
+// with the other page state because renderIdentity() reads it.
+const SIGNIN_ROWS=["identity-picker-row","name-input-row","tg-deeplink-row","tg-widget-wrap"];
+let _signinHome=null;   // [{el, parent, next}] — where each row came from
+
 // ── DOM ────────────────────────────────────────────────────────────────────
 function $(x){return document.getElementById(x)}
 function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
@@ -246,27 +255,61 @@ function renderIdentity(){
   }else{
     $("name-tag-row").classList.add("hidden");
     if(IS_GROUP&&!TG_NAME){
-      // Group mode with no identity: show the picker (Telegram vs guest)
-      $("identity-picker-row").classList.remove("hidden");
+      // Group mode with no identity: one button, which opens the dialog.
+      // The chooser itself is shown there, not here.
+      if(!_signinHome)$("signin-prompt-row").classList.remove("hidden");
+      $("identity-picker-row").classList.add("hidden");
       $("name-input-row").classList.add("hidden");
     }else{
-      // Join link or Mini App without a name yet: go straight to name input
+      // Join link or Mini App without a name yet: go straight to name input.
+      // This is "what should we call you", not a sign-in, so it stays inline.
+      $("signin-prompt-row").classList.add("hidden");
       $("identity-picker-row").classList.add("hidden");
       $("name-input-row").classList.remove("hidden");
     }
   }
-  // Login Widget: same visibility rule as the "Verify with Telegram" deep-
-  // link option above (needsVerify) — show it whenever verifying would
-  // still help, whether the visitor is mid-picker or already a guest.
+  if(currentName)$("signin-prompt-row").classList.add("hidden");
+  // Login Widget: same rule as the "Verify with Telegram" deep-link option
+  // above (needsVerify) — worth loading whenever verifying would still help.
+  // Note this only ever HIDES the block; revealing it is _loadLoginWidget's
+  // call, and it makes that call only once Telegram has rendered a real
+  // button. Unhiding from here is what produced a labelled empty gap (or a
+  // frame full of Telegram's own error text) on deployments where the widget
+  // was never set up.
   const widgetWrap=$("tg-widget-wrap");
   if(widgetWrap){
     const showWidget=IS_GROUP&&!TG_NAME&&!_verifiedUserId;
-    widgetWrap.classList.toggle("hidden",!showWidget);
     if(showWidget)_loadLoginWidget();
+    else widgetWrap.classList.add("hidden");
   }
+  // While the sign-in dialog has these rows on loan, a background re-render
+  // must not leave it empty — but it must also not drag the user back to the
+  // chooser after they've tapped Guest, so only the both-hidden case is
+  // rescued. The inline prompt stays hidden meanwhile: the dialog IS the
+  // prompt while it's open.
+  if(_signinHome){
+    $("signin-prompt-row").classList.add("hidden");
+    const p=$("identity-picker-row"),n=$("name-input-row");
+    if(p&&n&&p.classList.contains("hidden")&&n.classList.contains("hidden")){
+      p.classList.remove("hidden");
+    }
+  }
+  _syncIdentityCardVisibility();
   // Header chip mirrors whatever the identity card just decided, so the two
   // can never disagree about who you are.
   renderAcctControl();
+}
+
+// The identity card is a container for four rows that are each independently
+// hidden — and while the sign-in dialog has them on loan it holds none of
+// them. An empty card still paints its border and padding, so the page showed
+// a blank rounded box above the vote buttons. Hide the card when there's
+// nothing in it to show.
+function _syncIdentityCardVisibility(){
+  const card=$("identity-card");
+  if(!card)return;
+  const anyVisible=[...card.children].some(el=>!el.classList.contains("hidden"));
+  card.classList.toggle("hidden",!anyVisible);
 }
 
 $("name-save-btn").addEventListener("click",saveName);
@@ -310,6 +353,8 @@ function saveName(){
   currentName=val.slice(0,64);
   if(TG_NAME)localStorage.setItem(LS_NAME_OVERRIDE,currentName);
   else localStorage.setItem(LS_NAME,currentName);
+  // Naming yourself IS the guest sign-in, so the dialog's job is done.
+  if(_signinHome){closeSignIn();return;}
   renderIdentity();detectCurrentVote();
   if(IS_GROUP)loadWebStats();
 }
@@ -386,7 +431,11 @@ window.closeAcctMenu=function(){
   if(bd)bd.remove();
 };
 
-document.addEventListener("keydown",e=>{if(e.key==="Escape")closeAcctMenu();});
+document.addEventListener("keydown",e=>{
+  if(e.key!=="Escape")return;
+  closeAcctMenu();
+  if(_signinHome)closeSignIn();
+});
 
 // Three states, deliberately distinct: Telegram-verified, guest (a name but no
 // proof), and nothing at all.
@@ -406,7 +455,14 @@ function renderAcctMenu(){
     // openSignIn(), not startTgVerify() directly: one entry point that offers
     // every method this page supports, so "sign in" means the same thing
     // wherever it's clicked.
-    html+=`<button class="acct-menu-item" role="menuitem" onclick="closeAcctMenu();openSignIn()">✈ Sign in</button>`;
+    //
+    // Two different situations, two different words. Offering "Sign in" to
+    // someone whose name is already on the page reads as though the app
+    // forgot them — they HAVE signed in, as a guest. What they can still do
+    // is prove it's them, which is an upgrade, not a login.
+    html+=who
+      ? `<button class="acct-menu-item" role="menuitem" onclick="closeAcctMenu();openSignIn()">✈ Verify with Telegram</button>`
+      : `<button class="acct-menu-item" role="menuitem" onclick="closeAcctMenu();openSignIn()">✈ Sign in</button>`;
   }
   if(who&&!TG_NAME){
     html+=`<button class="acct-menu-item" role="menuitem" onclick="closeAcctMenu();acctChangeName()">✎ Change name</button>`;
@@ -438,23 +494,52 @@ window.openSignIn=function(){
     toast("You're already signed in",2200);
     return;
   }
-  const card=document.getElementById("identity-card");
+  const modal=document.getElementById("signin-modal");
+  const body=document.getElementById("signin-body");
+  if(!modal||!body){return;}
+  if(_signinHome)return;                       // already open
+  _signinHome=[];
+  SIGNIN_ROWS.forEach(id=>{
+    const el=document.getElementById(id);
+    if(!el)return;
+    _signinHome.push({el,parent:el.parentNode,next:el.nextSibling});
+    body.appendChild(el);
+  });
+  // Start on the chooser; the guest name input is one tap away from there.
+  // The inline prompt is what opened this, so it stands down while it's up.
+  const prompt=document.getElementById("signin-prompt-row");
+  if(prompt)prompt.classList.add("hidden");
   const picker=document.getElementById("identity-picker-row");
   const nameRow=document.getElementById("name-input-row");
-  const tagRow=document.getElementById("name-tag-row");
-  if(!card||!picker)return;
-  card.classList.remove("hidden");
-  picker.classList.remove("hidden");
+  if(picker)picker.classList.remove("hidden");
   if(nameRow)nameRow.classList.add("hidden");
-  if(tagRow)tagRow.classList.add("hidden");
-  // The QR widget is the answer to "Telegram isn't on this device", so it
-  // belongs with the other choices rather than only appearing further down.
-  const widget=document.getElementById("tg-widget-wrap");
-  if(widget){widget.classList.remove("hidden");if(typeof _loadLoginWidget==="function")_loadLoginWidget();}
-  card.scrollIntoView({behavior:"smooth",block:"center"});
-  card.classList.remove("id-flash");
-  void card.offsetWidth;
-  card.classList.add("id-flash");
+  // The Login Widget is the answer to "Telegram isn't on this device", so it
+  // belongs with the other choices. Load it, but leave the reveal to
+  // _loadLoginWidget — it only shows the block once there's a working button
+  // in it, so an unconfigured deployment shows two clean choices, not three
+  // with one broken.
+  if(typeof _loadLoginWidget==="function")_loadLoginWidget();
+  _syncIdentityCardVisibility();
+  modal.classList.remove("hidden");
+  document.body.classList.add("modal-open");
+  const first=document.getElementById("picker-tg-btn");
+  if(first)first.focus();
+};
+
+// Puts every borrowed row back where it came from, then lets renderIdentity()
+// decide what the identity card should show — so closing the dialog can't
+// leave the inline strip in a state the page never chose.
+window.closeSignIn=function(){
+  const modal=document.getElementById("signin-modal");
+  if(modal)modal.classList.add("hidden");
+  document.body.classList.remove("modal-open");
+  if(_signinHome){
+    _signinHome.forEach(({el,parent,next})=>{
+      if(parent)parent.insertBefore(el,next);
+    });
+    _signinHome=null;
+  }
+  renderIdentity();
 };
 
 // Keeps the header chip in sync with whatever identity render just happened.
@@ -681,6 +766,8 @@ function renderRollcall(rc){
   renderCapBar(rc);
   $("no-rollcalls").classList.add("hidden");
   $("identity-card").classList.remove("hidden");
+  // ...but only if it has a row to show — see _syncIdentityCardVisibility.
+  _syncIdentityCardVisibility();
   $("vote-card").classList.remove("hidden");
   $("lists-card").classList.remove("hidden");
   _syncAdminRcControls();
@@ -1312,6 +1399,10 @@ function _adoptVerifiedIdentity(data){
   currentName=_verifiedName;
   localStorage.setItem(LS_NAME,currentName);
   _hideVerifyDeepLink();
+  // Verification can land while the dialog is still open (the user comes back
+  // to this tab from Telegram) — close it rather than leaving them staring at
+  // a sign-in sheet they've already completed.
+  if(_signinHome)closeSignIn();
   toast(`✅ Verified as ${data.name}! Your identity is now locked to your Telegram account.`,4500);
   renderIdentity();detectCurrentVote();
   _checkWebAdmin().catch(()=>{});
@@ -1361,6 +1452,12 @@ async function _loadLoginWidget(){
     if(!res.ok)return;
     const cfg=await res.json();
     if(!cfg.bot_username)return;
+    // Only offer the widget where the deployment says it will actually work
+    // (domain registered via /setdomain in BotFather). Otherwise Telegram
+    // renders its own error — "Username invalid" / "Bot domain invalid" —
+    // inside an iframe we can't read, and the visitor is left reading a
+    // stranger's error message under a heading promising a QR scan.
+    if(!cfg.widget_enabled)return;
     const s=document.createElement("script");
     s.async=true;
     s.src="https://telegram.org/js/telegram-widget.js?22";
@@ -1371,16 +1468,19 @@ async function _loadLoginWidget(){
     const mount=$("tg-login-widget");
     if(!mount)return;
     mount.appendChild(s);
-    // The widget either injects an iframe or renders nothing at all (bot
-    // domain not registered via /setdomain). "Nothing at all" used to look
-    // like a missing logo with a dead click area, so say what happened.
-    setTimeout(()=>{
-      if(mount.querySelector("iframe"))return;
-      const hint=$("tg-widget-hint");
-      const note=$("tg-widget-note");
-      if(hint)hint.classList.add("hidden");
-      if(note)note.classList.remove("hidden");
-    },4000);
+    // Reveal the block only once Telegram has actually put something there.
+    // The script is cross-origin and fires no callback, so poll briefly; if
+    // nothing lands, the block stays hidden rather than leaving a labelled
+    // empty gap where a button should be.
+    let tries=0;
+    const t=setInterval(()=>{
+      if(mount.querySelector("iframe")){
+        clearInterval(t);
+        $("tg-widget-wrap")?.classList.remove("hidden");
+      }else if(++tries>=20){          // ~5s
+        clearInterval(t);
+      }
+    },250);
   }catch(_){}
 }
 
@@ -2641,7 +2741,13 @@ async function loadDuesSection(){
     if(memberCard){
       memberCard.classList.remove("hidden");
       const body=document.getElementById("dues-member-body");
-      if(body)body.innerHTML=`<div style="text-align:center;padding:14px 0;color:var(--sub);font-size:.85rem">🔒 <a href="#" onclick="startTgVerify();return false;" style="color:var(--accent)">Verify with Telegram</a> to see your dues balance</div>`;
+      // Deliberately NOT another sign-in button. This card sits low in the
+      // side column, and a second competing CTA down here (with its own
+      // wording, and one that jumped straight into the Telegram flow rather
+      // than offering the choice) is exactly what made "sign in" feel like it
+      // lived in four different places. Say what's missing and point at the
+      // one control that fixes it.
+      if(body)body.innerHTML=`<div style="text-align:center;padding:14px 0;color:var(--sub);font-size:.85rem">🔒 Sign in to see your dues balance</div>`;
     }
     return;
   }

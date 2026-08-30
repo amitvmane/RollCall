@@ -120,6 +120,13 @@ class TestVerifyLoginWidget(unittest.TestCase):
 @unittest.skipUnless(FASTAPI_AVAILABLE, "fastapi not installed")
 class TestTgLoginEndpoints(unittest.TestCase):
 
+    # These all go through the real middleware stack, so they draw on the same
+    # per-IP rate-limit bucket every other REST test shares. Reset it rather
+    # than spending someone else's budget.
+    def setUp(self):
+        from api.rate_limit import reset_buckets_for_tests
+        reset_buckets_for_tests()
+
     def _client(self):
         from api.main import create_app
         return TestClient(create_app(), raise_server_exceptions=False)
@@ -176,6 +183,32 @@ class TestTgLoginEndpoints(unittest.TestCase):
         with patch("api.routes.tg_verify._bot_username", return_value=""):
             res = self._client().get("/api/v1/auth/tg-login/config")
         self.assertEqual(res.status_code, 503)
+
+    # The widget's other half — /setdomain in BotFather — lives on Telegram's
+    # side, and an unregistered domain shows Telegram's own error text inside
+    # a cross-origin iframe the page can't read. So the deployment declares
+    # it, and the default is "don't offer what doesn't work".
+    def test_config_widget_disabled_by_default(self):
+        with patch("api.routes.tg_verify._bot_username", return_value="rollcall_bot"), \
+             patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("TG_LOGIN_WIDGET", None)
+            res = self._client().get("/api/v1/auth/tg-login/config")
+        self.assertEqual(res.status_code, 200)
+        self.assertFalse(res.json()["widget_enabled"])
+
+    def test_config_widget_enabled_when_opted_in(self):
+        for val in ("true", "TRUE", "1", "yes"):
+            with self.subTest(val=val):
+                with patch("api.routes.tg_verify._bot_username", return_value="rollcall_bot"), \
+                     patch.dict(os.environ, {"TG_LOGIN_WIDGET": val}):
+                    res = self._client().get("/api/v1/auth/tg-login/config")
+                self.assertTrue(res.json()["widget_enabled"])
+
+    def test_config_widget_not_enabled_by_a_random_value(self):
+        with patch("api.routes.tg_verify._bot_username", return_value="rollcall_bot"), \
+             patch.dict(os.environ, {"TG_LOGIN_WIDGET": "maybe"}):
+            res = self._client().get("/api/v1/auth/tg-login/config")
+        self.assertFalse(res.json()["widget_enabled"])
 
 
 @unittest.skipUnless(FASTAPI_AVAILABLE, "fastapi not installed")

@@ -67,6 +67,28 @@
   </div>
 </div>
 
+<!-- Sign-in dialog. Reached from the account menu, the signed-out admin note,
+     and anywhere else "sign in" is offered. It does NOT duplicate the identity
+     card's controls — duplicate ids would break every getElementById the same
+     way a second #acct-wrap would. Instead openSignIn() MOVES the picker, the
+     name input, the deep-link fallback and the login widget into #signin-body
+     and closeSignIn() puts them back exactly where they were. One set of
+     elements, one set of handlers, two places to show them. -->
+<div id="signin-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="signin-title">
+  <div class="signin-backdrop" onclick="closeSignIn()"></div>
+  <div class="signin-sheet">
+    <div class="signin-hdr">
+      <span class="signin-title" id="signin-title">Sign in</span>
+      <button class="signin-close" onclick="closeSignIn()" aria-label="Close sign in">✕</button>
+    </div>
+    <div id="signin-body"></div>
+    <div class="signin-foot">
+      You can also keep voting as a guest — signing in just links your votes to
+      your Telegram account on this device.
+    </div>
+  </div>
+</div>
+
 <div id="tg-offline-bar" class="tg-offline-bar hidden" role="alert">
   ⚠️ <strong>Bot is offline</strong> — web voting still works, but Telegram notifications may be delayed.
   <button class="tg-offline-close" onclick="this.parentElement.classList.add('hidden')">✕</button>
@@ -155,7 +177,18 @@
          could act; now it's one thin row that collapses to a tiny name-chip
          for returning visitors (see renderIdentity() in app.js). -->
     <div class="card" id="identity-card">
-      <!-- Picker: first-visit group users choose Telegram or guest entry -->
+      <!-- The ONE inline sign-in affordance. There used to be a sign-in
+           control here, another in the header, a third inside the dues card
+           and a fourth in the admin note — four places, four wordings, three
+           different destinations. This is a single button that opens the same
+           dialog the header chip opens; the Telegram/Guest chooser itself now
+           lives only in that dialog. -->
+      <div id="signin-prompt-row" class="hidden">
+        <div class="id-prompt-label">Who's voting?</div>
+        <button class="btn btn-primary" style="width:100%;padding:11px" onclick="openSignIn()">Sign in to vote</button>
+      </div>
+      <!-- Picker: Telegram vs guest. Lives here in the DOM but is shown inside
+           the sign-in dialog, which borrows it (see openSignIn in app.js). -->
       <div id="identity-picker-row" class="hidden">
         <div class="id-prompt-label">Who's voting?</div>
         <div style="display:flex;gap:8px">
@@ -203,15 +236,17 @@
            style="display:inline-block;padding:9px 16px;text-decoration:none">✈ Open Telegram to finish</a>
         <div style="font-size:.7rem;color:var(--sub);margin-top:5px">Didn't open automatically? Use this link, then come back to this tab.</div>
       </div>
-      <div id="tg-widget-wrap" class="hidden" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
-        <div id="tg-widget-hint" style="font-size:.74rem;color:var(--sub);text-align:center;margin-bottom:6px">No Telegram app on this device? Scan with your phone to sign in:</div>
-        <div id="tg-login-widget" style="display:flex;justify-content:center;min-height:40px"></div>
-        <!-- Telegram's widget renders into a cross-origin iframe. We can't read
-             it, but we CAN see whether an iframe ever appeared — if it didn't
-             (the usual cause is /setdomain never being set in BotFather for
-             this deployment's domain) the wrap replaces itself with the note
-             below instead of leaving a blank gap where a button should be. -->
-        <div id="tg-widget-note" class="hidden" style="font-size:.72rem;color:var(--sub);text-align:center;margin-top:5px">This sign-in method isn't set up for this site yet — use the Telegram button above, or continue as a guest.</div>
+      <!-- Telegram's official Login Widget. Stays hidden unless the server
+           says the domain is registered (TG_LOGIN_WIDGET) AND Telegram then
+           actually renders its iframe — see _loadLoginWidget(). The old copy
+           promised "scan with your phone", which is Telegram's own optional
+           fallback and not something we can guarantee, above a block that on
+           this deployment showed Telegram's "Username invalid" error. Neither
+           the promise nor the error is ours to make, so: no claim, and no
+           block at all until there's a working button in it. -->
+      <div id="tg-widget-wrap" class="hidden" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+        <div id="tg-widget-hint" style="font-size:.74rem;color:var(--sub);text-align:center;margin-bottom:8px">Or sign in with your Telegram account:</div>
+        <div id="tg-login-widget" style="display:flex;justify-content:center"></div>
       </div>
     </div>
 
@@ -263,12 +298,13 @@
     <!-- Signed out is NOT the same as "not an admin", but both used to render
          as the plain member view with nothing said. A group owner then sees no
          admin controls, no explanation, and no request is ever sent — so the
-         server logs are empty too and there is nothing to debug. Say it. -->
+         server logs are empty too and there is nothing to debug. Say it.
+         It is a note, not a fourth sign-in button: this shows for every
+         signed-out visitor, most of whom are not admins, so it must not
+         compete with the two real entry points (header chip, vote prompt). -->
     <div id="admin-signedout-note" class="card hidden"
-         style="border:1.5px dashed var(--border);font-size:.85rem">
-      🔑 You're not signed in on this device, so admin controls are hidden.
-      Sign in to manage this group.
-      <button class="btn" style="margin-top:8px" onclick="openSignIn()">Sign in</button>
+         style="border:1.5px dashed var(--border);font-size:.8rem;color:var(--sub)">
+      🔑 Admin of this group? Sign in (top right) — admin controls stay hidden until you do.
     </div>
 
     <!-- Admin actions. This used to be one long flat scroll — every toggle,

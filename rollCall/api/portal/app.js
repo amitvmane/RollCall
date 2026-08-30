@@ -6,6 +6,10 @@ const LS_TG_USER_ID="rc_verified_tg_user_id";
 const LS_TG_NAME="rc_verified_tg_name";
 const LS_ID_TOKEN="rc_identity_token";
 const LS_VERIFY_CODE="rc_verify_code";
+// Written by the group page for a guest (a name with no Telegram behind it).
+// The portal never sets it, but it must clear it on sign-out — otherwise
+// signing out here leaves you still named on the group page.
+const LS_NAME="rollcall_name";
 
 let _userId=parseInt(localStorage.getItem(LS_TG_USER_ID))||null;
 let _userName=localStorage.getItem(LS_TG_NAME)||null;
@@ -92,6 +96,7 @@ async function _checkVerify(code){
 // ── Layout ────────────────────────────────────────────────────────────────────
 
 function showVerifyScreen(){
+  renderAcctControl();
   $id("verify-screen").style.display="";
   $id("app").style.display="none";
   $id("verify-btn").addEventListener("click",startVerify,{once:true});
@@ -188,17 +193,40 @@ function _portalSignOut(){
   localStorage.removeItem(LS_TG_NAME);
   localStorage.removeItem(LS_ID_TOKEN);
   localStorage.removeItem(LS_VERIFY_CODE);
+  // The group page's guest name lives in the same localStorage. Leaving it
+  // behind means "Sign out" here still leaves you named over there — one
+  // account control, one meaning, both surfaces.
+  localStorage.removeItem(LS_NAME);
   _userId=null;_userName=null;_idToken=null;
   closeAcctMenu();
   $id("groups-list").innerHTML="";
   $id("summary-card").style.display="none";
   $id("upcoming-section").style.display="none";
+  // The chip is the one thing on screen that outlives the sign-out, so it has
+  // to be redrawn — it was still showing the name of the account just
+  // signed out of.
+  renderAcctControl();
   showVerifyScreen();
 }
 
+// The portal is Telegram-only: you either have a verified identity or you
+// have nothing. It used to render the same menu either way — a "✅ Telegram
+// verified" header it couldn't back up, plus a Sign out button that, with
+// nothing stored to remove, cleared nothing and changed nothing on screen.
+// That is the "sign out does nothing" report: the button worked, there was
+// simply never anything for it to do.
 function renderAcctMenu(){
   const menu=$id("acct-menu");
   if(!menu)return;
+  const signedIn=!!_idToken;
+  if(!signedIn){
+    menu.innerHTML=
+      `<div class="acct-menu-hdr"><div class="acct-menu-sub">Not signed in</div></div>`+
+      `<button class="acct-menu-item" role="menuitem" id="acct-signin-item">✈ Sign in</button>`;
+    const i=$id("acct-signin-item");
+    if(i)i.addEventListener("click",()=>{closeAcctMenu();showVerifyScreen();});
+    return;
+  }
   menu.innerHTML=
     (_userName?`<div class="acct-menu-hdr">
        <div class="acct-menu-name">${esc(_userName)}</div>
@@ -234,10 +262,15 @@ function renderAcctControl(){
   const av=$id("acct-av"),label=$id("acct-label");
   if(!av||!label)return;
   const who=_userName||"";
+  const signedIn=!!_idToken;
   av.textContent=(who[0]||"?").toUpperCase();
-  label.textContent=who?(who.length>12?who.slice(0,11)+"…":who):"Signed in";
+  // "Signed in" was the fallback for having NO name — which is also what a
+  // signed-out visitor sees. The chip therefore told people the opposite of
+  // the truth, and the menu behind it followed suit.
+  label.textContent=who?(who.length>12?who.slice(0,11)+"…":who)
+                       :(signedIn?"Signed in":"Sign in");
   const btn=$id("acct-btn");
-  if(btn)btn.title=who?`Signed in as ${who}`:"Your account";
+  if(btn)btn.title=signedIn?(who?`Signed in as ${who}`:"Your account"):"Sign in";
   const menu=$id("acct-menu");
   if(menu&&!menu.classList.contains("hidden"))renderAcctMenu();
 }

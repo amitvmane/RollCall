@@ -105,6 +105,18 @@ def _bot_username() -> str:
     return raw.lstrip("@")
 
 
+def _login_widget_enabled() -> bool:
+    """Has this deployment registered its domain with BotFather (/setdomain)?
+
+    Only the operator knows: the setting lives on Telegram's side, and a
+    browser asking the widget gets back Telegram's error rendered inside a
+    cross-origin iframe — unreadable to us, but very readable to the visitor,
+    who sees "Username invalid" from a service they never asked about. Opt-in
+    (TG_LOGIN_WIDGET=true) so the default is "don't offer what doesn't work".
+    """
+    return os.getenv("TG_LOGIN_WIDGET", "").strip().lower() in ("1", "true", "yes")
+
+
 @router.post(
     "/auth/tg-verify/start",
     response_model=TgVerifyStartResponse,
@@ -225,7 +237,10 @@ async def tg_login_config() -> TgLoginConfigResponse:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Bot not connected to Telegram yet — try again in a moment",
         )
-    return TgLoginConfigResponse(bot_username=username)
+    return TgLoginConfigResponse(
+        bot_username=username,
+        widget_enabled=_login_widget_enabled(),
+    )
 
 
 @router.post(

@@ -323,17 +323,62 @@ const WIDTHS = [
     if (!s.navHidden) failures.push("identity: admin nav button still visible after sign out");
     if (!s.menuClosed) failures.push("identity: menu left open after sign out");
 
-    // D) The unified sign-in entry reveals the chooser rather than committing
-    //    the user to one method.
+    // D) Sign-in is ONE dialog reached from a small, fixed number of places.
+    //    It used to be four competing affordances with three destinations:
+    //    the header menu, an inline Telegram/Guest chooser next to the vote
+    //    buttons, a "Verify with Telegram" link buried in the dues card, and
+    //    a button in the admin note. Beyond the always-present header chip
+    //    (icon-only on narrow screens) there must be exactly one CTA.
+    s = await page.evaluate(() => {
+      const vis = el => el && el.offsetParent !== null && el.getBoundingClientRect().width > 0;
+      const hits = [];
+      document.querySelectorAll("button, a").forEach(el => {
+        if (!vis(el) || el.id === "acct-btn" || el.closest("#signin-modal")) return;
+        if (/sign in|verify with telegram/i.test(el.innerText || "")) {
+          hits.push((el.innerText || "").trim().replace(/\s+/g, " "));
+        }
+      });
+      return { hits, chip: vis(document.getElementById("acct-btn")) };
+    });
+    if (!s.chip) failures.push("identity: header account chip not visible when signed out");
+    if (s.hits.length !== 1) {
+      failures.push(`identity: expected exactly 1 sign-in CTA besides the header chip, found ${s.hits.length}: ${JSON.stringify(s.hits)}`);
+    }
+
+    //    The dialog BORROWS the chooser rather than cloning it — a second
+    //    #name-input would make every getElementById a coin toss — and every
+    //    borrowed row has to go home when it closes.
     s = await page.evaluate(() => {
       openSignIn();
+      const body = document.getElementById("signin-body");
       return {
-        picker: !document.getElementById("identity-picker-row").classList.contains("hidden"),
-        card: !document.getElementById("identity-card").classList.contains("hidden"),
+        open: !document.getElementById("signin-modal").classList.contains("hidden"),
+        pickerInDialog: !!body.querySelector("#identity-picker-row"),
+        pickerVisible: !document.getElementById("identity-picker-row").classList.contains("hidden"),
+        promptHidden: document.getElementById("signin-prompt-row").classList.contains("hidden"),
+        nameInputs: document.querySelectorAll("#name-input").length,
       };
     });
-    if (!s.picker) failures.push("identity: openSignIn() did not reveal the Telegram/Guest chooser");
-    if (!s.card) failures.push("identity: openSignIn() left the identity card hidden");
+    if (!s.open) failures.push("identity: openSignIn() did not open the dialog");
+    if (!s.pickerInDialog || !s.pickerVisible) failures.push("identity: dialog does not show the Telegram/Guest chooser");
+    if (!s.promptHidden) failures.push("identity: inline prompt still visible behind the open dialog");
+    if (s.nameInputs !== 1) failures.push(`identity: #name-input duplicated (${s.nameInputs} in the document)`);
+
+    s = await page.evaluate(() => {
+      closeSignIn();
+      const card = document.getElementById("identity-card");
+      return {
+        closed: document.getElementById("signin-modal").classList.contains("hidden"),
+        restored: ["identity-picker-row", "name-input-row", "tg-deeplink-row", "tg-widget-wrap"]
+          .every(id => card.contains(document.getElementById(id))),
+        promptBack: !document.getElementById("signin-prompt-row").classList.contains("hidden"),
+        scrollLocked: document.body.classList.contains("modal-open"),
+      };
+    });
+    if (!s.closed) failures.push("identity: closeSignIn() left the dialog open");
+    if (!s.restored) failures.push("identity: borrowed rows were not returned to the identity card");
+    if (!s.promptBack) failures.push("identity: inline sign-in prompt did not come back after closing");
+    if (s.scrollLocked) failures.push("identity: body left scroll-locked after closing the dialog");
 
     if (errs.length) failures.push(`identity: JS error — ${errs[0]}`);
     console.log(`  identity: menu, sign-out and sign-in flows exercised`);
@@ -364,7 +409,16 @@ const WIDTHS = [
       localStorage.setItem("rc_identity_token", "168415137.9999999999.deadbeef");
     });
     await page.goto(`${BASE}/web/group/testtoken123`, { waitUntil: "load" });
-    await new Promise(r => setTimeout(r, 700));
+    // admin-status is a live round-trip with retries, so poll for the answer
+    // rather than sleeping a guessed interval — a fixed wait here is a flaky
+    // test that fails on a slow machine and says "admin menu broken".
+    // Wait for the group picker too: it is filled by a second async call that
+    // fires after the admin answer, so "card visible" alone still races it.
+    await page.waitForFunction(
+      () => !document.getElementById("admin-card").classList.contains("hidden")
+            && !!document.getElementById("admin-group-select").value,
+      { timeout: 8000 },
+    ).catch(() => failures.push("admin: admin card / group picker never became ready for an admin"));
 
     const root = await page.evaluate(() => {
       document.getElementById("admin-nav-btn").click();
@@ -530,7 +584,7 @@ const WIDTHS = [
     await page.goto(`${BASE}/portal/index.html`, { waitUntil: "load" });
     await new Promise(r => setTimeout(r, 400));
 
-    const s = await page.evaluate(() => {
+    let s = await page.evaluate(() => {
       const btn = document.getElementById("acct-btn");
       if (btn) btn.click();
       const m = document.getElementById("acct-menu");
@@ -550,11 +604,51 @@ const WIDTHS = [
     if (!/amit/i.test(s.text)) failures.push("portal: menu doesn't name the signed-in user");
     if (s.av !== "A") failures.push(`portal: avatar initial should be A, got "${s.av}"`);
     if (s.oldLogout) failures.push("portal: old #logout-btn still present alongside the new control");
+
+    // Sign out must actually sign you out — and be redrawn afterwards. It
+    // cleared storage but left the chip showing the name of the account you
+    // had just left, which reads as a button that did nothing.
+    page.on("dialog", async d => { await d.accept(); });
+    await page.evaluate(() => {
+      // Re-open if the previous assertions left it closed; the item only
+      // exists while the menu is rendered.
+      const menu = document.getElementById("acct-menu");
+      if (menu.classList.contains("hidden")) document.getElementById("acct-btn").click();
+      document.getElementById("acct-signout-item").click();
+    });
+    await new Promise(r => setTimeout(r, 400));
+    s = await page.evaluate(() => ({
+      token: localStorage.getItem("rc_identity_token"),
+      guestName: localStorage.getItem("rollcall_name"),
+      label: document.getElementById("acct-label").innerText,
+      verifyScreen: document.getElementById("verify-screen").style.display !== "none",
+    }));
+    if (s.token) failures.push("portal: sign out left the identity token behind");
+    if (s.guestName) failures.push("portal: sign out left the group page's guest name behind");
+    if (!/sign in/i.test(s.label)) failures.push(`portal: chip still reads "${s.label}" after sign out`);
+    if (!s.verifyScreen) failures.push("portal: sign out did not return to the verify screen");
+
+    // ...and a signed-OUT visitor must not be offered Sign out at all: with
+    // nothing stored, the button cleared nothing and nothing changed.
+    await page.evaluate(() => {
+      localStorage.clear();
+      location.reload();
+    });
+    await new Promise(r => setTimeout(r, 700));
+    s = await page.evaluate(() => {
+      document.getElementById("acct-btn").click();
+      return { text: document.getElementById("acct-menu").innerText,
+               label: document.getElementById("acct-label").innerText };
+    });
+    if (/sign out/i.test(s.text)) failures.push("portal: signed-out menu still offers Sign out");
+    if (!/sign in/i.test(s.text)) failures.push(`portal: signed-out menu has no Sign in — got "${s.text.replace(/\n/g, " | ")}"`);
+    if (!/sign in/i.test(s.label)) failures.push(`portal: signed-out chip reads "${s.label}"`);
+
     // A pageerror here would previously have been the stale
     // $id("portal-identity") throwing on load.
     if (errs.length) failures.push(`portal: JS error — ${errs[0]}`);
 
-    console.log(`  portal: account chip and menu exercised`);
+    console.log(`  portal: account chip, menu and sign-out exercised`);
     await page.close();
   }
 

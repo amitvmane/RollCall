@@ -105,6 +105,37 @@ html.dark .brand-bar{background:linear-gradient(180deg,#0D1712 0%,#000 220%)}
    card the "Sign in" you just pressed was talking about. */
 #identity-card.id-flash{animation:admFlash .9s ease-out}
 
+/* ── Sign-in dialog ──────────────────────────────────────────────────────── */
+/* One dialog, reached from the header chip and from the vote prompt. Bottom
+   sheet on phones (thumb reach), centred card from tablet up. */
+#signin-modal{position:fixed;inset:0;z-index:400;display:flex;align-items:flex-end;justify-content:center}
+#signin-modal.hidden{display:none}
+.signin-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.5)}
+.signin-sheet{
+  position:relative;width:100%;max-width:420px;background:var(--card);
+  border-radius:18px 18px 0 0;padding:18px 16px calc(24px + env(safe-area-inset-bottom));
+  max-height:88vh;overflow-y:auto;box-shadow:0 -8px 32px rgba(0,0,0,.25);
+}
+.signin-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.signin-title{font-size:1.05rem;font-weight:800}
+.signin-close{
+  background:var(--border);border:none;color:var(--text);width:30px;height:30px;
+  border-radius:8px;cursor:pointer;font-size:.9rem;line-height:1;font-family:inherit;
+}
+.signin-close:hover{background:var(--out,#dc2626);color:#fff}
+.signin-foot{font-size:.72rem;color:var(--sub);text-align:center;margin-top:14px;line-height:1.5}
+/* The identity card's rows carry their own top margins/borders for the inline
+   layout; inside the sheet the first one shouldn't start with a rule. */
+.signin-sheet #tg-widget-wrap{margin-top:14px}
+/* "Who's voting?" is the inline card's heading. Inside the sheet the dialog
+   title already says it, so two headings stack up saying the same thing. */
+.signin-sheet .id-prompt-label{display:none}
+body.modal-open{overflow:hidden}
+@media(min-width:600px){
+  #signin-modal{align-items:center}
+  .signin-sheet{border-radius:16px;padding-bottom:24px;box-shadow:0 12px 48px rgba(0,0,0,.3)}
+}
+
 /* ── Admin menu (level 1) and its submenu panels (level 2) ───────────────── */
 .adm-group-picker{margin-bottom:12px}
 .adm-group-lbl{font-size:.7rem;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px}

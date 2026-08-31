@@ -728,3 +728,22 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
   .dues-tbl,.dues-ledger-table{font-size:.75rem}
   .dues-modal-sheet{padding:16px 12px 26px}
 }
+
+/* ── Ghost review ─────────────────────────────────────────────────────────── */
+.gr-card{border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:12px}
+.gr-hdr{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:8px}
+.gr-title{font-size:.9rem;font-weight:700}
+.gr-when{font-size:.75rem;color:var(--sub);white-space:nowrap}
+.gr-sub{font-size:.72rem;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.05em;margin:10px 0 4px}
+.gr-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer;font-size:.88rem}
+.gr-row:hover{background:var(--bg)}
+/* Ticked means "did not turn up" — the destructive reading — so it is marked
+   in the same colour the OUT vote uses rather than the usual accent blue. */
+.gr-row.on{background:var(--danger-bg,rgba(220,38,38,.12))}
+.gr-row.on .gr-name{font-weight:700;color:var(--danger-fg,var(--out))}
+.gr-row input{width:17px;height:17px;flex-shrink:0;accent-color:var(--out,#dc2626)}
+.gr-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.gr-tag{font-size:.68rem;font-weight:700;color:var(--sub);border:1px solid var(--border);border-radius:5px;padding:1px 5px;white-space:nowrap}
+.gr-more{background:none;border:none;color:var(--accent);font-family:inherit;font-size:.8rem;font-weight:600;cursor:pointer;padding:8px 10px}
+.gr-actions{display:flex;gap:8px;margin-top:10px}
+.gr-badge{background:var(--out,#dc2626);color:#fff;border-radius:999px;min-width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;font-size:.72rem;font-weight:800;padding:0 6px}

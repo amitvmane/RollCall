@@ -1910,6 +1910,7 @@ function _applyAdminStatus(isAdmin){
   if(_isWebAdmin){_syncShhToggle();_syncGroupSettingsCard();_syncTimezoneDisplay();_renderWeekdayHint();_loadWeblogInMembers();_loadAdminGroupSwitcher();renderLists();}
   _syncAdminRcControls();
   _syncViewTabs();
+  _peekGhostReview().catch(()=>{});
   // The empty state offers "＋ New Rollcall" to admins, and admin status
   // usually lands after it was first rendered.
   if(!activeRcData)renderEmptyState();
@@ -2081,6 +2082,7 @@ const ADMIN_SECTIONS={
   templates:{load:()=>_ensureTemplatesLoaded()},
   scheduled:{load:()=>_ensureScheduledOnceLoaded()},
   merge:{load:()=>_ensureIdentityMergeLoaded()},
+  ghost:{load:()=>loadGhostReview()},
 };
 let _adminSection=null;
 
@@ -4356,4 +4358,160 @@ if(URL_TOKEN&&(URL_MODE==="join"||URL_MODE==="group")){
   renderHomeScreen();
   _bootHome().catch(()=>{});
 }
+
+
+// ── Ghost review (web half of the after-game "who ghosted?" prompt) ────────
+// The prompt only ever existed in Telegram. Answering it is what FORGIVES
+// everyone who turned up, so an admin who lives on this page had no way to
+// clear absences and the reconfirm prompt slowly followed people around.
+let _ghostSessions=null,_ghostSel={},_ghostShowOut={};
+
+async function loadGhostReview(){
+  const body=document.getElementById("ghost-review-body");
+  if(!body||!_idToken)return;
+  body.innerHTML='<div class="sched-empty">Loading…</div>';
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/ghost/sessions`,
+      {headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(8000)});
+    if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"Failed to load");
+    const d=await res.json();
+    _ghostSessions=d;
+    _ghostSel={};_ghostShowOut={};
+    renderGhostReview();
+  }catch(e){
+    body.innerHTML=`<div class="sched-empty">${esc(e.message||"Could not load")}</div>`;
+  }
+}
+
+function _ghostKey(c){return c.proxy_name?("p:"+c.proxy_name):("u:"+c.user_id);}
+
+function renderGhostReview(){
+  const body=document.getElementById("ghost-review-body");
+  if(!body||!_ghostSessions)return;
+  const {sessions,ghost_tracking_enabled,autoforgive_days}=_ghostSessions;
+
+  _syncGhostBadge();
+
+  if(!ghost_tracking_enabled){
+    body.innerHTML=`<div class="adm-row-s">Ghost tracking is off for this group, so there is nothing to review. Turn it on under Group settings if you want to track who doesn't turn up.</div>`;
+    return;
+  }
+  if(!sessions.length){
+    body.innerHTML=`<div class="sched-empty">Nothing waiting — every finished game has been reviewed. 🎉</div>`;
+    return;
+  }
+
+  body.innerHTML=`<div class="adm-row-s" style="margin-bottom:12px">
+    Tick anyone who didn't turn up. Everyone you leave unticked gets one past
+    absence forgiven — that's what answering this actually does, so it's worth
+    doing even when nobody ghosted.${autoforgive_days?` Unreviewed games are treated as "everyone attended" after ${autoforgive_days} days.`:""}
+  </div>`+sessions.map(s=>_ghostSessionHtml(s)).join("");
+}
+
+function _ghostSessionHtml(s){
+  const sel=_ghostSel[s.rollcall_id]||(_ghostSel[s.rollcall_id]=new Set());
+  const showOut=!!_ghostShowOut[s.rollcall_id];
+  const stayed=s.candidates.filter(c=>!c.was_out);
+  const dropped=s.candidates.filter(c=>c.was_out);
+  const when=s.ended_at?new Date(s.ended_at.endsWith("Z")?s.ended_at:s.ended_at+"Z"):null;
+  const whenStr=when&&!isNaN(when)?when.toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"}):"";
+
+  const row=c=>{
+    const k=_ghostKey(c);
+    const on=sel.has(k);
+    return `<label class="gr-row${on?" on":""}">
+      <input type="checkbox" ${on?"checked":""}
+             onchange="toggleGhostPick(${s.rollcall_id},'${esc(escJsAttr(k))}')"/>
+      <span class="gr-name">${esc(c.name)}</span>
+      ${c.was_out?'<span class="gr-tag">was OUT</span>':""}
+    </label>`;
+  };
+
+  // Drop-outs stay behind a disclosure: the normal question is "who said IN
+  // and didn't come", and someone who told you they were out is only a
+  // no-show if it was too late to replace them. That's a judgement call, so
+  // it shouldn't be pre-mixed into the list.
+  const dropHtml=dropped.length?(showOut
+    ? `<div class="gr-sub">Dropped out late</div>${dropped.map(row).join("")}
+       <button class="gr-more" onclick="toggleGhostOut(${s.rollcall_id})">Hide late drop-outs</button>`
+    : `<button class="gr-more" onclick="toggleGhostOut(${s.rollcall_id})">＋ Someone who dropped out late (${dropped.length})</button>`
+  ):"";
+
+  return `<div class="gr-card">
+    <div class="gr-hdr">
+      <span class="gr-title">${esc(s.title)}</span>
+      ${whenStr?`<span class="gr-when">${esc(whenStr)}</span>`:""}
+    </div>
+    ${stayed.length?stayed.map(row).join(""):'<div class="adm-row-s">Nobody was on the IN list.</div>'}
+    ${dropHtml}
+    <div class="gr-actions">
+      <button class="btn btn-primary" style="flex:1" onclick="submitGhostReview(${s.rollcall_id})">
+        ${sel.size?`Record ${sel.size} no-show${sel.size>1?"s":""}`:"Everyone showed up"}
+      </button>
+    </div>
+  </div>`;
+}
+
+window.toggleGhostPick=function(rcId,key){
+  const sel=_ghostSel[rcId]||(_ghostSel[rcId]=new Set());
+  if(sel.has(key))sel.delete(key);else sel.add(key);
+  renderGhostReview();
+};
+
+window.toggleGhostOut=function(rcId){
+  _ghostShowOut[rcId]=!_ghostShowOut[rcId];
+  renderGhostReview();
+};
+
+window.submitGhostReview=async function(rcId){
+  if(!_idToken)return;
+  const sel=[..._ghostSel[rcId]||[]];
+  const names=sel.filter(k=>k.startsWith("p:")).map(k=>k.slice(2));
+  const ids=sel.filter(k=>k.startsWith("u:")).map(k=>parseInt(k.slice(2),10)).filter(n=>!isNaN(n));
+  const msg=sel.length
+    ? `Record ${sel.length} no-show${sel.length>1?"s":""}? Everyone else gets one past absence forgiven.`
+    : "Mark everyone as having turned up? Each of them gets one past absence forgiven.";
+  if(!await _confirmAction(msg))return;
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/ghost/review`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({id_token:_idToken,rollcall_id:rcId,
+                           ghost_user_ids:ids,ghost_proxy_names:names}),
+      signal:AbortSignal.timeout(10000),
+    });
+    if(!res.ok){const d=await res.json().catch(()=>({}));throw new Error(d.detail||"Failed");}
+    const d=await res.json();
+    toast(d.ghosts?`👻 ${d.ghosts} recorded · ${d.forgiven} forgiven`
+                  :`✅ All present · ${d.forgiven} forgiven`,3500);
+    await loadGhostReview();
+  }catch(e){toast(e.message||"Could not save the review",4000);}
+};
+
+// A number on the menu entry, so a pending review is visible without opening
+// the panel — an unanswered review is the thing that quietly keeps people on
+// the reconfirm prompt, and nothing used to surface it here at all.
+function _syncGhostBadge(){
+  const item=document.getElementById("adm-mi-ghost");
+  const badge=document.getElementById("adm-ghost-badge");
+  if(!item||!badge)return;
+  const n=(_ghostSessions&&_ghostSessions.ghost_tracking_enabled)
+    ?(_ghostSessions.sessions||[]).length:0;
+  item.classList.remove("hidden");
+  badge.textContent=n?String(n):"›";
+  badge.classList.toggle("gr-badge",!!n);
+}
+
+// Pull the pending count once admin status is known, so the badge is there
+// before anyone opens the panel.
+async function _peekGhostReview(){
+  if(!_idToken||!_isWebAdmin)return;
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/ghost/sessions`,
+      {headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(6000)});
+    if(!res.ok)return;
+    _ghostSessions=await res.json();
+    _syncGhostBadge();
+  }catch(_){}
+}
+
 })();

@@ -128,6 +128,11 @@ async function _loadLoginWidget(){
   try{
     const cfg=await apiFetch("/auth/tg-login/config");
     if(!cfg.bot_username)return;
+    // Same gate as the group page: without /setdomain in BotFather, Telegram
+    // renders its own "Username invalid" inside a frame we can't read, and
+    // the visitor is left staring at a stranger's error on the sign-in
+    // screen. Opt in with TG_LOGIN_WIDGET once the domain is registered.
+    if(!cfg.widget_enabled)return;
     const s=document.createElement("script");
     s.async=true;
     s.src="https://telegram.org/js/telegram-widget.js?22";

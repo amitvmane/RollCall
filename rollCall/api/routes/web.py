@@ -40,6 +40,11 @@ from api.schemas.web import (
     ScheduledRollcallsResponse,
     VapidPublicKeyResponse,
     WebAdminStatusResponse,
+    WebGhostCandidate,
+    WebGhostReviewRequest,
+    WebGhostReviewResponse,
+    WebGhostSession,
+    WebGhostSessionsResponse,
     WebEndRollcallRequest,
     WebEndRollcallResponse,
     WebDiscardIdentityRequest,
@@ -1249,3 +1254,91 @@ async def vote_web(
         await _mirror_panel_to_telegram(loc[0], loc[1])
 
     return WebRollcallResponse(**data)
+
+
+# ── Ghost review ─────────────────────────────────────────────────────────────
+# The after-game "who ghosted?" prompt only ever existed in Telegram. An admin
+# who runs the group from the web page had no way to answer it — which matters
+# because answering is what FORGIVES everyone who did turn up, so leaving it
+# unanswered slowly makes the reconfirm prompt follow people around. Same
+# service the bot prompt calls, so the two can't disagree about the rules.
+
+@router.get(
+    "/web/group/{group_token}/ghost/sessions",
+    response_model=WebGhostSessionsResponse,
+    summary="Ended rollcalls still waiting for a no-show review (requires web-admin identity)",
+)
+async def web_ghost_sessions(
+    group_token: str = Path(...),
+    id_token: Optional[str] = Depends(identity_from_header),
+    days: int = Query(30, ge=1, le=365),
+) -> WebGhostSessionsResponse:
+    chat_id, _ = await _require_web_admin(group_token, id_token or "")
+
+    from services import ghost as ghost_svc
+    sessions = []
+    for row in _db.get_unprocessed_rollcalls(chat_id, days=days):
+        rc_id = int(row["id"])
+        cands = [
+            WebGhostCandidate(
+                user_id=c.get("user_id"),
+                proxy_name=c.get("proxy_name"),
+                name=(c.get("proxy_name") or c.get("first_name")
+                      or c.get("username") or str(c.get("user_id"))),
+                was_out=bool(c.get("was_out")),
+            )
+            for c in ghost_svc.candidates(rc_id)
+        ]
+        sessions.append(WebGhostSession(
+            rollcall_id=rc_id,
+            title=row.get("title") or "Untitled",
+            ended_at=str(row.get("ended_at")) if row.get("ended_at") else None,
+            candidates=cands,
+        ))
+
+    from rollcall_manager import manager as _mgr
+    return WebGhostSessionsResponse(
+        ghost_tracking_enabled=bool(_mgr.get_ghost_tracking_enabled(chat_id)),
+        autoforgive_days=int(os.environ.get("GHOST_AUTOFORGIVE_DAYS", "7") or 0),
+        sessions=sessions,
+    )
+
+
+@router.post(
+    "/web/group/{group_token}/ghost/review",
+    response_model=WebGhostReviewResponse,
+    summary="Record a session's no-shows and forgive everyone else (requires web-admin identity)",
+)
+async def web_ghost_review(
+    body: WebGhostReviewRequest,
+    group_token: str = Path(...),
+) -> WebGhostReviewResponse:
+    chat_id, actor_user_id = await _require_web_admin(group_token, body.id_token)
+
+    # The rollcall must belong to THIS group and still be open for review —
+    # without this an admin of any group could post another group's rollcall
+    # id and rewrite its attendance.
+    pending = {int(r["id"]) for r in _db.get_unprocessed_rollcalls(chat_id, days=365)}
+    if body.rollcall_id not in pending:
+        raise HTTPException(
+            status_code=404,
+            detail="That session isn't waiting for review — it may already have been reviewed.",
+        )
+
+    selected = set(body.ghost_user_ids) | {str(n) for n in body.ghost_proxy_names}
+
+    from services import ghost as ghost_svc
+    from rollcall_manager import manager as _mgr
+    # Reviewing rewrites attendance counters and streaks; serialise it with
+    # votes and /erc the same way every other mutating web route does.
+    async with _mgr.get_chat_write_lock(chat_id):
+        result = ghost_svc.review_session(chat_id, body.rollcall_id, selected)
+
+    actor_name = await _actor_display_name(chat_id, actor_user_id)
+    _db.log_admin_action(
+        chat_id, actor_user_id, actor_name, "ghost_review",
+        target_name=f"{result['ghosts']} ghost(s)",
+        rollcall_id=body.rollcall_id,
+        details=f"forgave {result['forgiven']}",
+    )
+    return WebGhostReviewResponse(**result)

@@ -456,3 +456,40 @@ class WebUpdateTemplateRequest(BaseModel):
 class WebStartTemplateRequest(BaseModel):
     id_token: str = Field(..., description="Signed identity token of the acting web admin")
     extra_title: Optional[str] = Field(None, max_length=200, description="Optional suffix appended to the template's base title")
+
+
+# ── Ghost review (post-session no-show marking) ──────────────────────────────
+
+class WebGhostCandidate(BaseModel):
+    """One person who can be marked a no-show for a session."""
+    user_id: Optional[int] = Field(None, description="Telegram user id; null for a proxy/guest")
+    proxy_name: Optional[str] = Field(None, description="Proxy name (added via /sif); null for a real user")
+    name: str = Field(..., description="Display name")
+    was_out: bool = Field(False, description="Ended the session in the OUT list — a late drop-out, shown separately")
+
+
+class WebGhostSession(BaseModel):
+    """An ended rollcall still waiting to be reviewed."""
+    rollcall_id: int
+    title: str
+    ended_at: Optional[str] = None
+    candidates: List[WebGhostCandidate] = Field(default_factory=list)
+
+
+class WebGhostSessionsResponse(BaseModel):
+    ghost_tracking_enabled: bool = Field(..., description="False → reviewing does nothing; the UI should say so")
+    autoforgive_days: int = Field(..., description="Unreviewed sessions are treated as 'everyone attended' after this many days; 0 disables")
+    sessions: List[WebGhostSession] = Field(default_factory=list)
+
+
+class WebGhostReviewRequest(BaseModel):
+    id_token: str = Field(..., description="Signed identity token of the acting web admin")
+    rollcall_id: int = Field(..., description="Which ended rollcall is being reviewed")
+    ghost_user_ids: List[int] = Field(default_factory=list, description="Real members who did not show")
+    ghost_proxy_names: List[str] = Field(default_factory=list, description="Proxy/guest names who did not show")
+
+
+class WebGhostReviewResponse(BaseModel):
+    ghosts: int = Field(..., description="How many no-shows were recorded")
+    forgiven: int = Field(..., description="How many attendees had one past absence cleared")
+    lines: List[str] = Field(default_factory=list, description="Human-readable summary, one line per no-show")

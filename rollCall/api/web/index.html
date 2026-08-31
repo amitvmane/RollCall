@@ -481,6 +481,12 @@
             <span class="adm-mi-sub">One-time rollcalls waiting to fire</span></span>
           <span class="adm-mi-chev">›</span>
         </button>
+        <button class="adm-menu-item hidden" id="adm-mi-ghost" role="menuitem" onclick="openAdminSection('ghost')">
+          <span class="adm-mi-icon">👻</span>
+          <span class="adm-mi-text"><span class="adm-mi-title">Review no-shows</span>
+            <span class="adm-mi-sub">Mark who didn't turn up, forgive everyone else</span></span>
+          <span class="adm-mi-chev" id="adm-ghost-badge">›</span>
+        </button>
         <button class="adm-menu-item" role="menuitem" onclick="openAdminSection('merge')">
           <span class="adm-mi-icon">🧬</span>
           <span class="adm-mi-text"><span class="adm-mi-title">Merge identities</span>
@@ -616,6 +622,18 @@
       <!-- Merge Identities: fold a proxy name (added repeatedly via /sif for
            a regular sitting with the admin) into a real member or another
            proxy name, so stats/dues/ghost-tracking count them once. -->
+      <!-- Ghost review: the web half of the after-game "who ghosted?" prompt.
+           Answering it is what forgives everyone who DID turn up, so an admin
+           who runs the group from here needs to be able to answer it without
+           opening Telegram. Body rendered by renderGhostReview() in app.js. -->
+      <div class="adm-panel hidden" id="adm-panel-ghost">
+        <div class="adm-panel-hdr">
+          <button class="adm-back" onclick="closeAdminSection()">‹ Back</button>
+          <span class="adm-panel-title">👻 Review no-shows</span>
+        </div>
+        <div id="ghost-review-body"></div>
+      </div>
+
       <div class="adm-panel hidden" id="adm-panel-merge">
         <div class="adm-panel-hdr">
           <button class="adm-back" onclick="closeAdminSection()">‹ Back</button>

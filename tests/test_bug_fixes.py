@@ -2095,18 +2095,31 @@ class TestProxyGhostEventUserName(unittest.TestCase):
     populated (not NULL) for every ghost event.
     """
 
-    def test_source_proxy_ghost_event_passes_user_name(self):
-        module_path = os.path.join(
-            os.path.dirname(__file__), "..", "rollCall", "handlers", "ghost.py"
-        )
-        with open(module_path) as f:
-            source = f.read()
+    def test_proxy_ghost_event_passes_user_name(self):
+        """Marking a proxy must record their NAME in the audit row, not just
+        the proxy link — a NULL user_name there is an event nobody can read
+        back later.
 
-        self.assertIn(
-            "add_ghost_event(rc_db_id, cid, None, user_name=proxy_name, proxy_name=proxy_name)",
-            source,
-            "Proxy ghost event must pass user_name=proxy_name to keep audit trail complete"
-        )
+        This used to assert on the source text of handlers/ghost.py. That
+        broke the moment the write moved into services/ghost.py (so the web
+        review could share it) while still being perfectly correct — a test
+        that fails on a rename and passes on a behaviour change is worse than
+        no test. Call it and look at the arguments instead."""
+        from unittest.mock import patch as _patch
+        from services import ghost as ghost_svc
+
+        rows = [{"user_id": None, "first_name": "Ravi friend",
+                 "proxy_name": "Ravi friend", "username": None}]
+        with _patch("services.ghost.increment_ghost_count"), \
+             _patch("services.ghost.get_ghost_count_by_proxy_name", return_value=1), \
+             _patch("services.ghost.add_ghost_event") as mock_event:
+            ghost_svc.apply_marking(100, 42, {"Ravi friend"}, rows)
+
+        mock_event.assert_called_once()
+        kwargs = mock_event.call_args.kwargs
+        self.assertEqual(kwargs.get("user_name"), "Ravi friend",
+                         "Proxy ghost event must pass user_name to keep the audit trail complete")
+        self.assertEqual(kwargs.get("proxy_name"), "Ravi friend")
 
     def test_add_ghost_event_signature_accepts_user_name(self):
         """add_ghost_event DB function must accept a user_name keyword argument."""

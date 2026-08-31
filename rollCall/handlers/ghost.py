@@ -45,71 +45,28 @@ _GHOST_PROMPT = (
 
 
 def _ghost_candidates(rc_db_id: int) -> list:
-    """Everyone who can be marked a ghost for this session.
-
-    IN members first (the usual no-show), then members who ended up OUT — a
-    drop-out so late that no replacement could be arranged is a no-show the
-    admin still wants on record, and it used to be unrecordable because every
-    ghost path read the IN list only.
-    """
-    return get_rollcall_in_users(rc_db_id) + get_rollcall_out_users(rc_db_id)
+    """Everyone who can be marked a ghost for this session — see
+    services.ghost.candidates. Kept as a thin alias because the callbacks
+    below and the penalty panel both reach for it by this name."""
+    return ghost_svc.candidates(rc_db_id)
 
 
 def apply_ghost_marking(cid: int, rc_db_id: int, selected: set, in_users: list) -> list:
     """Write ghost tracking records for `selected` members and return summary lines.
 
-    `selected` is a set of user_id (int) for real users or proxy_name (str) for proxies.
-    `in_users` is the candidate list — pass _ghost_candidates(rc_db_id) to allow
-    marking late drop-outs as well as the IN list.
-    Does NOT call mark_rollcall_absent_done or _decrement_attended — caller handles those.
+    Delegates to services.ghost.apply_marking — the same code the web review
+    UI calls, so the two can't drift on what marking someone actually costs.
     """
-    user_map  = {u['user_id']:   u for u in in_users if u['user_id'] is not None}
-    proxy_map = {u['proxy_name']: u for u in in_users if u.get('proxy_name') is not None}
-    lines = []
-    for item in selected:
-        if isinstance(item, int):
-            u = user_map.get(item)
-            if not u:
-                logging.warning(f"[{_ts()}] Ghost: real user {item} not found in user_map")
-                continue
-            name = u.get('first_name') or u.get('username') or str(item)
-            increment_ghost_count(cid, item, name)
-            add_ghost_event(rc_db_id, cid, item, name)
-            reset_user_streak(cid, item)
-            new_count = get_ghost_count(cid, item)
-            lines.append(f"👻 {name} — ghosted {new_count} session(s) total")
-        else:
-            proxy_name = str(item)
-            if proxy_name not in proxy_map:
-                logging.warning(f"[{_ts()}] Ghost: proxy {proxy_name} not found in proxy_map")
-                continue
-            increment_ghost_count(cid, -1, proxy_name, proxy_name=proxy_name)
-            add_ghost_event(rc_db_id, cid, None, user_name=proxy_name, proxy_name=proxy_name)
-            new_count = get_ghost_count_by_proxy_name(cid, proxy_name)
-            lines.append(f"👻 {proxy_name} (via /sif) — ghosted {new_count} session(s) total")
-    return lines
+    return ghost_svc.apply_marking(cid, rc_db_id, selected, in_users)
 
 
 def _decrement_attended(cid: int, in_users: list, selected: set) -> int:
     """Forgive 1 absence for each IN user NOT in the selected-ghosts set.
 
-    decrement_ghost_count floors at 0 so callers can pass selected=set() to mean
-    'everyone attended.' Returns the count of decrement calls made (for logging).
+    Delegates to services.ghost.forgive_attendees; see there for why only IN
+    members are ever forgiven.
     """
-    n = 0
-    for u in in_users:
-        proxy_name = u.get('proxy_name')
-        real_uid = u.get('user_id')
-        if proxy_name:
-            if proxy_name in selected:
-                continue
-            decrement_ghost_count(cid, -1, proxy_name=proxy_name)
-            n += 1
-        elif real_uid is not None:
-            if real_uid in selected:
-                continue
-            decrement_ghost_count(cid, real_uid)
-            n += 1
+    n = ghost_svc.forgive_attendees(cid, in_users, selected)
     if n:
         logging.info(f"[{_ts()}] decrement_attended: cid={cid}, decremented {n} user(s)")
     return n

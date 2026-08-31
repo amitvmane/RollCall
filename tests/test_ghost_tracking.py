@@ -360,7 +360,7 @@ class TestGhostCallbackYes(GhostTestBase):
     async def test_ghost_yes_shows_in_list(self):
         c = self._make_call(data="ghost_yes_42")
         in_users = [{'user_id': 5, 'first_name': 'Bob', 'username': 'bob'}]
-        with patch('handlers.ghost.get_rollcall_in_users', return_value=in_users):
+        with patch('handlers.ghost.get_rollcall_in_users', return_value=in_users), patch('services.ghost.get_rollcall_in_users', return_value=in_users):
             await self.ghost_callback_handler(c)
 
         self.bot_state.bot.edit_message_text.assert_called_once()
@@ -369,7 +369,7 @@ class TestGhostCallbackYes(GhostTestBase):
 
     async def test_ghost_yes_empty_in_list_answers_query(self):
         c = self._make_call(data="ghost_yes_42")
-        with patch('handlers.ghost.get_rollcall_in_users', return_value=[]):
+        with patch('handlers.ghost.get_rollcall_in_users', return_value=[]), patch('services.ghost.get_rollcall_in_users', return_value=[]):
             await self.ghost_callback_handler(c)
 
         self.bot_state.bot.answer_callback_query.assert_called_once()
@@ -377,7 +377,7 @@ class TestGhostCallbackYes(GhostTestBase):
     async def test_ghost_yes_initialises_empty_selection(self):
         c = self._make_call(data="ghost_yes_42", chat_id=100)
         in_users = [{'user_id': 5, 'first_name': 'Bob', 'username': 'bob'}]
-        with patch('handlers.ghost.get_rollcall_in_users', return_value=in_users):
+        with patch('handlers.ghost.get_rollcall_in_users', return_value=in_users), patch('services.ghost.get_rollcall_in_users', return_value=in_users):
             await self.ghost_callback_handler(c)
 
         self.assertIn((100, 42), self.bot_state._ghost_selections)
@@ -395,7 +395,7 @@ class TestGhostCallbackToggle(GhostTestBase):
         self.bot_state._ghost_selections[(100, 42)] = set()
         c = self._make_call(data="ghost_tog_42_5", chat_id=100)
         in_users = [{'user_id': 5, 'first_name': 'Bob', 'username': 'bob'}]
-        with patch('handlers.ghost.get_rollcall_in_users', return_value=in_users):
+        with patch('handlers.ghost.get_rollcall_in_users', return_value=in_users), patch('services.ghost.get_rollcall_in_users', return_value=in_users):
             await self.ghost_callback_handler(c)
 
         self.assertIn(5, self.bot_state._ghost_selections[(100, 42)])
@@ -404,7 +404,7 @@ class TestGhostCallbackToggle(GhostTestBase):
         self.bot_state._ghost_selections[(100, 42)] = {5}
         c = self._make_call(data="ghost_tog_42_5", chat_id=100)
         in_users = [{'user_id': 5, 'first_name': 'Bob', 'username': 'bob'}]
-        with patch('handlers.ghost.get_rollcall_in_users', return_value=in_users):
+        with patch('handlers.ghost.get_rollcall_in_users', return_value=in_users), patch('services.ghost.get_rollcall_in_users', return_value=in_users):
             await self.ghost_callback_handler(c)
 
         self.assertNotIn(5, self.bot_state._ghost_selections[(100, 42)])
@@ -421,11 +421,11 @@ class TestGhostCallbackDone(GhostTestBase):
         self.bot_state._ghost_selections[(100, 42)] = {5}
         c = self._make_call(data="ghost_done_42", chat_id=100)
         in_users = [{'user_id': 5, 'first_name': 'Bob', 'username': 'bob'}]
-        with patch('handlers.ghost.get_rollcall_in_users', return_value=in_users), \
+        with patch('handlers.ghost.get_rollcall_in_users', return_value=in_users), patch('services.ghost.get_rollcall_in_users', return_value=in_users), \
              patch('handlers.ghost.mark_rollcall_absent_done') as mock_mark, \
-             patch('handlers.ghost.increment_ghost_count') as mock_inc, \
-             patch('handlers.ghost.add_ghost_event') as mock_event, \
-             patch('handlers.ghost.get_ghost_count', return_value=1):
+             patch('services.ghost.increment_ghost_count') as mock_inc, \
+             patch('services.ghost.add_ghost_event') as mock_event, \
+             patch('services.ghost.get_ghost_count', return_value=1):
             await self.ghost_callback_handler(c)
 
         mock_mark.assert_called_once_with(42)
@@ -446,11 +446,11 @@ class TestGhostCallbackDone(GhostTestBase):
         self.bot_state._ghost_selections[(100, 42)] = {5}
         c = self._make_call(data="ghost_done_42", chat_id=100)
         in_users = [{'user_id': 5, 'first_name': 'Bob', 'username': 'bob'}]
-        with patch('handlers.ghost.get_rollcall_in_users', return_value=in_users), \
+        with patch('handlers.ghost.get_rollcall_in_users', return_value=in_users), patch('services.ghost.get_rollcall_in_users', return_value=in_users), \
              patch('handlers.ghost.mark_rollcall_absent_done'), \
-             patch('handlers.ghost.increment_ghost_count'), \
-             patch('handlers.ghost.add_ghost_event'), \
-             patch('handlers.ghost.get_ghost_count', return_value=1):
+             patch('services.ghost.increment_ghost_count'), \
+             patch('services.ghost.add_ghost_event'), \
+             patch('services.ghost.get_ghost_count', return_value=1):
             await self.ghost_callback_handler(c)
 
         self.assertNotIn((100, 42), self.bot_state._ghost_selections)
@@ -484,8 +484,8 @@ class TestGhostLateDropOut(GhostTestBase):
 
     async def test_out_members_hidden_behind_an_expander_by_default(self):
         c = self._make_call(data="ghost_yes_42", chat_id=100)
-        with patch('handlers.ghost.get_rollcall_in_users', return_value=self.IN_USERS), \
-             patch('handlers.ghost.get_rollcall_out_users', return_value=self.OUT_USERS):
+        with patch('handlers.ghost.get_rollcall_in_users', return_value=self.IN_USERS), patch('services.ghost.get_rollcall_in_users', return_value=self.IN_USERS), \
+             patch('handlers.ghost.get_rollcall_out_users', return_value=self.OUT_USERS), patch('services.ghost.get_rollcall_out_users', return_value=self.OUT_USERS):
             await self.ghost_callback_handler(c)
 
         labels = self._button_labels()
@@ -496,8 +496,8 @@ class TestGhostLateDropOut(GhostTestBase):
 
     async def test_expander_reveals_the_out_members(self):
         c = self._make_call(data="ghost_moreout_42", chat_id=100)
-        with patch('handlers.ghost.get_rollcall_in_users', return_value=self.IN_USERS), \
-             patch('handlers.ghost.get_rollcall_out_users', return_value=self.OUT_USERS):
+        with patch('handlers.ghost.get_rollcall_in_users', return_value=self.IN_USERS), patch('services.ghost.get_rollcall_in_users', return_value=self.IN_USERS), \
+             patch('handlers.ghost.get_rollcall_out_users', return_value=self.OUT_USERS), patch('services.ghost.get_rollcall_out_users', return_value=self.OUT_USERS):
             await self.ghost_callback_handler(c)
 
         labels = self._button_labels()
@@ -507,8 +507,8 @@ class TestGhostLateDropOut(GhostTestBase):
     async def test_out_member_can_be_toggled_and_stays_selected(self):
         self.bot_state._ghost_show_out.add((100, 42))
         c = self._make_call(data="ghost_tog_42_7", chat_id=100)
-        with patch('handlers.ghost.get_rollcall_in_users', return_value=self.IN_USERS), \
-             patch('handlers.ghost.get_rollcall_out_users', return_value=self.OUT_USERS):
+        with patch('handlers.ghost.get_rollcall_in_users', return_value=self.IN_USERS), patch('services.ghost.get_rollcall_in_users', return_value=self.IN_USERS), \
+             patch('handlers.ghost.get_rollcall_out_users', return_value=self.OUT_USERS), patch('services.ghost.get_rollcall_out_users', return_value=self.OUT_USERS):
             await self.ghost_callback_handler(c)
 
         self.assertIn(7, self.bot_state._ghost_selections[(100, 42)])
@@ -520,14 +520,14 @@ class TestGhostLateDropOut(GhostTestBase):
         and no ghost was ever written."""
         self.bot_state._ghost_selections[(100, 42)] = {7}
         c = self._make_call(data="ghost_done_42", chat_id=100)
-        with patch('handlers.ghost.get_rollcall_in_users', return_value=self.IN_USERS), \
-             patch('handlers.ghost.get_rollcall_out_users', return_value=self.OUT_USERS), \
+        with patch('handlers.ghost.get_rollcall_in_users', return_value=self.IN_USERS), patch('services.ghost.get_rollcall_in_users', return_value=self.IN_USERS), \
+             patch('handlers.ghost.get_rollcall_out_users', return_value=self.OUT_USERS), patch('services.ghost.get_rollcall_out_users', return_value=self.OUT_USERS), \
              patch('handlers.ghost.mark_rollcall_absent_done'), \
-             patch('handlers.ghost.increment_ghost_count') as mock_inc, \
-             patch('handlers.ghost.add_ghost_event') as mock_event, \
-             patch('handlers.ghost.decrement_ghost_count') as mock_dec, \
-             patch('handlers.ghost.reset_user_streak'), \
-             patch('handlers.ghost.get_ghost_count', return_value=2):
+             patch('services.ghost.increment_ghost_count') as mock_inc, \
+             patch('services.ghost.add_ghost_event') as mock_event, \
+             patch('services.ghost.decrement_ghost_count') as mock_dec, \
+             patch('services.ghost.reset_user_streak'), \
+             patch('services.ghost.get_ghost_count', return_value=2):
             await self.ghost_callback_handler(c)
 
         mock_inc.assert_called_once_with(100, 7, 'Kiran')
@@ -540,8 +540,8 @@ class TestGhostLateDropOut(GhostTestBase):
     async def test_mark_absent_review_also_offers_late_drop_outs(self):
         """/mark_absent reviews an old session through the same keyboard."""
         c = self._make_call(data="mabs_sel_42", chat_id=100)
-        with patch('handlers.ghost.get_rollcall_in_users', return_value=self.IN_USERS), \
-             patch('handlers.ghost.get_rollcall_out_users', return_value=self.OUT_USERS):
+        with patch('handlers.ghost.get_rollcall_in_users', return_value=self.IN_USERS), patch('services.ghost.get_rollcall_in_users', return_value=self.IN_USERS), \
+             patch('handlers.ghost.get_rollcall_out_users', return_value=self.OUT_USERS), patch('services.ghost.get_rollcall_out_users', return_value=self.OUT_USERS):
             await self.ghost_callback_handler(c)
 
         labels = self._button_labels()
@@ -552,8 +552,8 @@ class TestGhostLateDropOut(GhostTestBase):
         """Everyone bailed: there's no IN list, but there is still something
         to record. This used to answer 'No IN users found' and stop."""
         c = self._make_call(data="ghost_yes_42", chat_id=100)
-        with patch('handlers.ghost.get_rollcall_in_users', return_value=[]), \
-             patch('handlers.ghost.get_rollcall_out_users', return_value=self.OUT_USERS):
+        with patch('handlers.ghost.get_rollcall_in_users', return_value=[]), patch('services.ghost.get_rollcall_in_users', return_value=[]), \
+             patch('handlers.ghost.get_rollcall_out_users', return_value=self.OUT_USERS), patch('services.ghost.get_rollcall_out_users', return_value=self.OUT_USERS):
             await self.ghost_callback_handler(c)
 
         self.assertTrue(self.bot_state.bot.edit_message_text.called)

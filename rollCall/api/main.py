@@ -264,11 +264,28 @@ def create_app() -> FastAPI:
     if _shared_dir.is_dir():
         app.mount("/shared", StaticFiles(directory=str(_shared_dir)), name="shared")
 
-    # Serve Mini App static files at /miniapp/
-    _miniapp_dir = Path(__file__).parent / "miniapp"
-    if _miniapp_dir.is_dir():
-        app.mount("/miniapp", StaticFiles(directory=str(_miniapp_dir), html=True), name="miniapp")
-        logging.info("[api] Mini App served at /miniapp/")
+    # The standalone Mini App that used to live at /miniapp/ is gone. It was a
+    # second, smaller voting UI — pick a group, vote, and nothing else: no
+    # stats, no dues, no admin — so every feature added to the web app had to
+    # be either duplicated there or left missing, and it was always the one
+    # left missing. The group web page now runs as the Mini App itself
+    # (body.tg-mode, and its home screen is the group picker), so MINIAPP_URL
+    # should point at /web/. Same retirement as the admin console in 10.0.
+    #
+    # The endpoints it used are NOT retired: /auth/telegram/miniapp still
+    # authenticates the web app from Telegram initData, and /portal/groups
+    # still backs the group picker.
+    #
+    # MINIAPP_URL lives in each deployment's own .env, so it can still point
+    # here after an upgrade — and the menu button is registered with Telegram
+    # at startup, meaning a 404 would be what every member's "Open RollCall"
+    # button did until someone noticed. Redirect instead, exactly as /admin
+    # does. 302, not 301: this one is expected to stop being needed once the
+    # env var is updated, and a permanently-cached redirect would outlive it.
+    @app.get("/miniapp", include_in_schema=False)
+    @app.get("/miniapp/{_path:path}", include_in_schema=False)
+    async def _miniapp_retired_redirect(_path: str = ""):
+        return RedirectResponse(url="/web/", status_code=302)
 
     # Serve web voting static files at /web/
     _web_dir = Path(__file__).parent / "web"

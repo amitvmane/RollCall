@@ -1753,25 +1753,83 @@ function renderHomeScreen(){
     homeActions.appendChild(acct);
   }
   renderAcctControl();
-  const groups=_loadGroups();
   const container=document.getElementById("home-groups");
   if(!container)return;
+
+  // Two sources, deliberately merged. localStorage remembers every group whose
+  // link you opened on THIS device; the server knows every group you've
+  // actually voted in, on any device. Recents alone are empty on a fresh
+  // install — which is precisely how this screen is reached from Telegram's
+  // menu button, where there is no chat context and nothing has been visited
+  // yet. The old Mini App used the server list for exactly that reason.
+  const byToken=new Map();
+  _loadGroups().forEach(g=>{
+    if(g&&g.token)byToken.set(g.token,{token:g.token,name:g.name,last_visit:g.last_visit,local:true});
+  });
+  (_homeServerGroups||[]).forEach(g=>{
+    const t=g.group_web_token;
+    if(!t)return;
+    const prev=byToken.get(t)||{token:t};
+    byToken.set(t,{...prev,name:g.group_name||prev.name||"Group",
+                   live:!!g.has_active_rollcall,server:true});
+  });
+  // Somewhere with a vote open first, then the rest by name.
+  const groups=[...byToken.values()].sort((a,b)=>
+    (b.live?1:0)-(a.live?1:0)||String(a.name||"").localeCompare(String(b.name||"")));
+
   if(!groups.length){
-    container.innerHTML='<p style="color:var(--sub);font-size:.85rem">No groups yet. Visit a group rollcall link and it\'ll appear here automatically — or paste one below.</p>';
+    container.innerHTML=_homeGroupsLoading
+      ?'<p style="color:var(--sub);font-size:.85rem">Loading your groups…</p>'
+      :'<p style="color:var(--sub);font-size:.85rem">No groups yet. Visit a group rollcall link and it\'ll appear here automatically — or paste one below.</p>';
     return;
   }
-  container.innerHTML=groups.map(g=>`
+  container.innerHTML=groups.map(g=>{
+    // Only device-local entries get a ✕: removing one is forgetting a visit,
+    // and there is nothing to forget about a group the server vouches for —
+    // it would reappear on the next load and look broken.
+    const sub=g.live?'<span style="color:var(--in,#16a34a)">● Rollcall open</span>'
+      :(g.last_visit?new Date(g.last_visit).toLocaleDateString():"");
+    return `
     <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border)">
-      <div>
+      <div style="min-width:0">
         <div style="font-weight:600;font-size:.95rem">${esc(g.name)}</div>
-        <div style="font-size:.75rem;color:var(--sub)">${new Date(g.last_visit).toLocaleDateString()}</div>
+        <div style="font-size:.75rem;color:var(--sub)">${sub}</div>
       </div>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;flex-shrink:0">
         <button class="btn btn-primary" style="padding:8px 14px;font-size:.85rem" onclick="window.location.href='/web/group/${esc(g.token)}'">Open</button>
-        <button class="btn" style="padding:8px 10px;font-size:.85rem;background:var(--border);color:var(--sub);border-radius:8px" onclick="_removeGroup('${esc(g.token)}');renderHomeScreen()">✕</button>
+        ${g.server?"":`<button class="btn" style="padding:8px 10px;font-size:.85rem;background:var(--border);color:var(--sub);border-radius:8px" onclick="_removeGroup('${esc(g.token)}');renderHomeScreen()">✕</button>`}
       </div>
-    </div>
-  `).join("");
+    </div>`;
+  }).join("");
+}
+
+// Groups the server knows this user votes in — same source the standalone
+// Mini App used for its group picker.
+let _homeServerGroups=null,_homeGroupsLoading=false;
+
+async function _loadHomeGroups(){
+  if(!_idToken)return;
+  _homeGroupsLoading=true;
+  renderHomeScreen();
+  try{
+    const res=await fetch("/api/v1/portal/groups",
+      {headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(8000)});
+    if(res.ok){
+      const d=await res.json();
+      _homeServerGroups=(d.groups||[]).filter(g=>g.group_web_token);
+    }
+  }catch(_){/* recents still render — this is an enrichment, not the list */}
+  _homeGroupsLoading=false;
+  renderHomeScreen();
+}
+
+// The home screen is the Mini App's landing page: Telegram's menu button
+// opens the app with no chat context, so "which group?" is the first
+// question. Authenticate from initData (no sign-in needed inside Telegram),
+// then fill the list from the server.
+async function _bootHome(){
+  if(tg&&tg.initData&&!_idToken){try{await _miniappAuth();}catch(_){}}
+  await _loadHomeGroups();
 }
 
 window.homeOpenLink=function(){
@@ -4292,7 +4350,10 @@ if(URL_TOKEN&&(URL_MODE==="join"||URL_MODE==="group")){
   if(_weblogInRedeemPromise)_weblogInRedeemPromise.then(load);
   else load();
 }else{
-  // No token in URL — show home screen
+  // No token in URL — show the home screen. This is also where Telegram's
+  // menu button lands (it carries no chat context), so the boot below signs
+  // in from initData and fills the group list from the server.
   renderHomeScreen();
+  _bootHome().catch(()=>{});
 }
 })();

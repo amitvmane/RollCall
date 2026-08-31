@@ -4,10 +4,11 @@ Added 2026-08-17 after an adversarial review found the API served no security
 headers at all. The headers here are chosen around two constraints that make
 the obvious "just set a strict CSP and DENY framing" answer wrong for this app:
 
-1. The Mini App at /miniapp/ is embedded by Telegram Web in an IFRAME. A blanket
+1. The Mini App is embedded by Telegram Web in an IFRAME. A blanket
    `X-Frame-Options: DENY` / `frame-ancestors 'none'` would break it for anyone
    using web.telegram.org rather than a native client. So framing is denied
-   everywhere EXCEPT /miniapp/, which allows Telegram origins only.
+   everywhere EXCEPT the Mini App surfaces (/web and the retired /miniapp),
+   which allow Telegram origins only.
 
 2. Every web surface uses inline `onclick="..."` handlers (the app has no build
    step). A CSP without `'unsafe-inline'` in script-src would kill every button.
@@ -30,7 +31,19 @@ import os
 _TELEGRAM_FRAME_ANCESTORS = "https://web.telegram.org https://*.telegram.org"
 
 # Paths that legitimately get framed. Prefix match on the request path.
-_FRAMEABLE_PREFIXES = ("/miniapp",)
+#
+# /web is here because it IS the Mini App now — the Telegram menu button
+# points at the group web page, and Telegram Web embeds Mini Apps in an
+# iframe. Without this the page is served with frame-ancestors 'none' and
+# renders as a blank panel inside web.telegram.org, with the failure visible
+# only in the browser console of a client we don't control.
+#
+# /miniapp stays listed for the retired standalone app: a deployment that
+# hasn't updated MINIAPP_URL yet still has Telegram pointing at it.
+#
+# Framing is still refused to everyone except Telegram, so this is not a
+# clickjacking hole — an attacker's page cannot embed either surface.
+_FRAMEABLE_PREFIXES = ("/miniapp", "/web")
 
 _CSP_COMMON = (
     "default-src 'self'; "

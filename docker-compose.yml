@@ -87,9 +87,13 @@ services:
       # Leave unset to disable web voting links in panels and /weblink
       - WEB_BASE_URL=${WEB_BASE_URL:-}
 
-      # Mini App — set to <WEB_BASE_URL>/miniapp/ to wire the Telegram menu button
-      # Leave unset to disable the menu button
+      # Mini App — set to <WEB_BASE_URL>/web/ to wire the Telegram menu button
+      # at the full web app. Leave unset to disable the menu button.
       - MINIAPP_URL=${MINIAPP_URL:-}
+
+      # Telegram Login Widget on the sign-in dialog. Only turn on after
+      # /setdomain in BotFather — see .env.example.
+      - TG_LOGIN_WIDGET=${TG_LOGIN_WIDGET:-}
 
     volumes:
       # Persist database across container restarts.

@@ -348,11 +348,15 @@ async def start_roll_call(message):
             )
         title = ' '.join(title_tokens) if title_tokens else None
 
-        result = await rollcalls_svc.start_rollcall(
-            cid, title,
-            message.from_user.id, message.from_user.first_name,
-            message.from_user.username,
-        )
+        # Creating a rollcall shifts the numbering every other command
+        # addresses lists by, so it has to serialise with votes and /erc
+        # like every other mutation (CLAUDE.md).
+        async with manager.get_chat_write_lock(cid):
+            result = await rollcalls_svc.start_rollcall(
+                cid, title,
+                message.from_user.id, message.from_user.first_name,
+                message.from_user.username,
+            )
         rc_number_1based = result["number"]
         rc = manager.get_rollcall(cid, result["rc_index"])
         markup = await get_status_keyboard(rc_number_1based, web_url=_group_web_url(cid))
@@ -407,11 +411,15 @@ async def repeat_roll_call(message):
                 "No previous rollcall found to repeat. Start one with /rc <title>."
             )
 
-        result = await rollcalls_svc.start_rollcall(
-            cid, last.get("title"),
-            message.from_user.id, message.from_user.first_name,
-            message.from_user.username,
-        )
+        # Creating a rollcall shifts the numbering every other command
+        # addresses lists by, so it has to serialise with votes and /erc
+        # like every other mutation (CLAUDE.md).
+        async with manager.get_chat_write_lock(cid):
+            result = await rollcalls_svc.start_rollcall(
+                cid, last.get("title"),
+                message.from_user.id, message.from_user.first_name,
+                message.from_user.username,
+            )
         rc_number_1based = result["number"]
         rc = manager.get_rollcall(cid, result["rc_index"])
 
@@ -607,10 +615,13 @@ async def set_title(message):
             await bot.send_message(message.chat.id, "Input title is missing")
             return
 
-        result = rollcalls_svc.set_title(
-            cid, rc_number, title,
-            message.from_user.id, message.from_user.first_name,
-        )
+        # Renaming rewrites the rollcall row a concurrent vote is also
+        # writing to.
+        async with manager.get_chat_write_lock(cid):
+            result = rollcalls_svc.set_title(
+                cid, rc_number, title,
+                message.from_user.id, message.from_user.first_name,
+            )
         rc = manager.get_rollcall(cid, rc_number)
 
         if not manager.get_shh_mode(cid):

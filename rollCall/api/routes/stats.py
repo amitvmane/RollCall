@@ -240,16 +240,21 @@ async def set_limit(
     rc_number: int = Path(..., ge=1),
     _token: AuthedToken = Depends(require_scope("admin")),
 ) -> RollcallResponse:
-    if body.limit == 0:
-        # Removing the cap — no rebalance needed
-        result = settings_svc.set_rollcall_limit(
-            chat_id, 0, body.admin_user_id, body.admin_name, rc_number - 1
-        )
-    else:
-        # Setting a positive cap — rebalance IN↔WAIT immediately
-        result = settings_svc.set_wait_limit(
-            chat_id, body.limit, body.admin_user_id, body.admin_name, rc_number - 1
-        )["rollcall"]
+    # Serialise with concurrent votes — set_limit rebalances IN↔WAIT, so a
+    # vote landing mid-rebalance can be placed against a stale list.
+    # CLAUDE.md names set_limit explicitly; only the web route took it.
+    from rollcall_manager import manager as _mgr
+    async with _mgr.get_chat_write_lock(chat_id):
+        if body.limit == 0:
+            # Removing the cap — no rebalance needed
+            result = settings_svc.set_rollcall_limit(
+                chat_id, 0, body.admin_user_id, body.admin_name, rc_number - 1
+            )
+        else:
+            # Setting a positive cap — rebalance IN↔WAIT immediately
+            result = settings_svc.set_wait_limit(
+                chat_id, body.limit, body.admin_user_id, body.admin_name, rc_number - 1
+            )["rollcall"]
     return RollcallResponse(**result)
 
 
@@ -300,11 +305,13 @@ async def set_title(
     rc_number: int = Path(..., ge=1),
     _token: AuthedToken = Depends(require_scope("admin")),
 ) -> RollcallResponse:
-    return RollcallResponse(
-        **rc_svc.set_title(
-            chat_id, rc_number - 1, body.title, body.admin_user_id, body.admin_name
+    from rollcall_manager import manager as _mgr
+    async with _mgr.get_chat_write_lock(chat_id):
+        return RollcallResponse(
+            **rc_svc.set_title(
+                chat_id, rc_number - 1, body.title, body.admin_user_id, body.admin_name
+            )
         )
-    )
 
 
 @router.put(

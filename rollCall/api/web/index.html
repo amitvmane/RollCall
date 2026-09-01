@@ -91,7 +91,7 @@
 
 <div id="tg-offline-bar" class="tg-offline-bar hidden" role="alert">
   ⚠️ <strong>Bot is offline</strong> — web voting still works, but Telegram notifications may be delayed.
-  <button class="tg-offline-close" onclick="this.parentElement.classList.add('hidden')">✕</button>
+  <button class="tg-offline-close" aria-label="Dismiss offline notice" onclick="this.parentElement.classList.add('hidden')">✕</button>
 </div>
 <div id="app">
   <!-- Brand bar — hidden in TG Mini App mode (body.tg-mode) -->
@@ -336,7 +336,7 @@
     <div id="dues-member-card" class="card hidden">
       <div class="dues-hdr">
         <span class="dues-hdr-title">💰 Dues</span>
-        <button class="dues-hdr-toggle" id="dues-member-toggle" onclick="toggleDuesMember()">▲</button>
+        <button class="dues-hdr-toggle" id="dues-member-toggle" aria-label="Show or hide your dues" onclick="toggleDuesMember()">▲</button>
       </div>
       <div id="dues-member-body">
         <div id="dues-balance-row" class="dues-balance-row"></div>
@@ -353,7 +353,7 @@
     <div id="dues-admin-card" class="card hidden" style="border:1.5px dashed var(--border)">
       <div class="dues-hdr">
         <span class="dues-hdr-title">⚙️ Dues Admin</span>
-        <button class="dues-hdr-toggle" id="dues-admin-toggle" onclick="toggleDuesAdmin()">▲</button>
+        <button class="dues-hdr-toggle" id="dues-admin-toggle" aria-label="Show or hide dues admin" onclick="toggleDuesAdmin()">▲</button>
       </div>
       <div id="dues-admin-body">
         <!-- Balances table -->

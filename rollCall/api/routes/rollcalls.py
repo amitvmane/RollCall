@@ -38,13 +38,19 @@ async def start_rollcall(
     chat_id: int = Path(..., description="Telegram chat id"),
     _token: AuthedToken = Depends(require_scope("admin")),
 ) -> RollcallResponse:
-    result = await rc_svc.start_rollcall(
-        chat_id=chat_id,
-        title=body.title,
-        started_by_user_id=body.started_by_user_id,
-        started_by_name=body.started_by_name,
-        started_by_username=body.started_by_username,
-    )
+    # Serialise with concurrent votes and /erc — CLAUDE.md's chat-mutation
+    # rule. The web routes took this lock; these token-authenticated ones
+    # were missed, so an API-driven change could interleave with a vote
+    # landing from Telegram.
+    from rollcall_manager import manager as _mgr
+    async with _mgr.get_chat_write_lock(chat_id):
+        result = await rc_svc.start_rollcall(
+            chat_id=chat_id,
+            title=body.title,
+            started_by_user_id=body.started_by_user_id,
+            started_by_name=body.started_by_name,
+            started_by_username=body.started_by_username,
+        )
     await mirror_panel_to_telegram(chat_id, result["rc_index"] + 1, force_new=True)
     return RollcallResponse(**result)
 
@@ -85,12 +91,18 @@ async def end_rollcall(
     rc_number: int = Path(..., ge=1, description="1-based rollcall number"),
     _token: AuthedToken = Depends(require_scope("admin")),
 ) -> EndRollcallResponse:
-    result = await rc_svc.end_rollcall(
-        chat_id=chat_id,
-        rc_number=rc_number - 1,
-        ended_by_user_id=body.ended_by_user_id,
-        ended_by_name=body.ended_by_name,
-        ended_by_username=body.ended_by_username,
-    )
+    # Serialise with concurrent votes and /erc — CLAUDE.md's chat-mutation
+    # rule. The web routes took this lock; these token-authenticated ones
+    # were missed, so an API-driven change could interleave with a vote
+    # landing from Telegram.
+    from rollcall_manager import manager as _mgr
+    async with _mgr.get_chat_write_lock(chat_id):
+        result = await rc_svc.end_rollcall(
+            chat_id=chat_id,
+            rc_number=rc_number - 1,
+            ended_by_user_id=body.ended_by_user_id,
+            ended_by_name=body.ended_by_name,
+            ended_by_username=body.ended_by_username,
+        )
     await mirror_panel_to_telegram(chat_id, result.get("rc_number_ended_1based", rc_number))
     return EndRollcallResponse(**result)

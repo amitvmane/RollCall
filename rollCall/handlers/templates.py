@@ -247,7 +247,7 @@ def _fmt_calendar_entry(ev: dict, tz) -> str:
     return f"{icon} {html.escape(ev['label'])} — {verb} {day_label} {when.strftime('%H:%M')}"
 
 
-@bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/calendar")
+@bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() in ("/calendar", "/cal"))
 async def calendar_command(message):
     """List upcoming events for this chat: active rollcalls closing,
     pending one-time scheduled rollcalls, and recurring templates' next

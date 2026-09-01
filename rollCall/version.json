@@ -332,7 +332,7 @@
     {
         "Version": 10.2,
         "Description": "10.2 — Accurate Stats 📊\n\n📊 THE MONTHLY WRAP-UP COUNTS PEOPLE, NOT NAMES\nIf two players in your group share a first name, the monthly card was adding\ntheir games together — one of them could show more games played than the month\neven had. Everyone is counted as themselves now. Two players with the same name\nappear as two entries, told apart by their Telegram @username. Guests are\nmarked \"(guest)\". A guest name you've merged into a member still counts as that\none person, which is the whole point of merging them.\n\n🏅 YOUR RANK MATCHES THE LEADERBOARD\nThe rank shown in your portal is now read from the same leaderboard you can\nsee, so the two can't disagree. Before, it was worked out separately and\nignored games you'd played under a merged guest name — it could place you\nlower than the board printed right next to it.\n\n🩹 AUDIT FIXES\n/cal was advertised as a shortcut for /calendar but never actually worked.\nStarting, ending or renaming a game through the web API could overlap with\nsomebody's vote landing at that same moment; those now take their turn\nproperly, the way the group page already did.\n\nType /help for all commands · /weblink for the group web page",
-        "DeployedOnProd": "N",
-        "DeployedDatetime": "01-09-2026 12:00 UTC"
+        "DeployedOnProd": "Y",
+        "DeployedDatetime": "01-09-2026 05:16 UTC"
     }
 ]

@@ -6703,6 +6703,23 @@ def get_attendance_between(chat_id: int, start_utc: str, end_utc: str) -> List[D
 
     Returns [{'name': ..., 'attended': N}] combining real users and proxies,
     ordered most-attended first.
+
+    Counted per IDENTITY, not per display name. This used to be a single
+    `GROUP BY first_name`, which silently added together every distinct
+    person sharing a first name — two members both called "Amit" came out as
+    one row with the sum of their games, and the monthly wrap-up card then
+    showed someone having played more games than the month contained. Two of
+    eight plus five of eight is eleven of eight.
+
+    Real users group by user_id (UNIQUE(rollcall_id, user_id) means one row
+    per session each, so a single identity can never exceed the session
+    count). Proxies group by name — that IS their identity — and merged
+    aliases fold into their canonical member, the same way
+    get_leaderboard_by_attendance and get_ghost_leaderboard already do.
+
+    Two distinct people who really do share a name stay two rows, and the
+    label disambiguates them (by @username where known) — otherwise the fix
+    just turns one impossible row into two identical-looking ones.
     """
     try:
         with _cursor() as cursor:
@@ -6713,23 +6730,83 @@ def get_attendance_between(chat_id: int, start_utc: str, end_utc: str) -> List[D
                 f"AND COALESCE(r.is_cancelled, {active_false}) = {active_false} "
                 f"AND r.ended_at IS NOT NULL AND r.ended_at >= {ph} AND r.ended_at < {ph}"
             )
+
             cursor.execute(
-                f"""SELECT name, SUM(cnt) AS attended FROM (
-                        SELECT u.first_name AS name, COUNT(*) AS cnt
-                        FROM users u JOIN rollcalls r ON r.id = u.rollcall_id
-                        WHERE {window} AND u.status = 'in'
-                        GROUP BY u.first_name
-                        UNION ALL
-                        SELECT p.name AS name, COUNT(*) AS cnt
-                        FROM proxy_users p JOIN rollcalls r ON r.id = p.rollcall_id
-                        WHERE {window} AND p.status = 'in'
-                        GROUP BY p.name
-                    ) t
-                    WHERE name IS NOT NULL
-                    GROUP BY name ORDER BY attended DESC""",
-                (chat_id, start_utc, end_utc, chat_id, start_utc, end_utc),
+                f"""SELECT u.user_id AS uid, COUNT(*) AS cnt
+                    FROM users u JOIN rollcalls r ON r.id = u.rollcall_id
+                    WHERE {window} AND u.status = 'in'
+                    GROUP BY u.user_id""",
+                (chat_id, start_utc, end_utc),
             )
-            return [dict(row) for row in cursor.fetchall()]
+            real_rows = [dict(r) if isinstance(r, dict) else {"uid": r[0], "cnt": r[1]}
+                         for r in cursor.fetchall()]
+
+            cursor.execute(
+                f"""SELECT p.name AS pname, COUNT(*) AS cnt
+                    FROM proxy_users p JOIN rollcalls r ON r.id = p.rollcall_id
+                    WHERE {window} AND p.status = 'in' AND p.name IS NOT NULL
+                    GROUP BY p.name""",
+                (chat_id, start_utc, end_utc),
+            )
+            proxy_rows = [dict(r) if isinstance(r, dict) else {"pname": r[0], "cnt": r[1]}
+                          for r in cursor.fetchall()]
+
+        # Fold merged aliases into their canonical identity — outside the
+        # cursor block because identity lookups open their own.
+        from services import identity as identity_svc
+        canonical_map = identity_svc.get_canonical_map(chat_id)
+        buckets: Dict[tuple, Dict] = {}
+
+        def _bucket(key, name, username=None):
+            if key not in buckets:
+                buckets[key] = {"name": name, "username": username, "attended": 0}
+            return buckets[key]
+
+        for r in real_rows:
+            uid = int(r["uid"])
+            canonical = identity_svc.resolve_canonical(chat_id, user_id=uid)
+            if canonical["kind"] == "user":
+                cid_key = ("real", canonical["user_id"])
+                info = get_member_display_info(chat_id, canonical["user_id"]) or {}
+                label = info.get("first_name") or info.get("username") or str(canonical["user_id"])
+                _bucket(cid_key, label, info.get("username"))["attended"] += int(r["cnt"] or 0)
+            else:
+                key = ("proxy", (canonical["proxy_name"] or "").lower())
+                _bucket(key, canonical["proxy_name"])["attended"] += int(r["cnt"] or 0)
+
+        for r in proxy_rows:
+            pname = r["pname"]
+            canonical = canonical_map.get(
+                (pname or "").lower(),
+                {"kind": "proxy", "user_id": None, "proxy_name": pname},
+            )
+            if canonical["kind"] == "user":
+                info = get_member_display_info(chat_id, canonical["user_id"]) or {}
+                label = info.get("first_name") or info.get("username") or str(canonical["user_id"])
+                _bucket(("real", canonical["user_id"]), label, info.get("username"))["attended"] += int(r["cnt"] or 0)
+            else:
+                _bucket(("proxy", (canonical["proxy_name"] or "").lower()),
+                        canonical["proxy_name"])["attended"] += int(r["cnt"] or 0)
+
+        rows = list(buckets.values())
+
+        # Disambiguate genuine namesakes. Without this the card shows two
+        # rows both reading "Amit" and the reader assumes it's the same bug
+        # in a new outfit.
+        seen: Dict[str, int] = {}
+        for row in rows:
+            seen[row["name"]] = seen.get(row["name"], 0) + 1
+        dupe_seq: Dict[str, int] = {}
+        for row in rows:
+            if seen.get(row["name"], 0) > 1:
+                if row.get("username"):
+                    row["name"] = f"{row['name']} (@{row['username']})"
+                else:
+                    dupe_seq[row["name"]] = dupe_seq.get(row["name"], 0) + 1
+                    row["name"] = f"{row['name']} ({dupe_seq[row['name']]})"
+
+        rows.sort(key=lambda x: (-x["attended"], x["name"] or ""))
+        return [{"name": r["name"], "attended": r["attended"]} for r in rows]
     except Exception:
         logging.exception("get_attendance_between failed")
         return []

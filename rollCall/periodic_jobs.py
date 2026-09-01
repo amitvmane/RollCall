@@ -187,7 +187,12 @@ async def _monthly_digests() -> None:
                     buf = month_wrapup_card(
                         chat_row.get("group_name") or "Our Group",
                         label, len(sessions), avg,
-                        [{"name": a["name"], "attended": a["attended"]} for a in attendance[:5]],
+                        # Mark guests. A one-off name in the members list reads
+                        # like a stranger crept into the stats; saying "guest"
+                        # is both honest and how the group already thinks of
+                        # someone added with /sif.
+                        [{"name": a["name"] + (" (guest)" if a.get("kind") == "proxy" else ""),
+                          "attended": a["attended"]} for a in attendance[:5]],
                     )
                     await bot.send_photo(
                         chat_id, buf,

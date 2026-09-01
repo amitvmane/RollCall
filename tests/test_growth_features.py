@@ -121,7 +121,7 @@ class TestPeriodSummary:
             data = stats_svc.period_summary(-100, days=7)
         assert data["session_count"] == 2
         assert data["avg_attendance"] == 7.0
-        assert data["top_attendees"][0] == {"name": "Amit", "attended": 2}
+        assert data["top_attendees"][0] == {"name": "Amit", "attended": 2, "kind": "real"}
 
 
 # ── Collector rotation ────────────────────────────────────────────────────────

@@ -4740,40 +4740,24 @@ def get_member_chats(user_id: int) -> List[Dict]:
 
 
 def get_user_rank_in_chat(chat_id: int, user_id: int) -> Optional[int]:
-    """Return 1-based leaderboard rank for user in this chat (by final-IN count)."""
-    try:
-        with _cursor() as cursor:
-            ph = '%s' if db_type == 'postgresql' else '?'
-            active_false = 'FALSE' if db_type == 'postgresql' else '0'
-            cancel_false = 'FALSE' if db_type == 'postgresql' else '0'
-            cursor.execute(f"""
-                SELECT COUNT(*) + 1 AS rank FROM (
-                    SELECT u.user_id, COUNT(*) AS attended
-                    FROM users u
-                    JOIN rollcalls r ON u.rollcall_id = r.id
-                    WHERE r.chat_id = {ph} AND u.status = 'in'
-                      AND r.is_active = {active_false}
-                      AND COALESCE(r.is_cancelled, {cancel_false}) = {cancel_false}
-                      AND u.user_id IS NOT NULL
-                    GROUP BY u.user_id
-                ) sub
-                WHERE sub.attended > (
-                    SELECT COUNT(*) FROM users u2
-                    JOIN rollcalls r2 ON u2.rollcall_id = r2.id
-                    WHERE r2.chat_id = {ph} AND u2.user_id = {ph}
-                      AND u2.status = 'in' AND r2.is_active = {active_false}
-                      AND COALESCE(r2.is_cancelled, {cancel_false}) = {cancel_false}
-                )
-            """, (chat_id, chat_id, user_id))
-            row = cursor.fetchone()
-            if row is None:
-                return None
-            val = row[0] if not isinstance(row, dict) else row.get('rank', 1)
-            return int(val) if val is not None else None
-    except Exception as e:
-        logging.error("Error in get_user_rank_in_chat: %s", e)
-        return None
+    """Return 1-based leaderboard rank for user in this chat (by final-IN count).
 
+    Ranked off the SAME numbers get_leaderboard_by_attendance shows, which
+    means folding merged aliases in. This used to be its own SQL counting
+    users rows by user_id and ignoring proxy_users entirely, so a member
+    whose guest-era games had been merged into them was ranked on fewer
+    games than the leaderboard credited them with — the portal showed
+    "#4 of 20" next to a leaderboard putting them second.
+    """
+    try:
+        board = get_leaderboard_by_attendance(chat_id, limit=10_000)
+        for i, row in enumerate(board):
+            if row.get("kind") == "real" and row.get("user_id") == user_id:
+                return i + 1
+        return None
+    except Exception as e:
+        logging.error(f"Error computing user rank: {e}")
+        return None
 
 def get_user_upcoming_scheduled_rollcalls(tg_user_id: int, limit: int = 10) -> List[Dict]:
     """Return upcoming (unfired) scheduled rollcalls from all groups the user has voted in."""
@@ -6701,8 +6685,10 @@ def get_rollcalls_between(chat_id: int, start_utc: str, end_utc: str) -> List[Di
 def get_attendance_between(chat_id: int, start_utc: str, end_utc: str) -> List[Dict]:
     """Per-member IN counts for rollcalls ended in a UTC window.
 
-    Returns [{'name': ..., 'attended': N}] combining real users and proxies,
-    ordered most-attended first.
+    Returns [{'name': ..., 'attended': N, 'kind': 'real'|'proxy'}] combining
+    real members and guests, ordered most-attended first. `kind` is there so a
+    caller can say which rows are guests rather than leaving a reader to guess
+    why a name they don't recognise is on the list.
 
     Counted per IDENTITY, not per display name. This used to be a single
     `GROUP BY first_name`, which silently added together every distinct
@@ -6757,9 +6743,10 @@ def get_attendance_between(chat_id: int, start_utc: str, end_utc: str) -> List[D
         canonical_map = identity_svc.get_canonical_map(chat_id)
         buckets: Dict[tuple, Dict] = {}
 
-        def _bucket(key, name, username=None):
+        def _bucket(key, name, username=None, kind="real"):
             if key not in buckets:
-                buckets[key] = {"name": name, "username": username, "attended": 0}
+                buckets[key] = {"name": name, "username": username,
+                                "kind": kind, "attended": 0}
             return buckets[key]
 
         for r in real_rows:
@@ -6772,7 +6759,7 @@ def get_attendance_between(chat_id: int, start_utc: str, end_utc: str) -> List[D
                 _bucket(cid_key, label, info.get("username"))["attended"] += int(r["cnt"] or 0)
             else:
                 key = ("proxy", (canonical["proxy_name"] or "").lower())
-                _bucket(key, canonical["proxy_name"])["attended"] += int(r["cnt"] or 0)
+                _bucket(key, canonical["proxy_name"], kind="proxy")["attended"] += int(r["cnt"] or 0)
 
         for r in proxy_rows:
             pname = r["pname"]
@@ -6786,7 +6773,7 @@ def get_attendance_between(chat_id: int, start_utc: str, end_utc: str) -> List[D
                 _bucket(("real", canonical["user_id"]), label, info.get("username"))["attended"] += int(r["cnt"] or 0)
             else:
                 _bucket(("proxy", (canonical["proxy_name"] or "").lower()),
-                        canonical["proxy_name"])["attended"] += int(r["cnt"] or 0)
+                        canonical["proxy_name"], kind="proxy")["attended"] += int(r["cnt"] or 0)
 
         rows = list(buckets.values())
 
@@ -6806,7 +6793,8 @@ def get_attendance_between(chat_id: int, start_utc: str, end_utc: str) -> List[D
                     row["name"] = f"{row['name']} ({dupe_seq[row['name']]})"
 
         rows.sort(key=lambda x: (-x["attended"], x["name"] or ""))
-        return [{"name": r["name"], "attended": r["attended"]} for r in rows]
+        return [{"name": r["name"], "attended": r["attended"], "kind": r["kind"]}
+                for r in rows]
     except Exception:
         logging.exception("get_attendance_between failed")
         return []

@@ -98,7 +98,7 @@ class TestAttendanceBetween(unittest.TestCase):
         """No suffix noise for everyone else."""
         self._session("G1", [(SOLO_ID, "Ravi", "ravi")])
         rows = self._attendance()
-        self.assertEqual(rows, [{"name": "Ravi", "attended": 1}])
+        self.assertEqual(rows, [{"name": "Ravi", "attended": 1, "kind": "real"}])
 
     # ── Invariants the card depends on ───────────────────────────────────
 
@@ -111,11 +111,24 @@ class TestAttendanceBetween(unittest.TestCase):
             self.assertLessEqual(r["attended"], sessions,
                                  f"{r['name']}: {r['attended']} > {sessions} sessions")
 
-    def test_proxies_are_counted_and_named(self):
+    def test_proxies_are_counted_and_flagged_as_guests(self):
+        """`kind` lets the card mark a guest as a guest — otherwise a reader
+        sees a name they don't recognise sitting in the members list."""
         self._session("G1", proxies=["Guest 2"])
         self._session("G2", proxies=["Guest 2"])
-        by_name = {r["name"]: r["attended"] for r in self._attendance()}
-        self.assertEqual(by_name.get("Guest 2"), 2)
+        rows = self._attendance()
+        self.assertEqual(rows, [{"name": "Guest 2", "attended": 2, "kind": "proxy"}])
+
+    def test_merged_guest_counts_as_the_real_member_not_a_guest(self):
+        """Once merged, the alias IS the member — the combined row must not
+        still be labelled a guest."""
+        self._session("G1", [(SOLO_ID, "Ravi", "ravi")])
+        self._session("G2", proxies=["Ravi K"])
+        from services import identity as identity_svc
+        identity_svc.link_identities(CHAT_ID, "Ravi K", canonical_user_id=SOLO_ID,
+                                     admin_user_id=ADMIN_ID, admin_name="Admin")
+        rows = self._attendance()
+        self.assertEqual(rows[0]["kind"], "real")
 
     def test_merged_proxy_folds_into_the_real_member(self):
         """A guest name merged into a member is the SAME person — that one
@@ -130,6 +143,25 @@ class TestAttendanceBetween(unittest.TestCase):
         rows = self._attendance()
         self.assertEqual(len(rows), 1, f"merged aliases should be one row, got {rows}")
         self.assertEqual(rows[0]["attended"], 2)
+
+    def test_rank_agrees_with_the_leaderboard_after_a_merge(self):
+        """Rank used to be its own query over `users` only, ignoring proxy
+        rows — so a member whose guest-era games had been merged in was ranked
+        on fewer games than the leaderboard credited them with, and the portal
+        showed a rank contradicting the board printed next to it."""
+        # Ravi plays one session himself and one as a guest name; Amit plays one.
+        self._session("G1", [(SOLO_ID, "Ravi", "ravi"), (AMIT_A, "Amit", "amit_a")])
+        self._session("G2", proxies=["Ravi K"])
+        from services import identity as identity_svc
+        identity_svc.link_identities(CHAT_ID, "Ravi K", canonical_user_id=SOLO_ID,
+                                     admin_user_id=ADMIN_ID, admin_name="Admin")
+
+        board = self.db.get_leaderboard_by_attendance(CHAT_ID, limit=50)
+        top = next(r for r in board if r.get("user_id") == SOLO_ID)
+        self.assertEqual(top["attended"], 2, "merged guest games should count")
+        expected = board.index(top) + 1
+        self.assertEqual(self.db.get_user_rank_in_chat(CHAT_ID, SOLO_ID), expected)
+        self.assertEqual(expected, 1, "2 games should outrank 1")
 
     def test_ordered_most_attended_first(self):
         self._session("G1", [(AMIT_A, "Amit", "amit_a"), (SOLO_ID, "Ravi", "ravi")])

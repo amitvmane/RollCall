@@ -318,7 +318,8 @@ def period_summary(chat_id: int, days: int = 7) -> dict:
         "session_count": n,
         "avg_attendance": round(total_slots / n, 1) if n else 0.0,
         "top_attendees": [
-            {"name": a["name"], "attended": int(a["attended"])}
+            {"name": a["name"], "attended": int(a["attended"]),
+             "kind": a.get("kind", "real")}
             for a in attendance[:5]
         ],
     }

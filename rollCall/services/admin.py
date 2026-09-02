@@ -10,7 +10,9 @@ without a confirmation step (the web UI provides its own confirmation dialog).
 import logging
 from datetime import datetime
 
-from exceptions import incorrectParameter, parameterMissing, rollCallNotStarted
+import db
+from exceptions import (incorrectParameter, insufficientPermissions,
+                        parameterMissing, rollCallNotStarted)
 from rollcall_manager import manager
 from db import log_admin_action, delete_user_by_id, get_admin_audit_log, count_admin_audit_log
 
@@ -197,3 +199,92 @@ def set_user_status(
         "rc_number_1based": rc_number + 1,
         "rollcall": serialize_rollcall(rc, rc_number),
     }
+
+
+# ── Web-admin roles (owner / admin) ──────────────────────────────────────────
+# Groundwork for running a group without asking Telegram who its admins are.
+# Today every grant is equal and `web_admins` does double duty: a CACHE of a
+# Telegram fact in locked-down groups, the SOURCE OF TRUTH in open ones. An
+# owner concept is what lets the second case stand on its own — and it has to
+# exist before a group can be switched, not after, or there is nobody with
+# standing to grant anything.
+#
+# Nothing consumes these yet: admin_source defaults to 'platform', which is
+# exactly today's behaviour.
+
+VALID_ADMIN_SOURCES = ("platform", "local")
+
+
+def get_admin_source(chat_id: int) -> str:
+    """'platform' (ask Telegram) or 'local' (this app's own list)."""
+    row = db.get_or_create_chat(chat_id) or {}
+    return row.get("admin_source") or "platform"
+
+
+def list_admins(chat_id: int) -> list:
+    """Every grant in the chat, owners first."""
+    return db.list_web_admins(chat_id)
+
+
+def _require_owner(chat_id: int, actor_user_id: int) -> None:
+    if db.get_web_admin_role(chat_id, actor_user_id) != "owner":
+        raise insufficientPermissions(
+            "Only a group owner can change who administers this group."
+        )
+
+
+def promote_to_owner(chat_id: int, target_user_id: int, *,
+                     actor_user_id: int, actor_name: str) -> dict:
+    """Make an existing admin an owner. Owners only."""
+    _require_owner(chat_id, actor_user_id)
+    if db.get_web_admin_role(chat_id, target_user_id) is None:
+        raise incorrectParameter("That person isn't an admin of this group.")
+    db.set_web_admin_role(chat_id, target_user_id, "owner")
+    log_admin_action(chat_id, actor_user_id, actor_name, "promote_owner",
+                     target_name=str(target_user_id))
+    return {"user_id": target_user_id, "role": "owner"}
+
+
+def demote_to_admin(chat_id: int, target_user_id: int, *,
+                    actor_user_id: int, actor_name: str) -> dict:
+    """Step an owner back down to admin.
+
+    Refuses to remove the last owner — a group with none is one nobody can
+    ever administer again, and there is no recovery path short of editing the
+    database by hand.
+    """
+    _require_owner(chat_id, actor_user_id)
+    if db.get_web_admin_role(chat_id, target_user_id) != "owner":
+        raise incorrectParameter("That person isn't an owner of this group.")
+    if db.count_web_admin_owners(chat_id) <= 1:
+        raise insufficientPermissions(
+            "This is the group's only owner — promote someone else first, "
+            "otherwise nobody would be able to manage the group."
+        )
+    db.set_web_admin_role(chat_id, target_user_id, "admin")
+    log_admin_action(chat_id, actor_user_id, actor_name, "demote_owner",
+                     target_name=str(target_user_id))
+    return {"user_id": target_user_id, "role": "admin"}
+
+
+def set_admin_source(chat_id: int, source: str, *,
+                     actor_user_id: int, actor_name: str) -> dict:
+    """Switch a chat between asking Telegram and using its own admin list.
+
+    Owners only, and refuses to switch to 'local' without one — a chat with no
+    owner that stops asking Telegram has locked everybody out.
+    """
+    if source not in VALID_ADMIN_SOURCES:
+        raise incorrectParameter(
+            f"Unknown admin source '{source}'. Use: " + ", ".join(VALID_ADMIN_SOURCES)
+        )
+    _require_owner(chat_id, actor_user_id)
+    if source == "local" and db.count_web_admin_owners(chat_id) < 1:
+        raise insufficientPermissions(
+            "This group has no owner yet, so switching off Telegram admin "
+            "checks would lock everyone out."
+        )
+    db.update_chat_settings(chat_id, admin_source=source)
+    log_admin_action(chat_id, actor_user_id, actor_name, "set_admin_source",
+                     target_name=source)
+    return {"chat_id": chat_id, "admin_source": source}

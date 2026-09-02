@@ -920,6 +920,11 @@ _RECONCILE_COLUMNS = {
         ("collector_rotation",     "collector_rotation INTEGER DEFAULT 0",     "collector_rotation INTEGER DEFAULT 0"),
         ("last_collector_uid",     "last_collector_uid INTEGER DEFAULT NULL",  "last_collector_uid BIGINT DEFAULT NULL"),
         ("dues_epoch",             "dues_epoch TEXT DEFAULT NULL",             "dues_epoch TEXT DEFAULT NULL"),
+        # Where admin rights come FROM for this chat. 'platform' = ask Telegram
+        # (today's only behaviour); 'local' = this app's own web_admins list is
+        # the source of truth. Defaulting to 'platform' means adding the column
+        # changes nothing until something opts a chat into 'local'.
+        ("admin_source",           "admin_source TEXT DEFAULT 'platform'",     "admin_source VARCHAR(16) DEFAULT 'platform'"),
     ],
     "users": [
         ("in_pos",   "in_pos INTEGER DEFAULT NULL",   "in_pos INTEGER DEFAULT NULL"),
@@ -952,6 +957,13 @@ _RECONCILE_COLUMNS = {
     "penalty_tiers": [
         ("late_minutes_threshold", "late_minutes_threshold INTEGER DEFAULT NULL", "late_minutes_threshold INTEGER DEFAULT NULL"),
         ("is_ditch",               "is_ditch INTEGER DEFAULT 0",                  "is_ditch INTEGER DEFAULT 0"),
+    ],
+    # Every grant is equal today — there is no owner. This adds the distinction
+    # without acting on it: existing rows default to 'admin', and the backfill
+    # below promotes each chat's earliest grant to 'owner' so no group ends up
+    # ownerless.
+    "web_admins": [
+        ("role", "role TEXT DEFAULT 'admin'", "role VARCHAR(16) DEFAULT 'admin'"),
     ],
 }
 
@@ -1025,6 +1037,30 @@ def _run_migrations(conn, cursor):
     except Exception:
         conn.rollback()
         logging.exception("Schema reconcile: could not backfill templates.schedule_expires_at")
+
+    # One owner per chat. Every existing grant is 'admin' after the reconcile
+    # above, which would leave every group ownerless — and "only owners can
+    # promote" then locks everyone out of ever creating one. Promote the
+    # earliest grant in each chat (the person who first ran /weblink, which in
+    # practice is whoever set the group up). Scoped to chats with no owner, so
+    # it is idempotent and never demotes or overrides a real decision.
+    try:
+        cursor.execute(
+            """SELECT chat_id, MIN(id) AS first_id FROM web_admins
+               WHERE chat_id NOT IN (SELECT chat_id FROM web_admins WHERE role = 'owner')
+               GROUP BY chat_id"""
+        )
+        rows = cursor.fetchall()
+        ph = "%s" if db_type == "postgresql" else "?"
+        for r in rows:
+            first_id = r["first_id"] if isinstance(r, dict) else r[1]
+            cursor.execute(f"UPDATE web_admins SET role = 'owner' WHERE id = {ph}", (first_id,))
+        if rows:
+            conn.commit()
+            logging.warning("Schema reconcile: promoted %d chat(s) earliest web admin to owner", len(rows))
+    except Exception:
+        conn.rollback()
+        logging.exception("Schema reconcile: could not backfill web_admins.role")
 
     # Add ghost_tracking_enabled to chats (may not exist in older deployments)
     if db_type == 'postgresql':
@@ -1869,6 +1905,7 @@ _VALID_CHAT_FIELDS = {
     'auto_buzz_hours', 'dues_weekly_nudge', 'dues_report_enabled', 'last_idle_nudge',
     'collector_rotation', 'last_collector_uid', 'dues_epoch',
     'reminder_before_close_hours', 'reminder_after_open_hours',
+    'admin_source',
 }
 
 # Columns declared BOOLEAN in the Postgres schema. SQLite has no bool type and
@@ -5479,8 +5516,13 @@ def set_web_admin(chat_id: int, tg_user_id: int, tg_name: str) -> None:
                     (chat_id, tg_user_id, tg_name),
                 )
             else:
+                # NOT "INSERT OR REPLACE": that deletes the existing row and
+                # inserts a fresh one, silently resetting `role` to its default
+                # (and `added_at` to now) every time an admin ran /weblink.
+                # An upsert updates in place and leaves the rest alone.
                 cursor.execute(
-                    f"INSERT OR REPLACE INTO web_admins (chat_id, tg_user_id, tg_name) VALUES ({ph},{ph},{ph})",
+                    f"INSERT INTO web_admins (chat_id, tg_user_id, tg_name) VALUES ({ph},{ph},{ph}) "
+                    f"ON CONFLICT (chat_id, tg_user_id) DO UPDATE SET tg_name = excluded.tg_name",
                     (chat_id, tg_user_id, tg_name),
                 )
     except Exception:
@@ -5518,6 +5560,78 @@ def is_web_admin(chat_id: int, tg_user_id: int) -> bool:
     except Exception:
         logging.exception("is_web_admin failed")
         return False
+
+
+def get_web_admin_role(chat_id: int, tg_user_id: int) -> Optional[str]:
+    """'owner', 'admin', or None if this user has no grant in the chat."""
+    try:
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"SELECT role FROM web_admins WHERE chat_id={ph} AND tg_user_id={ph}",
+                (chat_id, tg_user_id),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            return (row['role'] if isinstance(row, dict) else row[0]) or 'admin'
+    except Exception:
+        logging.exception("get_web_admin_role failed")
+        return None
+
+
+def set_web_admin_role(chat_id: int, tg_user_id: int, role: str) -> bool:
+    """Set a grant's role. Returns False if there was no grant to update.
+
+    Deliberately dumb — the "who may do this" and "don't remove the last
+    owner" rules live in services/admin.py, so every caller gets them.
+    """
+    if role not in ('owner', 'admin'):
+        raise ValueError(f"set_web_admin_role: invalid role '{role}'")
+    try:
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"UPDATE web_admins SET role={ph} WHERE chat_id={ph} AND tg_user_id={ph}",
+                (role, chat_id, tg_user_id),
+            )
+            return cursor.rowcount > 0
+    except Exception:
+        logging.exception("set_web_admin_role failed")
+        return False
+
+
+def list_web_admins(chat_id: int) -> List[Dict]:
+    """Every grant in a chat, owners first then by when they were added."""
+    try:
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"""SELECT tg_user_id, tg_name, COALESCE(role,'admin') AS role, added_at
+                    FROM web_admins WHERE chat_id={ph}
+                    ORDER BY CASE WHEN COALESCE(role,'admin')='owner' THEN 0 ELSE 1 END, id""",
+                (chat_id,),
+            )
+            return [dict(r) for r in cursor.fetchall()]
+    except Exception:
+        logging.exception("list_web_admins failed")
+        return []
+
+
+def count_web_admin_owners(chat_id: int) -> int:
+    """How many owners a chat has — the guard against demoting the last one."""
+    try:
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"SELECT COUNT(*) FROM web_admins WHERE chat_id={ph} AND role='owner'",
+                (chat_id,),
+            )
+            row = cursor.fetchone()
+            return int((row[0] if not isinstance(row, dict) else list(row.values())[0]) or 0)
+    except Exception:
+        logging.exception("count_web_admin_owners failed")
+        return 0
 
 
 def revoke_web_admin(chat_id: int, tg_user_id: int) -> None:

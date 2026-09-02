@@ -45,6 +45,27 @@ Consequences:
 - Reversals write `cancel_credit` / `adjustment` entry types, not deletes.
 - `game_closures` is NOT append-only (it stores metadata, not money rows) — its `collector_uid` fields may be updated via `update_game_closure_collector`.
 
+## Web-admin roles
+
+`web_admins.role` is `owner` or `admin`, and `chats.admin_source` is `platform`
+(ask Telegram who the admins are — today's only behaviour) or `local` (this
+app's own `web_admins` list is the source of truth). Both are additive: every
+existing chat reads `platform`, so nothing changes until a chat opts in.
+
+The rules live in `services/admin.py`, never at the call site, because they
+guard one unrecoverable state — **a chat with no owner that has also stopped
+asking Telegram cannot be administered by anyone**, and there is no recovery
+short of editing the database:
+- only an owner may promote, demote, or change `admin_source`
+- the last owner cannot be demoted
+- a chat cannot switch to `local` without an owner
+- the schema reconciler promotes each chat's earliest grant to `owner`, so no
+  existing group is left ownerless
+
+Note `set_web_admin` must stay an upsert. It was `INSERT OR REPLACE` on SQLite,
+which deletes and re-inserts the row — that silently reset `role` on every
+`/weblink`.
+
 ## Environment variables
 
 | Var | Default | Purpose |

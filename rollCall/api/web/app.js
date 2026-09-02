@@ -1907,10 +1907,11 @@ function _applyAdminStatus(isAdmin){
   // for actual admins.
   const navBtn=document.getElementById("admin-nav-btn");
   if(navBtn)navBtn.classList.toggle("hidden",!_isWebAdmin);
-  if(_isWebAdmin){_syncShhToggle();_syncGroupSettingsCard();_syncTimezoneDisplay();_renderWeekdayHint();_loadWeblogInMembers();_loadAdminGroupSwitcher();renderLists();}
+  if(_isWebAdmin){_syncShhToggle();_syncGroupSettingsCard();_syncTimezoneDisplay();_renderWeekdayHint();_loadWeblogInMembers();renderLists();}
   _syncAdminRcControls();
   _syncViewTabs();
   _peekGhostReview().catch(()=>{});
+  _loadHeaderGroups().catch(()=>{});
   // The empty state offers "＋ New Rollcall" to admins, and admin status
   // usually lands after it was first rendered.
   if(!activeRcData)renderEmptyState();
@@ -2090,7 +2091,6 @@ let _adminSection=null;
 function _showAdminLevel(section){
   const menu=document.getElementById("admin-menu");
   const quick=document.querySelector("#admin-card-body .adm-quick");
-  const picker=document.getElementById("admin-group-switcher");
   Object.keys(ADMIN_SECTIONS).forEach(k=>{
     const p=document.getElementById(`adm-panel-${k}`);
     if(p)p.classList.toggle("hidden",k!==section);
@@ -2100,7 +2100,6 @@ function _showAdminLevel(section){
   const atRoot=!section;
   if(menu)menu.classList.toggle("hidden",!atRoot);
   if(quick)quick.classList.toggle("hidden",!atRoot);
-  if(picker)picker.classList.toggle("hidden",!atRoot);
   _adminSection=section||null;
 }
 
@@ -2131,40 +2130,6 @@ window.jumpToDuesAdmin=function(){
   // destination — scrolling to an element inside a hidden section would
   // simply do nothing.
   showView("dues");
-};
-
-// Lets an admin who manages more than one group jump between their groups'
-// own pages — the "breadcrumb" a multi-group admin needs, without a separate
-// admin app to host it in. Reuses the same /auth/admin/groups endpoint the
-// admin console's sign-in group-picker uses.
-//
-// This used to render as a link list that was hidden whenever you had no
-// OTHER group, which meant the panel never named the group it was editing.
-// It's now a select that always includes the current group, selected.
-async function _loadAdminGroupSwitcher(){
-  const sel=document.getElementById("admin-group-select");
-  if(!sel||!_idToken)return;
-  const here=(groupData&&groupData.group_name)||"This group";
-  const only=()=>{sel.innerHTML=`<option value="${esc(URL_TOKEN)}">${esc(here)}</option>`;sel.disabled=true;};
-  try{
-    const res=await fetch(`/api/v1/auth/admin/groups`,{headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(5000)});
-    if(!res.ok){only();return;}
-    const data=await res.json();
-    const groups=(data.groups||[]).filter(g=>g.group_web_token);
-    if(!groups.some(g=>g.group_web_token===URL_TOKEN)){
-      groups.unshift({group_name:here,group_web_token:URL_TOKEN});
-    }
-    if(groups.length<2){only();return;}
-    sel.disabled=false;
-    sel.innerHTML=groups.map(g=>
-      `<option value="${esc(g.group_web_token)}"${g.group_web_token===URL_TOKEN?" selected":""}>${esc(g.group_name)}</option>`
-    ).join("");
-  }catch(_){only();}
-}
-
-window.onAdminGroupChange=function(token){
-  if(!token||token===URL_TOKEN)return;
-  window.location.href=`/web/group/${encodeURIComponent(token)}`;
 };
 
 function _syncGroupSettingsCard(){
@@ -4587,6 +4552,51 @@ window.setAdminRole=async function(userId,role){
     renderAdminsPanel();
     toast(role==="owner"?"👑 Owner added":"Stepped down to admin",2500);
   }catch(e){toast(e.message||"Could not change the role",4000);}
+};
+
+
+// ── Header group switcher ─────────────────────────────────────────────────
+// Switching groups used to live inside the admin panel: admin-only, three
+// taps deep, and framed as an admin action — but "wrong group" applies just
+// as much to reading stats or casting a vote. It's a header control now, and
+// it uses /portal/groups (every group you play in) rather than the admin-only
+// list, so a member with two groups gets it too.
+async function _loadHeaderGroups(){
+  const wrap=document.getElementById("brand-group");
+  const sel=document.getElementById("group-switch");
+  if(!wrap||!sel||!IS_GROUP||!_idToken)return;
+  try{
+    const res=await fetch("/api/v1/portal/groups",
+      {headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(8000)});
+    if(!res.ok)return;
+    const d=await res.json();
+    const groups=(d.groups||[]).filter(g=>g.group_web_token);
+
+    // The group you're in might not be in that list — it lists groups you've
+    // VOTED in, and you can be looking at one you haven't yet.
+    if(!groups.some(g=>g.group_web_token===URL_TOKEN)){
+      groups.unshift({group_web_token:URL_TOKEN,
+                      group_name:(groupData&&groupData.group_name)||"This group"});
+    }
+    // One group needs no switcher — a dropdown with a single entry is furniture.
+    if(groups.length<2){wrap.classList.add("hidden");return;}
+
+    groups.sort((a,b)=>String(a.group_name||"").localeCompare(String(b.group_name||"")));
+    sel.innerHTML=groups.map(g=>
+      `<option value="${esc(g.group_web_token)}"${g.group_web_token===URL_TOKEN?" selected":""}>${
+        esc(g.group_name||"Group")}${g.has_active_rollcall&&g.group_web_token!==URL_TOKEN?" ●":""}</option>`
+    ).join("");
+    wrap.classList.remove("hidden");
+    // Tell the bar it now has one more thing to fit. On a phone the wordmark
+    // yields to it: "which group" is information you need, "ROLLCALL" is
+    // decoration you're already looking at.
+    document.getElementById("brand-bar")?.classList.add("has-group-switch");
+  }catch(_){/* the switcher is a convenience — never block the page on it */}
+}
+
+window.onHeaderGroupChange=function(token){
+  if(!token||token===URL_TOKEN)return;
+  window.location.href=`/web/group/${encodeURIComponent(token)}`;
 };
 
 })();

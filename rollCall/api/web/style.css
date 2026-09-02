@@ -124,7 +124,7 @@ h1,h2,h3,.rc-title,.brand-name{font-family:var(--font-display)}
 
 /* ── Brand bar: stadium signage, not a flat SaaS header ── */
 .brand-bar{
-  display:flex;align-items:center;justify-content:space-between;padding:12px 14px;
+  display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;
   background:linear-gradient(180deg,var(--text) 0%,#000 220%);
   margin:0 -14px 12px;position:sticky;top:0;z-index:100;
   border-bottom:2px solid var(--accent);
@@ -747,3 +747,43 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .gr-more{background:none;border:none;color:var(--accent);font-family:inherit;font-size:.8rem;font-weight:600;cursor:pointer;padding:8px 10px}
 .gr-actions{display:flex;gap:8px;margin-top:10px}
 .gr-badge{background:var(--out,#dc2626);color:#fff;border-radius:999px;min-width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;font-size:.72rem;font-weight:800;padding:0 6px}
+
+/* ── Group switcher in the header ─────────────────────────────────────────
+   Only rendered for people in more than one group. It sits next to the
+   wordmark rather than in the actions cluster: it says WHERE you are, which
+   is a label, not an action — and the actions side is already the first
+   thing to overflow on a phone. */
+.brand-group{min-width:0;display:flex;align-items:center}
+.brand-group.hidden{display:none}
+.brand-group-sel{
+  max-width:min(42vw,220px);
+  background:rgba(255,255,255,.12);color:#fff;border:none;border-radius:8px;
+  padding:5px 8px;font-family:inherit;font-size:.82rem;font-weight:700;
+  cursor:pointer;text-overflow:ellipsis;
+}
+.brand-group-sel:hover{background:var(--accent)}
+/* The native dropdown list renders in the OS palette, so its options need a
+   readable colour rather than the white that works on the dark bar. */
+.brand-group-sel option{color:var(--text);background:var(--card);font-weight:600}
+/* The bar already carries up to seven controls. Adding a group name to that
+   overflowed it into the Install button — no horizontal page scroll, so an
+   overflow check passes while the header visibly collides. Below 900px the
+   wordmark simply goes: "which group" is information, "ROLLCALL" is
+   decoration you are already looking at. */
+@media(max-width:900px){
+  .brand-bar.has-group-switch .brand-name{display:none}
+  .brand-group-sel{max-width:30vw;font-size:.78rem}
+  /* Seven icon buttons plus a group name is too much for a phone, and they
+     end up reading as one run of chrome — the Install pill in particular
+     looked like part of the dropdown. Install is the one that can wait: it
+     only appears when the PWA is installable, and it is still offered from
+     the home screen. Knowing which group you are in cannot wait. */
+  .brand-bar.has-group-switch #install-btn{display:none}
+}
+@media(max-width:420px){
+  .brand-bar.has-group-switch .brand-logo{display:none}
+  .brand-group-sel{max-width:44vw}
+}
+/* Inside Telegram the bar is re-skinned light-on-light, so the chip needs the
+   same treatment the other header controls get there. */
+body.tg-mode .brand-group-sel{background:rgba(127,127,127,.16);color:var(--text)}

@@ -101,6 +101,7 @@ const ROUTES = [
   [/\/web\/group\/[^/]+$/, GROUP],
   [/admin-status/, { is_admin: true }],
   [/\/auth\/admin\/groups/, ADMIN_GROUPS],
+  [/\/portal\/groups/, { groups: ADMIN_GROUPS.groups.map(g => ({ ...g, has_active_rollcall: false })) }],
   [/\/members$/, { members: [{ user_id: 1, first_name: "Amit", username: "amit" }] }],
   [/\/templates$/, []],
   [/\/scheduled-rollcalls/, { items: [] }],
@@ -206,12 +207,27 @@ const WIDTHS = [
         sects,
         docScrollW: document.documentElement.scrollWidth,
         innerW: window.innerWidth,
+        // Flex siblings can paint over each other without the PAGE scrolling.
+        // The group switcher in the header did exactly that — the name ran
+        // under the Install button while every overflow assertion passed.
+        headerOverlap: (() => {
+          const inner = document.querySelector(".brand-inner");
+          const acts = document.querySelector(".brand-actions");
+          if (!inner || !acts) return 0;
+          return Math.round(inner.getBoundingClientRect().right
+                            - acts.getBoundingClientRect().left);
+        })(),
       };
     });
 
     const tag = `${vp.name} (${vp.w}px)`;
 
     if (consoleErrors.length) failures.push(`${tag}: JS error — ${consoleErrors[0]}`);
+
+    // The header's two halves must not paint over each other.
+    if (m.headerOverlap > 0) {
+      failures.push(`${tag}: brand name overlaps the header buttons by ${m.headerOverlap}px`);
+    }
 
     // No horizontal overflow at any width.
     if (m.docScrollW > m.innerW + 1) {
@@ -449,17 +465,17 @@ const WIDTHS = [
     // admin-status is a live round-trip with retries, so poll for the answer
     // rather than sleeping a guessed interval — a fixed wait here is a flaky
     // test that fails on a slow machine and says "admin menu broken".
-    // Wait for the group picker too: it is filled by a second async call that
-    // fires after the admin answer, so "card visible" alone still races it.
+    // The header group switcher is filled by a second async call after the
+    // admin answer, so "card visible" alone still races it.
     await page.waitForFunction(
       () => !document.getElementById("admin-card").classList.contains("hidden")
-            && !!document.getElementById("admin-group-select").value,
+            && !!document.getElementById("group-switch").value,
       { timeout: 8000 },
-    ).catch(() => failures.push("admin: admin card / group picker never became ready for an admin"));
+    ).catch(() => failures.push("admin: admin card / group switcher never became ready")); 
 
     const root = await page.evaluate(() => {
       document.getElementById("admin-nav-btn").click();
-      const sel = document.getElementById("admin-group-select");
+      const sel = document.getElementById("group-switch");
       return {
         open: document.getElementById("view-admin").classList.contains("active"),
         menuVisible: !document.getElementById("admin-menu").classList.contains("hidden"),
@@ -472,9 +488,12 @@ const WIDTHS = [
     });
     if (!root.open) failures.push("admin: header button did not open the panel");
     if (!root.menuVisible) failures.push("admin: menu level not visible on open");
-    if (!root.pickerVisible) failures.push("admin: group picker not visible at the menu level");
-    if (root.options.length !== 2) failures.push(`admin: group picker should list both groups, got ${JSON.stringify(root.options)}`);
-    if (root.selected !== "testtoken123") failures.push(`admin: current group not selected, got "${root.selected}"`);
+    // The switcher lives in the HEADER now, not inside the admin panel — it
+    // answers "which group am I looking at", which applies to reading stats
+    // and voting just as much as to administering.
+    if (!root.pickerVisible) failures.push("group switcher not visible in the header");
+    if (root.options.length !== 2) failures.push(`group switcher should list both groups, got ${JSON.stringify(root.options)}`);
+    if (root.selected !== "testtoken123") failures.push(`current group not selected, got "${root.selected}"`);
     if (!root.endVisible) failures.push("admin: End Active Rollcall hidden for an admin with an open rollcall");
 
     for (const name of ["settings", "access", "templates", "scheduled", "merge"]) {

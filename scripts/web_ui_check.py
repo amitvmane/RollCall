@@ -106,6 +106,25 @@ def check_element_ids(html, js, label, errors):
         errors.append(f"{label}: JS looks up id '{eid}' which is in neither the HTML nor any JS template")
 
 
+def check_telegram_sdk_not_async(html, label, errors):
+    """The Telegram SDK must execute before app.js, not race it.
+
+    app.js reads window.Telegram.WebApp at its top level. With async/defer on
+    the SDK tag that read often lands first, so `tg` is null: no Mini App mode,
+    no initData auth, and a member opening the app from Telegram is treated as
+    an anonymous web visitor — asked to sign in, then asked to paste a group
+    link. It is a race, so it reproduces intermittently and mostly on slow
+    connections, which is the worst way to find it.
+    """
+    for m in re.finditer(r'<script([^>]*)\bsrc="[^"]*telegram-web-app\.js"', html):
+        attrs = m.group(1)
+        if "async" in attrs or "defer" in attrs:
+            errors.append(
+                f"{label}: telegram-web-app.js is loaded async/defer — app.js reads "
+                f"window.Telegram.WebApp at parse time and will race it"
+            )
+
+
 def check_duplicate_ids(html, label, errors):
     seen, dupes = set(), set()
     for eid in re.findall(r'id="([^"]+)"', html):
@@ -134,6 +153,7 @@ def main():
         checked += 1
         label = html_rel.split("/")[0]
         check_html_balance(html, label, errors)
+        check_telegram_sdk_not_async(html, label, errors)
         check_duplicate_ids(html, label, errors)
         check_onclick_handlers(html, js, label, errors)
         check_element_ids(html, js, label, errors)

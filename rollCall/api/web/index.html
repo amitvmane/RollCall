@@ -13,7 +13,14 @@
   <link rel="apple-touch-icon" href="/web/icon-192.png"/>
   <!-- manifest set dynamically by app.js once group token is known -->
   <script src="/shared/theme-init.js"></script>
-  <script async src="https://telegram.org/js/telegram-web-app.js"></script>
+  <!-- NOT async/defer. app.js is loaded at the end of <body> and reads
+       window.Telegram.WebApp at its TOP LEVEL — if this is still in flight at
+       that moment, `tg` is null, the page never enters Mini App mode, never
+       authenticates from initData, and a member opening it from Telegram is
+       treated as an anonymous web visitor: asked to sign in, then asked to
+       paste a group link. The retired /miniapp/ app carried this same warning;
+       pointing MINIAPP_URL at /web/ inherited the race it had avoided. -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800;900&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet"/>
@@ -99,6 +106,15 @@
     <div class="brand-inner">
       <img src="/web/logo.svg" alt="RollCall" class="brand-logo" width="28" height="28"/>
       <span class="brand-name">RollCall</span>
+      <!-- Which group am I looking at? Switching used to live inside the admin
+           panel, which meant it was admin-only, three taps deep, and framed as
+           an admin action — even though "wrong group" applies just as much to
+           checking stats or voting. Shown only to people who are in more than
+           one; with a single group it would be a dropdown with one entry. -->
+      <div class="brand-group hidden" id="brand-group">
+        <select id="group-switch" class="brand-group-sel"
+                aria-label="Switch group" onchange="onHeaderGroupChange(this.value)"></select>
+      </div>
       <span id="presence-badge" class="presence-badge hidden"></span>
     </div>
     <div class="brand-actions">
@@ -427,19 +443,6 @@
         <span>⚙ Admin actions</span>
       </div>
       <div id="admin-card-body">
-
-      <!-- Which group am I administering? Always rendered (even for a
-           single-group admin, as a plain label) — it used to be hidden
-           entirely unless you had a SECOND group, so the panel never said
-           which group it was about, and a multi-group admin had to guess
-           whether they were editing the right one. -->
-      <div id="admin-group-switcher" class="adm-group-picker">
-        <div class="adm-group-lbl">Managing group</div>
-        <select id="admin-group-select" class="adm-select" onchange="onAdminGroupChange(this.value)"
-                aria-label="Choose which of your groups to manage">
-          <option value="">Loading your groups…</option>
-        </select>
-      </div>
 
       <!-- Quick actions: the two things an admin comes here to do most. -->
       <div class="adm-quick">

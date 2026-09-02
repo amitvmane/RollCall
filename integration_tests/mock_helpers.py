@@ -86,6 +86,11 @@ def reset_db():
         # dues tables
         "game_closures", "dues_entries", "fund_transactions",
         "penalty_tiers", "scheduled_rollcalls",
+        # identity: bindings before principals — the FK cascades, but on
+        # Postgres deleting the parent first inside one transaction is the
+        # kind of ordering that bites only on the other dialect.
+        "principal_bindings", "principals",
+        "identity_links",
     ]:
         try:
             cur.execute(f"DELETE FROM {tbl}")

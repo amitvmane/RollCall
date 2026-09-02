@@ -202,6 +202,17 @@ def _mint_miniapp_session(chat_id: int, user_id: int, chat_is_group: bool) -> Mi
     from api.identity import issue_identity_token, IdentityError
     try:
         id_token = issue_identity_token(user_id)
+        # Record the app-local principal for this Telegram account.
+        # Best-effort and additive: nothing authorises off it yet, but
+        # it means "the same person" has a stable id from the moment
+        # they first sign in, rather than only for accounts created
+        # after a second login method exists.
+        try:
+            from services import principals as _principals
+            _principals.for_telegram(user_id)
+        except Exception:
+            logging.exception("principals: could not record telegram binding")
+
     except IdentityError:
         id_token = None
 
@@ -503,6 +514,17 @@ async def weblogin_redeem_post(body: _WeblogInRedeemRequest):
 
     try:
         id_token = issue_identity_token(tg_user_id)
+        # Record the app-local principal for this Telegram account.
+        # Best-effort and additive: nothing authorises off it yet, but
+        # it means "the same person" has a stable id from the moment
+        # they first sign in, rather than only for accounts created
+        # after a second login method exists.
+        try:
+            from services import principals as _principals
+            _principals.for_telegram(tg_user_id)
+        except Exception:
+            logging.exception("principals: could not record telegram binding")
+
     except IdentityError:
         logging.error("[weblogin_redeem_post] cannot issue id_token — TELEGRAM_TOKEN not set")
         raise HTTPException(status_code=503, detail="Could not issue identity token. Contact the group admin.")

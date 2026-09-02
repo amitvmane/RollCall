@@ -45,6 +45,28 @@ Consequences:
 - Reversals write `cancel_credit` / `adjustment` entry types, not deletes.
 - `game_closures` is NOT append-only (it stores metadata, not money rows) — its `collector_uid` fields may be updated via `update_game_closure_collector`.
 
+## Principals (app-local identity)
+
+`principals` + `principal_bindings` are an identity that doesn't belong to a
+chat platform. A principal is a person; bindings map them to zero or more
+platform accounts (`telegram:168415137`, `discord:…`, or none at all for an
+email login). Linking two accounts is adding a second binding.
+
+**This is additive groundwork.** The 11 tables keyed on `tg_user_id` are
+untouched, and nothing authorises off a principal yet — re-keying them is a
+large migration against a live database and speculative until a second login
+method exists. This gives the stable id to migrate *to*.
+
+- `services/principals.py` is the only entry point; `for_telegram()` is called
+  wherever identity is established, so principals stay current.
+- `(platform, platform_user_id)` is UNIQUE **in the schema**, not checked in
+  Python: "one account, one person" is exactly the invariant a race between
+  two concurrent first-logins would break.
+- `link()` refuses an account already bound to anyone — silently re-pointing
+  it would merge two people's history on a typo.
+- `backfill_from_telegram()` runs idempotently; without it "the same person"
+  would mean different things either side of the deploy.
+
 ## Web-admin roles
 
 `web_admins.role` is `owner` or `admin`, and `chats.admin_source` is `platform`

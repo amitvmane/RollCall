@@ -22,6 +22,7 @@ NOTE: the widget only appears on domains registered with @BotFather via /setdoma
 
 import hashlib
 import hmac
+import logging
 import os
 import secrets
 import time
@@ -175,6 +176,17 @@ async def tg_verify_status(
     from api.identity import issue_identity_token, IdentityError
     try:
         id_token = issue_identity_token(int(result["tg_user_id"]))
+        # Record the app-local principal for this Telegram account.
+        # Best-effort and additive: nothing authorises off it yet, but
+        # it means "the same person" has a stable id from the moment
+        # they first sign in, rather than only for accounts created
+        # after a second login method exists.
+        try:
+            from services import principals as _principals
+            _principals.for_telegram(int(result["tg_user_id"]))
+        except Exception:
+            logging.exception("principals: could not record telegram binding")
+
     except IdentityError:
         id_token = None
 
@@ -268,6 +280,17 @@ async def tg_login(body: TgLoginRequest, request: Request) -> TgVerifyStatusResp
     from api.identity import issue_identity_token, IdentityError
     try:
         id_token = issue_identity_token(body.id)
+        # Record the app-local principal for this Telegram account.
+        # Best-effort and additive: nothing authorises off it yet, but
+        # it means "the same person" has a stable id from the moment
+        # they first sign in, rather than only for accounts created
+        # after a second login method exists.
+        try:
+            from services import principals as _principals
+            _principals.for_telegram(body.id)
+        except Exception:
+            logging.exception("principals: could not record telegram binding")
+
     except IdentityError:
         id_token = None
 
@@ -309,6 +332,17 @@ async def member_token_login(body: MemberTokenLoginRequest, request: Request) ->
     from api.identity import issue_identity_token, IdentityError
     try:
         id_token = issue_identity_token(user_id)
+        # Record the app-local principal for this Telegram account.
+        # Best-effort and additive: nothing authorises off it yet, but
+        # it means "the same person" has a stable id from the moment
+        # they first sign in, rather than only for accounts created
+        # after a second login method exists.
+        try:
+            from services import principals as _principals
+            _principals.for_telegram(user_id)
+        except Exception:
+            logging.exception("principals: could not record telegram binding")
+
     except IdentityError:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

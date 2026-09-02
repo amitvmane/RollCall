@@ -721,6 +721,66 @@ def create_tables():
         #   standalone  — a real person with no Telegram account: out of the
         #                 review queue, but still listed and still a valid merge
         #                 target (see discard_identity_name)
+        # ── Principals ───────────────────────────────────────────────────
+        # An app-local identity, independent of any chat platform. Today every
+        # table below keys on a Telegram user id, which means this app cannot
+        # authenticate anyone Telegram doesn't know — and a person who arrives
+        # via a second platform (or none) has no way to be the same person.
+        #
+        # A principal is that person. `principal_bindings` maps them to zero or
+        # more platform accounts, so linking two accounts is adding a second
+        # binding, and a login method with no platform behind it (email magic
+        # link) is a principal with none.
+        #
+        # Deliberately ADDITIVE: the 11 tables keyed on tg_user_id are left
+        # exactly as they are. Re-keying them is a large migration on a live
+        # database and would be speculative until a second login method
+        # actually exists; this gives the stable id to migrate TO, later.
+        if db_type == 'postgresql':
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS principals (
+                    id SERIAL PRIMARY KEY,
+                    display_name TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS principal_bindings (
+                    id SERIAL PRIMARY KEY,
+                    principal_id INTEGER NOT NULL REFERENCES principals(id) ON DELETE CASCADE,
+                    platform TEXT NOT NULL,
+                    platform_user_id TEXT NOT NULL,
+                    linked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(platform, platform_user_id)
+                )
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS principal_bindings_principal_idx
+                ON principal_bindings (principal_id)
+            """)
+        else:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS principals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    display_name TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS principal_bindings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    principal_id INTEGER NOT NULL REFERENCES principals(id) ON DELETE CASCADE,
+                    platform TEXT NOT NULL,
+                    platform_user_id TEXT NOT NULL,
+                    linked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(platform, platform_user_id)
+                )
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS principal_bindings_principal_idx
+                ON principal_bindings (principal_id)
+            """)
+
         if db_type == 'postgresql':
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS identity_links (

@@ -698,6 +698,20 @@ async def main():
         logger.error(f"❌ Database verification failed: {e}")
         sys.exit(1)
 
+    # Give every Telegram user this app already knows an app-local principal.
+    # Without this the backfill never runs and principals exist only for people
+    # who sign in after the deploy, so "the same person" would mean two
+    # different things either side of it. Idempotent (bindings are UNIQUE), so
+    # every later boot is a no-op, and best-effort — identity groundwork must
+    # never be the reason the bot fails to start.
+    try:
+        from services import principals as _principals
+        _created = await asyncio.to_thread(_principals.backfill_from_telegram)
+        if _created:
+            logger.info(f"✅ Created {_created} app-local principal(s) for existing users")
+    except Exception:
+        logger.exception("⚠️  Principal backfill failed — continuing without it")
+
     # Start health check server early so the container is always observable.
     try:
         await start_health_server()

@@ -134,5 +134,31 @@ class TestPrincipals(unittest.TestCase):
         self.assertIsNone(self.p.resolve("telegram", -1))
 
 
+
+class TestBackfillIsActuallyWired(unittest.TestCase):
+    """The backfill has to be CALLED, not merely defined.
+
+    It was written, tested, and never invoked — which made the guarantee it
+    exists for ("everyone the app already knows gets a principal, so 'the
+    same person' means one thing either side of the deploy") quietly false.
+    Tests that only exercise a function directly cannot catch that.
+    """
+
+    def test_startup_invokes_the_backfill(self):
+        import os as _os
+        runner = _os.path.join(_os.path.dirname(__file__), "..", "rollCall", "runner.py")
+        src = open(runner, encoding="utf-8").read()
+        self.assertRegex(
+            src, r"backfill_from_telegram\s*\)?\s*\(?",
+            "runner.py never calls principals.backfill_from_telegram — existing "
+            "users would only get a principal if they happen to sign in again",
+        )
+        # ...and it must not be able to stop the bot booting.
+        i = src.index("backfill_from_telegram")
+        window = src[max(0, i - 400):i]
+        self.assertIn("try:", window,
+                      "the backfill must be best-effort — identity groundwork "
+                      "should never be why the bot fails to start")
+
 if __name__ == "__main__":
     unittest.main()

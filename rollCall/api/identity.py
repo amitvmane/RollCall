@@ -19,15 +19,31 @@ Format (all ASCII, URL-safe):
 
     <user_id>.<exp_unix>.<hex_sig>
 
-where hex_sig = HMAC-SHA256(secret, "<user_id>.<exp_unix>"). The secret is
-derived from the bot token (already a server-only secret) under a context
+where hex_sig = HMAC-SHA256(secret, "<user_id>.<exp_unix>"), under a context
 label distinct from Telegram's own "WebAppData" derivation, so an identity
 token can never be confused with — or forged from — a Telegram signature.
 
+The secret comes from IDENTITY_SECRET when set, and falls back to the bot
+token otherwise. That fallback is the historical behaviour and remains the
+default, so deployments that set nothing are unaffected.
+
+Why the env var exists: signing with the bot token makes this module require
+Telegram in order to authenticate anyone. An app with no Telegram behind it
+would have neither the signing key nor the user ids, so identity is the
+piece that has to be decoupled first. IDENTITY_SECRET is that decoupling —
+the code no longer *needs* a bot token to mint or verify.
+
+Rotation without signing everyone out: verification accepts ANY configured
+key, minting only ever uses the primary. So setting IDENTITY_SECRET on a
+running deployment keeps existing tokens valid for the rest of their 30-day
+life while new ones are issued under the new key. Once that window passes,
+the bot token can be removed from the accepted set (or changed) with no user
+impact. Without this, switching keys would silently sign out every signed-in
+browser at once.
+
 There is intentionally no DB lookup: verification is a single HMAC, so these
 tokens are stateless and cheap. They are short-to-medium lived (30 days) and
-cannot be individually revoked; rotating the bot token invalidates all of
-them at once, which is the same blast radius as every other bot secret.
+cannot be individually revoked.
 """
 
 import hashlib
@@ -52,17 +68,45 @@ def _bot_token() -> str:
     return os.environ.get("TELEGRAM_TOKEN") or os.environ.get("API_KEY", "")
 
 
-def _secret() -> bytes:
-    """Derive the signing key from the bot token under a dedicated context.
+def _identity_secret() -> str:
+    """Operator-supplied signing key, independent of any chat platform."""
+    return os.environ.get("IDENTITY_SECRET", "").strip()
 
-    Using a distinct label ("RollCallIdentityV1") rather than the raw bot
-    token — or Telegram's "WebAppData" label — keeps this key cryptographically
-    separate from the Mini App HMAC, so neither can be used to forge the other.
+
+def _derive(material: str) -> bytes:
+    """Key-derivation under a dedicated context label.
+
+    The label ("RollCallIdentityV1") rather than the raw material — or
+    Telegram's "WebAppData" label — keeps this key cryptographically separate
+    from the Mini App HMAC, so neither can be used to forge the other.
     """
+    return hmac.new(b"RollCallIdentityV1", material.encode(), hashlib.sha256).digest()
+
+
+def _signing_keys() -> list:
+    """[primary, *also-accepted]. Minting uses [0]; verification tries all.
+
+    Both are listed while IDENTITY_SECRET is set, which is what lets a
+    deployment switch keys without invalidating the tokens already in
+    people's browsers — see the module docstring.
+    """
+    keys = []
+    env = _identity_secret()
+    if env:
+        keys.append(_derive(env))
     bot_token = _bot_token()
-    if not bot_token:
-        raise IdentityError("TELEGRAM_TOKEN not configured — cannot sign identity tokens")
-    return hmac.new(b"RollCallIdentityV1", bot_token.encode(), hashlib.sha256).digest()
+    if bot_token:
+        keys.append(_derive(bot_token))
+    if not keys:
+        raise IdentityError(
+            "Neither IDENTITY_SECRET nor TELEGRAM_TOKEN is configured — "
+            "cannot sign identity tokens"
+        )
+    return keys
+
+
+def _secret() -> bytes:
+    return _signing_keys()[0]
 
 
 def _sign(payload: str) -> str:
@@ -130,12 +174,21 @@ def _verify(token: Optional[str], scope: Optional[str]) -> Optional[int]:
 
     payload = f"{scope}.{user_id}.{exp}" if scope is not None else f"{user_id}.{exp}"
     try:
-        expected = _sign(payload)
+        keys = _signing_keys()
     except IdentityError:
         return None
+    # Every configured key is checked, so a token minted under the previous
+    # one stays valid for the rest of its life after a key change.
+    #
     # Constant-time comparison so a timing side channel can't be used to
-    # recover the valid signature byte by byte.
-    if not hmac.compare_digest(expected, sig):
+    # recover the valid signature byte by byte — and the result is OR-ed
+    # across all keys without an early return, so the time taken doesn't
+    # reveal WHICH key matched either.
+    matched = False
+    for key in keys:
+        expected = hmac.new(key, payload.encode(), hashlib.sha256).hexdigest()
+        matched |= hmac.compare_digest(expected, sig)
+    if not matched:
         return None
     if exp < int(time.time()):
         return None

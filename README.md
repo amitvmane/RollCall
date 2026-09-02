@@ -161,7 +161,8 @@ variables:
 | `REST_API_ENABLED` | No | `true` to start FastAPI on port 8081 (required for web voting + Mini App) |
 | `REST_API_PORT` | No | FastAPI port (default: `8081`) |
 | `WEB_BASE_URL` | No | Your public HTTPS base URL — enables web voting links in panels and `/weblink` |
-| `MINIAPP_URL` | No | Public URL of `/miniapp/` — wires the Telegram menu button on startup |
+| `MINIAPP_URL` | No | Public URL the Telegram menu button opens — point it at `<WEB_BASE_URL>/web/`. The old standalone `/miniapp/` app is retired and redirects there |
+| `IDENTITY_SECRET` | No | Signing key for web/portal identity tokens. Unset = derived from the bot token (today's behaviour). Set it to decouple identity from Telegram; safe to set on a running deployment, nobody is signed out |
 | `GHOST_AUTOFORGIVE_DAYS` | No | Days before an unreviewed session counts as "everyone attended" (default: `7`, `0` disables) |
 | `API_DOCS_ENABLED` | No | `true` to serve `/api/docs`, `/api/redoc` and the OpenAPI schema. **Off by default** — they're unauthenticated and rate-limit-exempt, so on a publicly reachable deployment they hand any visitor a full map of every endpoint |
 | `REST_API_HOST` | No | Bind address for the REST API (default: `127.0.0.1`) |

@@ -481,6 +481,12 @@
             <span class="adm-mi-sub">One-time rollcalls waiting to fire</span></span>
           <span class="adm-mi-chev">›</span>
         </button>
+        <button class="adm-menu-item" role="menuitem" onclick="openAdminSection('admins')">
+          <span class="adm-mi-icon">👑</span>
+          <span class="adm-mi-text"><span class="adm-mi-title">Owners &amp; admins</span>
+            <span class="adm-mi-sub">Who can manage this group</span></span>
+          <span class="adm-mi-chev">›</span>
+        </button>
         <button class="adm-menu-item hidden" id="adm-mi-ghost" role="menuitem" onclick="openAdminSection('ghost')">
           <span class="adm-mi-icon">👻</span>
           <span class="adm-mi-text"><span class="adm-mi-title">Review no-shows</span>
@@ -626,6 +632,18 @@
            Answering it is what forgives everyone who DID turn up, so an admin
            who runs the group from here needs to be able to answer it without
            opening Telegram. Body rendered by renderGhostReview() in app.js. -->
+      <!-- Owners & admins. Roles are groundwork for a group running off its
+           own admin list instead of asking Telegram; ownership is shown now,
+           while Telegram is still the authority, because afterwards nobody
+           would have standing to grant it. -->
+      <div class="adm-panel hidden" id="adm-panel-admins">
+        <div class="adm-panel-hdr">
+          <button class="adm-back" onclick="closeAdminSection()">‹ Back</button>
+          <span class="adm-panel-title">👑 Owners &amp; admins</span>
+        </div>
+        <div id="admins-body"></div>
+      </div>
+
       <div class="adm-panel hidden" id="adm-panel-ghost">
         <div class="adm-panel-hdr">
           <button class="adm-back" onclick="closeAdminSection()">‹ Back</button>

@@ -151,5 +151,85 @@ class TestAdminRoles(unittest.TestCase):
         self.assertEqual(rows[0]["role"], "owner")
 
 
+
+class TestAdminRolesApi(unittest.TestCase):
+    """The REST surface the web panel uses.
+
+    Both failure modes have to be answers, not 500s: "you aren't an owner"
+    and "that's the last owner" are things the UI needs to show, and the
+    second is the one that protects an unrecoverable state.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        from fastapi.testclient import TestClient
+        import bot_state  # noqa: F401
+        from api.main import app
+        from api.identity import issue_identity_token
+        import db
+        cls.client = TestClient(app)
+        cls.issue = staticmethod(issue_identity_token)
+        cls.db = db
+
+    def setUp(self):
+        reset_db()
+        from api.rate_limit import reset_buckets_for_tests
+        reset_buckets_for_tests()
+        self.enterContext(patch.dict(os.environ, {"TELEGRAM_TOKEN": BOT_TOKEN}))
+        chat = self.db.get_or_create_chat(CHAT_ID)
+        self.token = chat["group_web_token"]
+        self.db.set_web_admin(CHAT_ID, OWNER_ID, "Owner")
+        self.db.set_web_admin(CHAT_ID, ADMIN_ID, "Admin")
+        self.db.set_web_admin_role(CHAT_ID, OWNER_ID, "owner")
+
+    def _get(self, actor):
+        with patch("api.routes.web.check_web_admin_live", return_value=True):
+            return self.client.get(f"/api/v1/web/group/{self.token}/admins",
+                                   headers={"X-Identity-Token": self.issue(actor)})
+
+    def _set(self, actor, target, role):
+        with patch("api.routes.web.check_web_admin_live", return_value=True):
+            return self.client.post(
+                f"/api/v1/web/group/{self.token}/admins/role",
+                json={"id_token": self.issue(actor), "tg_user_id": target, "role": role})
+
+    def test_lists_roles_and_flags_the_caller(self):
+        r = self._get(OWNER_ID)
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertTrue(body["you_are_owner"])
+        self.assertEqual(body["admin_source"], "platform")
+        me = next(a for a in body["admins"] if a["tg_user_id"] == OWNER_ID)
+        self.assertEqual(me["role"], "owner")
+        self.assertTrue(me["is_you"])
+
+    def test_a_plain_admin_sees_the_list_but_is_not_an_owner(self):
+        body = self._get(ADMIN_ID).json()
+        self.assertFalse(body["you_are_owner"])
+        self.assertEqual(len(body["admins"]), 2)
+
+    def test_owner_promotes(self):
+        r = self._set(OWNER_ID, ADMIN_ID, "owner")
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(self.db.get_web_admin_role(CHAT_ID, ADMIN_ID), "owner")
+
+    def test_non_owner_promotion_is_403_not_500(self):
+        r = self._set(ADMIN_ID, ADMIN_ID, "owner")
+        self.assertEqual(r.status_code, 403, r.text)
+        self.assertEqual(self.db.get_web_admin_role(CHAT_ID, ADMIN_ID), "admin")
+
+    def test_demoting_the_last_owner_is_403_not_500(self):
+        r = self._set(OWNER_ID, OWNER_ID, "admin")
+        self.assertEqual(r.status_code, 403, r.text)
+        self.assertIn("only owner", r.json()["detail"].lower())
+        self.assertEqual(self.db.count_web_admin_owners(CHAT_ID), 1)
+
+    def test_unknown_role_is_rejected(self):
+        self.assertEqual(self._set(OWNER_ID, ADMIN_ID, "superuser").status_code, 422)
+
+    def test_requires_identity(self):
+        r = self.client.get(f"/api/v1/web/group/{self.token}/admins")
+        self.assertEqual(r.status_code, 401)
+
 if __name__ == "__main__":
     unittest.main()

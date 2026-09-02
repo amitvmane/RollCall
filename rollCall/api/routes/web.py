@@ -39,7 +39,10 @@ from api.schemas.web import (
     ScheduledRollcallRequest,
     ScheduledRollcallsResponse,
     VapidPublicKeyResponse,
+    WebAdminEntry,
+    WebAdminListResponse,
     WebAdminStatusResponse,
+    WebSetAdminRoleRequest,
     WebGhostCandidate,
     WebGhostReviewRequest,
     WebGhostReviewResponse,
@@ -1342,3 +1345,70 @@ async def web_ghost_review(
         details=f"forgave {result['forgiven']}",
     )
     return WebGhostReviewResponse(**result)
+
+
+# ── Web-admin roles ──────────────────────────────────────────────────────────
+# Roles exist so a group can eventually run off its own admin list instead of
+# asking Telegram. They are visible here before that switch is possible on
+# purpose: ownership has to be established while Telegram is still the
+# authority, because afterwards nobody would have standing to grant it.
+
+@router.get(
+    "/web/group/{group_token}/admins",
+    response_model=WebAdminListResponse,
+    summary="Who administers this group, and with what role (requires web-admin identity)",
+)
+async def web_list_admins(
+    group_token: str = Path(...),
+    id_token: Optional[str] = Depends(identity_from_header),
+) -> WebAdminListResponse:
+    chat_id, actor_user_id = await _require_web_admin(group_token, id_token or "")
+    from services import admin as admin_svc
+    rows = admin_svc.list_admins(chat_id)
+    return WebAdminListResponse(
+        admin_source=admin_svc.get_admin_source(chat_id),
+        you_are_owner=any(r["tg_user_id"] == actor_user_id and r["role"] == "owner" for r in rows),
+        admins=[
+            WebAdminEntry(
+                tg_user_id=r["tg_user_id"],
+                tg_name=r.get("tg_name"),
+                role=r.get("role") or "admin",
+                added_at=str(r.get("added_at")) if r.get("added_at") else None,
+                is_you=(r["tg_user_id"] == actor_user_id),
+            )
+            for r in rows
+        ],
+    )
+
+
+@router.post(
+    "/web/group/{group_token}/admins/role",
+    response_model=WebAdminListResponse,
+    summary="Promote an admin to owner, or step an owner down (owners only)",
+)
+async def web_set_admin_role(
+    body: WebSetAdminRoleRequest,
+    group_token: str = Path(...),
+) -> WebAdminListResponse:
+    chat_id, actor_user_id = await _require_web_admin(group_token, body.id_token)
+    actor_name = await _actor_display_name(chat_id, actor_user_id)
+
+    from services import admin as admin_svc
+    from exceptions import insufficientPermissions, incorrectParameter
+    try:
+        if body.role == "owner":
+            admin_svc.promote_to_owner(chat_id, body.tg_user_id,
+                                       actor_user_id=actor_user_id, actor_name=actor_name)
+        elif body.role == "admin":
+            admin_svc.demote_to_admin(chat_id, body.tg_user_id,
+                                      actor_user_id=actor_user_id, actor_name=actor_name)
+        else:
+            raise HTTPException(status_code=422, detail="role must be 'owner' or 'admin'")
+    except insufficientPermissions as e:
+        # 403 rather than 500: "you're not an owner" and "that's the last
+        # owner" are both answers, not failures.
+        raise HTTPException(status_code=403, detail=str(e))
+    except incorrectParameter as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    return await web_list_admins(group_token=group_token, id_token=body.id_token)

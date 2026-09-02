@@ -172,3 +172,87 @@ class TestAttendanceBetween(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPortalMergedAliasHistory(unittest.TestCase):
+    """The portal was the last place that didn't fold merged identities.
+
+    A member who played some games under a guest name — later merged into
+    them — saw those games as "miss" in their history, and a lower total than
+    the group leaderboard credited them with. Same person, two screens,
+    different numbers.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.db = _import()
+
+    def setUp(self):
+        reset_db()
+        self.enterContext(patch.dict(os.environ, {"TELEGRAM_TOKEN": BOT_TOKEN}))
+        import rollcall_manager
+        rollcall_manager.manager.clear_cache()
+        self.db.get_or_create_chat(CHAT_ID)
+
+    def _session(self, title, in_users=(), proxies=()):
+        from services.rollcalls import start_rollcall, end_rollcall
+        from services.voting import vote_in
+        from services.proxy import set_in_for
+        asyncio.run(start_rollcall(CHAT_ID, title, ADMIN_ID, "Admin"))
+        for uid, name, uname in in_users:
+            asyncio.run(vote_in(CHAT_ID, uid, name, uname))
+        for pname in proxies:
+            asyncio.run(set_in_for(CHAT_ID, ADMIN_ID, "Admin", pname))
+        asyncio.run(end_rollcall(CHAT_ID, 0, ADMIN_ID, "Admin"))
+
+    def _merge(self, alias):
+        from services import identity as identity_svc
+        identity_svc.link_identities(CHAT_ID, alias, canonical_user_id=SOLO_ID,
+                                     admin_user_id=ADMIN_ID, admin_name="Admin")
+
+    def test_history_counts_a_merged_guest_game_as_attended(self):
+        self._session("G1", [(SOLO_ID, "Ravi", "ravi")])
+        self._session("G2", proxies=["Ravi K"])
+        self._merge("Ravi K")
+
+        hist = self.db.get_user_session_history(CHAT_ID, SOLO_ID, limit=10)
+        statuses = sorted(h["status"] for h in hist)
+        self.assertEqual(statuses, ["in", "in"],
+                         f"a merged guest game still reads as a miss: {hist}")
+
+    def test_history_without_a_merge_is_unchanged(self):
+        """No aliases → the query must behave exactly as before."""
+        self._session("G1", [(SOLO_ID, "Ravi", "ravi")])
+        self._session("G2", proxies=["Someone Else"])
+        hist = self.db.get_user_session_history(CHAT_ID, SOLO_ID, limit=10)
+        self.assertEqual(sorted(h["status"] for h in hist), ["in", "miss"])
+
+    def test_own_vote_wins_over_a_guest_row_in_the_same_session(self):
+        """Voting yourself AND having a guest entry in one session is still
+        one person — and one attendance."""
+        from services.proxy import set_in_for
+        from services.rollcalls import start_rollcall, end_rollcall
+        from services.voting import vote_in
+        asyncio.run(start_rollcall(CHAT_ID, "G1", ADMIN_ID, "Admin"))
+        asyncio.run(vote_in(CHAT_ID, SOLO_ID, "Ravi", "ravi"))
+        asyncio.run(set_in_for(CHAT_ID, ADMIN_ID, "Admin", "Ravi K"))
+        asyncio.run(end_rollcall(CHAT_ID, 0, ADMIN_ID, "Admin"))
+        self._merge("Ravi K")
+
+        hist = self.db.get_user_session_history(CHAT_ID, SOLO_ID, limit=10)
+        self.assertEqual([h["status"] for h in hist], ["in"])
+
+    def test_portal_group_list_includes_merged_guest_games(self):
+        self._session("G1", [(SOLO_ID, "Ravi", "ravi")])
+        self._session("G2", proxies=["Ravi K"])
+        self._merge("Ravi K")
+
+        chats = self.db.get_user_voted_chats(SOLO_ID)
+        row = next(c for c in chats if c["chat_id"] == CHAT_ID)
+        self.assertEqual(row["sessions_attended"], 2)
+
+        # ...and it must agree with what the group's own leaderboard says.
+        board = self.db.get_leaderboard_by_attendance(CHAT_ID, limit=50)
+        mine = next(r for r in board if r.get("user_id") == SOLO_ID)
+        self.assertEqual(row["sessions_attended"], mine["attended"],
+                         "portal and leaderboard disagree about the same person")

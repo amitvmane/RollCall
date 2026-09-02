@@ -493,3 +493,25 @@ class WebGhostReviewResponse(BaseModel):
     ghosts: int = Field(..., description="How many no-shows were recorded")
     forgiven: int = Field(..., description="How many attendees had one past absence cleared")
     lines: List[str] = Field(default_factory=list, description="Human-readable summary, one line per no-show")
+
+
+# ── Web-admin roles ──────────────────────────────────────────────────────────
+
+class WebAdminEntry(BaseModel):
+    tg_user_id: int
+    tg_name: Optional[str] = None
+    role: str = Field("admin", description="'owner' or 'admin'")
+    added_at: Optional[str] = None
+    is_you: bool = Field(False, description="True for the caller's own row")
+
+
+class WebAdminListResponse(BaseModel):
+    admin_source: str = Field(..., description="'platform' = Telegram decides, 'local' = this list decides")
+    you_are_owner: bool
+    admins: List[WebAdminEntry] = Field(default_factory=list)
+
+
+class WebSetAdminRoleRequest(BaseModel):
+    id_token: str = Field(..., description="Signed identity token of the acting owner")
+    tg_user_id: int = Field(..., description="Whose role to change")
+    role: str = Field(..., description="'owner' or 'admin'")

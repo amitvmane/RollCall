@@ -4676,25 +4676,88 @@ def get_rollcall_history(chat_id: int, limit: int = 10, offset: int = 0) -> List
         return []
 
 
-def get_user_session_history(chat_id: int, user_id: int, limit: int = 15) -> List[Dict]:
-    """Return recent ended rollcalls with the user's status for each (NULL = did not vote)."""
+def _merged_alias_names(chat_id: int, user_id: int) -> List[str]:
+    """Guest/proxy names currently merged INTO this member in this chat.
+
+    Their games are this member's games — that is what merging means — but
+    they live in `proxy_users` under a name, not in `users` under a user_id,
+    so any query that only reads `users` silently drops them.
+    """
+    try:
+        return [l["alias_proxy_name"] for l in
+                get_links_by_canonical(chat_id, canonical_user_id=user_id)
+                if l.get("alias_proxy_name")]
+    except Exception:
+        logging.exception("_merged_alias_names failed")
+        return []
+
+
+def _proxy_attendance_count(chat_id: int, names: List[str]) -> int:
+    """Ended, non-cancelled sessions these proxy names were IN for."""
+    if not names:
+        return 0
     try:
         with _cursor() as cursor:
             ph = '%s' if db_type == 'postgresql' else '?'
             active_false = 'FALSE' if db_type == 'postgresql' else '0'
             cancel_false = 'FALSE' if db_type == 'postgresql' else '0'
+            lowered = ",".join([f"LOWER({ph})"] * len(names))
+            cursor.execute(f"""
+                SELECT COUNT(*) FROM proxy_users p
+                JOIN rollcalls r ON r.id = p.rollcall_id
+                WHERE r.chat_id = {ph} AND p.status = 'in'
+                  AND r.is_active = {active_false}
+                  AND COALESCE(r.is_cancelled, {cancel_false}) = {cancel_false}
+                  AND LOWER(p.name) IN ({lowered})
+            """, (chat_id, *names))
+            row = cursor.fetchone()
+            return int((row[0] if not isinstance(row, dict) else list(row.values())[0]) or 0)
+    except Exception:
+        logging.exception("_proxy_attendance_count failed")
+        return 0
+
+
+def get_user_session_history(chat_id: int, user_id: int, limit: int = 15) -> List[Dict]:
+    """Return recent ended rollcalls with the user's status for each ('miss' = did not vote).
+
+    Sessions the member played under a guest name that has since been merged
+    into them count as theirs — otherwise the portal shows "miss" against a
+    game they actually turned up to, which is the opposite of what merging
+    the identity was meant to fix.
+    """
+    try:
+        aliases = _merged_alias_names(chat_id, user_id)
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            active_false = 'FALSE' if db_type == 'postgresql' else '0'
+            cancel_false = 'FALSE' if db_type == 'postgresql' else '0'
+
+            # The real-user row wins where both exist: a member who voted
+            # themselves AND had a guest entry in the same session is one
+            # person, and their own vote is the authoritative one.
+            if aliases:
+                proxy_join = (f"LEFT JOIN proxy_users p ON p.rollcall_id = r.id "
+                              f"AND LOWER(p.name) IN ({','.join(['LOWER(' + ph + ')'] * len(aliases))})")
+                status_expr = "COALESCE(u.status, p.status, 'miss')"
+                params = (user_id, *aliases, chat_id, limit)
+            else:
+                proxy_join = ""
+                status_expr = "COALESCE(u.status, 'miss')"
+                params = (user_id, chat_id, limit)
+
             cursor.execute(f"""
                 SELECT r.id, r.title, r.ended_at, r.finalize_date, r.created_at,
                        CASE WHEN COALESCE(r.is_cancelled, {cancel_false}) != {cancel_false}
                             THEN 'cancelled'
-                            ELSE COALESCE(u.status, 'miss')
+                            ELSE {status_expr}
                        END AS status
                 FROM rollcalls r
                 LEFT JOIN users u ON u.rollcall_id = r.id AND u.user_id = {ph}
+                {proxy_join}
                 WHERE r.chat_id = {ph} AND r.is_active = {active_false}
                 ORDER BY r.ended_at DESC
                 LIMIT {ph}
-            """, (user_id, chat_id, limit))
+            """, params)
             return [dict(row) for row in cursor.fetchall()]
     except Exception as e:
         logging.error("Error getting user session history: %s", e)
@@ -4740,7 +4803,22 @@ def get_user_voted_chats(tg_user_id: int) -> List[Dict]:
                 WHERE us.user_id = {ph}
                 ORDER BY sessions_attended DESC
             """, (tg_user_id,))
-            return [dict(row) for row in cursor.fetchall()]
+            rows = [dict(row) for row in cursor.fetchall()]
+
+        # Games played under a guest name later merged into this member are
+        # theirs. The subquery above counts `users` rows only, so without this
+        # the portal shows a member fewer games than the group's own
+        # leaderboard credits them with — for the same person, on two screens.
+        # Done per-chat in Python rather than in SQL because the alias set is
+        # per-chat and the query above spans every chat at once.
+        for row in rows:
+            aliases = _merged_alias_names(row["chat_id"], tg_user_id)
+            if not aliases:
+                continue
+            row["sessions_attended"] = int(row.get("sessions_attended") or 0) + \
+                _proxy_attendance_count(row["chat_id"], aliases)
+        rows.sort(key=lambda r: -int(r.get("sessions_attended") or 0))
+        return rows
     except Exception as e:
         logging.error("Error in get_user_voted_chats: %s", e)
         return []

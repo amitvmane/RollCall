@@ -2083,6 +2083,7 @@ const ADMIN_SECTIONS={
   scheduled:{load:()=>_ensureScheduledOnceLoaded()},
   merge:{load:()=>_ensureIdentityMergeLoaded()},
   ghost:{load:()=>loadGhostReview()},
+  admins:{load:()=>loadAdminsPanel()},
 };
 let _adminSection=null;
 
@@ -4513,5 +4514,79 @@ async function _peekGhostReview(){
     _syncGhostBadge();
   }catch(_){}
 }
+
+
+// ── Owners & admins ───────────────────────────────────────────────────────
+// Every grant used to be equal — there was no owner. Roles matter once a
+// group stops asking Telegram who its admins are; they're surfaced now, while
+// Telegram is still the authority, because after that switch nobody would
+// have standing to grant ownership to anyone.
+let _adminsData=null;
+
+async function loadAdminsPanel(){
+  const body=document.getElementById("admins-body");
+  if(!body||!_idToken)return;
+  body.innerHTML='<div class="sched-empty">Loading…</div>';
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/admins`,
+      {headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(8000)});
+    if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"Failed to load");
+    _adminsData=await res.json();
+    renderAdminsPanel();
+  }catch(e){
+    body.innerHTML=`<div class="sched-empty">${esc(e.message||"Could not load")}</div>`;
+  }
+}
+
+function renderAdminsPanel(){
+  const body=document.getElementById("admins-body");
+  if(!body||!_adminsData)return;
+  const {admins,you_are_owner,admin_source}=_adminsData;
+
+  const source=admin_source==="local"
+    ? `This group manages its own admin list.`
+    : `Admins come from Telegram — whoever is an admin of the group is an admin here.`;
+
+  const owners=admins.filter(a=>a.role==="owner").length;
+
+  body.innerHTML=`<div class="adm-row-s" style="margin-bottom:12px">${source}${
+    you_are_owner?"":" Only an owner can change roles."}</div>`+
+    admins.map(a=>{
+      const isOwner=a.role==="owner";
+      // The last owner can't be stepped down — a group with none is one
+      // nobody can administer again. Say why rather than failing on click.
+      const lastOwner=isOwner&&owners<=1;
+      const btn=!you_are_owner?""
+        :lastOwner?`<span class="gr-tag">only owner</span>`
+        :`<button class="btn btn-secondary" style="padding:6px 10px;font-size:.78rem"
+             onclick="setAdminRole(${a.tg_user_id},'${isOwner?"admin":"owner"}')">${
+             isOwner?"Step down":"Make owner"}</button>`;
+      return `<div class="gr-row" style="cursor:default">
+        <span class="gr-name">${esc(a.tg_name||("User "+a.tg_user_id))}${
+          a.is_you?' <span class="gr-tag">you</span>':""}</span>
+        ${isOwner?'<span class="gr-tag">👑 owner</span>':""}
+        ${btn}
+      </div>`;
+    }).join("");
+}
+
+window.setAdminRole=async function(userId,role){
+  if(!_idToken)return;
+  const msg=role==="owner"
+    ? "Make this person an owner? Owners can add and remove other owners."
+    : "Step this owner down to admin?";
+  if(!await _confirmAction(msg))return;
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/admins/role`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({id_token:_idToken,tg_user_id:userId,role}),
+      signal:AbortSignal.timeout(8000),
+    });
+    if(!res.ok){const d=await res.json().catch(()=>({}));throw new Error(d.detail||"Failed");}
+    _adminsData=await res.json();
+    renderAdminsPanel();
+    toast(role==="owner"?"👑 Owner added":"Stepped down to admin",2500);
+  }catch(e){toast(e.message||"Could not change the role",4000);}
+};
 
 })();

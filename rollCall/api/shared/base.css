@@ -410,4 +410,9 @@ body:has(.tg-status-bar) .topbar{top:40px}
    the portal is the surface people open one-handed to check a balance. */
 @media (pointer:coarse){
   .btn-theme,.rc-help-btn,.detail-close,.sb-toggle{min-width:44px;min-height:44px}
+  /* Every .btn too, rather than a list of classes — that list passed on my
+     Chrome and failed on CI's Chromium, which computed the same button at
+     39px instead of 40. Chasing selectors across two font stacks is a losing
+     game; the floor belongs on .btn. */
+  .btn{min-height:44px}
 }

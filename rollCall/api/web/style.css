@@ -805,42 +805,50 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 body.tg-mode .brand-group-sel{background:rgba(127,127,127,.16);color:var(--text)}
 
 /* ── Touch targets ────────────────────────────────────────────────────────
-   Header controls were 29–32px square. Apple's guidance is 44pt and
-   Material's is 48dp, and the gap shows up as mis-taps on a phone held one-
-   handed on the way to a game — which is exactly when this app gets used.
-   Applied only to coarse pointers so a mouse keeps the compact bar. */
+   Header controls were 29–32px square, the view tabs 35px, the roster's
+   remove ✕ 22px wide. Apple asks for 44pt and Material for 48dp; the gap
+   shows up as mis-taps on a phone held one-handed on the way to a game,
+   which is exactly when this app gets used. Coarse pointers only, so a
+   mouse keeps the compact layout.
+
+   .btn carries the floor rather than a list of individual classes: that
+   list passed on my Chrome and failed on CI's Chromium, which computed the
+   same button at 39px instead of 40. Chasing selectors across two font
+   stacks is a losing game. */
 @media (pointer:coarse){
-  .brand-theme-btn,.brand-notify-btn,.brand-admin-btn,.brand-acct-btn,
-  .brand-install-btn{min-width:44px;min-height:44px}
-  .signin-close,.dues-hdr-toggle,.tg-offline-close{min-width:44px;min-height:44px}
-  /* Room for them: Help and Home are one tap away in the account menu, and
-     four 44px targets fit a 320px screen where six do not. */
+  .btn{min-height:44px}
+
+  /* Header: both axes, because below 720px these collapse to icons. */
+  .brand-theme-btn,.brand-notify-btn,.brand-admin-btn,
+  .brand-acct-btn,.brand-install-btn,
+  #install-btn-home,#help-btn-home,#theme-btn-home{min-width:44px;min-height:44px}
+
+  /* Room for them: six buttons and a group name do not fit a 320px bar, and
+     Help and Home are one tap away in the account menu — where the other
+     account-level actions already live. */
   .brand-bar.has-group-switch #help-btn,
   .brand-bar.has-group-switch #home-btn{display:none}
-  /* The home screen has its own copies of these controls. */
-  #install-btn-home,#help-btn-home,#theme-btn-home{min-width:44px;min-height:44px}
-  /* The view tabs are the page's main navigation and the switcher decides
-     which group everything else is about — the two most-tapped controls on
-     the page were the two smallest. */
+
+  /* The page's main navigation, and the control that decides which group
+     everything else is about — the two most-tapped things here were the two
+     smallest. */
   .vn-item{min-height:44px}
   .brand-group-sel{min-height:44px}
-  /* Everything else people actually tap on the rollcall page: the share
-     link, the name/manage control, the vote note field, the roster's
-     per-row admin controls, and the buttons inside cards. */
+
+  /* Everything else people actually tap on the rollcall page. */
   .copy-btn,.id-change,.comment-input,.name-row input,
-  .li-move-sel,.dues-section-toggle,
-  .adm-menu-item,.adm-back,.gr-more,.es-actions .btn{min-height:44px}
-  /* The roster's remove button is a ✕ in a dense row — it cannot get wider
-     without pushing the name out, so it gets both axes. Losing a name to a
-     mis-tap here deletes someone from the rollcall, which makes it the one
-     control on the page where a near-miss actually costs something. */
+  .li-move-sel,.dues-section-toggle,.signin-close,
+  .dues-hdr-toggle,.tg-offline-close,
+  .adm-menu-item,.adm-back,.gr-more{min-height:44px}
+
+  /* The roster's remove ✕ sits in a dense row and cannot get wider without
+     pushing the name out, so it gets both axes. A near-miss here deletes
+     someone from the rollcall — the one control on the page where missing
+     actually costs something. */
   .li-remove-btn{min-width:44px;min-height:44px}
-  /* The footer's "Create your own group" is an inline anchor, so its height
-     is just a line box. Nothing else on the page wants to grow, so it is
-     given the floor directly rather than via a blanket `a` rule that would
-     stretch every link inside body copy. */
+
+  /* Inline anchors have no height beyond their line box. Given the floor
+     directly rather than via a blanket `a` rule, which would stretch every
+     link inside body copy. */
   #group-cta a,#bookmark-card a{display:inline-flex;align-items:center;min-height:44px}
-  /* The home screen's buttons carry inline padding, so they need the floor
-     set explicitly rather than inherited from .btn. */
-  #home-content .btn,#home-groups .btn{min-height:44px}
 }

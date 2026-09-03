@@ -143,6 +143,39 @@ def check_html_balance(html, label, errors):
         errors.append(f"{label}: unbalanced <div> tags — {opens} open vs {closes} close")
 
 
+def check_css_braces(errors):
+    """Unbalanced braces in a stylesheet silently drop rules.
+
+    A scripted edit once left a rule unclosed, which swallowed the header
+    button sizing that followed it — the CSS still parsed, the page still
+    rendered, and the only symptom was buttons that were 44px wide and 29px
+    tall. Nothing in the Python suite or the wiring checks above can see that.
+    """
+    css_dir = ROOT
+    for dirpath, _, files in os.walk(css_dir):
+        for fn in sorted(files):
+            if not fn.endswith(".css"):
+                continue
+            path = os.path.join(dirpath, fn)
+            src = open(path, encoding="utf-8").read()
+            # Strip comments so a brace inside one doesn't count.
+            stripped = re.sub(r"/\*.*?\*/", "", src, flags=re.S)
+            depth = 0
+            for ch in stripped:
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth < 0:
+                        break
+            rel = os.path.relpath(path, ROOT)
+            if depth != 0:
+                errors.append(
+                    f"{rel}: unbalanced braces ({depth:+d}) — rules after the "
+                    f"error are silently dropped"
+                )
+
+
 def main():
     errors = []
     checked = 0
@@ -157,6 +190,8 @@ def main():
         check_duplicate_ids(html, label, errors)
         check_onclick_handlers(html, js, label, errors)
         check_element_ids(html, js, label, errors)
+
+    check_css_braces(errors)
 
     if not checked:
         print("web_ui_check: no apps found — wrong ROOT?", file=sys.stderr)

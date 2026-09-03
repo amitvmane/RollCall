@@ -4566,11 +4566,30 @@ async function _loadHeaderGroups(){
   const sel=document.getElementById("group-switch");
   if(!wrap||!sel||!IS_GROUP||!_idToken)return;
   try{
-    const res=await fetch("/api/v1/portal/groups",
-      {headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(8000)});
-    if(!res.ok)return;
-    const d=await res.json();
-    const groups=(d.groups||[]).filter(g=>g.group_web_token);
+    // TWO sources, because neither is the whole picture:
+    //   /portal/groups      groups you have VOTING HISTORY in
+    //   /auth/admin/groups  groups you ADMINISTER
+    // An admin who runs four groups but only plays in one appears in the
+    // first list once — which hid the switcher from exactly the person most
+    // likely to need it. The admin-panel switcher this replaced used the
+    // second list, so using only the first was a narrowing.
+    const hdrs={"X-Identity-Token":_idToken};
+    const [mine,admin]=await Promise.all([
+      fetch("/api/v1/portal/groups",{headers:hdrs,signal:AbortSignal.timeout(8000)})
+        .then(r=>r.ok?r.json():{groups:[]}).catch(()=>({groups:[]})),
+      fetch("/api/v1/auth/admin/groups",{headers:hdrs,signal:AbortSignal.timeout(8000)})
+        .then(r=>r.ok?r.json():{groups:[]}).catch(()=>({groups:[]})),
+    ]);
+    const byToken=new Map();
+    [...(mine.groups||[]),...(admin.groups||[])].forEach(g=>{
+      if(!g||!g.group_web_token)return;
+      const prev=byToken.get(g.group_web_token)||{};
+      byToken.set(g.group_web_token,{...prev,...g,
+        // has_active_rollcall only comes from the portal list; don't let the
+        // admin entry blank it out when it merges second.
+        has_active_rollcall:prev.has_active_rollcall||g.has_active_rollcall});
+    });
+    const groups=[...byToken.values()];
 
     // The group you're in might not be in that list — it lists groups you've
     // VOTED in, and you can be looking at one you haven't yet.

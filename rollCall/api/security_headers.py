@@ -45,13 +45,33 @@ _TELEGRAM_FRAME_ANCESTORS = "https://web.telegram.org https://*.telegram.org"
 # clickjacking hole — an attacker's page cannot embed either surface.
 _FRAMEABLE_PREFIXES = ("/miniapp", "/web")
 
+# Third-party origins the pages genuinely load from. Everything here was
+# blocked outright by the original 'self'-only policy, silently — a CSP
+# violation is a console message in the visitor's browser and nothing at all
+# on the server, so all three failed without a single log line:
+#
+#   telegram.org        the Mini App SDK (telegram-web-app.js) and the Login
+#                       Widget (telegram-widget.js). With it blocked,
+#                       window.Telegram never exists, so a member opening the
+#                       app from Telegram is treated as an anonymous visitor:
+#                       asked to sign in, then asked to paste a group link.
+#   oauth.telegram.org  the iframe the Login Widget renders into.
+#   fonts.googleapis    the stylesheet, and fonts.gstatic the font files. Both
+#   / fonts.gstatic     blocked, so every page has been falling back to system
+#                       fonts rather than the typography it ships with.
+_TELEGRAM_SCRIPTS = "https://telegram.org"
+_TELEGRAM_FRAMES = "https://oauth.telegram.org"
+_GOOGLE_FONTS_CSS = "https://fonts.googleapis.com"
+_GOOGLE_FONTS_FILES = "https://fonts.gstatic.com"
+
 _CSP_COMMON = (
     "default-src 'self'; "
     "img-src 'self' data: blob:; "
     # 'unsafe-inline' is load-bearing — see module docstring.
-    "script-src 'self' 'unsafe-inline'; "
-    "style-src 'self' 'unsafe-inline'; "
-    "font-src 'self' data:; "
+    f"script-src 'self' 'unsafe-inline' {_TELEGRAM_SCRIPTS}; "
+    f"style-src 'self' 'unsafe-inline' {_GOOGLE_FONTS_CSS}; "
+    f"font-src 'self' data: {_GOOGLE_FONTS_FILES}; "
+    f"frame-src {_TELEGRAM_FRAMES}; "
     "connect-src 'self'; "
     "object-src 'none'; "
     "base-uri 'self'; "

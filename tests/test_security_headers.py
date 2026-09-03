@@ -69,6 +69,41 @@ class TestSecurityHeaders(unittest.TestCase):
         self.assertIn("object-src 'none'", csp)
         self.assertIn("base-uri 'self'", csp)
 
+    def test_csp_allows_the_origins_the_pages_actually_load(self):
+        """A CSP violation is a console message in the visitor's browser and
+        NOTHING on the server, so getting this wrong fails in total silence.
+
+        It did: 'self'-only script-src blocked telegram.org, so the Mini App
+        SDK never loaded, window.Telegram never existed, and a member opening
+        from Telegram was treated as an anonymous visitor — asked to sign in,
+        then asked to paste a group link. The Login Widget could never render
+        either, and every page fell back to system fonts.
+        """
+        csp = _client().get("/web/").headers["Content-Security-Policy"]
+        directives = {
+            d.strip().split(" ")[0]: d.strip()
+            for d in csp.split(";") if d.strip()
+        }
+        self.assertIn("https://telegram.org", directives["script-src"],
+                      "Mini App SDK + Login Widget script would be blocked")
+        self.assertIn("https://oauth.telegram.org", directives["frame-src"],
+                      "the Login Widget's iframe would be blocked")
+        self.assertIn("https://fonts.googleapis.com", directives["style-src"],
+                      "the webfont stylesheet would be blocked")
+        self.assertIn("https://fonts.gstatic.com", directives["font-src"],
+                      "the font files themselves would be blocked")
+
+    def test_csp_did_not_become_a_free_for_all(self):
+        """Allowing the four origins above must not turn into allowing any."""
+        csp = _client().get("/web/").headers["Content-Security-Policy"]
+        self.assertNotIn("script-src 'self' 'unsafe-inline' *", csp)
+        self.assertIn("default-src 'self'", csp)
+        self.assertIn("object-src 'none'", csp)
+        self.assertIn("connect-src 'self'", csp)
+        # Nothing may post a form off-origin, and no data: script sources.
+        self.assertIn("form-action 'self'", csp)
+        self.assertNotIn("script-src 'self' 'unsafe-inline' data:", csp)
+
     def test_hsts_only_when_https_base_url(self):
         with patch.dict(os.environ, {"WEB_BASE_URL": "https://roll.example.com"}):
             self.assertIn("Strict-Transport-Security", _client().get("/api/v1/health").headers)

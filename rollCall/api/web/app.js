@@ -1864,6 +1864,12 @@ let _isWebAdmin=false;
 // silently — an unknown result now says so instead of rendering as "not admin".
 async function _checkWebAdmin(){
   if(!IS_GROUP)return;
+  // Which group you are looking at is not an admin question, so the switcher
+  // must not ride on the admin answer. It used to be loaded from
+  // _applyAdminStatus, which only runs when the check SUCCEEDS — so with
+  // Telegram unreachable the whole header switcher quietly vanished, on top
+  // of admin controls already being hidden.
+  _loadHeaderGroups().catch(()=>{});
   // 1. A /weblogin redemption may still be in flight and is what sets _idToken.
   if(!_idToken&&_weblogInRedeemPromise){
     try{await _weblogInRedeemPromise;}catch(_){}
@@ -1911,7 +1917,6 @@ function _applyAdminStatus(isAdmin){
   _syncAdminRcControls();
   _syncViewTabs();
   _peekGhostReview().catch(()=>{});
-  _loadHeaderGroups().catch(()=>{});
   // The empty state offers "＋ New Rollcall" to admins, and admin status
   // usually lands after it was first rendered.
   if(!activeRcData)renderEmptyState();

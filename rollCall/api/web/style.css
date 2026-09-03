@@ -122,6 +122,12 @@ h1,h2,h3,.rc-title,.brand-name{font-family:var(--font-display)}
   #main{grid-template-columns:minmax(0,1.7fr) minmax(0,1fr)}
 }
 
+/* The bar's negative side margins exist to bleed to the screen edge against
+   #app's 14px (20px on desktop) padding. #home-screen has no such padding, so
+   there the same margins pushed it 14px PAST the right edge and the whole
+   home screen scrolled sideways on any desktop. */
+#home-screen .brand-bar{margin-left:0;margin-right:0}
+
 /* ── Brand bar: stadium signage, not a flat SaaS header ── */
 .brand-bar{
   display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;
@@ -191,7 +197,7 @@ body.modal-open{overflow:hidden}
 
 /* ── Admin menu (level 1) and its submenu panels (level 2) ───────────────── */
 .adm-group-picker{margin-bottom:12px}
-.adm-group-lbl{font-size:.7rem;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px}
+.adm-group-lbl{font-size:0.72rem;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px}
 .adm-select{
   width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;
   border:1.5px solid var(--border);background:var(--bg);color:var(--text);
@@ -344,7 +350,7 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .tab-bar{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none}
 .tab-bar::-webkit-scrollbar{display:none}
 .tab-btn{flex-shrink:0;padding:6px 14px;border:1.5px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);font-size:.82rem;cursor:pointer;white-space:nowrap;transition:all .15s;display:flex;flex-direction:column;align-items:center;gap:1px}
-.tab-btn .tn{font-size:.63rem;font-weight:800;opacity:.65;font-family:var(--font-mono)}
+.tab-btn .tn{font-size:0.72rem;font-weight:800;opacity:.65;font-family:var(--font-mono)}
 .tab-btn .tt{font-size:.8rem;font-weight:600;max-width:110px;overflow:hidden;text-overflow:ellipsis}
 .tab-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
 .tab-btn.active .tn{opacity:.75}
@@ -434,7 +440,7 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .list-items{list-style:none}
 .list-items li{font-size:.9rem;padding:7px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
 .list-items li:last-child{border-bottom:none}
-.av{width:27px;height:27px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:.7rem;font-weight:800;flex-shrink:0}
+.av{width:27px;height:27px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:0.72rem;font-weight:800;flex-shrink:0}
 
 /* ── Roster admin actions (move/remove) — web parity for the admin
    console's Rollcalls-tab controls, shown inline per row when signed in
@@ -462,7 +468,7 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .refresh-bar-wrap{display:flex;align-items:center;gap:8px;margin-top:4px}
 .refresh-bar{flex:1;height:2px;background:var(--border);border-radius:1px;overflow:hidden}
 .refresh-fill{height:100%;background:var(--accent);border-radius:1px;width:100%}
-.refresh-label{font-size:.68rem;color:var(--sub);white-space:nowrap;opacity:0;transition:opacity .3s;font-family:var(--font-mono)}
+.refresh-label{font-size:0.72rem;color:var(--sub);white-space:nowrap;opacity:0;transition:opacity .3s;font-family:var(--font-mono)}
 .refresh-label.show{opacity:1}
 .toast-local{position:fixed;bottom:20px;right:14px;left:14px;max-width:360px;margin:0 auto;padding:11px 16px;border-radius:8px;font-size:.87rem;font-weight:600;background:var(--text);color:var(--bg);box-shadow:var(--shadow-md);opacity:0;transform:translateY(8px);transition:opacity .2s,transform .2s;pointer-events:none;z-index:999}
 .toast-local.show{opacity:1;transform:none}
@@ -472,15 +478,15 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
    card in index.html — this styling makes that demotion visible: compact
    rows, no card-level heading weight competing with the live game). ── */
 #upcoming-card{padding-top:12px;padding-bottom:10px}
-.upcoming-header{font-size:.7rem;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:var(--sub);padding:0 0 8px;font-family:var(--font-display)}
+.upcoming-header{font-size:0.72rem;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:var(--sub);padding:0 0 8px;font-family:var(--font-display)}
 .upcoming-row{display:flex;gap:12px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--border)}
 .upcoming-row:last-child{border-bottom:none;padding-bottom:0}
 .upcoming-when{display:flex;flex-direction:column;align-items:center;min-width:50px;gap:2px}
-.upcoming-day{font-size:.68rem;font-weight:700;color:var(--accent);text-transform:uppercase;font-family:var(--font-mono)}
+.upcoming-day{font-size:0.72rem;font-weight:700;color:var(--accent);text-transform:uppercase;font-family:var(--font-mono)}
 .upcoming-time{font-size:.78rem;font-weight:700;color:var(--text);font-family:var(--font-mono)}
 .upcoming-info{flex:1;min-width:0}
 .upcoming-title{font-weight:600;font-size:.87rem;margin-bottom:2px}
-.upcoming-opens-lbl{font-size:.66rem;color:var(--sub);text-transform:uppercase;letter-spacing:.04em;font-weight:700;margin-bottom:3px}
+.upcoming-opens-lbl{font-size:0.72rem;color:var(--sub);text-transform:uppercase;letter-spacing:.04em;font-weight:700;margin-bottom:3px}
 .upcoming-event{font-size:.78rem;color:var(--text);font-weight:600;margin-bottom:2px}
 .upcoming-meta{font-size:.75rem;color:var(--sub)}
 
@@ -517,7 +523,7 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .sp-mini-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
 .sp-mini{text-align:center}
 .sp-mini-val{font-size:1.15rem;font-weight:800;color:var(--text);font-family:var(--font-mono)}
-.sp-mini-lbl{font-size:.68rem;color:var(--sub);margin-top:1px;font-weight:600}
+.sp-mini-lbl{font-size:0.72rem;color:var(--sub);margin-top:1px;font-weight:600}
 .sp-bar-row{display:flex;align-items:center;gap:8px;margin-bottom:10px}
 .sp-bar{flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden}
 .sp-bar-fill{height:100%;background:var(--accent);border-radius:3px;transition:width .4s}
@@ -559,9 +565,9 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .sp-trend-label{font-size:.78rem;font-weight:700;color:var(--sub);margin:12px 0 6px}
 .sp-trend{display:flex;align-items:flex-end;gap:5px;height:80px}
 .sp-tbar-wrap{display:flex;flex-direction:column;align-items:center;flex:1;min-width:20px;height:100%}
-.sp-tbar-val{font-size:.65rem;font-weight:700;color:var(--text);margin-bottom:2px;line-height:1;font-family:var(--font-mono)}
+.sp-tbar-val{font-size:0.72rem;font-weight:700;color:var(--text);margin-bottom:2px;line-height:1;font-family:var(--font-mono)}
 .sp-tbar{width:100%;background:var(--accent);border-radius:3px 3px 0 0;transition:height .3s;min-height:3px}
-.sp-tbar-lbl{font-size:.58rem;color:var(--sub);margin-top:3px;white-space:nowrap}
+.sp-tbar-lbl{font-size:0.72rem;color:var(--sub);margin-top:3px;white-space:nowrap}
 
 /* ── Personal session sparkline ── */
 .sp-spark-label{font-size:.72rem;color:var(--sub);margin:8px 0 4px;font-weight:600}
@@ -661,7 +667,7 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .dues-modal-btns{display:flex;gap:10px}
 .dues-modal-btns .btn{flex:1;padding:12px;border-radius:10px;font-weight:700}
 
-.slb-badge{display:inline-block;margin-left:5px;padding:1px 6px;border-radius:6px;background:var(--hover);font-size:.68rem;vertical-align:1px;white-space:nowrap}
+.slb-badge{display:inline-block;margin-left:5px;padding:1px 6px;border-radius:6px;background:var(--hover);font-size:0.72rem;vertical-align:1px;white-space:nowrap}
 
 .group-cta{text-align:center;padding:18px 12px 22px;font-size:.82rem;color:var(--sub)}
 .group-cta a{color:var(--accent);font-weight:700;text-decoration:none}
@@ -684,7 +690,7 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .identity-tbl col.c-count{width:13%}
 .identity-tbl col.c-aliases{width:42%}
 .itn{font-weight:600}
-.itn-tag{display:inline-block;font-size:.71rem;font-weight:600;padding:1px 7px;border-radius:5px;background:var(--border);color:var(--sub)}
+.itn-tag{display:inline-block;font-size:0.72rem;font-weight:600;padding:1px 7px;border-radius:5px;background:var(--border);color:var(--sub)}
 .itn-tag.proxy{background:var(--accent-dim);color:var(--accent)}
 .itcount{font-family:var(--font-mono);color:var(--sub)}
 .itcount.hot{color:var(--accent);font-weight:700}
@@ -699,7 +705,7 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
    colors (success/warn) already defined in shared/tokens.css instead of a
    new color system: exact matches get .chip-in (green), fuzzy get
    .chip-maybe (amber). */
-.itm-conf-badge{display:inline-block;font-size:.68rem;font-weight:700;padding:1px 6px;border-radius:5px;margin-right:6px}
+.itm-conf-badge{display:inline-block;font-size:0.72rem;font-weight:700;padding:1px 6px;border-radius:5px;margin-right:6px}
 
 /* Searchable combobox (Merge manually FROM/TO) — hand-rolled, no external
    deps. See _mountCombo in app.js. */
@@ -743,7 +749,7 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .gr-row.on .gr-name{font-weight:700;color:var(--danger-fg,var(--out))}
 .gr-row input{width:17px;height:17px;flex-shrink:0;accent-color:var(--out,#dc2626)}
 .gr-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
-.gr-tag{font-size:.68rem;font-weight:700;color:var(--sub);border:1px solid var(--border);border-radius:5px;padding:1px 5px;white-space:nowrap}
+.gr-tag{font-size:0.72rem;font-weight:700;color:var(--sub);border:1px solid var(--border);border-radius:5px;padding:1px 5px;white-space:nowrap}
 .gr-more{background:none;border:none;color:var(--accent);font-family:inherit;font-size:.8rem;font-weight:600;cursor:pointer;padding:8px 10px}
 .gr-actions{display:flex;gap:8px;margin-top:10px}
 .gr-badge{background:var(--out,#dc2626);color:#fff;border-radius:999px;min-width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;font-size:.72rem;font-weight:800;padding:0 6px}
@@ -782,8 +788,59 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 }
 @media(max-width:420px){
   .brand-bar.has-group-switch .brand-logo{display:none}
-  .brand-group-sel{max-width:44vw}
+  /* Sized so the switcher and the button row never end up flush against each
+     other. At 44vw flex had to shrink the select to fit, which left the
+     notification bell sitting on its chevron — measurably 0px apart, and it
+     reads as one control running into the next. */
+  .brand-group-sel{max-width:30vw}
+}
+/* iPhone SE and friends: six buttons plus a group name is 1px over, which is
+   still an overlap. The name gives up the width because a truncated name is
+   readable and an overlapping one is not. */
+@media(max-width:360px){
+  .brand-group-sel{max-width:24vw}
 }
 /* Inside Telegram the bar is re-skinned light-on-light, so the chip needs the
    same treatment the other header controls get there. */
 body.tg-mode .brand-group-sel{background:rgba(127,127,127,.16);color:var(--text)}
+
+/* ── Touch targets ────────────────────────────────────────────────────────
+   Header controls were 29–32px square. Apple's guidance is 44pt and
+   Material's is 48dp, and the gap shows up as mis-taps on a phone held one-
+   handed on the way to a game — which is exactly when this app gets used.
+   Applied only to coarse pointers so a mouse keeps the compact bar. */
+@media (pointer:coarse){
+  .brand-theme-btn,.brand-notify-btn,.brand-admin-btn,.brand-acct-btn,
+  .brand-install-btn{min-width:44px;min-height:44px}
+  .signin-close,.dues-hdr-toggle,.tg-offline-close{min-width:44px;min-height:44px}
+  /* Room for them: Help and Home are one tap away in the account menu, and
+     four 44px targets fit a 320px screen where six do not. */
+  .brand-bar.has-group-switch #help-btn,
+  .brand-bar.has-group-switch #home-btn{display:none}
+  /* The home screen has its own copies of these controls. */
+  #install-btn-home,#help-btn-home,#theme-btn-home{min-width:44px;min-height:44px}
+  /* The view tabs are the page's main navigation and the switcher decides
+     which group everything else is about — the two most-tapped controls on
+     the page were the two smallest. */
+  .vn-item{min-height:44px}
+  .brand-group-sel{min-height:44px}
+  /* Everything else people actually tap on the rollcall page: the share
+     link, the name/manage control, the vote note field, the roster's
+     per-row admin controls, and the buttons inside cards. */
+  .copy-btn,.id-change,.comment-input,.name-row input,
+  .li-move-sel,.dues-section-toggle,
+  .adm-menu-item,.adm-back,.gr-more,.es-actions .btn{min-height:44px}
+  /* The roster's remove button is a ✕ in a dense row — it cannot get wider
+     without pushing the name out, so it gets both axes. Losing a name to a
+     mis-tap here deletes someone from the rollcall, which makes it the one
+     control on the page where a near-miss actually costs something. */
+  .li-remove-btn{min-width:44px;min-height:44px}
+  /* The footer's "Create your own group" is an inline anchor, so its height
+     is just a line box. Nothing else on the page wants to grow, so it is
+     given the floor directly rather than via a blanket `a` rule that would
+     stretch every link inside body copy. */
+  #group-cta a,#bookmark-card a{display:inline-flex;align-items:center;min-height:44px}
+  /* The home screen's buttons carry inline padding, so they need the floor
+     set explicitly rather than inherited from .btn. */
+  #home-content .btn,#home-groups .btn{min-height:44px}
+}

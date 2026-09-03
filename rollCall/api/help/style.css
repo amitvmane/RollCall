@@ -33,7 +33,7 @@
 .cmd-card-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap}
 .cmd-name{font-family:var(--font-mono);font-weight:700;font-size:.92rem;color:var(--accent)}
 .cmd-args{font-family:var(--font-mono);font-size:.72rem;color:var(--sub)}
-.cmd-scope-badge{background:var(--warn-bg);color:var(--warn-fg);font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em;padding:2px 6px;border-radius:5px}
+.cmd-scope-badge{background:var(--warn-bg);color:var(--warn-fg);font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em;padding:2px 6px;border-radius:5px}
 
 .cmd-summary{font-size:.83rem;color:var(--text);margin-top:4px}
 
@@ -54,4 +54,13 @@
   .hero-block h1{font-size:1.35rem}
   .controls-bar{position:static}
   .cmd-grid{grid-template-columns:1fr}
+}
+
+/* The scope tabs are the only navigation on this page, and at 30px tall they
+   were under every touch-target guideline going. */
+@media (pointer:coarse){
+  .scope-btn{min-height:44px}
+  /* Inline links in the footer and body are the page's only other targets;
+     an inline anchor has no height of its own beyond its line box. */
+  .page-footer a,.cmd-card a{display:inline-flex;align-items:center;min-height:44px}
 }

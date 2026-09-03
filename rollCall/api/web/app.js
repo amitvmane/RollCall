@@ -510,6 +510,12 @@ function renderAcctMenu(){
   if(_isWebAdmin){
     html+=`<button class="acct-menu-item" role="menuitem" onclick="closeAcctMenu();toggleAdminPanel()">⚙ Admin controls</button>`;
   }
+  // On a phone the header hides Help and Home to leave room for 44px touch
+  // targets, so the menu has to carry them — otherwise they are simply gone.
+  if(window.matchMedia&&window.matchMedia("(pointer:coarse)").matches){
+    html+=`<button class="acct-menu-item" role="menuitem" onclick="closeAcctMenu();window.location.href='/web/'">🏠 All your groups</button>`;
+    html+=`<button class="acct-menu-item" role="menuitem" onclick="closeAcctMenu();window.location.href='/help'">❓ Command reference</button>`;
+  }
   if(who||_idToken){
     html+=`<button class="acct-menu-item danger" role="menuitem" onclick="signOut()">⏻ Sign out</button>`;
   }

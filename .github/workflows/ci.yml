@@ -136,6 +136,13 @@ jobs:
       - name: Check web layout
         run: node scripts/web_layout_check.js
 
+      # Every surface at every real device size: overflow, header collisions,
+      # touch-target size, text size, iOS zoom-on-focus, JS errors. Catches the
+      # class of problem that only appears on a phone, which is where this app
+      # is actually used.
+      - name: Check device matrix
+        run: node scripts/web_device_matrix.js
+
   functional:
     # Deliberately no scenario count in the name — it went stale within a day
     # of being written (121 -> 156), the same way the old

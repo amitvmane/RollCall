@@ -20,6 +20,29 @@
      for countdowns and ledger figures. Each surface links its own Google
      Fonts <link>; if that fails to load, the fallback stack still reads
      fine. */
+/* ── Type scale ───────────────────────────────────────────────────────────
+   The app grew 49 distinct font sizes, 71% of them under 14px, with body
+   copy at 13.6px — small enough that the people actually using this (a
+   weekend football group, not a design portfolio) have to squint at a phone
+   in daylight. Sizes drifted by 0.1px increments, which is drift, not
+   hierarchy.
+
+   Rather than rewrite 398 declarations across five surfaces — high risk, low
+   reward — the root is raised. Almost every size here is expressed in rem
+   while 92% of spacing is in px, so this scales the TEXT and leaves the
+   layout where it is. 106.25% takes body copy from 13.6px to 14.5px and the
+   smallest labels from 11.5px to 12.2px, clearing the 12px floor below which
+   text stops being read and starts being skipped.
+
+   The tokens below are for new work: reach for these rather than inventing a
+   50th size. */
+  --text-xs:0.75rem;    /* 12.75px — captions, meta. The floor. */
+  --text-sm:0.875rem;   /* 14.9px  — secondary text */
+  --text-base:1rem;     /* 17px    — body */
+  --text-lg:1.125rem;   /* 19.1px  — card titles */
+  --text-xl:1.375rem;   /* 23.4px  — section headings */
+  --text-2xl:1.75rem;   /* 29.8px  — page headings */
+
   --font-display:"Big Shoulders Display",'Arial Narrow',sans-serif;
   --font-body:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
   --font-mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
@@ -67,3 +90,24 @@ html.dark{
 .chip-in{background:var(--success-bg);color:var(--success-fg)}
 .chip-out{background:var(--danger-bg);color:var(--danger-fg)}
 .chip-maybe{background:var(--warn-bg);color:var(--warn-fg)}
+
+/* Raises every rem-based size by 6.25%. Deliberately a percentage, not a px
+   value: a reader who has set a larger default font size in their browser
+   keeps that preference scaled, which a hard `font-size:17px` would silently
+   override. */
+html{font-size:106.25%}
+
+/* Any control smaller than 16px makes iOS Safari ZOOM the page when it gains
+   focus, then leaves it zoomed — it happens on the vote comment box, the
+   name field and every admin dropdown, which is 50 controls in this app.
+   Scoped to touch pointers so desktop keeps its compact forms, and
+   !important because most of these carry inline font sizes that would
+   otherwise win. */
+@media (pointer:coarse){
+  /* Text entry only. iOS zooms when a field that accepts a KEYBOARD gains
+     focus; a <select> opens a native picker instead and never zooms — and
+     forcing 16px on selects widened the header group switcher until it ran
+     into the notification bell. Checkboxes and radios have no text to size. */
+  input:not([type=checkbox]):not([type=radio]):not([type=range]),
+  textarea{font-size:16px !important}
+}

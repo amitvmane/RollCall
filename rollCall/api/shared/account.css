@@ -60,3 +60,13 @@
   .brand-acct-btn{padding:0 4px;max-width:none}
   .acct-label{display:none}
 }
+
+/* Apple asks for 44pt touch targets; this chip is 32px tall by design on a
+   dense header. On a touch device the box grows to 44 while the visual
+   padding stays put, so it reads the same and is actually hittable. */
+@media (pointer:coarse){
+  /* Both axes: below 720px the chip collapses to just the avatar, so height
+     alone left a 32px-wide target. */
+  .brand-acct-btn{min-height:44px;min-width:44px;justify-content:center}
+  .acct-menu-item{min-height:44px}
+}

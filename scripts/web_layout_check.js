@@ -211,11 +211,16 @@ const WIDTHS = [
         // The group switcher in the header did exactly that — the name ran
         // under the Install button while every overflow assertion passed.
         headerOverlap: (() => {
-          const inner = document.querySelector(".brand-inner");
-          const acts = document.querySelector(".brand-actions");
-          if (!inner || !acts) return 0;
-          return Math.round(inner.getBoundingClientRect().right
-                            - acts.getBoundingClientRect().left);
+          // Compare the RENDERED edges, not the flex wrappers: .brand-inner
+          // can be wider than the control drawn inside it, so wrapper maths
+          // reported a 0px gap while the group switcher was genuinely 1px
+          // under the notification bell at 320px.
+          const vis = el => el && el.offsetParent !== null;
+          const left = [...document.querySelectorAll(".brand-inner *")].filter(vis).pop();
+          const right = [...document.querySelectorAll(".brand-actions > *")].filter(vis)[0];
+          if (!left || !right) return 0;
+          return Math.round(left.getBoundingClientRect().right
+                            - right.getBoundingClientRect().left);
         })(),
       };
     });

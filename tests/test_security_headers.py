@@ -148,3 +148,93 @@ class TestRetiredMiniapp(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 
+
+
+class TestStaticCacheRevalidation(unittest.TestCase):
+    """Cache-Control on code assets (added 2026-09-04).
+
+    The deploy that day shipped correctly and still didn't reach anyone:
+    Cloudflare had a 24 July copy of /shared/tokens.css and kept serving it,
+    because StaticFiles sends validators but no Cache-Control and the edge
+    filled the gap with its own four-hour default. The same URL returned the
+    old or the new type scale depending on which edge node answered.
+
+    This is the third delivery failure of the same shape in this app — the
+    service worker pinning app.js, `make up` recreating from a stale image,
+    now the CDN — each of which reported a successful deploy while the change
+    sat invisible to users. Hence a test at the layer that can assert it.
+    """
+
+    def test_stylesheets_and_scripts_must_be_revalidated(self):
+        for path in ("/shared/tokens.css", "/web/style.css", "/web/app.js"):
+            with self.subTest(path=path):
+                resp = _client().get(path)
+                if resp.status_code == 404:
+                    self.skipTest(f"{path} not mounted in this build")
+                cc = resp.headers.get("Cache-Control", "")
+                self.assertIn(
+                    "no-cache", cc,
+                    f"{path} left to the CDN's default TTL — a deploy would "
+                    f"take up to 4h to reach visitors, and inconsistently",
+                )
+
+    def test_html_is_revalidated_too(self):
+        """The HTML references the CSS, so pinning it stale pins the page."""
+        resp = _client().get("/web/")
+        self.assertIn("no-cache", resp.headers.get("Cache-Control", ""))
+
+    def test_validators_are_present_so_revalidation_is_cheap(self):
+        """no-cache is only affordable because an unchanged file answers 304
+        with no body. That needs ETag or Last-Modified — without them every
+        request would re-download the asset in full."""
+        resp = _client().get("/web/style.css")
+        self.assertTrue(
+            resp.headers.get("ETag") or resp.headers.get("Last-Modified"),
+            "no validator: revalidation would refetch the whole file",
+        )
+
+    def test_a_route_that_chose_no_store_keeps_it(self):
+        """setdefault, not assignment.
+
+        Routes that build a response per request — the per-group PWA manifest,
+        the dues QR — send `no-store` deliberately. Revalidation is weaker than
+        no-store, so overwriting it would let a CDN hold a response that was
+        built for one group and one member. Driven through the middleware
+        directly because those routes 404 without live data, and a test that
+        skips protects nothing.
+        """
+        import asyncio
+        from fastapi import Response as FastAPIResponse
+        from api.security_headers import security_headers_middleware
+
+        class _Req:
+            class url:
+                path = "/web/group/tok/manifest.json"
+
+        async def _call_next(_req):
+            r = FastAPIResponse(content="{}", media_type="application/manifest+json")
+            r.headers["Cache-Control"] = "no-store"
+            return r
+
+        resp = asyncio.run(security_headers_middleware(_Req(), _call_next))
+        self.assertEqual(resp.headers.get("Cache-Control"), "no-store")
+
+    def test_a_plain_asset_does_get_the_revalidate(self):
+        """The other half of the setdefault: nothing set, so we set it."""
+        import asyncio
+        from fastapi import Response as FastAPIResponse
+        from api.security_headers import security_headers_middleware
+
+        class _Req:
+            class url:
+                path = "/shared/tokens.css"
+
+        async def _call_next(_req):
+            return FastAPIResponse(content="html{}", media_type="text/css")
+
+        resp = asyncio.run(security_headers_middleware(_Req(), _call_next))
+        self.assertEqual(resp.headers.get("Cache-Control"), "no-cache, must-revalidate")
+
+    def test_api_responses_are_left_alone(self):
+        resp = _client().get("/api/v1/health")
+        self.assertNotIn("must-revalidate", resp.headers.get("Cache-Control", ""))

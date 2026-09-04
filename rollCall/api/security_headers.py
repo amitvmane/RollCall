@@ -79,6 +79,40 @@ _CSP_COMMON = (
 )
 
 
+# Assets whose staleness desyncs the client from the server. Served through
+# Cloudflare, which caches by file extension and — when the origin says nothing
+# about caching — applies its own default TTL of four hours.
+#
+# Starlette's StaticFiles sends ETag and Last-Modified but no Cache-Control, so
+# that default is exactly what happened on the 2026-09-04 deploy: the edge kept
+# serving a 24 July copy of /shared/tokens.css, the file carrying the type
+# scale, while serving the current version of every other stylesheet. Visitors
+# got 13.6px or 17px body text from the same URL depending on which edge node
+# they reached, and browsers were told to hold their own copy for four hours on
+# top of that.
+#
+# `no-cache` does not mean "don't cache" — the edge still stores the file and
+# still serves it. It means "ask first", so an unchanged file comes back as a
+# 304 with no body (StaticFiles already sends the validators that make that
+# work) and a deployed change is visible on the next request instead of up to
+# eight hours later.
+#
+# Images are deliberately left on the default TTL: they're effectively
+# content-addressed by filename, and a stale icon can't desync anything — the
+# same reasoning the service worker uses for its cache-first image branch.
+_REVALIDATE_SUFFIXES = (".css", ".js")
+
+
+def _should_revalidate(path: str, response) -> bool:
+    if path.startswith("/api/"):
+        return False
+    if path.endswith(_REVALIDATE_SUFFIXES):
+        return True
+    # Directory indexes ("/web/") carry no suffix, and the HTML is what
+    # references the CSS — caching it stale pins the whole page.
+    return response.headers.get("content-type", "").startswith("text/html")
+
+
 def _wants_hsts() -> bool:
     """Only advertise HSTS when the deployment is actually reachable over
     HTTPS. Sending it from a plain-HTTP local run would pin a browser to a
@@ -112,6 +146,11 @@ async def security_headers_middleware(request, call_next):
     response.headers.setdefault(
         "Permissions-Policy", "geolocation=(), microphone=(), camera=(), payment=()"
     )
+
+    # setdefault, so a route that already chose no-store (the group page, the
+    # dues QR) keeps the stricter answer.
+    if _should_revalidate(path, response):
+        response.headers.setdefault("Cache-Control", "no-cache, must-revalidate")
 
     if _wants_hsts():
         response.headers.setdefault(

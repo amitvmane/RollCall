@@ -276,6 +276,25 @@ def text_of(outbound):
     return "\n".join(chunks)
 
 
+def deployed_version_str():
+    """The version number /version should be reporting, read from the source.
+
+    Asserting on a hardcoded string here would need editing every release.
+    Asserting on the literal word "version" — which is what this used to do —
+    passed only because the reply printed a "Version:" field label, so it
+    broke the moment /version started rendering the changelog as members read
+    it rather than as a database row.
+    """
+    import json as _json
+    import os as _os
+    vf = _os.path.join(_os.path.dirname(__file__), "..", "rollCall", "version.json")
+    with open(vf, encoding="utf-8") as fh:
+        data = _json.load(fh)
+    live = [v for v in data if v.get("DeployedOnProd") == "Y"]
+    assert live, "no version marked DeployedOnProd=Y — /version would report nothing"
+    return str(live[-1]["Version"])
+
+
 def contains(out, *needles):
     t = text_of(out)
     missing = [n for n in needles if n.lower() not in t.lower()]
@@ -712,8 +731,8 @@ async def run_all():
     record("/buzz responds", ok)
 
     out = await feed("/version", ALICE)
-    ok, d = contains(out, "version")
-    record("/version reports version", ok, d)
+    ok, d = contains(out, deployed_version_str())
+    record("/version reports the deployed version", ok, d)
 
     print("\n=== Phase 6: Help ===\n")
 
@@ -1213,8 +1232,8 @@ async def run_all():
     record("/rollcalls after all ended responds (no crash)", ok)
 
     out = await feed("/version", ALICE)
-    ok, d = contains(out, "version")
-    record("/version still reports version after lifecycle churn", ok, d)
+    ok, d = contains(out, deployed_version_str())
+    record("/version still reports the deployed version after lifecycle churn", ok, d)
 
     # Final global error check — no ERROR-level logs leaked across entire run
     record("FINAL: no ERROR-level logs from any phase", len(_errors) == 0,

@@ -498,6 +498,49 @@ async def config_timezone(message):
         await reply_error(message, e)
 
 
+def _friendly_release_date(raw) -> str:
+    """"06-09-2026 12:58 UTC" -> "6 September 2026".
+
+    Falls back to the raw string on anything unexpected: these are 50-odd
+    hand-typed dates going back to 2022, some with a time and some without,
+    so the format is a convention rather than a guarantee — and a changelog
+    is not worth raising over.
+    """
+    from datetime import datetime as _dt
+    raw = (raw or "").strip()
+    if not raw:
+        return ""
+    try:
+        parsed = _dt.strptime(raw.split(" ")[0], "%d-%m-%Y")
+    except ValueError:
+        return raw
+    return f"{parsed.day} {parsed.strftime('%B %Y')}"
+
+
+def _format_release(version: dict) -> str:
+    """Render one version.json entry as the message members actually read.
+
+    This used to print the raw record — "Version:", "Description:",
+    "Deployed: Y", "Deployed datetime:" — which showed the version number
+    twice (the descriptions carry their own header) and exposed an internal
+    deployment flag that means nothing to a player. The changelog is written
+    for members, so it is now shown as written, with a plain release date.
+    """
+    desc = str(version.get("Description") or "").strip()
+    ver = version.get("Version")
+
+    # Descriptions have led with their own "10.3 — Title" header for many
+    # releases now. Only add one when the entry lacks it, so the number is
+    # never duplicated and never missing.
+    if ver is not None and not desc.startswith(str(ver)):
+        desc = f"RollCall v{ver}" + ("\n\n" + desc if desc else "")
+
+    released = _friendly_release_date(version.get("DeployedDatetime"))
+    if released:
+        desc += f"\n\nReleased {released}"
+    return desc
+
+
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/version")
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/v")
 async def version_command(message):
@@ -516,13 +559,7 @@ async def version_command(message):
     for i in range(len(data)):
         version = data[-1 - i]
         if version.get("DeployedOnProd") == 'Y':
-            txt = (
-                f"Version: {version['Version']}\n"
-                f"Description: {version['Description']}\n"
-                f"Deployed: {version['DeployedOnProd']}\n"
-                f"Deployed datetime: {version['DeployedDatetime']}"
-            )
-            await bot.send_message(message.chat.id, txt)
+            await bot.send_message(message.chat.id, _format_release(version))
             return
 
     logging.warning("[version_command] No deployed version found in version.json")

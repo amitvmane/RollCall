@@ -248,12 +248,77 @@ make up
 ```
 
 **Alarm on stale backups.** The dangerous failure is silent — backups stopping
-without anyone noticing. `make backup-check` exits non-zero if the newest
-snapshot is missing, older than 48h, or truncated. Put it in cron:
+without anyone noticing. This is not hypothetical: the sidecar died on
+2026-08-03 and nobody found out until 2026-08-24.
+
+The `watchdog` sidecar now covers this automatically — `/health` reports
+backup freshness, and the watchdog DMs you when it goes stale. See
+[Alerting](#alerting) below; if the watchdog is running you do not need the
+cron job.
+
+For a belt-and-braces check independent of Docker (or if you have the
+watchdog switched off), `make backup-check` exits non-zero when the newest
+snapshot is missing, older than 48h, or truncated:
 
 ```
 0 9 * * * cd /home/you/RollCall && make -s backup-check
 ```
+
+### Alerting
+
+Everything else in this document makes the bot *recover*. Nothing in it makes
+anyone *find out*. `restart: unless-stopped` brings a crashed bot back
+silently, and a stale backup or a dead scheduler task deliberately does not
+fail the container healthcheck at all — returning 503 there would make Docker
+restart a bot that is serving traffic perfectly well. So those conditions had
+nothing watching them.
+
+The `watchdog` sidecar closes that gap. It starts automatically with
+`make up`, polls the bot's `/health` every 5 minutes from its own container,
+and DMs you when the bot stops responding or reports a problem. Because it
+talks to the Telegram API directly it still works when the bot process is the
+thing that is down — which is the case that matters.
+
+It reports on everything `/health` aggregates: database reachability,
+Telegram reachability, scheduler and prune task liveness, connection-pool
+saturation, and backup freshness.
+
+Two requirements, and the second one is the one people miss:
+
+1. `ADMIN1` in `.env` must be your **numeric** Telegram user id (or set
+   `WATCHDOG_CHAT_ID` to send alerts elsewhere, e.g. a private ops group).
+2. That account must have **sent the bot a DM at least once**. Telegram does
+   not allow a bot to open a conversation, so an admin who has never messaged
+   the bot cannot be alerted — and the failure is silent, which is exactly the
+   thing we are trying to eliminate.
+
+Prove the whole path end to end before you rely on it:
+
+```bash
+make watchdog-test     # sends a real DM; fails loudly if it cannot reach you
+make watchdog-logs     # tail the sidecar
+```
+
+`make watchdog-test` is worth running again any time you change `ADMIN1`, the
+bot token, or the alert target.
+
+Tuning (all optional, in `.env`):
+
+```bash
+WATCHDOG_INTERVAL_SECONDS=300        # poll cadence
+WATCHDOG_FAILURES_BEFORE_ALERT=3     # consecutive bad polls before alerting
+WATCHDOG_REPEAT_HOURS=12             # re-nag cadence while still broken
+```
+
+The defaults mean a routine restart never pages you (three consecutive
+failures at 5-minute intervals is ~15 minutes of genuine downtime), while a
+real outage is re-announced twice a day rather than mentioned once and
+forgotten.
+
+**Sentry (optional).** For full stack traces rather than a one-line health
+summary, set `SENTRY_DSN` in `.env` and add `sentry-sdk` to the image. The
+two are complementary: Sentry tells you what threw, the watchdog tells you the
+bot stopped answering at all.
 
 **Off-site copies.** Everything above still lives on one disk. The
 `backup-sync` sidecar copies snapshots to any rclone remote (Backblaze B2, S3,

@@ -51,7 +51,8 @@ BACKUP_MAX_AGE_HOURS ?= 48
 .PHONY: help up down restart build rebuild logs logs-cf status url notify token group-token chats \
         backup-now backup-check backup-list backup-remote backup-remote-logs backup-remote-ls \
         migrate-data check-data-dir restore backup-remote-get backup-remote-latest restore-remote \
-        up-postgres db-shell db-counts backup-remote-prune backup-remote-size
+        up-postgres db-shell db-counts backup-remote-prune backup-remote-size \
+        watchdog-logs watchdog-test
 
 help: ## Show this help
 	@printf "\n\033[1mRollCall — deployment manager\033[0m\n"
@@ -71,6 +72,8 @@ help: ## Show this help
 	@printf "  \033[36m%-16s\033[0m %s\n" "make chats"   "List all known groups with their chat IDs"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make db-counts" "Row counts for the main tables (works on SQLite or Postgres)"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make db-shell" "Open a SQL shell on whichever DB this deployment uses"
+	@printf "  \033[36m%-16s\033[0m %s\n" "make watchdog-logs" "Tail the watchdog (alerting) sidecar"
+	@printf "  \033[36m%-16s\033[0m %s\n" "make watchdog-test" "Send a test alert — proves alerts actually reach you"
 	@printf "\n\033[4mBACKUPS\033[0m\n"
 	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-now"    "Take a snapshot right now"
 	@printf "  \033[36m%-20s\033[0m %s\n" "make backup-list"   "List local snapshots, newest last"
@@ -206,6 +209,17 @@ logs: ## Tail bot logs (Ctrl+C to stop)
 
 logs-cf: ## Tail Cloudflare tunnel logs (blobsystems-cloudflared container)
 	docker logs -f blobsystems-cloudflared
+
+watchdog-logs: ## Tail the watchdog (alerting) sidecar
+	docker compose logs -f watchdog
+
+# The watchdog's one silent failure mode: Telegram does not let a bot open a
+# conversation, so if ADMIN1 has never DMed the bot, every alert is accepted by
+# this Makefile, accepted by the sidecar, and delivered to nobody. That is the
+# same shape of bug the watchdog exists to catch, so prove the path end to end
+# rather than waiting for a real outage to test it.
+watchdog-test: ## Send a test alert — proves alerts actually reach you
+	@set -e; 	target="$${WATCHDOG_CHAT_ID:-$$ADMIN1}"; 	if [ -z "$$target" ]; then 	  echo "❌  Neither WATCHDOG_CHAT_ID nor ADMIN1 is set in .env — the watchdog has nobody to alert."; 	  exit 1; 	fi; 	echo "→ sending a test alert to chat $$target ..."; 	resp=$$(curl -s --max-time 20 -X POST 	  "https://api.telegram.org/bot$$API_KEY/sendMessage" 	  -d "chat_id=$$target" 	  --data-urlencode "text=🔔 RollCall watchdog test — if you can read this, real alerts will reach you too."); 	if echo "$$resp" | grep -q '"ok":true'; then 	  echo "✅  delivered — alerting is wired correctly."; 	else 	  echo "❌  NOT delivered. Telegram said:"; echo "    $$resp"; 	  echo "    Most likely: chat $$target has never sent this bot a DM."; 	  echo "    Open a DM with the bot, send it /start, then re-run this."; 	  exit 1; 	fi
 
 status: ## Show container status + external service reachability
 	@echo ""

@@ -73,6 +73,15 @@ services:
       - TELEGRAM_TOKEN=${API_KEY}
       - HEALTH_CHECK_PORT=${HEALTH_CHECK_PORT:-8080}
 
+      # Error reporting. These were documented in .env.example but never
+      # passed through to the container, so setting SENTRY_DSN in .env did
+      # nothing at all. Unset = disabled, exactly as before.
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      - SENTRY_TRACES_SAMPLE_RATE=${SENTRY_TRACES_SAMPLE_RATE:-0.0}
+      - RELEASE_VERSION=${RELEASE_VERSION:-}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - STRUCTURED_LOGS=${STRUCTURED_LOGS:-}
+
       # Database Configuration (SQLite with persistent volume)
       - DATABASE_URL=${DATABASE_URL:-sqlite:////app/data/rollcall.db}
       - TZ=${TZ:-Asia/Kolkata}
@@ -173,6 +182,54 @@ services:
     # Run once immediately, then daily. Override the cadence with BACKUP_INTERVAL_SECONDS.
     command:
       - 'while true; do /app/scripts/backup_db.sh || true; sleep "${BACKUP_INTERVAL_SECONDS:-86400}"; done'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  # ---------------------------------------------------------------------------
+  # Watchdog — the thing that tells a HUMAN when something broke.
+  #
+  # `restart: unless-stopped` plus the container healthcheck already recover a
+  # crashed bot, but recovery is not notification: every failure this project
+  # has actually hit was silent. The db-backup sidecar died on 2026-08-03 and
+  # was not noticed until 2026-08-24. A stale backup and a dead scheduler task
+  # deliberately do NOT fail the bot's healthcheck either — returning 503 there
+  # would make Docker restart a bot that is serving traffic perfectly well — so
+  # those two conditions had nothing watching them at all.
+  #
+  # Runs as its own container and calls the Telegram API directly, so it still
+  # works when the bot process is the thing that is down. /health already
+  # aggregates DB, Telegram reachability, scheduler + prune liveness, pool
+  # saturation and backup freshness, so this reads that one endpoint and
+  # forwards anything it does not like.
+  #
+  # Needs ADMIN1 (or WATCHDOG_CHAT_ID) set, and that admin must have DMed the
+  # bot at least once — Telegram does not let a bot open a conversation. With
+  # neither set the container stays up and explains itself on a loop rather
+  # than pretending to work.
+  # ---------------------------------------------------------------------------
+  watchdog:
+    image: rollcall-bot:local
+    container_name: rollcall-watchdog
+    restart: unless-stopped
+    depends_on:
+      - rollcall-bot
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      - TELEGRAM_TOKEN=${API_KEY}
+      - ADMIN1=${ADMIN1:-}
+      - WATCHDOG_CHAT_ID=${WATCHDOG_CHAT_ID:-}
+      - HEALTH_URL=http://rollcall-bot:${HEALTH_CHECK_PORT:-8080}/health
+      - WATCHDOG_INTERVAL_SECONDS=${WATCHDOG_INTERVAL_SECONDS:-300}
+      - WATCHDOG_FAILURES_BEFORE_ALERT=${WATCHDOG_FAILURES_BEFORE_ALERT:-3}
+      - WATCHDOG_REPEAT_HOURS=${WATCHDOG_REPEAT_HOURS:-12}
+      - TZ=${TZ:-Asia/Kolkata}
+    entrypoint: ["/bin/sh", "/app/scripts/watchdog.sh"]
     logging:
       driver: "json-file"
       options:

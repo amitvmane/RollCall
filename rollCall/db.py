@@ -1849,6 +1849,34 @@ def _run_migrations(conn, cursor):
         except Exception:
             conn.rollback()  # column already exists — safe to ignore
 
+    # ── Performance indexes on monotonically-growing tables ───────────────────
+    # These tables only ever grow — nothing prunes them, by design — so a query
+    # that scans them gets linearly slower for the life of the deployment. The
+    # cost is invisible on a young database and only shows up months in, which
+    # is exactly when nobody is looking. Both are IF NOT EXISTS and run on every
+    # boot, so existing databases pick them up without a migration.
+    #
+    #   ghost_events(rollcall_id) — get_rollcall_history() counts ghosts with a
+    #       correlated subquery per returned row. Its siblings (users,
+    #       proxy_users) are covered by idx_users_rollcall / idx_proxy_users_
+    #       rollcall; ghost_events was not, so every /history page scanned the
+    #       whole table once per row on the page.
+    #   admin_actions(chat_id, created_at) — the audit log pages with
+    #       "WHERE chat_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?", so
+    #       the composite serves both the filter and the sort.
+    for _idx_sql in (
+        "CREATE INDEX IF NOT EXISTS idx_ghost_events_rollcall ON ghost_events(rollcall_id)",
+        "CREATE INDEX IF NOT EXISTS idx_admin_actions_chat_created ON admin_actions(chat_id, created_at)",
+    ):
+        try:
+            cursor.execute(_idx_sql)
+            conn.commit()
+        except Exception:
+            # A missing table (partial schema on an old database) must not
+            # abort the rest of create_tables — the index is an optimisation,
+            # never a correctness requirement.
+            conn.rollback()
+
 
 def get_or_create_chat(chat_id: int) -> Dict:
     """Get or create chat settings"""

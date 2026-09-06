@@ -446,7 +446,7 @@ async def memory_prune_loop(interval_seconds: int = 600):
         _rate_limits, _buzz_cooldowns, _pending_deletes, _pending_overrides,
         _pending_proxy_add, _pending_reconf, _pending_subsidy_input,
         _pending_payment_input, _prune_pending, _panel_msg_ids, _sched_selection,
-        _group_warning_cooldowns, _ghost_selections,
+        _group_warning_cooldowns, _ghost_selections, _ghost_show_out,
     )
     from handlers.dues import _settle_nudge_msgs
     from services import presence as presence_svc
@@ -475,7 +475,14 @@ async def memory_prune_loop(interval_seconds: int = 600):
     #                         because it re-reads DB state.
     # Both are keyed per chat+rollcall, so these caps are far above any
     # realistic working set and only bite on genuinely abandoned entries.
+    #   _ghost_show_out     — the same abandoned-panel leak as _ghost_selections
+    #                         (it is that panel's expand/collapse flag) but it
+    #                         is a set, not a dict, and was missed when the
+    #                         others were capped. Pure display state: evicting
+    #                         it just collapses the late-drop-out section next
+    #                         time the panel renders.
     GHOST_SELECTIONS_MAX = 500
+    GHOST_SHOW_OUT_MAX = 500
     SETTLE_NUDGE_MAX = 500
 
     def _cap_oldest(d: dict, maxlen: int) -> None:
@@ -511,6 +518,10 @@ async def memory_prune_loop(interval_seconds: int = 600):
 
             _cap_oldest(_ghost_selections, GHOST_SELECTIONS_MAX)
             _cap_oldest(_settle_nudge_msgs, SETTLE_NUDGE_MAX)
+            # A set has no insertion-order eviction helper; it is display-only
+            # state, so clearing wholesale past the cap is acceptable.
+            if len(_ghost_show_out) > GHOST_SHOW_OUT_MAX:
+                _ghost_show_out.clear()
 
             # Per-chat state — clean entries for chats whose rollcalls are
             # all gone, or panel ids past the current rollcall count.
@@ -530,21 +541,30 @@ async def memory_prune_loop(interval_seconds: int = 600):
             # Drop stale web-presence sessions
             presence_svc.prune()
 
-            # Purge expired Telegram deep-link verify tokens (TTL 10 min, purge after 1 h)
+            # Purge dead single-use login tokens.
+            #   web_verify_tokens       — deep-link verify, TTL 10 min, purge after 1 h.
+            #   web_direct_login_tokens — /weblogin links, TTL 7 days. Nothing
+            #       ever deleted these, so used and expired rows accumulated for
+            #       the life of the deployment. Purged a generous 30 days past
+            #       expiry rather than on use, so a member who clicks a spent
+            #       link still gets "this link was already used" instead of a
+            #       bare "invalid link" for a month afterwards.
             try:
                 from db import get_connection, release_connection, db_type as _db_type
                 _conn = get_connection()
                 _cur = _conn.cursor()
                 if _db_type == 'postgresql':
                     _cur.execute("DELETE FROM web_verify_tokens WHERE expires_at < NOW() - INTERVAL '1 hour'")
+                    _cur.execute("DELETE FROM web_direct_login_tokens WHERE expires_at < NOW() - INTERVAL '30 days'")
                 else:
                     _cur.execute("DELETE FROM web_verify_tokens WHERE expires_at < datetime('now', '-1 hour')")
+                    _cur.execute("DELETE FROM web_direct_login_tokens WHERE expires_at < datetime('now', '-30 days')")
                 _conn.commit()
                 _cur.close()
                 if _db_type == 'postgresql':
                     release_connection(_conn)
             except Exception:
-                logger.exception("Error pruning web_verify_tokens")
+                logger.exception("Error pruning expired login tokens")
 
             logger.debug(
                 f"prune: rl={len(_rate_limits)} buzz={len(_buzz_cooldowns)} "

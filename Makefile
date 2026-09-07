@@ -10,11 +10,18 @@
 COMPOSE  := docker compose
 BOT      := rollcall-bot
 BACKUP   := db-backup
+WATCHDOG := watchdog
 
 # Services that must come back up together. `make down` stops everything, so
 # any target that starts the bot must also restart the backup sidecar —
 # otherwise it stays stopped silently and daily snapshots quietly cease.
-SERVICES := $(BOT) $(BACKUP)
+# The watchdog belongs here, not just in docker-compose.yml. `down` stops
+# every service but `up`/`build` only start what is listed here, so a service
+# missing from this line gets stopped on the next deploy and silently never
+# comes back — the exact trap that left db-backup dead for three weeks. An
+# alerting sidecar that is not running is worse than none, because you believe
+# you are covered.
+SERVICES := $(BOT) $(BACKUP) $(WATCHDOG)
 
 # Read a value from .env, stripping surrounding quotes
 _env = $(shell grep -m1 '^$(1)=' .env 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'")
@@ -173,8 +180,8 @@ up-postgres: ## Start PostgreSQL, wait for it, then start the bot
 	done
 	@$(MAKE) -s up
 
-up: check-data-dir ## Start/recreate bot + backup sidecars (tunnel is managed by the blobsystems repo)
-	@echo "Starting bot and backup sidecar..."
+up: check-data-dir ## Start/recreate bot + backup + watchdog sidecars (tunnel is managed by the blobsystems repo)
+	@echo "Starting bot, backup and watchdog sidecars..."
 	@$(COMPOSE) up -d --force-recreate $(SERVICES)
 	# backup-sync sits behind the backup-remote profile, so a plain `up` skips
 	# it while `down` still stops it — the same silent-death trap that left

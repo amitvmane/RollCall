@@ -220,13 +220,53 @@ logs-cf: ## Tail Cloudflare tunnel logs (blobsystems-cloudflared container)
 watchdog-logs: ## Tail the watchdog (alerting) sidecar
 	docker compose logs -f watchdog
 
+# Resolved from .env via _env: make does not read .env at all (only docker
+# compose does), so reading $$WATCHDOG_CHAT_ID / $$API_KEY from the shell
+# found nothing and this target reported 'not set in .env' for values that
+# were plainly set in .env.
+WATCHDOG_TARGET := $(or $(call _env,WATCHDOG_CHAT_ID),$(call _env,ADMIN1))
+WATCHDOG_TOKEN  := $(call _env,API_KEY)
+
 # The watchdog's one silent failure mode: Telegram does not let a bot open a
 # conversation, so if ADMIN1 has never DMed the bot, every alert is accepted by
 # this Makefile, accepted by the sidecar, and delivered to nobody. That is the
 # same shape of bug the watchdog exists to catch, so prove the path end to end
 # rather than waiting for a real outage to test it.
 watchdog-test: ## Send a test alert — proves alerts actually reach you
-	@set -e; 	target="$${WATCHDOG_CHAT_ID:-$$ADMIN1}"; 	if [ -z "$$target" ]; then 	  echo "❌  Neither WATCHDOG_CHAT_ID nor ADMIN1 is set in .env — the watchdog has nobody to alert."; 	  exit 1; 	fi; 	echo "→ sending a test alert to chat $$target ..."; 	resp=$$(curl -s --max-time 20 -X POST 	  "https://api.telegram.org/bot$$API_KEY/sendMessage" 	  -d "chat_id=$$target" 	  --data-urlencode "text=🔔 RollCall watchdog test — if you can read this, real alerts will reach you too."); 	if echo "$$resp" | grep -q '"ok":true'; then 	  echo "✅  delivered — alerting is wired correctly."; 	else 	  echo "❌  NOT delivered. Telegram said:"; echo "    $$resp"; 	  echo "    Most likely: chat $$target has never sent this bot a DM."; 	  echo "    Open a DM with the bot, send it /start, then re-run this."; 	  exit 1; 	fi
+	@set -e; \
+	target="$(WATCHDOG_TARGET)"; \
+	token="$(WATCHDOG_TOKEN)"; \
+	if [ -z "$$target" ]; then \
+	  echo "❌  Neither WATCHDOG_CHAT_ID nor ADMIN1 is set in .env — the watchdog has nobody to alert."; \
+	  exit 1; \
+	fi; \
+	if [ -z "$$token" ]; then \
+	  echo "❌  API_KEY is not set in .env — cannot reach Telegram to send the test."; \
+	  exit 1; \
+	fi; \
+	echo "→ sending a test alert to chat $$target ..."; \
+	resp=$$(curl -s --max-time 20 -X POST \
+	  "https://api.telegram.org/bot$$token/sendMessage" \
+	  -d "chat_id=$$target" \
+	  --data-urlencode "text=🔔 RollCall watchdog test — if you can read this, real alerts will reach you too."); \
+	if echo "$$resp" | grep -q '"ok":true'; then \
+	  echo "✅  delivered — alerting is wired correctly."; \
+	else \
+	  echo "❌  NOT delivered. Telegram said:"; echo "    $$resp"; \
+	  case "$$resp" in \
+	    *'"error_code":401'*) \
+	      echo "    → API_KEY in .env is not a valid bot token." ;; \
+	    *"chat not found"*) \
+	      echo "    → Chat $$target has never messaged this bot, or the id is wrong."; \
+	      echo "      Telegram forbids a bot opening a conversation, so open a DM"; \
+	      echo "      with the bot, send /start, then re-run this." ;; \
+	    *"bot was blocked"*|*'"error_code":403'*) \
+	      echo "    → Chat $$target has blocked this bot. Unblock it and re-run." ;; \
+	    *) \
+	      echo "    → See the description above." ;; \
+	  esac; \
+	  exit 1; \
+	fi
 
 status: ## Show container status + external service reachability
 	@echo ""

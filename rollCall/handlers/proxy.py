@@ -21,6 +21,7 @@ from exceptions import (
     rollCallNotStarted, insufficientPermissions, parameterMissing, incorrectParameter,
 )
 from functions import admin_rights, roll_call_not_started
+from handlers.promotion import announce_one
 from rollcall_manager import manager
 from services import proxy as proxy_svc
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -41,24 +42,6 @@ def _parse_proxy_args(text: str) -> tuple[int, str, str]:
     proxy_name = parts[1]
     comment = " ".join(parts[2:]) if len(parts) > 2 else ""
     return rc_number, proxy_name, comment
-
-
-async def _send_promoted_proxy(cid: int, promoted: dict, rc_title: str, rc_number_1based: int):
-    """Announce and optionally DM a user promoted waitlist→IN via proxy command."""
-    if promoted["is_proxy"]:
-        if not manager.get_shh_mode(cid):
-            await bot.send_message(cid, f"{promoted['name']} → IN")
-    else:
-        if not manager.get_shh_mode(cid):
-            from models import User
-            u = User(promoted["name"], promoted.get("username"), promoted["user_id"], [])
-            await bot.send_message(
-                cid,
-                f"{format_mention_with_name_md(u)} → IN",
-                parse_mode="Markdown",
-            )
-        _t = asyncio.create_task(_dm_promoted_real_user(promoted["user_id"], rc_title, rc_number_1based))
-        _t.add_done_callback(_log_task_exc)
 
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/set_in_for")
@@ -138,15 +121,8 @@ async def set_out_for(message):
         rc_number_1based = result["rc_number_1based"]
 
         if result["promoted"]:
-            await _send_promoted_proxy(cid, result["promoted"], rc_title, rc_number_1based)
-            rc = manager.get_rollcall(cid, rc_number)
-            if rc:
-                from handlers.lifecycle import notify_proxy_owner_wait_to_in
-                from models import User
-                promoted = result["promoted"]
-                promo_user = User(promoted["name"], promoted.get("username"),
-                                  promoted["user_id"], [])
-                await notify_proxy_owner_wait_to_in(rc, promo_user, cid, rc_title, rc_number_1based)
+            await announce_one(cid, result["promoted"], rc_title, rc_number_1based,
+                               manager.get_rollcall(cid, rc_number))
         else:
             if not manager.get_shh_mode(cid):
                 if result["was_in"]:
@@ -182,15 +158,8 @@ async def set_maybe_for(message):
         rc_number_1based = result["rc_number_1based"]
 
         if result["promoted"]:
-            await _send_promoted_proxy(cid, result["promoted"], rc_title, rc_number_1based)
-            rc = manager.get_rollcall(cid, rc_number)
-            if rc:
-                from handlers.lifecycle import notify_proxy_owner_wait_to_in
-                from models import User
-                promoted = result["promoted"]
-                promo_user = User(promoted["name"], promoted.get("username"),
-                                  promoted["user_id"], [])
-                await notify_proxy_owner_wait_to_in(rc, promo_user, cid, rc_title, rc_number_1based)
+            await announce_one(cid, result["promoted"], rc_title, rc_number_1based,
+                               manager.get_rollcall(cid, rc_number))
         else:
             if not manager.get_shh_mode(cid):
                 await bot.send_message(cid, f"{proxy_name} is now MAYBE!")

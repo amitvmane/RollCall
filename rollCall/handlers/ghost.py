@@ -457,8 +457,16 @@ async def ghost_callback_handler(call):
             rc_number = pending['rc_number']
             try:
                 async with manager.get_chat_write_lock(cid):
-                    admin_svc.delete_user_from_rollcall(
+                    del_result = admin_svc.delete_user_from_rollcall(
                         cid, rc_number, name, admin_id, call.from_user.first_name
+                    )
+                    rc_after = manager.get_rollcall(cid, rc_number)
+                # Removing someone from a capped IN list frees a slot, so the
+                # waitlist drains just as it does on /out — announce it.
+                if del_result.get("promoted") and rc_after is not None:
+                    from handlers.promotion import announce_promotions
+                    await announce_promotions(
+                        cid, del_result["promoted"], rc_after.title, rc_number + 1, rc_after
                     )
                 await bot.answer_callback_query(call.id, f"✅ Deleted {name}")
                 await safe_edit_text(cid, call.message.message_id, f"✅ *{_esc_md(name)}* removed from rollcall #{rc_number + 1}.", parse_mode="Markdown")
@@ -494,10 +502,12 @@ async def ghost_callback_handler(call):
                     await safe_edit_text(cid, call.message.message_id, "⚠️ Rollcall not found.")
                     return
 
+                ovrd_promoted = []
                 try:
-                    admin_svc.set_user_status(
+                    ovrd_result = admin_svc.set_user_status(
                         cid, rc_number, user.name, status, admin_id, call.from_user.first_name
                     )
+                    ovrd_promoted = ovrd_result.get("promoted") or []
                 except incorrectParameter:
                     # User may have been in a non-standard list (e.g. waitlist) so fall back
                     # to the direct manipulation path for waitlist entries.
@@ -506,12 +516,16 @@ async def ghost_callback_handler(call):
                     if rc_db_id is not None:
                         _del_by_id(rc_db_id, user.user_id)
                     rc._load_users_from_db()
+                    moved_up = None
                     if status == 'in':
                         rc.addIn(user)
                     elif status == 'out':
-                        rc.addOut(user)
+                        moved_up = rc.addOut(user)
                     else:
-                        rc.addMaybe(user)
+                        moved_up = rc.addMaybe(user)
+                    if moved_up is not None and not isinstance(moved_up, str):
+                        from services.common import serialize_user as _ser_u
+                        ovrd_promoted = [_ser_u(moved_up)]
                     rc.save()
                     log_admin_action(cid, admin_id, call.from_user.first_name, "set_status",
                                      target_name=f"{user.name} → {status}",
@@ -521,6 +535,9 @@ async def ghost_callback_handler(call):
                 rc = manager.get_rollcall(cid, rc_number)
             if not manager.get_shh_mode(cid):
                 await bot.send_message(cid, f"✅ Done! {user.name}'s status for '{rc.title}' updated to {status.upper()}.")
+            if ovrd_promoted and rc is not None:
+                from handlers.promotion import announce_promotions
+                await announce_promotions(cid, ovrd_promoted, rc.title, rc_number + 1, rc)
 
             from handlers.lifecycle import _update_panel
             await _update_panel(cid, rc_number + 1, rc)

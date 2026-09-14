@@ -17,12 +17,11 @@ from rollcall_manager import manager
 from db import (
     get_all_chat_ids,
     get_or_create_chat,
-    increment_rollcall_stat,
-    increment_user_stat,
     log_admin_action,
     update_chat_settings,
 )
-from .common import resolve_rollcall_or_raise, serialize_rollcall, serialize_user
+from .common import (record_promotion_stats, resolve_rollcall_or_raise,
+                     serialize_rollcall, serialize_user)
 
 
 def get_chat_settings(chat_id: int) -> dict:
@@ -144,10 +143,7 @@ def set_wait_limit(
         rc_db_id = _rc_db_id(rc)
         for u in moving:
             rc._save_user_to_db(u, "in")
-            if rc_db_id is not None and isinstance(u.user_id, int):
-                increment_user_stat(chat_id, u.user_id, "total_waiting_to_in")
-                increment_user_stat(chat_id, u.user_id, "total_in")
-                increment_rollcall_stat(rc_db_id, "total_in")
+            record_promotion_stats(chat_id, rc_db_id, u.user_id)
         rc.save()
         log_admin_action(chat_id, admin_user_id, admin_name, "set_limit", details="0 (cleared)")
         promoted = [serialize_user(u) for u in moving]
@@ -183,10 +179,7 @@ def set_wait_limit(
         rc_db_id = _rc_db_id(rc)
         for u in moving:
             rc._save_user_to_db(u, "in")
-            if rc_db_id is not None and isinstance(u.user_id, int):
-                increment_user_stat(chat_id, u.user_id, "total_waiting_to_in")
-                increment_user_stat(chat_id, u.user_id, "total_in")
-                increment_rollcall_stat(rc_db_id, "total_in")
+            record_promotion_stats(chat_id, rc_db_id, u.user_id)
         rc.save()
         promoted = [serialize_user(u) for u in moving]
 

@@ -22,12 +22,11 @@ from exceptions import (
 from models import User
 from rollcall_manager import manager
 from db import (
-    increment_rollcall_stat,
-    increment_user_stat,
     log_admin_action,
 )
 
-from .common import resolve_rollcall_or_raise, serialize_rollcall, serialize_user
+from .common import (record_promotion_stats, resolve_rollcall_or_raise,
+                     serialize_rollcall, serialize_user)
 
 
 _MAX_PROXY_NAME_LEN = 40
@@ -182,12 +181,7 @@ async def set_out_for(
         if isinstance(result, User):
             promoted = serialize_user(result)
             action = "moved"
-            if rc_db_id is not None and isinstance(result.user_id, int):
-                # Mirror the same /sof glitch-fix the handler ships: bump
-                # promotion stats for real users moved waitlist→IN.
-                increment_user_stat(chat_id, result.user_id, "total_waiting_to_in")
-                increment_user_stat(chat_id, result.user_id, "total_in")
-                increment_rollcall_stat(rc_db_id, "total_in")
+            record_promotion_stats(chat_id, rc_db_id, result.user_id)
         elif was_in:
             action = "moved"
 
@@ -242,10 +236,7 @@ async def set_maybe_for(
         if isinstance(result, User):
             promoted = serialize_user(result)
             action = "moved"
-            if rc_db_id is not None and isinstance(result.user_id, int):
-                increment_user_stat(chat_id, result.user_id, "total_waiting_to_in")
-                increment_user_stat(chat_id, result.user_id, "total_in")
-                increment_rollcall_stat(rc_db_id, "total_in")
+            record_promotion_stats(chat_id, rc_db_id, result.user_id)
         elif was_in:
             action = "moved"
 

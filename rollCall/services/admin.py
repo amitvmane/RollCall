@@ -16,7 +16,8 @@ from exceptions import (incorrectParameter, insufficientPermissions,
 from rollcall_manager import manager
 from db import log_admin_action, delete_user_by_id, get_admin_audit_log, count_admin_audit_log
 
-from .common import resolve_rollcall_or_raise, serialize_rollcall
+from .common import (fill_waitlist_slots, resolve_rollcall_or_raise,
+                     serialize_rollcall, serialize_user)
 
 
 def _ts() -> str:
@@ -63,7 +64,12 @@ def delete_user_from_rollcall(
       admin_user_* — identity of the admin performing the action
 
     Returns:
-      {"deleted": name, "rc_number_1based": int, "rollcall": {...serialized rollcall...}}
+      {"deleted": name, "rc_number_1based": int, "promoted": [...],
+       "rollcall": {...serialized rollcall...}}
+
+    `promoted` lists anyone pulled waitlist→IN by the slot the deletion
+    freed; adapters announce them the same way a /out promotion is
+    announced. Empty when the rollcall has no limit or no waitlist.
 
     Raises:
       rollCallNotStarted — no active rollcall
@@ -75,6 +81,7 @@ def delete_user_from_rollcall(
     rc = resolve_rollcall_or_raise(chat_id, rc_number)
     if not rc.delete_user(name):
         raise incorrectParameter(f"User '{name}' not found in rollcall #{rc_number + 1}.")
+    promoted = fill_waitlist_slots(rc)
     rc.save()
     logging.info(f"[{_ts()}] [CHAT {chat_id}] delete_user: '{name}' from RC #{rc_number + 1} by {admin_name}")
     log_admin_action(
@@ -86,6 +93,7 @@ def delete_user_from_rollcall(
     return {
         "deleted": name,
         "rc_number_1based": rc_number + 1,
+        "promoted": promoted,
         "rollcall": serialize_rollcall(rc, rc_number),
     }
 
@@ -113,7 +121,10 @@ def set_user_status(
 
     Returns:
       {"moved": name, "from_status": str, "to_status": str, "rc_number_1based": int,
-       "rollcall": {...serialized rollcall...}}
+       "promoted": [...], "rollcall": {...serialized rollcall...}}
+
+    `promoted` lists anyone pulled waitlist→IN by the slot this move freed,
+    so adapters can announce it rather than letting it happen silently.
 
     Raises:
       rollCallNotStarted — no active rollcall
@@ -162,13 +173,18 @@ def set_user_status(
         delete_user_by_id(rc_db_id, found_user.user_id)
     rc._load_users_from_db()
 
+    promoted = []
     try:
         if new_status == "in":
             rc.addIn(found_user)
         elif new_status == "out":
-            rc.addOut(found_user)
+            moved_up = rc.addOut(found_user)
         else:
-            rc.addMaybe(found_user)
+            moved_up = rc.addMaybe(found_user)
+        # addOut/addMaybe return the promoted User, or an 'AB'/'AU' status
+        # string on the no-op paths — only a User means a real promotion.
+        if new_status != "in" and moved_up is not None and not isinstance(moved_up, str):
+            promoted = [serialize_user(moved_up)]
         rc.save()
     except Exception as move_err:
         # Restore the user at their original status to prevent silent data loss.
@@ -197,6 +213,7 @@ def set_user_status(
         "from_status": current_status,
         "to_status": new_status,
         "rc_number_1based": rc_number + 1,
+        "promoted": promoted,
         "rollcall": serialize_rollcall(rc, rc_number),
     }
 

@@ -31,7 +31,8 @@ from db import (
     upsert_chat_member,
 )
 
-from .common import resolve_rollcall_or_raise, serialize_rollcall, serialize_user
+from .common import (record_promotion_stats, resolve_rollcall_or_raise,
+                     serialize_rollcall, serialize_user)
 
 
 def _ts() -> str:
@@ -212,10 +213,7 @@ async def vote_out(
         if isinstance(result, User):
             promoted = serialize_user(result)
             action = "moved"
-            if rc_db_id is not None and isinstance(result.user_id, int):
-                increment_user_stat(chat_id, result.user_id, "total_waiting_to_in")
-                increment_user_stat(chat_id, result.user_id, "total_in")
-                increment_rollcall_stat(rc_db_id, "total_in")
+            record_promotion_stats(chat_id, rc_db_id, result.user_id)
         elif was_in:
             # The voter was on IN list, now moved to OUT — still "added" semantics
             # for the caller, but flagging via was_in tells adapter to phrase it
@@ -282,10 +280,7 @@ async def vote_maybe(
         if isinstance(result, User):
             promoted = serialize_user(result)
             action = "moved"
-            if rc_db_id is not None and isinstance(result.user_id, int):
-                increment_user_stat(chat_id, result.user_id, "total_waiting_to_in")
-                increment_user_stat(chat_id, result.user_id, "total_in")
-                increment_rollcall_stat(rc_db_id, "total_in")
+            record_promotion_stats(chat_id, rc_db_id, result.user_id)
         elif was_in:
             action = "moved"
 

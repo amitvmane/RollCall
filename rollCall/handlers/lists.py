@@ -13,6 +13,7 @@ from exceptions import (
 )
 from functions import admin_rights, roll_call_not_started
 from rollcall_manager import manager
+from services.common import ensure_rc_number
 from db import (
     get_rollcall_history, mark_member_inactive, log_admin_action,
     upsert_chat_member,
@@ -35,9 +36,7 @@ async def whos_in(message):
         had_suffix = bool(pmts) and "::" in pmts[-1]
         rc_number, pmts = parse_rc_suffix(pmts)
         if had_suffix:
-            rollcalls = manager.get_rollcalls(cid)
-            if len(rollcalls) < rc_number + 1:
-                raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+            ensure_rc_number(cid, rc_number, manager)
 
         rc = manager.get_rollcall(cid, rc_number)
         rollcalls = manager.get_rollcalls(cid)
@@ -59,9 +58,7 @@ async def whos_out(message):
         had_suffix = bool(pmts) and "::" in pmts[-1]
         rc_number, pmts = parse_rc_suffix(pmts)
         if had_suffix:
-            rollcalls = manager.get_rollcalls(cid)
-            if len(rollcalls) < rc_number + 1:
-                raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+            ensure_rc_number(cid, rc_number, manager)
 
         rc = manager.get_rollcall(cid, rc_number)
         rollcalls = manager.get_rollcalls(cid)
@@ -83,9 +80,7 @@ async def whos_maybe(message):
         had_suffix = bool(pmts) and "::" in pmts[-1]
         rc_number, pmts = parse_rc_suffix(pmts)
         if had_suffix:
-            rollcalls = manager.get_rollcalls(cid)
-            if len(rollcalls) < rc_number + 1:
-                raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+            ensure_rc_number(cid, rc_number, manager)
 
         rc = manager.get_rollcall(cid, rc_number)
         rollcalls = manager.get_rollcalls(cid)
@@ -107,9 +102,7 @@ async def whos_waiting(message):
         had_suffix = bool(pmts) and "::" in pmts[-1]
         rc_number, pmts = parse_rc_suffix(pmts)
         if had_suffix:
-            rollcalls = manager.get_rollcalls(cid)
-            if len(rollcalls) < rc_number + 1:
-                raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+            ensure_rc_number(cid, rc_number, manager)
 
         rc = manager.get_rollcall(cid, rc_number)
         rollcalls = manager.get_rollcalls(cid)

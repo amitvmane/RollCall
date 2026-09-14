@@ -58,18 +58,23 @@ class RollCallManager:
         # double-ending the same rollcall.
         self._erc_locks: Dict[int, asyncio.Lock] = {}
 
-    def get_erc_lock(self, chat_id: int) -> asyncio.Lock:
-        """Return (creating if needed) the per-chat write lock.
+    def get_chat_write_lock(self, chat_id: int) -> asyncio.Lock:
+        """Return (creating if needed) the per-chat mutation lock.
 
-        Originally added for /erc serialization (hence the name) but now used
-        as the general per-chat mutation lock — voting, proxy, set_limit, etc.
-        should all take this to prevent races with concurrent ends/renumbers."""
+        Everything that mutates a chat's rollcall state takes this — voting,
+        proxy, set_limit, delete, end — so those can't interleave.
+
+        Not re-entrant (plain asyncio.Lock): a service that takes it must not
+        be called from inside another holder, which is why the services
+        document "caller holds the lock" rather than taking it themselves."""
         if chat_id not in self._erc_locks:
             self._erc_locks[chat_id] = asyncio.Lock()
         return self._erc_locks[chat_id]
 
-    # Friendlier alias for new call sites; same underlying lock.
-    get_chat_write_lock = get_erc_lock
+    # Original name from when this only guarded /erc. Kept so nothing breaks,
+    # but new call sites use get_chat_write_lock — two names for one lock is
+    # how half the codebase stopped being greppable for "is this locked?".
+    get_erc_lock = get_chat_write_lock
 
     def get_chat(self, chat_id: int) -> Dict:
         """Get or create chat data"""

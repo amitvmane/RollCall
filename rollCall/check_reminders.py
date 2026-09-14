@@ -336,7 +336,7 @@ async def check(rollcalls, timezone, chat_id):
                         # Take the same lock /erc uses so we don't race with a
                         # concurrent manual end (which would double-send the
                         # finish text and ghost prompt).
-                        async with manager.get_erc_lock(chat_id):
+                        async with manager.get_chat_write_lock(chat_id):
                             current_rcs = manager.get_rollcalls(chat_id)
                             if rollcall not in current_rcs:
                                 # /erc beat us to it — nothing left to do.
@@ -533,14 +533,12 @@ async def _auto_start_from_template(chat_id: int, tmpl: dict, stamp_date: str = 
     unstamped behavior.
     """
     from rollcall_manager import manager
-    from functions import get_next_weekday_datetime
 
     chat = manager.get_chat(chat_id)
     tzname = chat.get("timezone", "Asia/Kolkata")
     try:
-        tz = pytz.timezone(tzname)
+        pytz.timezone(tzname)
     except Exception:
-        tz = pytz.timezone("Asia/Kolkata")
         tzname = "Asia/Kolkata"
 
     rollcalls = manager.get_rollcalls(chat_id)
@@ -582,27 +580,22 @@ async def _auto_start_from_template(chat_id: int, tmpl: dict, stamp_date: str = 
             )
             return False
 
+    # Build through the same helper /start_template and the one-time scheduled
+    # path use. This used to be a hand-written copy, and it had drifted: it
+    # handled event_day/event_time but never gained the offset_* fallback, so
+    # a recurring template configured with offsets auto-opened with
+    # finalizeDate=None — and the reminder loop below skips a rollcall with no
+    # close time, so it never auto-closed.
+    from services.templates import build_rollcall_from_template
+    from db import log_admin_action
+
     title = tmpl.get("title") or tmpl["name"]
-    rc = manager.add_rollcall(chat_id, title)
+    rc = build_rollcall_from_template(chat_id, tmpl, title)
 
-    if tmpl.get("inlistlimit") is not None:
-        rc.inListLimit = tmpl["inlistlimit"]
-    if tmpl.get("location"):
-        rc.location = tmpl["location"]
-    if tmpl.get("eventfee"):
-        rc.event_fee = tmpl["eventfee"]
-
-    rc.timezone = tzname
-    rc.finalizeDate = None
-
-    event_day = tmpl.get("event_day")
-    event_time = tmpl.get("event_time")
-    if event_day and event_time:
-        dt = get_next_weekday_datetime(tz, event_day, event_time)
-        if dt:
-            rc.finalizeDate = dt
-
-    rc.save()
+    # Auto-starts are admin actions too — the manual path has always logged
+    # one, so /audit_log showed a gap wherever the scheduler did the work.
+    log_admin_action(chat_id, 0, "(scheduled)", "start_template",
+                     target_name=tmpl["name"], details=title)
 
     rc_index = len(rollcalls) - 1  # 0-based; rc was just appended by add_rollcall
     rc_number = rc_index + 1       # 1-based display number
@@ -649,7 +642,8 @@ async def _auto_start_from_template(chat_id: int, tmpl: dict, stamp_date: str = 
         def _log_exc(t):
             if not t.cancelled() and t.exception():
                 logging.error(f"Reminder loop raised: {t.exception()}")
-        asyncio.create_task(start(rollcalls, tzname, chat_id)).add_done_callback(_log_exc)
+        _t = asyncio.create_task(start(manager.get_rollcalls(chat_id), tzname, chat_id))
+        _t.add_done_callback(_log_exc)
 
     return True
 

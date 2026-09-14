@@ -1,9 +1,10 @@
 """Pydantic models for admin user-management endpoints."""
 
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from .common import UserPayload
 from .rollcalls import RollcallResponse
 
 
@@ -21,6 +22,10 @@ class DeleteUserRequest(AdminRequest):
 class DeleteUserResponse(BaseModel):
     deleted: str = Field(..., description="Name of the user that was removed")
     rc_number_1based: int
+    promoted: List[UserPayload] = Field(
+        default_factory=list,
+        description="Members pulled waitlist→IN by the slot this removal freed",
+    )
     rollcall: RollcallResponse
 
 
@@ -35,4 +40,8 @@ class SetStatusResponse(BaseModel):
     from_status: str
     to_status: str
     rc_number_1based: int
+    promoted: List[UserPayload] = Field(
+        default_factory=list,
+        description="Members pulled waitlist→IN by the slot this move freed",
+    )
     rollcall: RollcallResponse

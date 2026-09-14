@@ -84,6 +84,30 @@ def parse_rc_number_suffix(text: str) -> tuple[int, str]:
     return n - 1, " ".join(parts[:-1])
 
 
+def ensure_rc_number(chat_id: int, rc_number: int, mgr=None) -> None:
+    """Raise if `rc_number` (0-based) isn't an open rollcall in this chat.
+
+    The handler-layer twin of `resolve_rollcall_or_raise`, for commands that
+    validate an explicit `::N` suffix before doing any work. It was 17 copies
+    across four handler modules, and they had already split into two variants
+    — five of them omitted the lower-bound check.
+
+    Handlers pass their own `manager` rather than letting this resolve one:
+    the module-level alias is what the handler test suite patches, so taking
+    it as an argument keeps the check honest about which state it read.
+    """
+    from exceptions import incorrectParameter
+
+    if mgr is None:
+        from rollcall_manager import manager as mgr
+
+    rollcalls = mgr.get_rollcalls(chat_id)
+    if rc_number < 0 or len(rollcalls) < rc_number + 1:
+        raise incorrectParameter(
+            "The rollcall number doesn't exist, check /rollcalls to see all rollcalls"
+        )
+
+
 def resolve_rollcall_or_raise(chat_id: int, rc_number: int):
     """
     Fetch the rollcall at rc_number (0-based) from the manager, raising the
@@ -106,3 +130,57 @@ def resolve_rollcall_or_raise(chat_id: int, rc_number: int):
         # with /erc could have removed it. Treat as not-active for the user.
         raise rollCallNotStarted("Roll call is not active")
     return rc
+
+
+def record_promotion_stats(chat_id: int, rc_db_id, user_id) -> None:
+    """Count one waitlist→IN promotion.
+
+    A promotion is a real IN, so it bumps `total_in` alongside the
+    `total_waiting_to_in` counter that makes it visible in /stats. Proxies
+    have string ids and no stats row, so they are skipped.
+
+    Every path that promotes calls this — `addOut`/`addMaybe` via the voting
+    and proxy services, `set_wait_limit`, and `fill_waitlist_slots`. It used
+    to be six hand-written copies of the same three lines.
+    """
+    from db import increment_rollcall_stat, increment_user_stat
+
+    if chat_id is None or rc_db_id is None or not isinstance(user_id, int):
+        return
+    increment_user_stat(chat_id, user_id, "total_waiting_to_in")
+    increment_user_stat(chat_id, user_id, "total_in")
+    increment_rollcall_stat(rc_db_id, "total_in")
+
+
+def fill_waitlist_slots(rc) -> list:
+    """
+    Promote waitlisters into any free IN slots and return them serialized.
+
+    The promotion rule lives in three places that each free a slot:
+    `addOut`/`addMaybe` (a member leaves), `set_limit` (the cap moves), and
+    here (a member is removed outright). Deletion is the one path that does
+    NOT go through a vote, so without this the IN list silently sits under
+    its cap and the waitlist never drains — see
+    `services.admin.delete_user_from_rollcall`.
+
+    Caller is responsible for `rc.save()`; user rows are persisted here.
+    """
+    if rc.inListLimit is None:
+        return []
+
+    limit = int(rc.inListLimit)
+    slots = limit - len(rc.inList)
+    if slots <= 0 or not rc.waitList:
+        return []
+
+    moving = rc.waitList[:slots]
+    rc.inList.extend(moving)
+    rc.waitList = rc.waitList[slots:]
+
+    rc_db_id = getattr(rc, "db_id", None) or getattr(rc, "id", None)
+    chat_id = getattr(rc, "chat_id", None)
+    for u in moving:
+        rc._save_user_to_db(u, "in")
+        record_promotion_stats(chat_id, rc_db_id, u.user_id)
+
+    return [serialize_user(u) for u in moving]

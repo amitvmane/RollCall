@@ -26,7 +26,7 @@ from pydantic import BaseModel
 import db as _db
 from api.identity import identity_from_header, require_identity, verify_identity_token
 from api.web_admin import check_web_admin_live
-from api.telegram_mirror import mirror_panel_to_telegram as _mirror_panel_to_telegram, send_vote_notification as _send_vote_notification, send_event_notification as _send_event_notification
+from api.telegram_mirror import mirror_panel_to_telegram as _mirror_panel_to_telegram, send_vote_notification as _send_vote_notification, send_event_notification as _send_event_notification, send_promotion_notification as _send_promotion_notification
 from services import web as web_svc
 from services import stats as stats_svc
 from services import presence as presence_svc
@@ -482,13 +482,17 @@ async def web_proxy_vote(
         rc_number=body.rollcall_num - 1,
     )
     if body.vote == "in":
-        await proxy_svc.set_in_for(**common)
+        proxy_result = await proxy_svc.set_in_for(**common)
     elif body.vote == "out":
-        await proxy_svc.set_out_for(**common)
+        proxy_result = await proxy_svc.set_out_for(**common)
     else:
-        await proxy_svc.set_maybe_for(**common)
+        proxy_result = await proxy_svc.set_maybe_for(**common)
 
     await _send_vote_notification(chat_id, body.proxy_name, body.vote)
+    promoted = proxy_result.get("promoted") if isinstance(proxy_result, dict) else None
+    await _send_promotion_notification(
+        chat_id, [promoted] if promoted else [], body.rollcall_num
+    )
     await _mirror_panel_to_telegram(chat_id, body.rollcall_num)
 
     from rollcall_manager import manager as _mgr
@@ -531,13 +535,16 @@ async def web_remove_user(
     from services import admin as admin_svc
     from rollcall_manager import manager as _mgr
     async with _mgr.get_chat_write_lock(chat_id):
-        admin_svc.delete_user_from_rollcall(
+        del_result = admin_svc.delete_user_from_rollcall(
             chat_id=chat_id,
             rc_number=body.rollcall_num - 1,
             name=body.name,
             admin_user_id=actor_user_id,
             admin_name=actor_name,
         )
+    await _send_promotion_notification(
+        chat_id, del_result.get("promoted") or [], body.rollcall_num
+    )
     await _mirror_panel_to_telegram(chat_id, body.rollcall_num)
 
     from services.web import _serialize_web_rollcall
@@ -577,7 +584,7 @@ async def web_move_user(
     from services import admin as admin_svc
     from rollcall_manager import manager as _mgr
     async with _mgr.get_chat_write_lock(chat_id):
-        admin_svc.set_user_status(
+        move_result = admin_svc.set_user_status(
             chat_id=chat_id,
             rc_number=body.rollcall_num - 1,
             name=body.name,
@@ -585,6 +592,9 @@ async def web_move_user(
             admin_user_id=actor_user_id,
             admin_name=actor_name,
         )
+    await _send_promotion_notification(
+        chat_id, move_result.get("promoted") or [], body.rollcall_num
+    )
     await _mirror_panel_to_telegram(chat_id, body.rollcall_num)
 
     from services.web import _serialize_web_rollcall
@@ -1249,11 +1259,14 @@ async def vote_web(
         username=body.username or None,
     )
 
+    promoted = data.pop("promoted", [])
+
     # Reflect the web vote in the Telegram group — notification so the vote is
     # visible in chat history, then panel update so the list stays current.
     loc = web_svc.locate_rollcall(token)
     if loc:
         await _send_vote_notification(loc[0], body.name, body.vote)
+        await _send_promotion_notification(loc[0], promoted, loc[1])
         await _mirror_panel_to_telegram(loc[0], loc[1])
 
     return WebRollcallResponse(**data)

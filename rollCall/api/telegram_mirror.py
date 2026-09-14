@@ -79,3 +79,30 @@ async def send_vote_notification(
             "[mirror] vote notification failed chat=%s name=%s",
             chat_id, name, exc_info=True,
         )
+
+
+async def send_promotion_notification(
+    chat_id: int,
+    promoted: list,
+    rc_number_1based: int,
+) -> None:
+    """Announce waitlist→IN promotions caused by a web/REST action.
+
+    Web actions free IN slots exactly as bot commands do; without this the
+    promoted member finds out only by re-opening the panel.
+    """
+    if not promoted:
+        return
+    try:
+        from rollcall_manager import manager
+        from handlers.promotion import announce_promotions
+
+        rc = manager.get_rollcall(chat_id, rc_number_1based - 1)
+        if rc is None:
+            return
+        await announce_promotions(chat_id, promoted, rc.title, rc_number_1based, rc)
+    except Exception:
+        logging.warning(
+            "[mirror] promotion notification failed chat=%s rc=%s",
+            chat_id, rc_number_1based, exc_info=True,
+        )

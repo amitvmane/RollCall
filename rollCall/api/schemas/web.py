@@ -236,7 +236,16 @@ class PushSubscribeKeys(BaseModel):
 class PushSubscribeRequest(BaseModel):
     endpoint: str = Field(..., min_length=10)
     keys: PushSubscribeKeys
-    tg_user_id: Optional[int] = Field(None, description="Verified Telegram user_id to link this subscription to an identity")
+    id_token: Optional[str] = Field(
+        None,
+        description=(
+            "Signed identity token. The Telegram user_id is derived from it, "
+            "never taken from the request body — with a raw id, anyone holding "
+            "the group's magic link could file a subscription under another "
+            "member's identity. Omitted for guest subscribers, who get an "
+            "unlinked subscription exactly as before."
+        ),
+    )
 
 
 class PushUnsubscribeRequest(BaseModel):

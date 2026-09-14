@@ -111,7 +111,12 @@ async def push_subscribe(
     chat = _db.get_chat_by_group_web_token(group_token)
     if not chat:
         raise HTTPException(404, "Invalid group token")
-    push_svc.subscribe(group_token, body.endpoint, body.keys.p256dh, body.keys.auth, tg_user_id=body.tg_user_id)
+    # Identity comes from the signed token or not at all. An unverified token
+    # is treated as an anonymous subscriber rather than rejected: the failure
+    # mode for a guest with a stale token should be "no personalisation",
+    # not "notifications silently stop working".
+    tg_user_id = verify_identity_token(body.id_token) if body.id_token else None
+    push_svc.subscribe(group_token, body.endpoint, body.keys.p256dh, body.keys.auth, tg_user_id=tg_user_id)
 
 
 @router.post(

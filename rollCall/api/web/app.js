@@ -1473,7 +1473,7 @@ function _adoptVerifiedIdentity(data){
   renderIdentity();detectCurrentVote();
   _checkWebAdmin().catch(()=>{});
   // Re-link any existing push subscription with the now-known user ID
-  _relinkPushSubscription(_verifiedUserId);
+  _relinkPushSubscription();
 }
 
 async function _pollVerify(){
@@ -1564,15 +1564,18 @@ window.onTelegramAuth=async function(user){
   }catch(e){toast("Telegram sign-in failed — try again",3500);}
 };
 
-async function _relinkPushSubscription(userId){
+async function _relinkPushSubscription(){
   try{
     if(!_swReg)return;
     const existing=await _swReg.pushManager.getSubscription();
     if(!existing)return;
     const j=existing.toJSON();
+    // id_token, not a raw user id — the server derives the identity, so a
+    // subscription can't be filed under somebody else's account.
     await fetch(`/api/v1/web/group/${URL_TOKEN}/push-subscribe`,{
       method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({endpoint:j.endpoint,keys:{p256dh:j.keys.p256dh,auth:j.keys.auth},tg_user_id:userId}),
+      body:JSON.stringify({endpoint:j.endpoint,keys:{p256dh:j.keys.p256dh,auth:j.keys.auth},
+                           ...(_idToken?{id_token:_idToken}:{})}),
       signal:AbortSignal.timeout(5000),
     });
   }catch(_){}
@@ -1677,7 +1680,7 @@ window.toggleNotifications = async function() {
       body: JSON.stringify({
         endpoint: j.endpoint,
         keys: { p256dh: j.keys.p256dh, auth: j.keys.auth },
-        ...(TG_USER?.id||_verifiedUserId?{tg_user_id:TG_USER?.id||_verifiedUserId}:{}),
+        ...(_idToken?{id_token:_idToken}:{}),
       }),
       signal: AbortSignal.timeout(5000),
     });

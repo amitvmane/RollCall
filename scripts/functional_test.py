@@ -567,6 +567,41 @@ async def phase_remaining_surface():
     out = await feed("/delete_user Carol", ALICE)
     record("/delete_user removes a member from the list", bool(out))
 
+    # Removing someone from a CAPPED in-list frees a slot — the first
+    # waitlister has to move up and be told about it. This shipped broken:
+    # the delete path was the one slot-freeing path with no promotion step,
+    # so the waitlist stalled until an unrelated /out happened to fire.
+    await feed("/erc", ALICE)
+    await feed("/src Waitlist Promotion Game", ALICE)
+    await feed("/set_limit 2", ALICE)
+    # These three voted seconds ago in the previous rollcall — the 2s
+    # in/out/maybe cooldown would otherwise swallow the votes.
+    bot_state._rate_limits.clear()
+    await feed("/in", ALICE)
+    bot_state._rate_limits.clear()
+    await feed("/in", BOB)
+    bot_state._rate_limits.clear()
+    await feed("/in", CAROL)          # -> WAITING
+    out = await feed("/whos_waiting", ALICE)
+    record("/set_limit puts the 3rd voter on the waitlist", "Carol" in text_of(out))
+
+    await feed("/delete_user Bob", ALICE)
+    out = await feed_cb("delconf_yes_0_100", ALICE)
+    record("/delete_user announces the waitlist -> IN promotion",
+           "Carol" in text_of(out))
+
+    out = await feed("/whos_in", ALICE)
+    in_txt = text_of(out)
+    record("/delete_user promotes the waitlister into the freed IN slot",
+           "Carol" in in_txt and "Bob" not in in_txt)
+
+    out = await feed("/whos_waiting", ALICE)
+    record("waitlist is empty after the promotion", "Carol" not in text_of(out))
+    await feed("/erc", ALICE)
+
+    await feed("/src Surface Coverage Game 2", ALICE)
+    await feed("/in", ALICE)
+
     # Match-day card — the pillow rendering path.
     out = await feed("/card", ALICE)
     record("/card renders without crashing", bool(out))

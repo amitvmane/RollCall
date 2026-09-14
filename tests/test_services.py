@@ -380,7 +380,11 @@ class TestRollcallsService(unittest.IsolatedAsyncioTestCase):
         rc = _make_rc()
         mgr = self._mgr([rc])
 
-        with patch("services.rollcalls.manager", mgr):
+        # rollcall_manager too: the range check now lives in
+        # services.common.resolve_rollcall_or_raise, which resolves the
+        # manager lazily from its own module rather than this one.
+        with patch("services.rollcalls.manager", mgr), \
+             patch("rollcall_manager.manager", mgr):
             from services.rollcalls import end_rollcall
             with self.assertRaises(incorrectParameter):
                 await end_rollcall(100, 5, 9, "Admin")
@@ -463,7 +467,11 @@ class TestRollcallsService(unittest.IsolatedAsyncioTestCase):
         rc = _make_rc()
         mgr = self._mgr([rc])
 
-        with patch("services.rollcalls.manager", mgr):
+        # rollcall_manager too: the range check now lives in
+        # services.common.resolve_rollcall_or_raise, which resolves the
+        # manager lazily from its own module rather than this one.
+        with patch("services.rollcalls.manager", mgr), \
+             patch("rollcall_manager.manager", mgr):
             from services.rollcalls import cancel_rollcall
             with self.assertRaises(incorrectParameter):
                 await cancel_rollcall(100, 5, 9, "Admin")
@@ -783,8 +791,7 @@ class TestSettingsService(unittest.TestCase):
         with patch("services.settings.manager", mgr), \
              patch("rollcall_manager.manager", mgr), \
              patch("services.settings.log_admin_action"), \
-             patch("services.settings.increment_user_stat"), \
-             patch("services.settings.increment_rollcall_stat"):
+             patch("services.settings.record_promotion_stats"):
             from services.settings import set_wait_limit
             result = set_wait_limit(100, 0, 1, "Admin")
         self.assertIsNone(result["new_limit"])
@@ -799,8 +806,7 @@ class TestSettingsService(unittest.TestCase):
         with patch("services.settings.manager", mgr), \
              patch("rollcall_manager.manager", mgr), \
              patch("services.settings.log_admin_action"), \
-             patch("services.settings.increment_user_stat"), \
-             patch("services.settings.increment_rollcall_stat"):
+             patch("services.settings.record_promotion_stats"):
             from services.settings import set_wait_limit
             result = set_wait_limit(100, 2, 1, "Admin")
         self.assertEqual(len(result["promoted"]), 1)
@@ -816,8 +822,7 @@ class TestSettingsService(unittest.TestCase):
         with patch("services.settings.manager", mgr), \
              patch("rollcall_manager.manager", mgr), \
              patch("services.settings.log_admin_action"), \
-             patch("services.settings.increment_user_stat"), \
-             patch("services.settings.increment_rollcall_stat"):
+             patch("services.settings.record_promotion_stats"):
             from services.settings import set_wait_limit
             result = set_wait_limit(100, 2, 1, "Admin")
         self.assertEqual(len(result["demoted"]), 1)
@@ -973,8 +978,7 @@ class TestProxyService(unittest.IsolatedAsyncioTestCase):
         with patch("services.proxy.manager", mgr), \
              patch("rollcall_manager.manager", mgr), \
              patch("services.proxy.log_admin_action"), \
-             patch("services.proxy.increment_user_stat"), \
-             patch("services.proxy.increment_rollcall_stat"):
+             patch("services.proxy.record_promotion_stats"):
             from services.proxy import set_in_for
             result = await set_in_for(100, 1, "Admin", "ProxyBob")
 
@@ -1004,8 +1008,7 @@ class TestProxyService(unittest.IsolatedAsyncioTestCase):
         with patch("services.proxy.manager", mgr), \
              patch("rollcall_manager.manager", mgr), \
              patch("services.proxy.log_admin_action"), \
-             patch("services.proxy.increment_user_stat"), \
-             patch("services.proxy.increment_rollcall_stat"):
+             patch("services.proxy.record_promotion_stats"):
             from services.proxy import set_in_for
             result = await set_in_for(100, 1, "Admin", "ProxyBob")
 
@@ -1021,8 +1024,7 @@ class TestProxyService(unittest.IsolatedAsyncioTestCase):
         with patch("services.proxy.manager", mgr), \
              patch("rollcall_manager.manager", mgr), \
              patch("services.proxy.log_admin_action"), \
-             patch("services.proxy.increment_user_stat"), \
-             patch("services.proxy.increment_rollcall_stat"):
+             patch("services.proxy.record_promotion_stats"):
             from services.proxy import set_out_for
             result = await set_out_for(100, 1, "Admin", "Alice")
 
@@ -1037,8 +1039,7 @@ class TestProxyService(unittest.IsolatedAsyncioTestCase):
         with patch("services.proxy.manager", mgr), \
              patch("rollcall_manager.manager", mgr), \
              patch("services.proxy.log_admin_action"), \
-             patch("services.proxy.increment_user_stat"), \
-             patch("services.proxy.increment_rollcall_stat"):
+             patch("services.proxy.record_promotion_stats"):
             from services.proxy import set_maybe_for
             result = await set_maybe_for(100, 1, "Admin", "ProxyBob")
 

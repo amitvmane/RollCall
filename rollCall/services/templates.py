@@ -308,6 +308,62 @@ def upsert_template(
 
 # ─── Start (spawn rollcall from template) ─────────────────────────────────────
 
+def build_rollcall_from_template(chat_id: int, tmpl: dict, title: str):
+    """Create a rollcall and apply `tmpl`'s settings to it. Returns the rollcall.
+
+    THE single answer to "which template fields become what on a rollcall".
+    Everything that starts one from a template goes through here — the
+    /start_template command, the one-time web schedule, and the recurring
+    auto-start in check_reminders. The auto-start used to carry its own copy
+    of this, and that copy had never been given the offset_* fallback below,
+    so an offset-configured template auto-opened with no close time and then
+    never auto-closed.
+
+    Takes the already-fetched `tmpl` row rather than a name, so the scheduler
+    doesn't re-read (and possibly re-resolve differently) a template it is
+    holding.
+    """
+    rc = manager.add_rollcall(chat_id, title)
+
+    if tmpl.get("inlistlimit") is not None:
+        rc.inListLimit = tmpl["inlistlimit"]
+    if tmpl.get("location"):
+        rc.location = tmpl["location"]
+    if tmpl.get("eventfee"):
+        rc.event_fee = tmpl["eventfee"]
+
+    chat = manager.get_chat(chat_id)
+    tzname = chat.get("timezone", "Asia/Kolkata")
+    try:
+        tz = pytz.timezone(tzname)
+    except Exception:
+        tz = pytz.timezone("Asia/Kolkata")
+        tzname = "Asia/Kolkata"
+    rc.timezone = tzname
+    rc.finalizeDate = None
+
+    # event_day/event_time — a fixed weekly slot.
+    event_day = tmpl.get("event_day")
+    event_time = tmpl.get("event_time")
+    if event_day and event_time:
+        dt = get_next_weekday_datetime(tz, event_day, event_time)
+        if dt:
+            rc.finalizeDate = dt
+
+    # offset_* — "closes N after it opens", for a one-off with no fixed day.
+    if rc.finalizeDate is None:
+        days = tmpl.get("offsetdays")
+        hours = tmpl.get("offsethours")
+        minutes = tmpl.get("offsetminutes")
+        if any(v is not None for v in (days, hours, minutes)):
+            rc.finalizeDate = datetime.now(tz) + timedelta(
+                days=days or 0, hours=hours or 0, minutes=minutes or 0
+            )
+
+    rc.save()
+    return rc
+
+
 async def start_template(
     chat_id: int,
     name: str,
@@ -341,43 +397,7 @@ async def start_template(
     else:
         title = base_title or name
 
-    rc = manager.add_rollcall(chat_id, title)
-
-    if tmpl.get("inlistlimit") is not None:
-        rc.inListLimit = tmpl["inlistlimit"]
-    if tmpl.get("location"):
-        rc.location = tmpl["location"]
-    if tmpl.get("eventfee"):
-        rc.event_fee = tmpl["eventfee"]
-
-    chat = manager.get_chat(chat_id)
-    tzname = chat.get("timezone", "Asia/Kolkata")
-    try:
-        tz = pytz.timezone(tzname)
-    except Exception:
-        tz = pytz.timezone("Asia/Kolkata")
-        tzname = "Asia/Kolkata"
-    rc.timezone = tzname
-    rc.finalizeDate = None
-
-    event_day = tmpl.get("event_day")
-    event_time = tmpl.get("event_time")
-    if event_day and event_time:
-        dt = get_next_weekday_datetime(tz, event_day, event_time)
-        if dt:
-            rc.finalizeDate = dt
-
-    if rc.finalizeDate is None:
-        days = tmpl.get("offsetdays")
-        hours = tmpl.get("offsethours")
-        minutes = tmpl.get("offsetminutes")
-        if any(v is not None for v in (days, hours, minutes)):
-            now = datetime.now(tz)
-            rc.finalizeDate = now + timedelta(
-                days=days or 0, hours=hours or 0, minutes=minutes or 0
-            )
-
-    rc.save()
+    rc = build_rollcall_from_template(chat_id, tmpl, title)
 
     rc_index = len(manager.get_rollcalls(chat_id)) - 1
     log_admin_action(

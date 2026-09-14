@@ -183,25 +183,26 @@ async def vote_by_token(
         # For proxy votes, normalise to canonical casing of any existing same-name entry
         name = _find_canonical_name(rc_pre, name)
 
+    vote_result = None
     try:
         if is_real_user:
             # Real Telegram user identified via WebApp SDK — vote as their actual user_id
             # so stats, ghost tracking, and is_proxy=false all work correctly.
             from services import voting as voting_svc
             if vote_type == "in":
-                await voting_svc.vote_in(chat_id, tg_user_id, name, username=username, rc_number=rc_index, comment=comment)
+                vote_result = await voting_svc.vote_in(chat_id, tg_user_id, name, username=username, rc_number=rc_index, comment=comment)
             elif vote_type == "out":
-                await voting_svc.vote_out(chat_id, tg_user_id, name, username=username, rc_number=rc_index, comment=comment)
+                vote_result = await voting_svc.vote_out(chat_id, tg_user_id, name, username=username, rc_number=rc_index, comment=comment)
             else:
-                await voting_svc.vote_maybe(chat_id, tg_user_id, name, username=username, rc_number=rc_index, comment=comment)
+                vote_result = await voting_svc.vote_maybe(chat_id, tg_user_id, name, username=username, rc_number=rc_index, comment=comment)
         else:
             # Guest / external user — proxy entry identified by display name
             if vote_type == "in":
-                await proxy_svc.set_in_for(chat_id, 0, "web", name, rc_number=rc_index, comment=comment)
+                vote_result = await proxy_svc.set_in_for(chat_id, 0, "web", name, rc_number=rc_index, comment=comment)
             elif vote_type == "out":
-                await proxy_svc.set_out_for(chat_id, 0, "web", name, rc_number=rc_index, comment=comment)
+                vote_result = await proxy_svc.set_out_for(chat_id, 0, "web", name, rc_number=rc_index, comment=comment)
             else:
-                await proxy_svc.set_maybe_for(chat_id, 0, "web", name, rc_number=rc_index, comment=comment)
+                vote_result = await proxy_svc.set_maybe_for(chat_id, 0, "web", name, rc_number=rc_index, comment=comment)
     except Exception as e:
         # duplicateProxy / repeatlyName — proxy double-tap, treat as idempotent.
         # alreadyInList is NOT caught here: a verified user who is already IN/OUT
@@ -212,7 +213,13 @@ async def vote_by_token(
 
     # Re-resolve so we return the updated state
     _, _, rc = _resolve_rc(token)
-    return _serialize_web_rollcall(rc)
+    out = _serialize_web_rollcall(rc)
+    # Carried out-of-band (the route pops it) so the caller can announce the
+    # waitlist→IN promotion this vote caused. Without it a web /out frees a
+    # slot and the promoted member is never told.
+    promoted = vote_result.get("promoted") if isinstance(vote_result, dict) else None
+    out["promoted"] = [promoted] if promoted else []
+    return out
 
 
 # ── Group token (permanent per-group URL) ────────────────────────────────────

@@ -221,22 +221,13 @@ async def end_rollcall(
       rollCallNotStarted   — no active rollcall in this chat
       incorrectParameter   — rc_number is out of range
 
-    Caller should hold `manager.get_erc_lock(chat_id)` if it needs the
+    Caller should hold `manager.get_chat_write_lock(chat_id)` if it needs the
     end-vs-vote race exclusion that the bot's `/erc` handler uses today.
-    This service intentionally does NOT acquire the erc lock itself —
+    This service intentionally does NOT acquire the chat write lock itself —
     adapters that want serialization must hold it; adapters that don't
     care (e.g. tests) can call directly.
     """
-    rollcalls = manager.get_rollcalls(chat_id)
-    if len(rollcalls) == 0:
-        raise rollCallNotStarted("Roll call is not active")
-    if rc_number < 0 or rc_number >= len(rollcalls):
-        raise incorrectParameter(
-            "The rollcall number doesn't exist, check /rollcalls to see all rollcalls"
-        )
-    rc = manager.get_rollcall(chat_id, rc_number)
-    if rc is None:
-        raise rollCallNotStarted("Roll call is not active")
+    rc = resolve_rollcall_or_raise(chat_id, rc_number)
 
     rc_db_id = getattr(rc, "id", None)
     ghost_tracking_on = manager.get_ghost_tracking_enabled(chat_id)
@@ -374,19 +365,10 @@ async def cancel_rollcall(
       rollCallNotStarted  — no active rollcall in this chat
       incorrectParameter  — rc_number is out of range
 
-    Caller should hold manager.get_erc_lock(chat_id) for the same race-exclusion
+    Caller should hold manager.get_chat_write_lock(chat_id) for the same race-exclusion
     reasons as end_rollcall.
     """
-    rollcalls = manager.get_rollcalls(chat_id)
-    if len(rollcalls) == 0:
-        raise rollCallNotStarted("Roll call is not active")
-    if rc_number < 0 or rc_number >= len(rollcalls):
-        raise incorrectParameter(
-            "The rollcall number doesn't exist, check /rollcalls to see all rollcalls"
-        )
-    rc = manager.get_rollcall(chat_id, rc_number)
-    if rc is None:
-        raise rollCallNotStarted("Roll call is not active")
+    rc = resolve_rollcall_or_raise(chat_id, rc_number)
 
     rc_db_id = getattr(rc, "db_id", None) or getattr(rc, "id", None)
     cancelled_snapshot = serialize_rollcall(rc, rc_number)

@@ -15,6 +15,7 @@ from exceptions import (
 from functions import admin_rights, roll_call_not_started
 from models import User
 from rollcall_manager import manager
+from services.common import ensure_rc_number
 from services import admin as admin_svc
 from utils.text import parse_rc_suffix
 
@@ -117,9 +118,7 @@ async def delete_user(message):
         had_suffix = len(arr) > 1 and "::" in arr[-1]
         rc_number, arr = parse_rc_suffix(arr)
         if had_suffix:
-            rollcalls = manager.get_rollcalls(cid)
-            if len(rollcalls) < rc_number + 1:
-                raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+            ensure_rc_number(cid, rc_number, manager)
 
         name = " ".join(arr[1:])
         if not name.strip():
@@ -197,9 +196,7 @@ async def set_status_override(message):
 
         name = " ".join(parts[1:-1])
 
-        rollcalls = manager.get_rollcalls(cid)
-        if rc_number < 0 or len(rollcalls) < rc_number + 1:
-            raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+        ensure_rc_number(cid, rc_number, manager)
 
         rc = manager.get_rollcall(cid, rc_number)
 

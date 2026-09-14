@@ -2015,14 +2015,14 @@ class TestErcConcurrencyLock(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(order, ['first-in', 'first-out', 'second-in'])
 
     def test_source_erc_handler_uses_lock(self):
-        """The /erc handler source must contain 'async with manager.get_erc_lock'."""
+        """The /erc handler source must contain 'async with manager.get_chat_write_lock'."""
         module_path = os.path.join(
             os.path.dirname(__file__), "..", "rollCall", "handlers", "lifecycle.py"
         )
         with open(module_path) as f:
             source = f.read()
         self.assertIn(
-            "async with manager.get_erc_lock(cid)",
+            "async with manager.get_chat_write_lock(cid)",
             source,
             "/erc handler must acquire per-chat lock to prevent concurrent double-end"
         )
@@ -2035,7 +2035,7 @@ class TestErcConcurrencyLock(unittest.IsolatedAsyncioTestCase):
         with open(module_path) as f:
             source = f.read()
         # There must be at least two occurrences (one per code path)
-        count = source.count("async with manager.get_erc_lock(cid)")
+        count = source.count("async with manager.get_chat_write_lock(cid)")
         self.assertGreaterEqual(count, 2, "Both /erc and endconfirm must hold the per-chat lock")
 
 

@@ -327,7 +327,8 @@ class TestEndRollcallWithParallel(TestParallelRollcallsBase):
         msg = self._make_message("/end_roll_call ::2")
         with self._rc_started(), self._admin_ok(), \
              patch('handlers.lifecycle.manager', mgr), \
-             patch('services.rollcalls.manager', mgr):
+             patch('services.rollcalls.manager', mgr), \
+             patch('rollcall_manager.manager', mgr):
             await self.end_roll_call(msg)
 
         mgr.remove_rollcall.assert_called_once_with(100, 1)
@@ -343,7 +344,8 @@ class TestEndRollcallWithParallel(TestParallelRollcallsBase):
         msg = self._make_message("/end_roll_call ::1")
         with self._rc_started(), self._admin_ok(), \
              patch('handlers.lifecycle.manager', mgr), \
-             patch('services.rollcalls.manager', mgr):
+             patch('services.rollcalls.manager', mgr), \
+             patch('rollcall_manager.manager', mgr):
             await self.end_roll_call(msg)
 
         mgr.remove_rollcall.assert_called_once_with(100, 0)

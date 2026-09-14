@@ -211,7 +211,8 @@ class TestErcGhostPrompt(GhostTestBase):
         with self._rc_started(), \
              patch('handlers.lifecycle.admin_rights', new=AsyncMock(return_value=True)), \
              patch('handlers.lifecycle.manager', self.manager), \
-             patch('services.rollcalls.manager', self.manager):
+             patch('services.rollcalls.manager', self.manager), \
+             patch('rollcall_manager.manager', self.manager):
             await self.end_roll_call(self._make_message("/erc"))
 
         # At least 3 messages: finish list, ghost prompt, (possibly renumber)
@@ -230,7 +231,8 @@ class TestErcGhostPrompt(GhostTestBase):
         with self._rc_started(), \
              patch('handlers.lifecycle.admin_rights', new=AsyncMock(return_value=True)), \
              patch('handlers.lifecycle.manager', self.manager), \
-             patch('services.rollcalls.manager', self.manager):
+             patch('services.rollcalls.manager', self.manager), \
+             patch('rollcall_manager.manager', self.manager):
             await self.end_roll_call(self._make_message("/erc"))
 
         texts = [self.bot_state.bot.send_message.call_args_list[i][0][1]
@@ -243,7 +245,8 @@ class TestErcGhostPrompt(GhostTestBase):
         with self._rc_started(), \
              patch('handlers.lifecycle.admin_rights', new=AsyncMock(return_value=True)), \
              patch('handlers.lifecycle.manager', self.manager), \
-             patch('services.rollcalls.manager', self.manager):
+             patch('services.rollcalls.manager', self.manager), \
+             patch('rollcall_manager.manager', self.manager):
             await self.end_roll_call(self._make_message("/erc"))
 
         texts = [self.bot_state.bot.send_message.call_args_list[i][0][1]
@@ -262,7 +265,8 @@ class TestErcGhostPrompt(GhostTestBase):
         with self._rc_started(), \
              patch('handlers.lifecycle.admin_rights', new=AsyncMock(return_value=True)), \
              patch('handlers.lifecycle.manager', self.manager), \
-             patch('services.rollcalls.manager', self.manager):
+             patch('services.rollcalls.manager', self.manager), \
+             patch('rollcall_manager.manager', self.manager):
             await self.end_roll_call(self._make_message("/erc"))
 
         texts = [self.bot_state.bot.send_message.call_args_list[i][0][1]

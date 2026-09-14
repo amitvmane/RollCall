@@ -20,6 +20,7 @@ from exceptions import (
 import db
 from functions import admin_rights, roll_call_not_started
 from rollcall_manager import manager
+from services.common import ensure_rc_number
 from services import settings as settings_svc
 
 
@@ -48,9 +49,7 @@ async def set_rollcall_time(message):
                 del pmts[-1]
             except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
-        rollcalls = manager.get_rollcalls(cid)
-        if rc_number < 0 or len(rollcalls) < rc_number + 1:
-            raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+        ensure_rc_number(cid, rc_number, manager)
         input_datetime = " ".join(pmts).strip()
         result = settings_svc.set_rollcall_time(
             cid, rc_number, input_datetime,
@@ -109,9 +108,7 @@ async def reminder(message):
             except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
-            rollcalls = manager.get_rollcalls(cid)
-            if rc_number < 0 or len(rollcalls) < rc_number + 1:
-                raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+            ensure_rc_number(cid, rc_number, manager)
 
         if len(pmts) == 0:
             raise parameterMissing("The format is /set_rollcall_reminder hours")
@@ -164,9 +161,7 @@ async def event_fee(message):
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
             if has_active:
-                rollcalls = manager.get_rollcalls(cid)
-                if rc_number < 0 or len(rollcalls) < rc_number + 1:
-                    raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+                ensure_rc_number(cid, rc_number, manager)
 
         event_price = " ".join(pmts)
         event_price_number = re.findall('[0-9]+', event_price)
@@ -232,9 +227,7 @@ async def individual_fee(message):
             except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
-            rollcalls = manager.get_rollcalls(cid)
-            if rc_number < 0 or len(rollcalls) < rc_number + 1:
-                raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+            ensure_rc_number(cid, rc_number, manager)
 
         result = settings_svc.get_individual_fee(cid, rc_number)
         await bot.send_message(cid, f"Individual fee is {result['individual_fee']}")
@@ -263,9 +256,7 @@ async def when(message):
             except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
-            rollcalls = manager.get_rollcalls(cid)
-            if rc_number < 0 or len(rollcalls) < rc_number + 1:
-                raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+            ensure_rc_number(cid, rc_number, manager)
 
         rc = manager.get_rollcall(cid, rc_number)
         if rc.finalizeDate is None:
@@ -299,9 +290,7 @@ async def set_location(message):
                 del pmts[-1]
             except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
-        rollcalls = manager.get_rollcalls(cid)
-        if rc_number < 0 or len(rollcalls) < rc_number + 1:
-            raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+        ensure_rc_number(cid, rc_number, manager)
 
         place = " ".join(pmts)
         if not place.strip():
@@ -349,9 +338,7 @@ async def wait_limit(message):
 
         limit = int(pmts[0])
 
-        rollcalls = manager.get_rollcalls(cid)
-        if rc_number < 0 or len(rollcalls) < rc_number + 1:
-            raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+        ensure_rc_number(cid, rc_number, manager)
 
         async with manager.get_chat_write_lock(cid):
             result = settings_svc.set_wait_limit(
@@ -393,31 +380,13 @@ async def wait_limit(message):
                     logging.warning(f"Could not DM demoted user {uid}")
             asyncio.create_task(_dm_demoted()).add_done_callback(_log_task_exc)
 
+        # Raising the cap promotes exactly like an /out does — same announcer,
+        # so the message can't drift from the one every other path sends. (It
+        # had: this block mentioned a bare tg:// link where the shared one
+        # shows @username.)
         if result["promoted"]:
-            from handlers.lifecycle import notify_proxy_owner_wait_to_in
-            for u in result["promoted"]:
-                uid = u["user_id"]
-                name = u["name"]
-                is_proxy = u["is_proxy"]
-                if not shh:
-                    if not is_proxy:
-                        await bot.send_message(
-                            cid,
-                            f"[{_esc_md(name)}](tg://user?id={uid}) → IN (from WAITING) for '{_esc_md(rc_title)}' (#{rc_number_1})",
-                            parse_mode="Markdown",
-                        )
-                    else:
-                        await bot.send_message(
-                            cid,
-                            f"{name} → IN (from WAITING) for '{rc_title}' (#{rc_number_1})",
-                        )
-                if not is_proxy:
-                    asyncio.create_task(_dm_promoted_real_user(uid, rc_title, rc_number_1)).add_done_callback(_log_task_exc)
-
-                # find the actual User object from the rc for notify_proxy_owner
-                rc_user = next((x for x in rc.inList if (x.user_id == uid or x.name == name)), None)
-                if rc_user is not None:
-                    await notify_proxy_owner_wait_to_in(rc, rc_user, cid, rc_title, rc_number_1)
+            from handlers.promotion import announce_promotions
+            await announce_promotions(cid, result["promoted"], rc_title, rc_number_1, rc)
 
         if limit > 0 and len(rc.inList) == limit and not result["was_full"]:
             if not shh:

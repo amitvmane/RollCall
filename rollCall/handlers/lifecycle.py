@@ -27,6 +27,7 @@ from exceptions import (
 from functions import admin_rights, roll_call_not_started
 from models import User
 from rollcall_manager import manager
+from services.common import ensure_rc_number
 import db
 from db import update_rollcall
 from services import rollcalls as rollcalls_svc
@@ -479,10 +480,8 @@ async def end_roll_call(message):
             except Exception:
                 raise incorrectParameter("The RollCallnumber must be a positive integer")
 
-        async with manager.get_erc_lock(cid):
-            rollcalls = manager.get_rollcalls(cid)
-            if rc_number < 0 or len(rollcalls) < rc_number + 1:
-                raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+        async with manager.get_chat_write_lock(cid):
+            ensure_rc_number(cid, rc_number, manager)
             rc = manager.get_rollcall(cid, rc_number)
             ended_number = rc_number + 1
             ended_by = message.from_user.first_name or message.from_user.username or "someone"
@@ -535,10 +534,8 @@ async def cancel_roll_call(message):
                 raise incorrectParameter("The RollCallnumber must be a positive integer")
         reason = " ".join(pmts).strip() or None
 
-        async with manager.get_erc_lock(cid):
-            rollcalls = manager.get_rollcalls(cid)
-            if rc_number < 0 or len(rollcalls) < rc_number + 1:
-                raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+        async with manager.get_chat_write_lock(cid):
+            ensure_rc_number(cid, rc_number, manager)
             rc = manager.get_rollcall(cid, rc_number)
             ended_number = rc_number + 1
             cancelled_by = message.from_user.first_name or message.from_user.username or "someone"
@@ -606,9 +603,7 @@ async def set_title(message):
             except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
-            rollcalls = manager.get_rollcalls(cid)
-            if rc_number < 0 or len(rollcalls) < rc_number + 1:
-                raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+            ensure_rc_number(cid, rc_number, manager)
 
         title = " ".join(pmts)
         if not title.strip():
@@ -653,9 +648,7 @@ async def show_panel(message):
             except Exception:
                 raise incorrectParameter("The rollcall number must be a positive integer")
 
-        rollcalls = manager.get_rollcalls(cid)
-        if rc_number < 0 or len(rollcalls) < rc_number + 1:
-            raise incorrectParameter("The rollcall number doesn't exist, check /rollcalls to see all rollcalls")
+        ensure_rc_number(cid, rc_number, manager)
 
         rc = manager.get_rollcall(cid, rc_number)
         text = _build_panel_text(rc, rc_number + 1)
@@ -771,23 +764,8 @@ async def _cb_vote(call, cid: int, rc_number: int, action: str) -> None:
 
     promoted = svc_result.get("promoted")
     if promoted and action in ("out", "maybe"):
-        p_id = promoted["user_id"]
-        p_name = promoted["name"]
-        p_uname = promoted.get("username")
-        if not manager.get_shh_mode(cid):
-            if isinstance(p_id, int):
-                _p = User(p_name, p_uname, p_id, [])
-                await bot.send_message(
-                    cid,
-                    f"{format_mention_with_name_md(_p)} → IN (from WAITING) for '{_esc_md(rc.title)}' (#{rc_number})",
-                    parse_mode="Markdown",
-                )
-            else:
-                await bot.send_message(cid, f"{p_name} → IN (from WAITING) for '{rc.title}' (#{rc_number})")
-        if isinstance(p_id, int):
-            asyncio.create_task(_dm_promoted_real_user(p_id, rc.title, rc_number)).add_done_callback(_log_task_exc)
-        _p_obj = User(p_name, p_uname, p_id, [])
-        await notify_proxy_owner_wait_to_in(rc, _p_obj, cid, rc.title, rc_number)
+        from handlers.promotion import announce_one
+        await announce_one(cid, promoted, rc.title, rc_number, rc)
 
     text = _build_panel_text(rc, rc_number)
     markup = await get_status_keyboard(rc_number, web_url=_group_web_url(cid))
@@ -892,7 +870,7 @@ async def _cb_end_confirm(call, cid: int, rc_number: int, rc) -> None:
             await bot.answer_callback_query(call.id, "⛔ Only admins can end rollcalls", show_alert=True)
             return
 
-    async with manager.get_erc_lock(cid):
+    async with manager.get_chat_write_lock(cid):
         rc = manager.get_rollcall(cid, rc_number - 1)
         if rc is None:
             await bot.answer_callback_query(call.id, "Rollcall already ended.")

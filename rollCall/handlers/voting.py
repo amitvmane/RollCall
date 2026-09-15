@@ -136,25 +136,31 @@ async def out_user(message):
         rc_number_1based = result["rc_number_1based"]
 
         # Announce promotion if someone moved waitlist→IN
+        # The voter's own change and any promotion it caused are two separate
+        # announcements, not an either/or. This was an if/else: whenever a vote
+        # freed a slot, the group was told who moved UP but never who moved
+        # out — the state change that caused it vanished. The panel buttons
+        # always got this right, so the same action announced differently
+        # depending on whether it came from a command or a tap.
+        if not manager.get_shh_mode(cid) and result["action"] != "already":
+            from models import User
+            u = User(display_name, username, user_id, [])
+            if result["was_in"]:
+                await bot.send_message(
+                    cid,
+                    f"{format_mention_with_name_md(u)} → OUT for '{_esc_md(rc_title)}' (#{rc_number_1based})",
+                    parse_mode="Markdown",
+                )
+            else:
+                await bot.send_message(
+                    cid,
+                    f"{format_mention_with_name_md(u)} is now OUT!",
+                    parse_mode="Markdown",
+                )
+
         if result["promoted"]:
             await announce_one(cid, result["promoted"], rc_title, rc_number_1based,
                                manager.get_rollcall(cid, rc_number))
-        else:
-            if not manager.get_shh_mode(cid) and result["action"] != "already":
-                from models import User
-                u = User(display_name, username, user_id, [])
-                if result["was_in"]:
-                    await bot.send_message(
-                        cid,
-                        f"{format_mention_with_name_md(u)} → OUT for '{_esc_md(rc_title)}' (#{rc_number_1based})",
-                        parse_mode="Markdown",
-                    )
-                else:
-                    await bot.send_message(
-                        cid,
-                        f"{format_mention_with_name_md(u)} is now OUT!",
-                        parse_mode="Markdown",
-                    )
 
         from handlers.lifecycle import _update_panel
         rc = manager.get_rollcall(cid, rc_number)
@@ -187,18 +193,24 @@ async def maybe_user(message):
         rc_title = result["rollcall"]["title"]
         rc_number_1based = result["rc_number_1based"]
 
+        # The voter's own change and any promotion it caused are two separate
+        # announcements, not an either/or. This was an if/else: whenever a vote
+        # freed a slot, the group was told who moved UP but never who moved
+        # out — the state change that caused it vanished. The panel buttons
+        # always got this right, so the same action announced differently
+        # depending on whether it came from a command or a tap.
+        if not manager.get_shh_mode(cid):
+            from models import User
+            u = User(display_name, username, user_id, [])
+            await bot.send_message(
+                cid,
+                f"{format_mention_with_name_md(u)} is now MAYBE!",
+                parse_mode="Markdown",
+            )
+
         if result["promoted"]:
             await announce_one(cid, result["promoted"], rc_title, rc_number_1based,
                                manager.get_rollcall(cid, rc_number))
-        else:
-            if not manager.get_shh_mode(cid):
-                from models import User
-                u = User(display_name, username, user_id, [])
-                await bot.send_message(
-                    cid,
-                    f"{format_mention_with_name_md(u)} is now MAYBE!",
-                    parse_mode="Markdown",
-                )
 
         from handlers.lifecycle import _update_panel
         rc = manager.get_rollcall(cid, rc_number)

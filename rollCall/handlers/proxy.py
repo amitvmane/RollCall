@@ -120,15 +120,18 @@ async def set_out_for(message):
         rc_title = result["rollcall"]["title"]
         rc_number_1based = result["rc_number_1based"]
 
+        # Two announcements, not an either/or — see the same note in
+        # handlers/voting.py. A proxy going OUT and freeing a slot used to
+        # announce only whoever moved up.
+        if not manager.get_shh_mode(cid):
+            if result["was_in"]:
+                await bot.send_message(cid, f"{proxy_name} → OUT for '{rc_title}' (#{rc_number_1based})")
+            else:
+                await bot.send_message(cid, f"{proxy_name} is now OUT!")
+
         if result["promoted"]:
             await announce_one(cid, result["promoted"], rc_title, rc_number_1based,
                                manager.get_rollcall(cid, rc_number))
-        else:
-            if not manager.get_shh_mode(cid):
-                if result["was_in"]:
-                    await bot.send_message(cid, f"{proxy_name} → OUT for '{rc_title}' (#{rc_number_1based})")
-                else:
-                    await bot.send_message(cid, f"{proxy_name} is now OUT!")
 
         from handlers.lifecycle import show_panel_for_rollcall
         await show_panel_for_rollcall(cid, rc_number_1based)
@@ -157,12 +160,15 @@ async def set_maybe_for(message):
         rc_title = result["rollcall"]["title"]
         rc_number_1based = result["rc_number_1based"]
 
+        # Two announcements, not an either/or — see the same note in
+        # handlers/voting.py. A proxy going OUT and freeing a slot used to
+        # announce only whoever moved up.
+        if not manager.get_shh_mode(cid):
+            await bot.send_message(cid, f"{proxy_name} is now MAYBE!")
+
         if result["promoted"]:
             await announce_one(cid, result["promoted"], rc_title, rc_number_1based,
                                manager.get_rollcall(cid, rc_number))
-        else:
-            if not manager.get_shh_mode(cid):
-                await bot.send_message(cid, f"{proxy_name} is now MAYBE!")
 
         from handlers.lifecycle import show_panel_for_rollcall
         await show_panel_for_rollcall(cid, rc_number_1based)

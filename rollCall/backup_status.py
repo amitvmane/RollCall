@@ -19,6 +19,10 @@ import time
 # missed cycle before complaining.
 BACKUP_MAX_AGE_HOURS = int(os.environ.get("BACKUP_MAX_AGE_HOURS", "48"))
 
+# Off-site sync runs hourly by default, so 6h rides out a few missed cycles
+# (a flaky network, a remote rate-limiting us) before it counts as broken.
+BACKUP_SYNC_MAX_AGE_HOURS = int(os.environ.get("BACKUP_SYNC_MAX_AGE_HOURS", "6"))
+
 
 def backup_freshness() -> dict:
     """Return {status, label, age_hours, newest}.
@@ -58,4 +62,54 @@ def backup_freshness() -> dict:
         "label": f"{'STALE' if stale else 'ok'}({age_h:.0f}h)",
         "age_hours": round(age_h, 1),
         "newest": newest,
+    }
+
+
+def remote_sync_freshness() -> dict:
+    """How long ago the off-site sync last SUCCEEDED. Same shape as backup_freshness().
+
+    Why this exists: the local snapshot check above answers "is a backup being
+    taken", and nothing answered "is it getting off this machine". The
+    backup-sync sidecar ran `rclone copy ... || true`, so a remote that had
+    been rejecting writes for weeks logged failures into a container nobody
+    reads and otherwise looked identical to one that was working — while
+    `make status` reported a green tick for the container merely being up.
+    That is the same silent-failure shape as the backup sidecar which sat dead
+    from 2026-08-03 to 2026-08-24, and it matters more, because this is the
+    copy that survives losing the machine.
+
+    The sidecar now writes a timestamp file only on a successful copy, so the
+    file's age is the real answer rather than the container's uptime.
+
+    status is one of:
+      OK       a successful copy within BACKUP_SYNC_MAX_AGE_HOURS
+      STALE    the last success is older than that — the remote is rejecting
+               writes, credentials expired, or the sidecar is not running
+      MISSING  a remote is configured but no copy has ever succeeded
+      NA       no RCLONE_REMOTE — off-site backup isn't set up, which is a
+               choice and not a fault, so it must not read as a problem
+    """
+    if not os.environ.get("RCLONE_REMOTE", "").strip():
+        return {"status": "NA", "label": "n/a(unset)", "age_hours": None, "at": None}
+
+    state_dir = os.environ.get("BACKUP_SYNC_STATE_DIR") or "/app/data/sync-state"
+    stamp = os.path.join(state_dir, "last-success")
+    try:
+        mtime = os.path.getmtime(stamp)
+    except OSError:
+        return {"status": "MISSING", "label": "MISSING(never)", "age_hours": None, "at": None}
+
+    age_h = (time.time() - mtime) / 3600.0
+    stale = age_h >= BACKUP_SYNC_MAX_AGE_HOURS
+    at = None
+    try:
+        with open(stamp) as fh:
+            at = fh.read().strip()[:32] or None
+    except OSError:
+        pass
+    return {
+        "status": "STALE" if stale else "OK",
+        "label": f"{'STALE' if stale else 'ok'}({age_h:.0f}h)",
+        "age_hours": round(age_h, 1),
+        "at": at,
     }

@@ -643,6 +643,14 @@ async def phase_remaining_surface():
     # assert the real value, not merely that the line is present.
     record("/health reports uptime", any("Uptime:" in str(m) for m in out),
            f"got: {str(out)[:200]}")
+    # The off-site line is the one that answers "would we survive losing this
+    # machine". With no RCLONE_REMOTE set here it must read as not-configured
+    # rather than as a fault — an operator who hasn't opted in isn't broken.
+    record("/health reports the off-site copy", any("Off-site" in str(m) for m in out),
+           f"got: {str(out)[:240]}")
+    record("/health calls an unconfigured off-site 'not configured', not a failure",
+           any("Off-site: not configured" in str(m) for m in out),
+           f"got: {str(out)[:240]}")
     record("/health uptime is a real measurement, not the fallback",
            not any("Uptime: unavailable" in str(m) for m in out),
            f"got: {str(out)[:200]}")

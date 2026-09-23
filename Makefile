@@ -300,10 +300,12 @@ status: ## Show container status + external service reachability
 	@printf "  off-site:  "; \
 	if [ -z "$(call _env,RCLONE_REMOTE)" ]; then \
 	  echo "⚠️   not configured — everything lives on this one disk (make backup-remote)"; \
-	elif [ -n "$$(docker ps -q -f name=rollcall-backup-sync -f status=running)" ]; then \
-	  echo "✅  syncing to $(call _env,RCLONE_REMOTE)  (verify: make backup-remote-ls)"; \
-	else \
+	elif [ -z "$$(docker ps -q -f name=rollcall-backup-sync -f status=running)" ]; then \
 	  echo "❌  RCLONE_REMOTE is set but rollcall-backup-sync is NOT running — run: make up"; \
+	elif [ ! -f "$(DATA_DIR)/sync-state/last-success" ]; then \
+	  echo "❌  sidecar is running but NO copy has ever succeeded — make backup-remote-logs"; \
+	else \
+	  echo "✅  last successful copy $$(cat $(DATA_DIR)/sync-state/last-success) → $(call _env,RCLONE_REMOTE)"; \
 	fi
 	@echo ""
 

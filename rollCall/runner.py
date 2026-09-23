@@ -12,7 +12,7 @@ import time
 from datetime import datetime, timezone
 
 from db import init_db, db_ping
-from backup_status import backup_freshness
+from backup_status import backup_freshness, remote_sync_freshness
 from aiohttp import web
 
 
@@ -290,6 +290,15 @@ async def health_check(request):
     if backup_state["status"] in ("STALE", "MISSING"):
         problems.append(f"backup_{backup_state['status'].lower()}")
 
+    # Off-site copy. Like the local backup signal it is reported but never
+    # made a 503 — the bot is serving fine, and restarting it fixes nothing
+    # about a remote that is rejecting writes. NA (no RCLONE_REMOTE) is not a
+    # problem: off-site backup is a choice, and an operator who hasn't made it
+    # should not be shown a fault they didn't cause.
+    remote_state = remote_sync_freshness()
+    if remote_state["status"] in ("STALE", "MISSING"):
+        problems.append(f"offsite_{remote_state['status'].lower()}")
+
     from check_reminders import _active_loops
     scheduler_ok = _task_alive(_health_state["scheduler_task"])
     prune_ok = _task_alive(_health_state["prune_task"])
@@ -320,7 +329,8 @@ async def health_check(request):
         f"bot={bot_status} db={'ok' if db_ok else 'FAIL'}{pool_part} "
         f"scheduler={'ok' if scheduler_ok else 'DEAD'} "
         f"prune={'ok' if prune_ok else 'DEAD'} "
-        f"backup={backup_state['label']}"
+        f"backup={backup_state['label']} "
+        f"offsite={remote_state['label']}"
         f"{up_part} "
         f"chats={cache_size} reminder_loops={len(_active_loops)}"
     )

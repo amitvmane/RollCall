@@ -430,7 +430,8 @@ async def health_command(message):
     cid = message.chat.id
     try:
         import db as _db
-        from backup_status import backup_freshness, BACKUP_MAX_AGE_HOURS
+        from backup_status import (backup_freshness, remote_sync_freshness,
+                                   BACKUP_MAX_AGE_HOURS, BACKUP_SYNC_MAX_AGE_HOURS)
 
         db_ok = _db.db_ping()
         b = backup_freshness()
@@ -449,10 +450,32 @@ async def health_command(message):
         else:
             backup_line = f"{icon} Backup: not applicable ({b['label']})"
 
+        # Off-site copy — the one that survives losing the machine. Reported
+        # next to the local snapshot because "a backup exists" and "a backup
+        # exists somewhere else" are different questions, and only the second
+        # one helps the day the disk does not come back.
+        r = remote_sync_freshness()
+        if r["status"] == "OK":
+            offsite_line = f"✅ Off-site: synced {r['age_hours']}h ago"
+        elif r["status"] == "STALE":
+            offsite_line = (
+                f"🔴 *Off-site sync STALE* — last success {r['age_hours']}h ago "
+                f"(limit {BACKUP_SYNC_MAX_AGE_HOURS}h)\n"
+                f"   The remote is rejecting copies, or the sync sidecar stopped."
+            )
+        elif r["status"] == "MISSING":
+            offsite_line = (
+                "🔴 *Off-site sync has never succeeded* — a remote is configured "
+                "but no copy has landed."
+            )
+        else:
+            offsite_line = "➖ Off-site: not configured (`make backup-remote`)"
+
         lines = [
             "*Bot health*",
             f"{'✅' if db_ok else '🔴'} Database: {'ok' if db_ok else 'FAILING'}",
             backup_line,
+            offsite_line,
         ]
         lines.extend(_uptime_lines())
         await bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")

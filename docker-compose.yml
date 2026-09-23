@@ -91,6 +91,14 @@ services:
       - WATCHDOG_CHAT_ID=${WATCHDOG_CHAT_ID:-}
       - DOWNTIME_MIN_MINUTES=${DOWNTIME_MIN_MINUTES:-5}
 
+      # Off-site backup sync. The bot doesn't do the syncing — it only reports
+      # on it: RCLONE_REMOTE tells it whether one is meant to be running at
+      # all (unset = nothing to report, not a fault), and the stamp directory
+      # is where the backup-sync sidecar records its last successful copy.
+      - RCLONE_REMOTE=${RCLONE_REMOTE:-}
+      - BACKUP_SYNC_STATE_DIR=${BACKUP_SYNC_STATE_DIR:-/app/data/sync-state}
+      - BACKUP_SYNC_MAX_AGE_HOURS=${BACKUP_SYNC_MAX_AGE_HOURS:-6}
+
       # Database Configuration (SQLite with persistent volume)
       - DATABASE_URL=${DATABASE_URL:-sqlite:////app/data/rollcall.db}
       - TZ=${TZ:-Asia/Kolkata}
@@ -280,14 +288,29 @@ services:
       - ${DATA_DIR:-../rollcall-data}/backups:/backups:ro
       # Host rclone config (must already be configured via `rclone config`)
       - ${RCLONE_CONFIG_PATH:-~/.config/rclone}:/config/rclone:ro
+      # Writable stamp directory. /backups stays read-only — this sidecar must
+      # never be able to modify the snapshots it is shipping — so the
+      # "last successful copy" marker needs somewhere of its own.
+      - ${DATA_DIR:-../rollcall-data}/sync-state:/state
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
         while true; do
           echo "$$(date -u +%Y-%m-%dT%H:%M:%SZ) rclone copy /backups $${RCLONE_REMOTE}"
-          rclone copy /backups "$${RCLONE_REMOTE}" \
-            --config /config/rclone/rclone.conf \
-            --log-level INFO || true
+          if rclone copy /backups "$${RCLONE_REMOTE}" \
+               --config /config/rclone/rclone.conf \
+               --log-level INFO; then
+            # Touch a stamp ONLY on success. `|| true` used to swallow every
+            # failure here, so a remote that had been rejecting writes for
+            # weeks looked exactly like one that was working — the same
+            # silent-failure shape as the backup sidecar that sat dead for
+            # three weeks in Aug 2026. The bot reads this file's age and
+            # reports it through /health, so a broken sync now surfaces
+            # wherever the other backup signal already does.
+            date -u +%Y-%m-%dT%H:%M:%SZ > /state/last-success
+          else
+            echo "$$(date -u +%Y-%m-%dT%H:%M:%SZ) rclone copy FAILED — stamp not updated"
+          fi
           sleep "$${BACKUP_SYNC_INTERVAL_SECONDS:-3600}"
         done
     logging:

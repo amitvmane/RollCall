@@ -1104,6 +1104,12 @@ def _run_migrations(conn, cursor):
     # earliest grant in each chat (the person who first ran /weblink, which in
     # practice is whoever set the group up). Scoped to chats with no owner, so
     # it is idempotent and never demotes or overrides a real decision.
+    #
+    # DO NOT DELETE THIS AS A SPENT MIGRATION. It runs on every boot, and that
+    # is load-bearing: it is the only thing that repairs a chat which has
+    # reached zero owners by any route, and an ownerless chat cannot be fixed
+    # from inside the app because only owners may promote. It reads like a
+    # one-time backfill and is really a standing repair.
     try:
         cursor.execute(
             """SELECT chat_id, MIN(id) AS first_id FROM web_admins
@@ -5487,17 +5493,34 @@ def get_push_subscriptions(group_token: str) -> List[Dict]:
         return []
 
 
-def delete_push_subscription(endpoint: str) -> None:
-    """Mark a push subscription inactive (expired or unsubscribed)."""
+def delete_push_subscription(endpoint: str, group_token: Optional[str] = None) -> bool:
+    """Mark a push subscription inactive. Returns whether a row matched.
+
+    `group_token` scopes the change to one group's subscriptions. Pass it for
+    anything a request can reach: the unsubscribe endpoint is unauthenticated
+    (a browser that has revoked its push permission must be able to clean up
+    without a valid login), so the group token in the URL is the only thing
+    bounding what the caller may touch — and without it in the WHERE clause,
+    any group's public link could cancel a subscription belonging to a
+    different group.
+
+    Omit it only for server-initiated pruning, where the push provider has
+    told us the endpoint is gone and it is dead in every group at once.
+    """
     try:
         with _cursor(commit=True) as cursor:
             ph = '%s' if db_type == 'postgresql' else '?'
-            cursor.execute(
-                f"UPDATE push_subscriptions SET active = {'FALSE' if db_type == 'postgresql' else '0'} WHERE endpoint = {ph}",
-                (endpoint,)
-            )
+            false_val = 'FALSE' if db_type == 'postgresql' else '0'
+            sql = f"UPDATE push_subscriptions SET active = {false_val} WHERE endpoint = {ph}"
+            params = [endpoint]
+            if group_token is not None:
+                sql += f" AND group_token = {ph}"
+                params.append(group_token)
+            cursor.execute(sql, tuple(params))
+            return cursor.rowcount > 0
     except Exception:
         logging.exception("delete_push_subscription failed")
+        return False
 
 
 def create_web_verify_token(code: str, expires_at: "datetime") -> None:

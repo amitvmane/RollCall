@@ -46,6 +46,67 @@ def _ts() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _resolve_close_time(chat_id: int, event_day, event_time, finalize_at):
+    """Work out a rollcall's closing time, or refuse to guess.
+
+    Returns (tzname, finalize_datetime); either may be None when the caller
+    asked for no closing time at all, which is a valid open-ended rollcall.
+
+    Raises incorrectParameter when a closing time WAS supplied and could not
+    be read. It used to be skipped silently, which produced a rollcall that
+    opened, looked completely normal in every list and panel, and then never
+    closed — no reminders, no auto-close, nothing until somebody noticed days
+    later and ran /erc by hand. That is the same symptom as the 10.4
+    template-offset bug, and expensive for the same reason: nothing is visible
+    at the moment it happens.
+
+    Separate from start_rollcall so it runs before the rollcall exists — see
+    the call site.
+    """
+    # Half a weekly slot is not a weekly slot. Without this the pair just
+    # failed the `and` below and the whole block was skipped, so "close it
+    # every Friday" sent without a time produced exactly the silent
+    # never-closing rollcall described above.
+    if not finalize_at and bool(event_day) != bool(event_time):
+        raise incorrectParameter(
+            "A weekly closing slot needs both a day and a time — "
+            f"got {'a day but no time' if event_day else 'a time but no day'}. "
+            "e.g. Friday 18:30."
+        )
+
+    if not (finalize_at or (event_day and event_time)):
+        return None, None
+
+    tzname = manager.get_chat(chat_id).get("timezone", "Asia/Kolkata")
+    try:
+        tz = pytz.timezone(tzname)
+    except Exception:
+        tz = pytz.timezone("Asia/Kolkata")
+        tzname = "Asia/Kolkata"
+
+    # finalize_at wins over event_day/event_time: an exact one-off is more
+    # specific than "next Xday". Documented in start_rollcall's docstring.
+    if finalize_at:
+        try:
+            dt = datetime.fromisoformat(finalize_at.replace("Z", "+00:00"))
+        except (ValueError, AttributeError, TypeError):
+            raise incorrectParameter(
+                f"Couldn't read '{finalize_at}' as a closing time. "
+                "Expected an ISO 8601 datetime, e.g. 2026-10-01T18:30:00Z."
+            )
+        if dt.tzinfo is None:
+            dt = pytz.utc.localize(dt)
+        return tzname, dt.astimezone(tz)
+
+    dt = get_next_weekday_datetime(tz, event_day, event_time)
+    if dt is None:
+        raise incorrectParameter(
+            f"Couldn't read '{event_day} {event_time}' as a closing time. "
+            "Expected a weekday name and a 24-hour HH:MM, e.g. Friday 18:30."
+        )
+    return tzname, dt
+
+
 async def start_rollcall(
     chat_id: int,
     title: str | None,
@@ -87,6 +148,12 @@ async def start_rollcall(
     Raises:
       amountOfRollCallsReached — if chat already has MAX_ROLLCALLS_PER_CHAT
                                   active rollcalls.
+      incorrectParameter       — if a closing time WAS supplied (finalize_at,
+                                  or event_day+event_time) but could not be
+                                  parsed. Supplying none at all is valid and
+                                  creates an open-ended rollcall; what is
+                                  refused is asking for a close time we then
+                                  silently fail to set.
 
     NOTE: This service does NOT enforce admin permissions. Adapters must
     check chat-admin status with platform-specific APIs before calling
@@ -100,6 +167,12 @@ async def start_rollcall(
             f"Allowed Maximum number of active roll calls per group is {MAX_ROLLCALLS_PER_CHAT}."
         )
 
+    # Resolve the closing time BEFORE anything is created. manager.add_rollcall
+    # writes a row and appends to the chat cache, so raising after it would
+    # leave a phantom rollcall behind — open-ended, visible in /rollcalls, and
+    # never closing: precisely the state these checks exist to prevent.
+    tzname, finalize_dt = _resolve_close_time(chat_id, event_day, event_time, finalize_at)
+
     clean_title = (title or "").strip() or "<Empty>"
     rc_index = len(rollcalls)
     rc = manager.add_rollcall(chat_id, clean_title)
@@ -110,28 +183,10 @@ async def start_rollcall(
         rc.location = location
     if fee:
         rc.event_fee = fee
-
-    if finalize_at or (event_day and event_time):
-        chat = manager.get_chat(chat_id)
-        tzname = chat.get("timezone", "Asia/Kolkata")
-        try:
-            tz = pytz.timezone(tzname)
-        except Exception:
-            tz = pytz.timezone("Asia/Kolkata")
-            tzname = "Asia/Kolkata"
+    if tzname:
         rc.timezone = tzname
-        if finalize_at:
-            try:
-                dt = datetime.fromisoformat(finalize_at.replace("Z", "+00:00"))
-                if dt.tzinfo is None:
-                    dt = pytz.utc.localize(dt)
-                rc.finalizeDate = dt.astimezone(tz)
-            except ValueError:
-                pass
-        else:
-            dt = get_next_weekday_datetime(tz, event_day, event_time)
-            if dt:
-                rc.finalizeDate = dt
+    if finalize_dt:
+        rc.finalizeDate = finalize_dt
 
     rc.save()
 

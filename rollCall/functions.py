@@ -178,6 +178,13 @@ def get_next_weekday_datetime(tz, target_day: str, target_time: str):
     now = datetime.now(tz)
     try:
         hour, minute = map(int, target_time.split(":"))
+        # Range-check by constructing the value, not by hand: "25:99" parses
+        # as two perfectly good ints and only blows up later, inside the
+        # datetime() call below — where it escaped as a raw ValueError and
+        # surfaced as a 500. This function's contract is "None if it can't be
+        # read as a weekday+time", so an out-of-range time is a None like any
+        # other unreadable input.
+        datetime(2000, 1, 1, hour, minute)
     except ValueError:
         return None
 

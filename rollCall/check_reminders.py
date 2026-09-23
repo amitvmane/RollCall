@@ -947,6 +947,15 @@ async def check_template_schedules():
 
     global _last_group_name_refresh
     while True:
+        # Liveness stamp, first thing in the tick. Read back on the next boot
+        # to work out how long the bot was gone — the only record that
+        # survives an outage that took the watchdog down with it.
+        try:
+            import uptime as _uptime
+            _uptime.beat()
+        except Exception:
+            logging.exception("Error writing uptime heartbeat")
+
         # Fire any one-shot web-scheduled rollcalls whose time has passed.
         try:
             await _fire_scheduled_rollcalls()

@@ -381,6 +381,42 @@ async def unset_admins(message):
         await reply_error(message, e)
 
 
+def _uptime_lines() -> list:
+    """Uptime, last outage, and trailing availability — for /health.
+
+    Every other line in /health answers "is this alive right now". These
+    answer "and how much of the time has it been", which is the one question
+    the bot could never be asked before: an outage that also took the watchdog
+    down used to leave no record anywhere.
+
+    Best-effort by design — a health report must still render when the thing
+    reporting on health is itself the broken part.
+    """
+    try:
+        import uptime as _uptime
+
+        out = [f"⏱ Uptime: {_uptime.format_duration(_uptime.uptime_seconds())}"]
+
+        gap = _uptime.boot_gap()
+        if gap:
+            out.append(
+                f"🔌 Last downtime: {_uptime.format_duration(gap['sec'])} "
+                f"(before this restart)"
+            )
+
+        s = _uptime.summary()
+        if s["availability"] is not None and s["window_sec"] > 3600:
+            window = _uptime.format_duration(s["window_sec"])
+            out.append(
+                f"📈 {s['availability']:.2f}% up over the last {window} — "
+                f"{s['outages']} outage(s), {_uptime.format_duration(s['downtime_sec'])} down"
+            )
+        return out
+    except Exception:
+        logging.exception("[health] uptime block failed")
+        return ["⏱ Uptime: unavailable"]
+
+
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/health" and message.from_user.id in ADMINS)
 async def health_command(message):
     """Bot/DB/backup status, from Telegram.
@@ -418,6 +454,7 @@ async def health_command(message):
             f"{'✅' if db_ok else '🔴'} Database: {'ok' if db_ok else 'FAILING'}",
             backup_line,
         ]
+        lines.extend(_uptime_lines())
         await bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
     except Exception as e:
         await reply_error(message, e)

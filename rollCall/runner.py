@@ -307,11 +307,21 @@ async def health_check(request):
         f" pool={pool_stats['in_use']}/{pool_stats['max']}(peak={pool_stats['high_water']})"
         if pool_stats else ""
     )
+    # Uptime/downtime. Deliberately never a `problem`: being back up after an
+    # outage is good news, and a 503 here would make Docker restart the bot
+    # for having once been down — which is both useless and self-perpetuating.
+    import uptime as _uptime
+    up_part = f" up={_uptime.format_duration(_uptime.uptime_seconds()).replace(' ', '')}"
+    _gap = _uptime.boot_gap()
+    if _gap:
+        up_part += f" last_downtime={_uptime.format_duration(_gap['sec']).replace(' ', '')}"
+
     status_text = (
         f"bot={bot_status} db={'ok' if db_ok else 'FAIL'}{pool_part} "
         f"scheduler={'ok' if scheduler_ok else 'DEAD'} "
         f"prune={'ok' if prune_ok else 'DEAD'} "
-        f"backup={backup_state['label']} "
+        f"backup={backup_state['label']}"
+        f"{up_part} "
         f"chats={cache_size} reminder_loops={len(_active_loops)}"
     )
     if last_err:
@@ -579,12 +589,69 @@ async def memory_prune_loop(interval_seconds: int = 600):
         await asyncio.sleep(interval_seconds)
 
 
+async def _announce_downtime() -> None:
+    """DM the operator how long the bot was down, once Telegram is back.
+
+    Deliberately sent from here rather than at boot: the common reason for a
+    long gap is that the network was down, in which case a message sent at
+    boot goes nowhere and the outage is never reported at all. This runs on
+    both paths into a live connection — the clean start and the reconnect
+    after _telegram_retry_loop() — so "we're back, and here's the damage"
+    lands the moment there is a wire to send it on.
+
+    Routine restarts are filtered out by DOWNTIME_MIN_MINUTES in uptime.py,
+    not here: a deploy must not page anyone, or real outages stop being read.
+    """
+    try:
+        import uptime as _uptime
+        gap = _uptime.boot_gap()
+        if not gap or not gap.get("announce"):
+            return
+
+        target = os.environ.get("WATCHDOG_CHAT_ID", "").strip() or (
+            str(ADMINS[0]) if ADMINS else ""
+        )
+        if not target:
+            logger.info("⏱  Downtime not announced — no WATCHDOG_CHAT_ID or ADMIN1 set")
+            return
+
+        import pytz
+        tz = pytz.timezone(os.environ.get("TZ", "Asia/Kolkata"))
+        fmt = "%Y-%m-%d %H:%M %Z"
+        went = datetime.fromtimestamp(gap["from"], tz).strftime(fmt)
+        back = datetime.fromtimestamp(gap["to"], tz).strftime(fmt)
+        s = _uptime.summary()
+
+        lines = [
+            f"✅ RollCall is back — down for about {_uptime.format_duration(gap['sec'])}.",
+            "",
+            f"Last seen alive: {went}",
+            f"Back up:         {back}",
+        ]
+        if s["availability"] is not None:
+            lines.append(
+                f"\nLast {s['days']}d: {s['availability']:.2f}% up, "
+                f"{s['outages']} outage(s), "
+                f"{_uptime.format_duration(s['downtime_sec'])} total down."
+            )
+        await bot.send_message(int(target), "\n".join(lines),
+                               disable_web_page_preview=True)
+        logger.info(f"⏱  Downtime announced to {target}: {gap['sec']}s")
+    except Exception:
+        # A failed announcement must never stop the bot coming back up — the
+        # gap is already durably in the downtime log, and /health still shows
+        # it. Logging is the whole recovery path here.
+        logger.exception("⚠️  Could not announce downtime")
+
+
 async def _post_connect_setup(me) -> None:
     """Register commands and wire Mini App button after a successful Telegram connection."""
     try:
         await register_commands()
     except Exception as e:
         logger.warning(f"⚠️  Failed to register bot commands: {e}")
+
+    await _announce_downtime()
 
     if _rest_api_enabled():
         _miniapp_url = os.environ.get("MINIAPP_URL", "").strip()
@@ -717,6 +784,22 @@ async def main():
     except Exception as e:
         logger.error(f"❌ Database verification failed: {e}")
         sys.exit(1)
+
+    # How long were we gone? The heartbeat stamp is in the database, so this
+    # is the first point it can be read. Runs before anything that can block
+    # (Telegram, backfills) so the measured gap is the outage, not our own
+    # startup work. Announcing it needs Telegram, which may still be the
+    # thing that is down — that happens later, in _post_connect_setup().
+    try:
+        import uptime as _uptime
+        _gap = _uptime.record_boot_gap()
+        if _gap:
+            logger.info(
+                f"⏱  Previous run last seen {_uptime.format_duration(_gap['sec'])} ago "
+                f"— downtime {'will be announced' if _gap['announce'] else 'below alert threshold'}"
+            )
+    except Exception:
+        logger.exception("⚠️  Could not measure downtime — continuing")
 
     # Give every Telegram user this app already knows an app-local principal.
     # Without this the backfill never runs and principals exist only for people

@@ -82,6 +82,15 @@ services:
       - ENVIRONMENT=${ENVIRONMENT:-production}
       - STRUCTURED_LOGS=${STRUCTURED_LOGS:-}
 
+      # Downtime reporting. The bot stamps a heartbeat every minute and, on
+      # the next boot, works out how long it was gone — then DMs this chat
+      # once Telegram is reachable again. Same target as the watchdog on
+      # purpose: outage news belongs in one place. A gap shorter than
+      # DOWNTIME_MIN_MINUTES is still logged but never announced, so a
+      # `make build` deploy stays silent.
+      - WATCHDOG_CHAT_ID=${WATCHDOG_CHAT_ID:-}
+      - DOWNTIME_MIN_MINUTES=${DOWNTIME_MIN_MINUTES:-5}
+
       # Database Configuration (SQLite with persistent volume)
       - DATABASE_URL=${DATABASE_URL:-sqlite:////app/data/rollcall.db}
       - TZ=${TZ:-Asia/Kolkata}

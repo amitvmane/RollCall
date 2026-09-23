@@ -636,6 +636,16 @@ async def phase_remaining_surface():
     # would look fine while hiding exactly the signal it was added to surface.
     record("/health reports backup status", any("Backup" in str(m) or "backup" in str(m) for m in out),
            f"got: {str(out)[:160]}")
+    # Uptime is the other half: /health answers "is everything alive right
+    # now", and this line is the only one that answers "and how much of the
+    # time has it been". It is built from a database read, so a broken
+    # heartbeat would degrade to the string below rather than raising —
+    # assert the real value, not merely that the line is present.
+    record("/health reports uptime", any("Uptime:" in str(m) for m in out),
+           f"got: {str(out)[:200]}")
+    record("/health uptime is a real measurement, not the fallback",
+           not any("Uptime: unavailable" in str(m) for m in out),
+           f"got: {str(out)[:200]}")
     # And it must stay owner-only: it names file paths and infrastructure state.
     out_nonadmin = await feed("/health", BOB)
     record("/health is silent for non-owners", not out_nonadmin,

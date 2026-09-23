@@ -50,7 +50,7 @@ def main():
     commit_msg = os.environ.get("COMMIT_MSG", "").strip()
     description = _clean_commit_msg(commit_msg) if commit_msg else "Maintenance update"
 
-    with open(VERSION_FILE, "r") as f:
+    with open(VERSION_FILE, "r", encoding="utf-8") as f:
         versions = json.load(f)
 
     latest_version = max(float(v["Version"]) for v in versions)
@@ -68,8 +68,13 @@ def main():
 
     versions.append(new_entry)
 
-    with open(VERSION_FILE, "w") as f:
-        json.dump(versions, f, indent=4)
+    # ensure_ascii=False matches how version.json is actually stored — the
+    # changelog is full of em-dashes and emoji, and escaping them here would
+    # rewrite all 58 existing entries as \uXXXX, burying a one-entry bump in a
+    # 350-line diff. Reading the file back and re-dumping it this way is
+    # byte-identical; with the default it is not.
+    with open(VERSION_FILE, "w", encoding="utf-8") as f:
+        json.dump(versions, f, indent=4, ensure_ascii=False)
         f.write("\n")
 
     print(f"Bumped version {latest_version} → {new_version}: {description}")

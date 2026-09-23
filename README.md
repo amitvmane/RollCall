@@ -168,6 +168,7 @@ variables:
 | `WATCHDOG_INTERVAL_SECONDS` | No | Watchdog `/health` poll cadence (default: `300`) |
 | `WATCHDOG_FAILURES_BEFORE_ALERT` | No | Consecutive bad polls before alerting (default: `3`) |
 | `WATCHDOG_REPEAT_HOURS` | No | Re-alert cadence while still broken (default: `12`) |
+| `DOWNTIME_MIN_MINUTES` | No | How long a gap must be before the bot announces it on recovery (default: `5`). Shorter gaps are still recorded and shown in `/health`, they just don't ping you — so a routine redeploy stays quiet |
 | `API_DOCS_ENABLED` | No | `true` to serve `/api/docs`, `/api/redoc` and the OpenAPI schema. **Off by default** — they're unauthenticated and rate-limit-exempt, so on a publicly reachable deployment they hand any visitor a full map of every endpoint |
 | `REST_API_HOST` | No | Bind address for the REST API (default: `127.0.0.1`) |
 | `WEBHOOK_SECRET_TOKEN` | No | Auto-generated when `WEBHOOK_URL` is set — verifies `/webhook` POSTs really came from Telegram |

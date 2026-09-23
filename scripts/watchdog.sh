@@ -56,9 +56,34 @@ notify() {
     || echo "[watchdog] failed to deliver alert (Telegram unreachable from watchdog)"
 }
 
+# Seconds -> "3h 12m" / "2d 4h" / "45s". Two units is always enough, and the
+# alert is read on a phone.
+human_duration() {
+  s=$1
+  if [ "$s" -lt 60 ]; then echo "${s}s"; return; fi
+  m=$(( s / 60 ))
+  if [ "$m" -lt 60 ]; then echo "${m}m"; return; fi
+  h=$(( m / 60 )); m=$(( m % 60 ))
+  if [ "$h" -lt 24 ]; then
+    if [ "$m" -eq 0 ]; then echo "${h}h"; else echo "${h}h ${m}m"; fi
+    return
+  fi
+  d=$(( h / 24 )); h=$(( h % 24 ))
+  if [ "$h" -eq 0 ]; then echo "${d}d"; else echo "${d}d ${h}h"; fi
+}
+
 consecutive_failures=0
 last_state="OK"
 last_alert_at=0
+# When the current run of bad polls began — the basis for the downtime figure
+# in the recovery message. 0 means "not currently down".
+#
+# This is the watchdog's OWN view, bounded by its poll interval and lost if
+# this container restarts. The bot keeps an independent, durable measurement
+# in its database (see rollCall/uptime.py) and reports that when it reconnects
+# — which is the one that survives an outage that took this container down
+# too. Two observers on purpose: neither one can see every kind of outage.
+first_failure_at=0
 
 echo "[watchdog] started — polling ${HEALTH_URL} every ${INTERVAL}s, alerting chat ${CHAT_ID}"
 notify "🐕 RollCall watchdog started — monitoring $(echo "$HEALTH_URL" | sed 's#http://##'). You'll get a message here if the bot stops responding or reports a problem."
@@ -87,15 +112,34 @@ while true; do
 
   if [ "$state" = "OK" ]; then
     if [ "$last_state" != "OK" ]; then
+      # Down for at least (now - first bad poll). "at least" because the bot
+      # can have failed at any point in the interval before that poll, and
+      # recovered at any point in the one before this — both ends are fuzzy
+      # by up to INTERVAL seconds, so never claim more precision than that.
+      # first_failure_at is always set here: last_state only leaves "OK" in
+      # the failure branch below, which stamps it.
+      down_for=$(( now - first_failure_at ))
+      # GNU date in the bot image; the -r form is the BSD fallback for anyone
+      # running this script directly on a Mac.
+      went_at="$(date -d "@${first_failure_at}" '+%H:%M' 2>/dev/null \
+                 || date -r "${first_failure_at}" '+%H:%M' 2>/dev/null \
+                 || echo '?')"
       notify "✅ RollCall recovered — $(date '+%Y-%m-%d %H:%M %Z')
+
+Down for about $(human_duration "$down_for") — first bad check at ${went_at}, ±$(human_duration "$INTERVAL") either side.
+
 ${detail}"
-      echo "[watchdog] recovered: ${detail}"
+      echo "[watchdog] recovered after ${down_for}s: ${detail}"
     fi
     consecutive_failures=0
     last_state="OK"
     last_alert_at=0
+    first_failure_at=0
   else
     consecutive_failures=$(( consecutive_failures + 1 ))
+    if [ "$first_failure_at" -eq 0 ]; then
+      first_failure_at="$now"
+    fi
     # Alert on the Nth consecutive bad poll, then re-nag on the repeat cadence.
     # Both conditions are needed: the first stops a routine restart from paging
     # anyone, the second stops a real outage from being announced once at 3am
@@ -113,7 +157,7 @@ ${detail}"
 
 ${detail}
 
-Failed ${consecutive_failures} check(s) in a row.
+Failed ${consecutive_failures} check(s) in a row, over $(human_duration $(( now - first_failure_at ))).
 On the server: make status && make logs"
       last_alert_at="$now"
       echo "[watchdog] ALERT (${state}, ${consecutive_failures} consecutive): ${detail}"

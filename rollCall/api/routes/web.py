@@ -131,7 +131,13 @@ async def push_unsubscribe(
     chat = _db.get_chat_by_group_web_token(group_token)
     if not chat:
         raise HTTPException(404, "Invalid group token")
-    push_svc.unsubscribe(body.endpoint)
+    # Scoped to the group whose page this request came from. Unauthenticated
+    # is deliberate — a browser that has revoked its push permission should be
+    # able to clean up without a valid login — but that makes the group token
+    # the only bound on what it can cancel, so it has to reach the WHERE
+    # clause. It previously deleted by endpoint alone, which let any group's
+    # public link unsubscribe an endpoint belonging to a different group.
+    push_svc.unsubscribe(body.endpoint, group_token)
 
 
 @router.get(
@@ -181,11 +187,21 @@ async def group_manifest(
     summary="Record viewer heartbeat (no auth) — increments view count on first visit",
 )
 async def web_group_heartbeat(
+    request: Request,
     body: WebHeartbeatRequest,
     group_token: str = Path(..., description="Permanent group token"),
 ) -> None:
-    is_new = presence_svc.heartbeat(group_token, body.session_id)
-    if is_new:
+    # The view counter is keyed on the caller's address, not on body.session_id.
+    # It increments a number that is persistent and shown on the group page,
+    # and this route is unauthenticated — so gating it on a value the client
+    # chooses meant anyone could POST fresh UUIDs and move that number at will.
+    # session_id still drives the live "viewers now" count, where a per-tab id
+    # is exactly what's wanted and nothing durable is at stake.
+    #
+    # uvicorn runs with proxy_headers=True, so request.client is the real
+    # visitor rather than the proxy (see TRUSTED_PROXY_IPS).
+    viewer_key = request.client.host if request.client else None
+    if presence_svc.heartbeat(group_token, body.session_id, viewer_key=viewer_key):
         _db.increment_group_view_count(group_token)
 
 
@@ -1413,15 +1429,23 @@ async def web_set_admin_role(
 
     from services import admin as admin_svc
     from exceptions import insufficientPermissions, incorrectParameter
+    from rollcall_manager import manager as _mgr
     try:
-        if body.role == "owner":
-            admin_svc.promote_to_owner(chat_id, body.tg_user_id,
-                                       actor_user_id=actor_user_id, actor_name=actor_name)
-        elif body.role == "admin":
-            admin_svc.demote_to_admin(chat_id, body.tg_user_id,
-                                      actor_user_id=actor_user_id, actor_name=actor_name)
-        else:
-            raise HTTPException(status_code=422, detail="role must be 'owner' or 'admin'")
+        # Serialised, because the last-owner guard is a read followed by a
+        # write in a separate transaction. Two demotions arriving together at
+        # a chat with exactly two owners would both read 2, both pass, and
+        # both write — leaving nobody who can administer the group. The chat
+        # write lock is how every other multi-step mutation here is made
+        # atomic, so this uses it rather than inventing a second mechanism.
+        async with _mgr.get_chat_write_lock(chat_id):
+            if body.role == "owner":
+                admin_svc.promote_to_owner(chat_id, body.tg_user_id,
+                                           actor_user_id=actor_user_id, actor_name=actor_name)
+            elif body.role == "admin":
+                admin_svc.demote_to_admin(chat_id, body.tg_user_id,
+                                          actor_user_id=actor_user_id, actor_name=actor_name)
+            else:
+                raise HTTPException(status_code=422, detail="role must be 'owner' or 'admin'")
     except insufficientPermissions as e:
         # 403 rather than 500: "you're not an owner" and "that's the last
         # owner" are both answers, not failures.

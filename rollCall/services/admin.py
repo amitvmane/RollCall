@@ -284,6 +284,36 @@ def demote_to_admin(chat_id: int, target_user_id: int, *,
     return {"user_id": target_user_id, "role": "admin"}
 
 
+def revoke_admin(chat_id: int, target_user_id: int) -> bool:
+    """Drop a grant entirely. Returns whether anything was removed.
+
+    Called when a live Telegram re-check finds someone is no longer an admin,
+    so it is not an operator action and takes no actor — but it still has to
+    respect the one rule the whole module exists for: **never leave a chat
+    without an owner.** `demote_to_admin` refuses that; deleting the row is
+    the same outcome by a different route, and went straight to the database
+    without consulting it.
+
+    A chat whose only owner loses Telegram admin therefore KEEPS the grant.
+    That is the deliberate choice between two imperfect states: a stale grant
+    can be corrected by anyone with standing, an ownerless chat cannot be
+    corrected by anyone at all. Harmless while admin_source is 'platform'
+    everywhere — Telegram is still consulted, so the stale row grants nothing
+    on its own — and it is the difference between a working group and an
+    unrecoverable one the day a chat switches to 'local'.
+    """
+    if db.get_web_admin_role(chat_id, target_user_id) == "owner" \
+            and db.count_web_admin_owners(chat_id) <= 1:
+        logging.warning(
+            "[admin] refusing to revoke chat=%s user=%s — last owner; "
+            "keeping a stale grant rather than leaving the chat ownerless",
+            chat_id, target_user_id,
+        )
+        return False
+    db.revoke_web_admin(chat_id, target_user_id)
+    return True
+
+
 def set_admin_source(chat_id: int, source: str, *,
                      actor_user_id: int, actor_name: str) -> dict:
     """Switch a chat between asking Telegram and using its own admin list.

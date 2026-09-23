@@ -70,9 +70,18 @@ def subscribe(group_token: str, endpoint: str, p256dh: str, auth: str, tg_user_i
     logging.info("[push] subscribe: group=%s tg_user_id=%s endpoint=%.40s", group_token[:12], tg_user_id, endpoint)
 
 
-def unsubscribe(endpoint: str) -> None:
-    _db.delete_push_subscription(endpoint)
-    logging.info("[push] unsubscribe: endpoint=%.40s", endpoint)
+def unsubscribe(endpoint: str, group_token: str) -> bool:
+    """Remove one group's subscription for an endpoint. Returns whether it matched.
+
+    group_token is required, not optional: this is reachable from an
+    unauthenticated route, so it is the only bound on what a caller can
+    cancel. Making it a positional argument means a new call site cannot
+    forget it and silently get the unscoped behaviour back.
+    """
+    removed = _db.delete_push_subscription(endpoint, group_token=group_token)
+    logging.info("[push] unsubscribe: group=%s endpoint=%.40s matched=%s",
+                 group_token[:12], endpoint, removed)
+    return removed
 
 
 def _send_one(sub: dict, payload: str, priv_pem: str):
@@ -127,6 +136,9 @@ async def _dispatch(subs: list, payload: str, priv_pem: str) -> int:
         elif r == "ok":
             sent += 1
 
+    # Unscoped on purpose: the push provider has told us this endpoint no
+    # longer exists, so it is dead in every group that holds it, not just
+    # the one we happened to be sending for.
     for endpoint in expired:
         try:
             _db.delete_push_subscription(endpoint)

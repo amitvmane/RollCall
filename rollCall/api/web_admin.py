@@ -92,5 +92,10 @@ async def check_web_admin_live(chat_id: int, tg_user_id: int) -> bool:
         name = getattr(getattr(member, "user", None), "first_name", None) or f"user{tg_user_id}"
         _db.set_web_admin(chat_id, tg_user_id, name)
     else:
-        _db.revoke_web_admin(chat_id, tg_user_id)
+        # Through the service, not straight to the database: the last-owner
+        # rule lives there, and deleting the row is the same outcome as a
+        # demotion by a different route. A refused revoke keeps a stale grant,
+        # which is the recoverable half of that trade.
+        from services import admin as _admin_svc
+        _admin_svc.revoke_admin(chat_id, tg_user_id)
     return is_admin_now

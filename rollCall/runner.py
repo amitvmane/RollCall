@@ -744,6 +744,59 @@ async def _recover_telegram_panels() -> None:
             logger.warning(f"  ⚠️  Could not announce rollcall {cid}#{rc_num}: {e}")
 
 
+# Irregular handler-bucket names — everything else is f"{update_type}_handlers".
+_HANDLER_BUCKET_ALIASES = {
+    "inline_query": "inline_handlers",
+    "chosen_inline_result": "chosen_inline_handlers",
+}
+
+# Floor, used only if introspection somehow finds nothing. Never the normal
+# path: it exists so a telebot rename degrades to "the bot still works" rather
+# than "the bot silently receives nothing".
+_MINIMUM_UPDATES = ["message", "callback_query"]
+
+
+def allowed_updates() -> list:
+    """The update types this bot actually handles, derived from its handlers.
+
+    Passed explicitly on every poll and webhook registration, because Telegram
+    REMEMBERS this list server-side per bot and reuses it for any later call
+    that omits the parameter — across restarts, redeploys, and deleteWebhook,
+    which does not reset it.
+
+    On 2026-09-21 this deployment's stored list was:
+
+        ["message", "edited_message", "channel_post", "edited_channel_post"]
+
+    with callback_query absent, so Telegram stopped delivering button presses
+    entirely. Typed commands worked perfectly; every inline panel button was
+    dead and completely silent, because the update never reached the process.
+    Nothing could log it and /health could not see it — get_me() succeeds fine
+    on a bot that is receiving nothing.
+
+    Derived rather than hard-coded so that registering a new handler type
+    cannot silently fail to arrive: the list follows the handlers instead of
+    having to be remembered alongside them.
+    """
+    try:
+        from telebot import util as _tb_util
+        found = [
+            t for t in _tb_util.update_types
+            if getattr(bot, _HANDLER_BUCKET_ALIASES.get(t, f"{t}_handlers"), None)
+        ]
+    except Exception:
+        logger.exception("⚠️  Could not derive allowed_updates — using the minimum set")
+        return list(_MINIMUM_UPDATES)
+
+    missing = [t for t in _MINIMUM_UPDATES if t not in found]
+    if missing:
+        logger.warning(
+            "⚠️  No handlers found for %s — asking Telegram for them anyway", missing
+        )
+        found.extend(missing)
+    return found
+
+
 async def _run_polling_or_webhook() -> None:
     """Start the Telegram listener (webhook or long-poll) and block until shutdown."""
     if WEBHOOK_URL:
@@ -751,7 +804,8 @@ async def _run_polling_or_webhook() -> None:
         logger.info("🚀 Bot is now running via webhook...")
         logger.info("=" * 60)
         await bot.remove_webhook()
-        await bot.set_webhook(url=WEBHOOK_URL, secret_token=WEBHOOK_SECRET_TOKEN)
+        await bot.set_webhook(url=WEBHOOK_URL, secret_token=WEBHOOK_SECRET_TOKEN,
+                              allowed_updates=allowed_updates())
         logger.info("✅ Webhook registered with Telegram")
         await asyncio.Event().wait()
     else:
@@ -767,11 +821,17 @@ async def _run_polling_or_webhook() -> None:
         logger.info("🚀 Bot is now running via long-polling...")
         logger.info("Press Ctrl+C to stop")
         logger.info("=" * 60)
+        _allowed = allowed_updates()
+        logger.info(f"📥 Requesting update types: {', '.join(_allowed)}")
         await bot.infinity_polling(
             timeout=10,         # long-poll: Telegram responds in ≤10s
             request_timeout=35, # aiohttp HTTP timeout: 25s headroom over long-poll
             skip_pending=True,
             interval=1,         # 1s backoff between retries to avoid hammering
+            # Always sent, never left to Telegram's remembered value — see
+            # allowed_updates(). Omitting it is what made every panel button
+            # dead and silent for days in Sept 2026.
+            allowed_updates=_allowed,
         )
 
 

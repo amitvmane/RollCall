@@ -606,7 +606,7 @@ async def _auto_start_from_template(chat_id: int, tmpl: dict, stamp_date: str = 
     try:
         from handlers.lifecycle import get_status_keyboard, _persist_panel_msg_id, _build_panel_text
         from bot_state import _panel_msg_ids
-        markup = await get_status_keyboard(rc_number)
+        markup = await get_status_keyboard(rc_number, chat_id)
         text = _build_panel_text(rc, rc_number)
         sent = await bot.send_message(chat_id, text, reply_markup=markup, parse_mode=None)
         _panel_msg_ids[(chat_id, rc_number)] = sent.message_id
@@ -889,7 +889,7 @@ async def _fire_scheduled_rollcalls():
             rc_number = rc_index + 1
 
             try:
-                markup = await get_status_keyboard(rc_number)
+                markup = await get_status_keyboard(rc_number, chat_id)
                 text = _build_panel_text(rc, rc_number)
                 sent = await bot.send_message(chat_id, text, reply_markup=markup)
                 _panel_msg_ids[(chat_id, rc_number)] = sent.message_id

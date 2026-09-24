@@ -22,6 +22,9 @@
 #   WATCHDOG_FAILURES_BEFORE_ALERT  consecutive bad polls before alerting
 #                              (default 3 — rides out a normal restart)
 #   WATCHDOG_REPEAT_HOURS      re-nag cadence while still broken (default 12)
+#   WATCHDOG_HEARTBEAT_FILE    stamp touched once per loop iteration; the
+#                              container healthcheck below reads its age
+#                              (default /tmp/watchdog-heartbeat)
 
 set -u
 
@@ -31,12 +34,19 @@ HEALTH_URL="${HEALTH_URL:-http://rollcall-bot:8080/health}"
 INTERVAL="${WATCHDOG_INTERVAL_SECONDS:-300}"
 FAILURES_BEFORE_ALERT="${WATCHDOG_FAILURES_BEFORE_ALERT:-3}"
 REPEAT_SECONDS=$(( ${WATCHDOG_REPEAT_HOURS:-12} * 3600 ))
+HEARTBEAT_FILE="${WATCHDOG_HEARTBEAT_FILE:-/tmp/watchdog-heartbeat}"
 
 if [ -z "$TOKEN" ] || [ -z "$CHAT_ID" ]; then
   # Deliberately not an error: the watchdog ships enabled by default, and an
   # operator who has not set ADMIN1 should get a clear explanation on a loop
   # rather than a container that crash-loops or, worse, one that looks healthy
   # while silently alerting nobody.
+  #
+  # This branch never touches HEARTBEAT_FILE, so the container healthcheck
+  # below stays unhealthy the whole time it runs. That's deliberate, not a
+  # bug: a watchdog with no admin configured genuinely isn't watching
+  # anything, and `docker ps`/`make status` should say so rather than show
+  # green for a container quietly doing nothing.
   while true; do
     echo "[watchdog] DISABLED — need a bot token and WATCHDOG_CHAT_ID (or ADMIN1) to send alerts."
     echo "[watchdog] Set ADMIN1=<your numeric Telegram user id> in .env, and make sure"
@@ -87,6 +97,7 @@ first_failure_at=0
 
 echo "[watchdog] started — polling ${HEALTH_URL} every ${INTERVAL}s, alerting chat ${CHAT_ID}"
 notify "🐕 RollCall watchdog started — monitoring $(echo "$HEALTH_URL" | sed 's#http://##'). You'll get a message here if the bot stops responding or reports a problem."
+touch "$HEARTBEAT_FILE" 2>/dev/null
 
 while true; do
   body="$(curl -s --max-time 15 "$HEALTH_URL" 2>/dev/null)"
@@ -166,6 +177,13 @@ On the server: make status && make logs"
     fi
     last_state="$state"
   fi
+
+  # Marks "the poll loop is still turning" — independent of whether the last
+  # poll was OK, DEGRADED or UNREACHABLE. An unreachable bot is exactly the
+  # case this file must stay fresh through, or the healthcheck would confuse
+  # "bot is down" (the thing watchdog exists to report) with "watchdog is
+  # down" (the thing nothing else was reporting).
+  touch "$HEARTBEAT_FILE" 2>/dev/null
 
   sleep "$INTERVAL"
 done

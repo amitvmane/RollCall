@@ -987,6 +987,78 @@ async def run_all():
     await feed("/erc", ALICE)
     _errors.clear()
 
+    # ── Reported from production, 2026-09-23 ──────────────────────────────
+    # A rollcall the SCHEDULER started came up with no "Vote on Web" button,
+    # then grew one as soon as somebody voted. Cause: the web URL was an
+    # optional argument to get_status_keyboard, and the two scheduler call
+    # sites didn't pass it, while the vote path did.
+    #
+    # Driven through _auto_start_from_template — the real function the weekly
+    # scheduler calls — because that is the path that was broken. Asserting
+    # the button on a /src panel would have passed throughout the bug.
+    import os as _os
+    from datetime import datetime as _dt
+    from check_reminders import _auto_start_from_template
+
+    _prev_base = _os.environ.get("WEB_BASE_URL")
+    _os.environ["WEB_BASE_URL"] = "https://rollcall.test"
+    try:
+        def _url_buttons(out):
+            """Every button carrying a url, across all recorded markups."""
+            found = []
+            for _n, _a, _kw in out:
+                markup = (_kw or {}).get("reply_markup")
+                for row in getattr(markup, "keyboard", []) or []:
+                    for btn in row:
+                        url = getattr(btn, "url", None)
+                        if url:
+                            found.append((getattr(btn, "text", ""), url))
+            return found
+
+        _outbound.clear()
+        _errors.clear()
+        await _auto_start_from_template(
+            CHAT_ID,
+            {"name": "friday", "title": "Scheduled Friday", "chatid": CHAT_ID},
+            _dt.now().strftime("%Y-%m-%d"),
+        )
+        sched_out = list(_outbound)
+        buttons = _url_buttons(sched_out)
+        record("scheduler auto-start sends a panel", has_call(sched_out, "send_message"),
+               f"got: {[n for n, _, _ in sched_out]}")
+        record("scheduler-started panel carries the Vote on Web button",
+               any("Web" in t for t, _ in buttons),
+               f"url buttons on the scheduled panel: {buttons}")
+        record("that button points at this group's web page",
+               any("/web/group/" in u for _, u in buttons),
+               f"url buttons: {buttons}")
+
+        # The same panel via /panel — this path always worked, and is here so
+        # a regression tells you WHICH path broke rather than just that one did.
+        panel_out = await feed("/panel", ALICE)
+        record("/panel carries the Vote on Web button too",
+               any("Web" in t for t, _ in _url_buttons(panel_out)),
+               f"url buttons on /panel: {_url_buttons(panel_out)}")
+
+        await feed("/erc", ALICE)
+    finally:
+        if _prev_base is None:
+            _os.environ.pop("WEB_BASE_URL", None)
+        else:
+            _os.environ["WEB_BASE_URL"] = _prev_base
+
+    # With no WEB_BASE_URL there is nothing to link to, and a dead button
+    # would be worse than none — self-hosted bots must not get one.
+    await feed("/src No Web Configured", ALICE)
+    out = await feed("/panel", ALICE)
+    record("no Vote on Web button when WEB_BASE_URL is unset",
+           not any("Web" in str(getattr(b, "text", ""))
+                   for _n, _a, _kw in out
+                   for row in (getattr((_kw or {}).get("reply_markup"), "keyboard", []) or [])
+                   for b in row),
+           "a web button appeared with no WEB_BASE_URL set")
+    await feed("/erc", ALICE)
+
     print("\n=== Phase 9: Admin overrides ===\n")
 
     out = await feed("/audit_log", ALICE)

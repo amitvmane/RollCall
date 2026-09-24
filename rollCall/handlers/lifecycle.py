@@ -129,7 +129,21 @@ def _group_web_url(cid: int) -> str:
 
 # ── Inline keyboards ──────────────────────────────────────────────────────────
 
-async def get_status_keyboard(rc_number: int = 0, web_url: str = "") -> InlineKeyboardMarkup:
+async def get_status_keyboard(rc_number: int, chat_id: int) -> InlineKeyboardMarkup:
+    """The vote panel's keyboard. Always offers the web link when one exists.
+
+    chat_id is required and the URL is derived HERE rather than passed in.
+    It used to be an optional `web_url` that each of eleven call sites had to
+    remember to compute, and two of them — both in the scheduler — did not.
+    The effect was invisible in testing and obvious in use: a rollcall the
+    scheduler started came up with no "Vote on Web" button, and then grew one
+    the moment somebody voted, because the vote path rebuilt the panel
+    through a call site that did pass it.
+
+    An optional argument that silently degrades a feature is the bug. Taking
+    the chat id instead means there is nothing left to omit.
+    """
+    web_url = _group_web_url(chat_id)
     markup = InlineKeyboardMarkup(row_width=3)
     markup.add(
         InlineKeyboardButton("✅ IN",       callback_data=f"btn_in_{rc_number}"),
@@ -194,7 +208,7 @@ async def _update_panel(cid: int, rc_number: int, rc, force_new: bool = False) -
         _panel_msg_ids[key] = rc.panel_msg_id
 
     text = _build_panel_text(rc, rc_number)
-    markup = await get_status_keyboard(rc_number, web_url=_group_web_url(cid))
+    markup = await get_status_keyboard(rc_number, cid)
 
     if not force_new:
         existing_msg_id = _panel_msg_ids.get(key)
@@ -360,7 +374,7 @@ async def start_roll_call(message):
             )
         rc_number_1based = result["number"]
         rc = manager.get_rollcall(cid, result["rc_index"])
-        markup = await get_status_keyboard(rc_number_1based, web_url=_group_web_url(cid))
+        markup = await get_status_keyboard(rc_number_1based, cid)
         text = _build_panel_text(rc, rc_number_1based)
         sent = await bot.send_message(message.chat.id, text, reply_markup=markup)
         _panel_msg_ids[(cid, rc_number_1based)] = sent.message_id
@@ -437,7 +451,7 @@ async def repeat_roll_call(message):
             cloned.append(f"fee {last['event_fee']}")
         rc.save()
 
-        markup = await get_status_keyboard(rc_number_1based, web_url=_group_web_url(cid))
+        markup = await get_status_keyboard(rc_number_1based, cid)
         text = _build_panel_text(rc, rc_number_1based)
         sent = await bot.send_message(cid, text, reply_markup=markup)
         _panel_msg_ids[(cid, rc_number_1based)] = sent.message_id
@@ -652,7 +666,7 @@ async def show_panel(message):
 
         rc = manager.get_rollcall(cid, rc_number)
         text = _build_panel_text(rc, rc_number + 1)
-        markup = await get_status_keyboard(rc_number + 1, web_url=_group_web_url(cid))
+        markup = await get_status_keyboard(rc_number + 1, cid)
 
         sent = await bot.send_message(cid, text, reply_markup=markup)
         _panel_msg_ids[(cid, rc_number + 1)] = sent.message_id
@@ -768,7 +782,7 @@ async def _cb_vote(call, cid: int, rc_number: int, action: str) -> None:
         await announce_one(cid, promoted, rc.title, rc_number, rc)
 
     text = _build_panel_text(rc, rc_number)
-    markup = await get_status_keyboard(rc_number, web_url=_group_web_url(cid))
+    markup = await get_status_keyboard(rc_number, cid)
     try:
         await bot.edit_message_text(text, cid, call.message.message_id, reply_markup=markup)
         _panel_msg_ids[(cid, rc_number)] = call.message.message_id
@@ -814,7 +828,7 @@ async def _cb_status(call, cid: int, rc_number: int, rc) -> None:
     """btn_status_{rc_number} — back to the main panel."""
     await bot.answer_callback_query(call.id)
     text = _build_panel_text(rc, rc_number)
-    markup = await get_status_keyboard(rc_number, web_url=_group_web_url(cid))
+    markup = await get_status_keyboard(rc_number, cid)
     try:
         await bot.edit_message_text(text, cid, call.message.message_id, reply_markup=markup)
     except Exception as e:
@@ -826,7 +840,7 @@ async def _cb_refresh(call, cid: int, rc_number: int, rc) -> None:
     """btn_refresh_{rc_number} — re-render the main panel in place."""
     await bot.answer_callback_query(call.id, "Refreshed")
     text = _build_panel_text(rc, rc_number)
-    markup = await get_status_keyboard(rc_number, web_url=_group_web_url(cid))
+    markup = await get_status_keyboard(rc_number, cid)
     try:
         await bot.edit_message_text(text, cid, call.message.message_id, reply_markup=markup)
         _panel_msg_ids[(cid, rc_number)] = call.message.message_id
@@ -935,7 +949,7 @@ async def _cb_end_confirm(call, cid: int, rc_number: int, rc) -> None:
             for idx, rollcall in enumerate(updated_rollcalls):
                 new_id = idx + 1
                 text = _build_panel_text(rollcall, new_id)
-                panel_markup = await get_status_keyboard(new_id, web_url=_group_web_url(cid))
+                panel_markup = await get_status_keyboard(new_id, cid)
                 sent = await bot.send_message(cid, text, reply_markup=panel_markup)
                 _panel_msg_ids[(cid, new_id)] = sent.message_id
                 _persist_panel_msg_id(rollcall, sent.message_id)
@@ -945,7 +959,7 @@ async def _cb_end_cancel(call, cid: int, rc_number: int, rc) -> None:
     """btn_endcancel_{rc_number} — dismiss the end-confirmation, back to panel."""
     await bot.answer_callback_query(call.id, "Cancelled")
     text = _build_panel_text(rc, rc_number)
-    markup = await get_status_keyboard(rc_number, web_url=_group_web_url(cid))
+    markup = await get_status_keyboard(rc_number, cid)
     try:
         await bot.edit_message_text(text, cid, call.message.message_id, reply_markup=markup)
     except Exception as e:

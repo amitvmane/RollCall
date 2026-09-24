@@ -956,6 +956,15 @@ async def check_template_schedules():
         except Exception:
             logging.exception("Error writing uptime heartbeat")
 
+        # Hourly (self-throttled): does Telegram still intend to deliver the
+        # update types we asked for? Catches the Sept 2026 dead-buttons cause
+        # directly, rather than inferring it from a silence.
+        try:
+            from bot_state import check_update_delivery
+            await check_update_delivery()
+        except Exception:
+            logging.exception("Error checking update delivery config")
+
         # Fire any one-shot web-scheduled rollcalls whose time has passed.
         try:
             await _fire_scheduled_rollcalls()

@@ -100,8 +100,55 @@ class TestInMemoryStateIsBounded(unittest.TestCase):
     _ghost_show_out was missed when its siblings were capped.
     """
 
-    # Single-slot status records with a fixed set of keys — they cannot grow.
-    FIXED_SIZE = {"_last_error_state", "_telegram_status"}
+    # Containers whose key space is fixed by construction, not by pruning.
+    # Anything added here needs a reason that survives review — "it's probably
+    # small" is how a leak gets in.
+    FIXED_SIZE = {
+        # Single-slot status records with a fixed set of keys.
+        "_last_error_state",
+        "_telegram_status",
+        "_delivery_state",
+        # One key each ("at"), used to throttle a periodic action.
+        "_last_update_persist",
+        "_last_delivery_check",
+        # Keyed by Telegram UPDATE TYPE, not by chat, user or session — so the
+        # key space is telebot.util.update_types (~25 today, 2 in practice:
+        # message and callback_query) and cannot grow with traffic or time.
+        # Asserted below rather than taken on trust.
+        "_last_update_state",
+    }
+
+    def test_update_state_really_is_keyed_by_update_type(self):
+        """The justification for _last_update_state's FIXED_SIZE entry.
+
+        It is exempt because its keys are Telegram update types — a fixed
+        vocabulary — rather than chats, users or sessions. If a caller ever
+        passes something derived from a message, that stops being true and it
+        becomes an unbounded leak, so the claim is checked rather than trusted.
+
+        Static like the rest of this file: every note_update() argument must be
+        a string literal. A literal cannot vary with traffic; an expression can.
+        """
+        tree = ast.parse(_read("bot_state.py"))
+        args = [
+            node.args[0]
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "note_update"
+            and node.args
+        ]
+        self.assertTrue(args, "no note_update() call sites found — the walk broke")
+        for arg in args:
+            # A ternary between two literals is still a closed set of keys.
+            values = ([arg.body, arg.orelse] if isinstance(arg, ast.IfExp) else [arg])
+            for v in values:
+                self.assertIsInstance(
+                    v, ast.Constant,
+                    f"note_update() called with {ast.unparse(arg)!r} — if that can "
+                    "vary per chat or user, _last_update_state is no longer bounded "
+                    "and must come out of FIXED_SIZE",
+                )
 
     def test_every_module_level_container_is_pruned(self):
         tree = ast.parse(_read("bot_state.py"))

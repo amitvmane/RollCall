@@ -170,6 +170,7 @@ variables:
 | `WATCHDOG_REPEAT_HOURS` | No | Re-alert cadence while still broken (default: `12`) |
 | `BACKUP_SYNC_MAX_AGE_HOURS` | No | How old the last *successful* off-site copy may be before `/health` reports `offsite=STALE` (default: `6`). Only meaningful when `RCLONE_REMOTE` is set |
 | `BACKUP_SYNC_STATE_DIR` | No | Where the off-site sync sidecar stamps its last success (default: `/app/data/sync-state`) |
+| `UPDATE_STALE_HOURS` | No | How long the bot may receive **nothing at all** from Telegram before `/health` reports `no_updates` (default: `24`). Deliberately generous — a quiet group overnight must never page anyone. A single stale update *type* is shown on `/health` but never alarms |
 | `DOWNTIME_MIN_MINUTES` | No | How long a gap must be before the bot announces it on recovery (default: `5`). Shorter gaps are still recorded and shown in `/health`, they just don't ping you — so a routine redeploy stays quiet |
 | `API_DOCS_ENABLED` | No | `true` to serve `/api/docs`, `/api/redoc` and the OpenAPI schema. **Off by default** — they're unauthenticated and rate-limit-exempt, so on a publicly reachable deployment they hand any visitor a full map of every endpoint |
 | `REST_API_HOST` | No | Bind address for the REST API (default: `127.0.0.1`) |

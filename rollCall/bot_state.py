@@ -5,6 +5,7 @@ All handler modules import from here — nothing else should create a second bot
 import os
 import logging
 import asyncio
+import time
 from datetime import datetime
 from typing import Optional
 
@@ -60,6 +61,11 @@ try:
             self.update_types = ['message', 'callback_query']
 
         async def pre_process(self, message, data):
+            # First, before any early return below. The question this answers
+            # is "did an update reach us at all", which is true even for the
+            # DMs and bot-authored updates that member tracking skips.
+            note_update("callback_query" if getattr(message, "message", None) is not None
+                        else "message")
             try:
                 # CallbackQuery: chat lives on .message.chat; plain Message: on .chat
                 msg_obj = getattr(message, 'message', None)
@@ -291,6 +297,138 @@ _last_error_state = {'at': None, 'msg': None}
 # ok=None means the check has not run yet (REST API started before bot init).
 _telegram_status: dict = {"ok": None, "checked_at": None, "bot_username": None}
 
+
+
+# ── Inbound-update liveness ───────────────────────────────────────────────────
+#
+# Is the bot actually RECEIVING anything? Every other health signal answers
+# "is this subsystem alive": database, Telegram reachability, scheduler, prune,
+# backups, uptime. None of them answer the one question the bot exists for.
+#
+# Sept 2026: Telegram's stored allowed_updates lost callback_query, so button
+# presses were never delivered. Typed commands worked. /health was green, the
+# Docker healthcheck was green, the watchdog stayed quiet, and the container
+# reported (healthy) for three days — because get_me() succeeds perfectly well
+# on a bot that cannot hear anything. The same week, a stray webhook produced
+# an identical silence from an entirely different cause.
+#
+# Tracked PER UPDATE TYPE on purpose. One combined timestamp says "something
+# arrived recently" and would have looked fine throughout that outage, since
+# messages never stopped. Per type says:
+#
+#     message 2m ago · callback_query 3d ago
+#
+# which names the fault outright instead of merely hinting that one exists.
+_last_update_state: dict = {}
+
+# Persisted at most this often. The in-memory value updates on every single
+# update; the database write is throttled because this is a hot path.
+_UPDATE_PERSIST_EVERY = 60
+_last_update_persist: dict = {"at": 0.0}
+
+_UPDATE_KEY = "last_update_received"
+
+
+def note_update(kind: str) -> None:
+    """Record that an update of `kind` just arrived. Called per update.
+
+    Best-effort throughout: a liveness stamp must never be the reason an
+    actual update fails to be handled.
+    """
+    try:
+        now = time.time()
+        _last_update_state[kind] = now
+        if now - _last_update_persist["at"] < _UPDATE_PERSIST_EVERY:
+            return
+        _last_update_persist["at"] = now
+        # Persisted so the signal survives a restart. Without this, a bot
+        # restarting daily would reset the clock every morning and three days
+        # of deafness would never look older than a few hours.
+        import json as _json
+        from db import set_system_config
+        set_system_config(_UPDATE_KEY, _json.dumps(
+            {k: int(v) for k, v in _last_update_state.items()}))
+    except Exception:
+        logging.debug("note_update: could not record inbound update", exc_info=True)
+
+
+def load_update_state() -> None:
+    """Restore the last-seen stamps from a previous run. Called once at boot."""
+    try:
+        import json as _json
+        from db import get_system_config
+        raw = get_system_config(_UPDATE_KEY)
+        if not raw:
+            return
+        for k, v in (_json.loads(raw) or {}).items():
+            # A live stamp from this process always wins over a stored one.
+            if k not in _last_update_state:
+                _last_update_state[k] = float(v)
+    except Exception:
+        logging.warning("Could not restore inbound-update stamps", exc_info=True)
+
+
+def update_ages() -> dict:
+    """{update_type: seconds since one last arrived}, most recent first."""
+    now = time.time()
+    return {k: max(0.0, now - v)
+            for k, v in sorted(_last_update_state.items(), key=lambda kv: -kv[1])}
+
+
+def seconds_since_any_update():
+    """Age of the most recent update of ANY type, or None if we've never seen one."""
+    ages = update_ages()
+    return min(ages.values()) if ages else None
+
+
+# ── Delivery configuration check ──────────────────────────────────────────────
+#
+# The per-type ages above DIAGNOSE a silence but cannot safely ALARM on one:
+# a group that simply never taps buttons would look identical to this outage,
+# so alerting on a stale type would cry wolf and get muted.
+#
+# This checks the cause directly instead. Telegram stores allowed_updates
+# server-side, and runner.allowed_updates() asserts our list on every poll —
+# so if what Telegram has stored is missing something we asked for, that is
+# unambiguous and needs no heuristic. It is the exact condition that made
+# every button dead in Sept 2026, catchable before anyone presses one.
+#
+# Checked on a slow cadence from the minute tick, never at startup: polling has
+# to have run at least once for our list to have been asserted, so a boot-time
+# check would read the previous value and cry wolf on every deploy.
+_delivery_state: dict = {"checked_at": None, "missing": [], "ok": None}
+_DELIVERY_CHECK_EVERY = 3600
+_last_delivery_check: dict = {"at": 0.0}
+
+
+async def check_update_delivery(force: bool = False) -> dict:
+    """Ask Telegram which update types it will actually deliver to us."""
+    now = time.time()
+    if not force and now - _last_delivery_check["at"] < _DELIVERY_CHECK_EVERY:
+        return _delivery_state
+    _last_delivery_check["at"] = now
+    try:
+        from runner import allowed_updates
+        info = await bot.get_webhook_info()
+        stored = set(getattr(info, "allowed_updates", None) or [])
+        # An empty list is Telegram's "everything except chat_member" default,
+        # which delivers all of ours — not a fault.
+        missing = sorted(set(allowed_updates()) - stored) if stored else []
+        _delivery_state.update(
+            checked_at=datetime.now().isoformat(timespec="seconds"),
+            missing=missing, ok=not missing,
+        )
+        if missing:
+            logging.error(
+                "🔴 Telegram will NOT deliver %s — those updates never reach this "
+                "bot, so anything relying on them is silently dead. Restarting "
+                "re-asserts the list.", ", ".join(missing),
+            )
+    except Exception:
+        # Unknown, not broken: never turn an API hiccup into a false alarm.
+        logging.warning("Could not check update delivery config", exc_info=True)
+        _delivery_state.update(ok=None)
+    return _delivery_state
 
 def _record_error(exc: BaseException) -> None:
     """Record the last unhandled error so /health can surface it."""

@@ -397,6 +397,24 @@ def _uptime_lines() -> list:
 
         out = [f"⏱ Uptime: {_uptime.format_duration(_uptime.uptime_seconds())}"]
 
+        # What the bot is actually HEARING. Broken out per update type
+        # because that is what names the fault: in Sept 2026 messages kept
+        # arriving normally while button presses had stopped for three days,
+        # and a single combined timestamp would have looked perfectly healthy
+        # the entire time.
+        from bot_state import update_ages
+        ages = update_ages()
+        if ages:
+            from runner import UPDATE_STALE_SECONDS
+            label = {"message": "commands", "callback_query": "button taps"}
+            worst = max(ages.values())
+            icon = "📨" if worst < UPDATE_STALE_SECONDS else "🔴"
+            parts = [f"{label.get(k, k)} {_uptime.format_duration(v)} ago"
+                     for k, v in ages.items()]
+            out.append(f"{icon} Last received: " + " · ".join(parts))
+        else:
+            out.append("📭 Last received: nothing yet since restart")
+
         gap = _uptime.boot_gap()
         if gap:
             out.append(

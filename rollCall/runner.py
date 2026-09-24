@@ -255,6 +255,13 @@ async def _run_rest_api_server():
     await server.serve()
 
 
+# How long the bot may receive NOTHING AT ALL before /health calls it degraded.
+# Generous on purpose: a quiet group overnight is normal and must never page
+# anyone. The outage this exists for lasted three days, so a day of total
+# silence is already far past anything legitimate.
+UPDATE_STALE_SECONDS = int(float(os.environ.get("UPDATE_STALE_HOURS", "24")) * 3600)
+
+
 def _task_alive(task) -> bool:
     return task is not None and not task.done()
 
@@ -286,6 +293,11 @@ async def health_check(request):
     if pool_stats and pool_stats.get("saturated"):
         problems.append(f"db_pool_saturated_{pool_stats['in_use']}/{pool_stats['max']}")
 
+    # Uptime/downtime is deliberately never a `problem`: being back up after
+    # an outage is good news, and a 503 here would make Docker restart the bot
+    # for having once been down — useless and self-perpetuating.
+    import uptime as _uptime
+
     backup_state = backup_freshness()
     if backup_state["status"] in ("STALE", "MISSING"):
         problems.append(f"backup_{backup_state['status'].lower()}")
@@ -307,6 +319,32 @@ async def health_check(request):
     if not prune_ok:
         problems.append("memory_prune_dead")
 
+    # Is the bot actually RECEIVING anything? Every signal above answers
+    # "is this subsystem alive"; none answered the one thing the bot exists
+    # to do. In Sept 2026 button presses stopped being delivered for three
+    # days while every one of those signals stayed green.
+    #
+    # DEGRADED only when NOTHING of any type has arrived for the threshold,
+    # and only once we have seen traffic at least once. A per-type alarm
+    # would cry wolf on any group that happens not to use buttons, and a
+    # never-yet-received alarm would fire on every fresh install.
+    from bot_state import update_ages, seconds_since_any_update
+    _ages = update_ages()
+    _quiet = seconds_since_any_update()
+    if _quiet is not None and _quiet >= UPDATE_STALE_SECONDS:
+        problems.append(f"no_updates_{_uptime.format_duration(_quiet).replace(' ', '')}")
+
+    # Unambiguous, and the one that can safely page a human: Telegram itself
+    # says it will not deliver something we asked for.
+    from bot_state import _delivery_state
+    if _delivery_state.get("missing"):
+        problems.append("undelivered_" + "+".join(_delivery_state["missing"]))
+    updates_part = (
+        " updates=" + ",".join(
+            f"{k}:{_uptime.format_duration(v).replace(' ', '')}" for k, v in _ages.items())
+        if _ages else " updates=none_yet"
+    )
+
     cache_size = len(manager._cache)
     from bot_state import _last_error_state
     last_err = _last_error_state.get('at')
@@ -316,10 +354,6 @@ async def health_check(request):
         f" pool={pool_stats['in_use']}/{pool_stats['max']}(peak={pool_stats['high_water']})"
         if pool_stats else ""
     )
-    # Uptime/downtime. Deliberately never a `problem`: being back up after an
-    # outage is good news, and a 503 here would make Docker restart the bot
-    # for having once been down — which is both useless and self-perpetuating.
-    import uptime as _uptime
     up_part = f" up={_uptime.format_duration(_uptime.uptime_seconds()).replace(' ', '')}"
     _gap = _uptime.boot_gap()
     if _gap:
@@ -331,7 +365,8 @@ async def health_check(request):
         f"prune={'ok' if prune_ok else 'DEAD'} "
         f"backup={backup_state['label']} "
         f"offsite={remote_state['label']}"
-        f"{up_part} "
+        f"{up_part}"
+        f"{updates_part} "
         f"chats={cache_size} reminder_loops={len(_active_loops)}"
     )
     if last_err:
@@ -860,6 +895,14 @@ async def main():
     # (Telegram, backfills) so the measured gap is the outage, not our own
     # startup work. Announcing it needs Telegram, which may still be the
     # thing that is down — that happens later, in _post_connect_setup().
+    # Restore inbound-update stamps so a restart doesn't reset the clock and
+    # hide days of silence behind a fresh-looking timestamp.
+    try:
+        from bot_state import load_update_state
+        load_update_state()
+    except Exception:
+        logger.exception("⚠️  Could not restore inbound-update stamps")
+
     try:
         import uptime as _uptime
         _gap = _uptime.record_boot_gap()

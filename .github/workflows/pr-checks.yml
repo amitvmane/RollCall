@@ -14,12 +14,22 @@ jobs:
         with:
           script: |
             const title = context.payload.pull_request.title;
-            const validPrefixes = ['feat:', 'fix:', 'docs:', 'refactor:', 'test:', 'chore:', 'ci:'];
-            const isValid = validPrefixes.some(prefix => title.toLowerCase().startsWith(prefix));
-            if (!isValid) {
+            // An optional (scope) is part of Conventional Commits, and it is
+            // what this repo actually writes: 18 of the 25 commits on main
+            // before this change used one. Matching bare prefixes only meant
+            // the check rejected the project's own dominant convention —
+            // "docs(version):" and "fix(ops):" were both failed by it, and
+            // the fix each time was to reword a perfectly good title.
+            const types = ['feat', 'fix', 'docs', 'refactor', 'test', 'chore', 'ci'];
+            const pattern = new RegExp(`^(${types.join('|')})(\\([a-z0-9._-]+\\))?!?: .+`, 'i');
+            if (!pattern.test(title)) {
               core.setFailed(
-                `PR title "${title}" must start with one of: ${validPrefixes.join(', ')}\n` +
-                'Example: "fix: resolve duplicate message in /set_rollcall_time"'
+                `PR title "${title}" must be "<type>: <description>" or ` +
+                `"<type>(<scope>): <description>", where <type> is one of: ` +
+                `${types.join(', ')}\n` +
+                'Examples:\n' +
+                '  fix: resolve duplicate message in /set_rollcall_time\n' +
+                '  fix(ops): pin the rclone image instead of tracking :latest'
               );
             }
 

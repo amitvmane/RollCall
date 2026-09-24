@@ -273,7 +273,18 @@ services:
   # The sidecar runs a copy every BACKUP_SYNC_INTERVAL_SECONDS (default 1 hour).
   # ---------------------------------------------------------------------------
   backup-sync:
-    image: rclone/rclone:latest
+    # Pinned, not :latest — same rationale as every other image in this file,
+    # and it matters most here: this is the container holding the only off-site
+    # copy of the ledger, so a silent upstream swap on the next `pull`/reboot is
+    # the worst possible place for one.
+    #
+    # 1.75.1 is upstream's current stable (released 2026-09-04), chosen
+    # deliberately rather than read off the running container — the host isn't
+    # reachable from this checkout. If the sidecar is live on an older version
+    # and you'd rather freeze exactly what has been working, run:
+    #   docker exec rollcall-backup-sync rclone version | head -1
+    # and put that version here instead. Bump deliberately; update this note.
+    image: rclone/rclone:1.75.1
     container_name: rollcall-backup-sync
     restart: unless-stopped
     profiles:

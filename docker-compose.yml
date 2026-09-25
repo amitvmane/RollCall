@@ -49,6 +49,14 @@ services:
     build:
       context: .
       dockerfile: dockerfile
+      # Provenance baked into the image for version_info.log_startup_banner().
+      # Sourced from the calling shell's environment — `make build`/`rebuild`
+      # export both before invoking compose; a bare `docker compose up --build`
+      # run by hand falls through to "unknown", same as the Dockerfile's own
+      # ARG defaults, rather than failing.
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
     # Named so the db-backup sidecar can reuse the same image (it already has
     # sqlite3 and scripts/backup_db.sh baked in — no separate image to pull).
     image: rollcall-bot:local

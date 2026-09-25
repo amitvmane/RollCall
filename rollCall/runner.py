@@ -11,7 +11,7 @@ import sys
 import time
 from datetime import datetime, timezone
 
-from db import init_db, db_ping
+from db import init_db, db_ping, db_type
 from backup_status import backup_freshness, remote_sync_freshness
 from aiohttp import web
 
@@ -875,6 +875,22 @@ async def main():
     logger.info("=" * 60)
     logger.info("🤖 Starting RollCall Telegram Bot")
     logger.info("=" * 60)
+
+    # Log what's actually running before anything else has a chance to fail
+    # — the two things a deploy can silently get wrong are the CODE (did the
+    # build pick up the commit you think it did) and the DEPENDENCIES (did
+    # the lock file's pins actually land). Best-effort and self-contained;
+    # see version_info.py for why it never imports anything that could fail.
+    try:
+        import version_info
+        version_info.log_startup_banner(
+            logger,
+            db_type=db_type,
+            database_url=DATABASE_URL or "",
+            rest_api_enabled=_rest_api_enabled(),
+        )
+    except Exception:
+        logger.exception("⚠️  Could not log version banner — continuing")
 
     # Validate environment
     validate_environment()

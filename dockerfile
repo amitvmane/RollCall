@@ -32,6 +32,19 @@ EXPOSE 8080
 # Change to the directory where runner.py is located
 WORKDIR /app/rollCall
 
+# Bake in what actually got built, for version_info.log_startup_banner().
+# Declared this late on purpose: an ARG busts the cache for every layer from
+# its declaration onward, and GIT_SHA/BUILD_DATE change on every commit — put
+# above the pip install, they would invalidate it on every single build.
+# Down here, only this one negligible RUN re-runs.
+#
+# Both default to "unknown" so a plain `docker build` (no --build-arg, as a
+# developer running locally would do) still produces a working image —
+# version_info.py already treats "unknown" as an expected value, not an error.
+ARG GIT_SHA=unknown
+ARG BUILD_DATE=unknown
+RUN printf '{"commit": "%s", "built_at": "%s"}\n' "$GIT_SHA" "$BUILD_DATE" > .build_info.json
+
 # Run the bot
 CMD ["python", "runner.py"]
 

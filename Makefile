@@ -12,6 +12,16 @@ BOT      := rollcall-bot
 BACKUP   := db-backup
 WATCHDOG := watchdog
 
+# Baked into the image (dockerfile's final layer) so `docker compose logs`
+# names exactly what got built — see rollCall/version_info.py. Recomputed on
+# every `make` invocation and exported so `build`/`rebuild` (any target that
+# passes --build to compose) picks up the CURRENT commit, not whatever was
+# checked out the first time these were evaluated. Falls back to "unknown"
+# rather than failing make entirely if run outside a git checkout.
+GIT_SHA    := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+BUILD_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+export GIT_SHA BUILD_DATE
+
 # Services that must come back up together. `make down` stops everything, so
 # any target that starts the bot must also restart the backup sidecar —
 # otherwise it stays stopped silently and daily snapshots quietly cease.

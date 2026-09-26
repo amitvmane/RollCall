@@ -247,6 +247,27 @@ def has_call(out, method_name):
     return any(name == method_name for name, _, _ in out)
 
 
+def has_panel_send(out):
+    """True if a NEW panel message was posted -- specifically the vote
+    panel's own keyboard (buttons whose callback_data starts with "btn_",
+    built by get_status_keyboard), not just any send_message with SOME
+    reply_markup. The ghost-warning prompt ALSO carries buttons (Yes/No,
+    callback_data "proxy_add_"/"proxy_cancel_"), so checking for "any
+    markup" would misidentify that prompt as the panel. Distinguishing
+    these is the whole point of the /sif consistency regression: a plain
+    confirmation or a different prompt must never be mistaken for the vote
+    panel being re-posted as a new message."""
+    for name, _args, kwargs in out:
+        if name != "send_message":
+            continue
+        markup = kwargs.get("reply_markup")
+        for row in getattr(markup, "keyboard", []) or []:
+            for btn in row:
+                if str(getattr(btn, "callback_data", "") or "").startswith("btn_"):
+                    return True
+    return False
+
+
 def error_msgs():
     return [f"{r.name}: {r.getMessage()}" for r in _errors]
 
@@ -800,6 +821,71 @@ async def run_all():
     out = await feed("/help in", ALICE)
     ok, d = contains(out, "in")
     record("/help in renders detail", ok, d)
+
+    print("\n=== Phase 7a: /sif panel consistency (ghosted vs clean proxy) ===\n")
+    print("    Reported from production: /sif sometimes posts the full panel as a")
+    print("    brand-new message, sometimes only edits an existing one silently.")
+    print("    Traced to force_new=True on the ghosted-proxy reconfirm path only --")
+    print("    every other vote/proxy-vote path edits the existing panel in place.")
+
+    await feed("/erc", ALICE)  # clear any leftover
+    _errors.clear()
+    await feed("/src GhostPanelConsistency", ALICE)
+    await feed("/louder", ALICE)  # ensure shh is OFF so confirmations are visible
+    await feed("/toggle_ghost_tracking on", ALICE)
+    await feed("/set_absent_limit 1", ALICE)
+
+    # Give KEDAR a ghost history at/above the limit -- /sif on him must ask
+    # for reconfirmation rather than adding him directly.
+    _db.increment_ghost_count(CHAT_ID, -1, "Kedar", proxy_name="Kedar")
+
+    out = await feed("/sif Kedar", ALICE)
+    ok, d = contains(out, "ghosted", "still add")
+    record("/sif on a ghosted proxy asks for reconfirmation instead of adding",
+           ok, d)
+    record("/sif on a ghosted proxy does NOT touch the panel yet -- only the "
+           "warning prompt is sent, no edit and no panel-shaped send",
+           not has_call(out, "edit_message_text") and not has_panel_send(out),
+           f"outbound: {[n for n,_,_ in out]}")
+
+    # Tap "Yes, add anyway" -- this is the proxy_add_ callback.
+    out = await feed_cb("proxy_add_0_Kedar", ALICE)
+    no_err = len(_errors) == 0
+    record("proxy_add_ (ghosted proxy confirmed): no exceptions",
+           no_err, str(error_msgs()) if not no_err else "")
+    record("proxy_add_: confirmation bubble is edited",
+           has_call(out, "edit_message_text"),
+           f"outbound: {[n for n,_,_ in out]}")
+    # THE regression this phase exists to catch: a ghosted proxy, once
+    # confirmed, must update the SAME existing panel in place -- not spawn a
+    # second, separate full-list message alongside it.
+    record("proxy_add_ (ghosted, confirmed): panel is edited in place, "
+           "not re-posted as a new message",
+           not has_panel_send(out),
+           f"outbound: {[n for n,_,_ in out]}")
+
+    out = await feed("/whos_in", ALICE)
+    ok, d = contains(out, "kedar")
+    record("Kedar is IN after confirming past the ghost warning", ok, d)
+
+    # GUTTI has no ghost history at all -- /sif adds him straight away. This
+    # path already used the default (edit-in-place); it is the CONTROL that
+    # proves both proxy paths now agree with each other.
+    out = await feed("/sif Gutti", ALICE)
+    no_err = len(_errors) == 0
+    record("/sif on a clean proxy (no ghost history): no exceptions",
+           no_err, str(error_msgs()) if not no_err else "")
+    record("/sif on a clean proxy: panel is edited in place (unchanged control case)",
+           has_call(out, "edit_message_text") and not has_panel_send(out),
+           f"outbound: {[n for n,_,_ in out]}")
+
+    out = await feed("/whos_in", ALICE)
+    ok, d = contains(out, "kedar", "gutti")
+    record("Both Kedar and Gutti show IN together", ok, d)
+
+    await feed("/erc", ALICE)
+    record("Phase 7a -- no ERROR-level logs emitted", len(_errors) == 0,
+           str(error_msgs()) if _errors else "")
 
     print("\n=== Phase 7: Ghost tracking ===\n")
 

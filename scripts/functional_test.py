@@ -804,6 +804,50 @@ async def run_all():
     ok = len(out) >= 1
     record("/buzz responds", ok)
 
+    print("\n=== Phase 5a: /buzz skips a merged proxy's real account ===\n")
+    print("    An admin who /sif's the same regulars every week (instead of")
+    print("    having them /in themselves) must not have /buzz ping their real")
+    print("    account too, once that proxy alias is merged to it.")
+
+    await feed("/erc", ALICE)  # isolate from Phase 5's ambient rollcall state
+    _errors.clear()
+    await feed("/src BuzzMergeCheck", ALICE)
+    await feed("/louder", ALICE)
+
+    # BOB and CAROL both need to exist as known chat_members before /buzz can
+    # consider pinging them -- any message routes through the real member-
+    # tracking middleware and registers the sender, same as a real group.
+    await feed("/whos_in", BOB)
+    await feed("/whos_in", CAROL)
+
+    # BOB is represented every week by a proxy alias rather than voting
+    # himself. Merge it to his real account -- the identity service is the
+    # same one the web portal's merge UI calls; there is no Telegram command
+    # for it (merge is web-portal only), so this drives it the way that UI
+    # would.
+    await feed("/sif BobsRegularSlot", ALICE)
+    from services.identity import link_identities
+    link_identities(
+        CHAT_ID, "BobsRegularSlot",
+        canonical_user_id=BOB[0],
+        admin_user_id=ALICE[0], admin_name=ALICE[1],
+    )
+
+    bot_state._buzz_cooldowns.pop(CHAT_ID, None)  # isolate from Phase 5's own /buzz call above
+    out = await feed("/buzz", ALICE)
+    no_err = len(_errors) == 0
+    record("/buzz (merged-proxy case): no exceptions",
+           no_err, str(error_msgs()) if not no_err else "")
+    text = text_of(out)
+    record("/buzz does NOT ping Bob -- his merged proxy alias already voted",
+           "@bob" not in text.lower(), f"buzz text: {text[:300]!r}")
+    record("/buzz DOES still ping Carol -- neither she nor any alias of hers voted",
+           "@carol" in text.lower(), f"buzz text: {text[:300]!r}")
+
+    await feed("/erc", ALICE)
+    record("Phase 5a -- no ERROR-level logs emitted", len(_errors) == 0,
+           str(error_msgs()) if _errors else "")
+
     out = await feed("/version", ALICE)
     ok, d = contains(out, deployed_version_str())
     record("/version reports the deployed version", ok, d)

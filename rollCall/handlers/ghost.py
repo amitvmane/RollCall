@@ -416,8 +416,19 @@ async def ghost_callback_handler(call):
 
             await bot.answer_callback_query(call.id, f"✅ Added {proxy_name}")
             await safe_edit_text(cid, call.message.message_id, f"✅ {proxy_name} added to IN list")
+            # force_new=False (the default everywhere else a vote lands: /in,
+            # /sif with no ghost history, every panel button) — quietly edits
+            # the existing panel in place instead of posting a second, brand
+            # new wall of text under the confirmation.
+            #
+            # This used to be force_new=True, which was the one path in the
+            # whole app that behaved this way. The practical effect: whether
+            # /sif's target had ghosted before became the hidden variable that
+            # decided whether the group saw a fresh full list or a quiet edit
+            # to an existing message elsewhere in the chat — reported as
+            # "sometimes it shows the whole list, sometimes it doesn't".
             from handlers.lifecycle import _update_panel
-            await _update_panel(cid, rc_number + 1, rc, force_new=True)
+            await _update_panel(cid, rc_number + 1, rc)
             return
 
         # ── proxy_cancel ─────────────────────────────────────────────────────

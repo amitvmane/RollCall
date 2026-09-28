@@ -1147,10 +1147,15 @@ async def run_all():
     # Force it due and fire it through the REAL scheduler function -- not a
     # re-implementation of the firing logic, the actual one that runs every
     # minute in production.
+    # Dialect-aware placeholder -- this whole file also runs against real
+    # Postgres (see the module docstring on why), and a bare "?" is a SQLite-
+    # only syntax that raises a psycopg2.errors.SyntaxError under PG. Matches
+    # the "ph = ..." pattern every db.py function already uses.
+    _ph = "%s" if _db.db_type == "postgresql" else "?"
     with _db._cursor(commit=True) as cur:
         cur.execute(
-            "UPDATE scheduled_rollcalls SET scheduled_at = '2000-01-01T00:00:00Z' "
-            "WHERE chat_id = ?", (CHAT_ID,)
+            f"UPDATE scheduled_rollcalls SET scheduled_at = '2000-01-01T00:00:00Z' "
+            f"WHERE chat_id = {_ph}", (CHAT_ID,)
         )
     from check_reminders import _fire_scheduled_rollcalls
     await _fire_scheduled_rollcalls()
@@ -1196,8 +1201,8 @@ async def run_all():
 
     with _db._cursor(commit=True) as cur:
         cur.execute(
-            "UPDATE scheduled_rollcalls SET scheduled_at = '2000-01-01T00:00:00Z' "
-            "WHERE chat_id = ? AND title = 'standup_keeper'", (CHAT_ID,)
+            f"UPDATE scheduled_rollcalls SET scheduled_at = '2000-01-01T00:00:00Z' "
+            f"WHERE chat_id = {_ph} AND title = 'standup_keeper'", (CHAT_ID,)
         )
     await _fire_scheduled_rollcalls()
     record("A named (opted-in) template SURVIVES firing -- it's meant to be reused",

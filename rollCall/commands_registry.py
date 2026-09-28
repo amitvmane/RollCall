@@ -399,6 +399,26 @@ COMMANDS = [
         ),
     },
     {
+        "name": "schedule_once", "aliases": [], "scope": "admin", "category": "Templates",
+        "args": "<weekday> <HH:MM> \"<Title>\" [limit=N] [location=X] [fee=X] [event_day=X] [event_time=HH:MM] [save_as_template=name]",
+        "sample": '/schedule_once tuesday 09:00 "Friday Football" event_day=friday event_time=07:00',
+        "summary": "Schedule a one-off auto-start, no template required",
+        "details": (
+            "For a single event that doesn't repeat — a holiday-shifted game, a "
+            "one-time meetup — without creating a permanent template for it.\n\n"
+            "<weekday> <HH:MM> is when it OPENS (next occurrence of that weekday). "
+            "event_day/event_time (optional) is when it auto-closes, resolved the "
+            "same way at open time — 'opens tuesday, closes friday' just works, no "
+            "date math needed.\n\n"
+            "By default nothing is left behind once it fires — no entry in "
+            "/templates. Add save_as_template=name to keep it as a real, reusable "
+            "template instead, same choice /src's save_as_template already offers "
+            "for an immediate start.\n\n"
+            "Shows up under /schedules 🕐 One-time while pending. For something "
+            "that repeats every week, use /set_template + /schedule_template instead."
+        ),
+    },
+    {
         "name": "schedules", "aliases": [], "scope": "admin", "category": "Templates",
         "args": "", "sample": "/schedules",
         "summary": "View and toggle schedules",

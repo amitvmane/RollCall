@@ -535,6 +535,18 @@ async def set_template(message):
             existing = templates_svc.get_one_template(cid, name)
         except Exception:
             existing = {}
+
+        # Reserved for /schedule_once's internal one-off templates — those
+        # get deleted the moment they fire, so a human-typed template
+        # sharing the prefix would silently vanish. Only guarded on create:
+        # an existing row (however it got its name) stays editable.
+        if not existing and templates_svc.is_reserved_once_template_name(name):
+            await bot.send_message(
+                cid,
+                f"⚠️ Template names can't start with '{templates_svc.ONCE_TEMPLATE_PREFIX}' "
+                "— that prefix is reserved for one-off schedules (/schedule_once).",
+            )
+            return
         title       = existing.get('title')
         inlistlimit = existing.get('limit')
         location    = existing.get('location')
@@ -624,6 +636,136 @@ async def set_template(message):
         from bot_state import _USER_FACING_EXCEPTIONS
         if not isinstance(e, _USER_FACING_EXCEPTIONS):
             logging.exception("[set_template] Unexpected error")
+        await reply_error(message, e)
+
+
+@bot.message_handler(func=lambda message: message.text.split(" ")[0].split("@")[0].lower() == "/schedule_once")
+async def schedule_once_command(message):
+    """One-off auto-start with NO permanent template required.
+
+    /schedule_once <weekday> <HH:MM> "<Title>" [limit=N] [location=Place]
+                   [fee=Amount] [event_day=weekday] [event_time=HH:MM]
+                   [save_as_template=name]
+
+    <weekday> <HH:MM> is WHEN THIS OPENS (the next occurrence — "tuesday
+    09:00" always means the coming Tuesday, never last week's). event_day/
+    event_time, if given, is when it auto-closes — resolved the same way, at
+    fire time, so "opens tuesday, closes friday" needs nothing special: by
+    the time it opens on Tuesday, "next Friday" is correctly this Friday.
+
+    A template is still created under the hood (see services/templates.py's
+    module note on why), but it stays invisible and gets cleaned up the
+    moment it fires UNLESS save_as_template=name is given, in which case a
+    real, reusable template is kept under that name — the same choice /src's
+    immediate-start path already offers via its own save_as_template.
+    """
+    try:
+        cid = message.chat.id
+        if await admin_rights(message, manager) is False:
+            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
+
+        msg = message.text.strip()
+        msg = msg.replace("\u201c", '"').replace("\u201d", '"').replace("\u2018", "'").replace("\u2019", "'")
+        parts = msg.split(" ", 3)
+
+        usage = (
+            "Usage:\n"
+            '/schedule_once <weekday> <HH:MM> "<Title>" [limit=N] [location=Place] '
+            "[fee=Amount] [event_day=weekday] [event_time=HH:MM] [save_as_template=name]\n\n"
+            "<weekday> <HH:MM> is when it OPENS (next occurrence of that weekday).\n"
+            "event_day/event_time (optional) is when it auto-closes.\n"
+            "save_as_template (optional) keeps a reusable template under that name — "
+            "omit it and nothing is left behind once this fires.\n\n"
+            "Example — a holiday-shifted Friday game, scheduled from Tuesday:\n"
+            '/schedule_once tuesday 09:00 "Friday Football" location=GroundZero '
+            "fee=200 limit=16 event_day=friday event_time=07:00"
+        )
+        if len(parts) < 4:
+            await bot.send_message(cid, usage)
+            return
+
+        fire_weekday, fire_time = parts[1], parts[2]
+        tail = parts[3].strip()
+
+        title = None
+        if tail.startswith('"'):
+            end_quote = tail.find('"', 1)
+            if end_quote != -1:
+                title = tail[1:end_quote]
+                tail = tail[end_quote + 1:].strip()
+            else:
+                title = tail[1:]
+                tail = ""
+        else:
+            first_space = tail.find(" ")
+            first_token = tail[:first_space] if first_space > 0 else tail
+            if tail and "=" not in first_token:
+                title = first_token
+                tail = tail[first_space + 1:].strip() if first_space > 0 else ""
+
+        if not title:
+            await bot.send_message(cid, usage)
+            return
+
+        limit = location = fee = event_day = event_time = save_as_template = None
+        bad_values = []
+        for tok in tail.split():
+            if "=" not in tok:
+                continue
+            key, val = tok.split("=", 1)
+            key = key.strip().lower()
+            val = val.strip().strip('"').strip("'")
+            if key == "limit":
+                try:
+                    limit = int(val)
+                except ValueError:
+                    bad_values.append(f"limit={val!r}")
+            elif key == "location":
+                location = val
+            elif key == "fee":
+                fee = val
+            elif key == "event_day":
+                event_day = val.lower()
+            elif key == "event_time":
+                event_time = val
+            elif key == "save_as_template":
+                save_as_template = val
+
+        if bad_values:
+            await bot.send_message(cid, f"⚠️ Ignored non-integer value(s): {', '.join(bad_values)}.")
+
+        fire_at_iso = templates_svc.resolve_next_weekday_utc_iso(cid, fire_weekday, fire_time)
+        result = templates_svc.schedule_once(
+            cid,
+            fire_at_iso=fire_at_iso,
+            title=title,
+            admin_user_id=message.from_user.id,
+            admin_name=message.from_user.first_name,
+            limit=limit, location=location, fee=fee,
+            event_day=event_day, event_time=event_time,
+            save_as_template=save_as_template,
+        )
+
+        chat = manager.get_chat(cid)
+        tzname = chat.get("timezone", "Asia/Kolkata")
+        try:
+            local_when = datetime.fromisoformat(fire_at_iso.replace("Z", "+00:00")) \
+                .astimezone(pytz.timezone(tzname))
+            when_str = local_when.strftime("%A, %d %b at %H:%M %Z")
+        except Exception:
+            when_str = fire_at_iso
+
+        lines = [f"📅 *{_esc_md(title)}* will open on {when_str}."]
+        if event_day and event_time:
+            lines.append(f"Auto-closes: {event_day.capitalize()} {event_time}.")
+        if result["persistent"]:
+            lines.append(f"Saved as reusable template *{_esc_md(result['template_name'])}* "
+                         f"— /start_template {_esc_md(result['template_name'])} to reuse it later.")
+        else:
+            lines.append("This is a one-off — nothing left in /templates once it fires.")
+        await bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
+
+    except Exception as e:
         await reply_error(message, e)
 
 

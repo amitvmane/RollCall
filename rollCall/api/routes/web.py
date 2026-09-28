@@ -762,6 +762,16 @@ async def web_update_template(
     chat_id, actor_user_id = await _require_web_admin(group_token, body.id_token)
     actor_name = await _actor_display_name(chat_id, actor_user_id)
     from services import templates as tmpl_svc
+    # Reserved for /schedule_once's internal one-off templates (see
+    # services/templates.py's module note) — those are deleted the moment
+    # they fire, so a human-typed template that happened to share the
+    # prefix would silently vanish out from under them. Only guarded on
+    # CREATE: an existing row (however it got its name) must stay editable.
+    if _db.get_template(chat_id, name) is None and tmpl_svc.is_reserved_once_template_name(name):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Template names can't start with '{tmpl_svc.ONCE_TEMPLATE_PREFIX}' — that prefix is reserved.",
+        )
     # This route always receives the whole form, not a sparse patch — unlike
     # the token-gated REST API's real partial-update contract, a blank field
     # here means "clear it", not "leave unchanged". upsert_template's None

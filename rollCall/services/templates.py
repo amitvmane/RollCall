@@ -5,6 +5,7 @@ get_schedule, set_schedule, disable_schedule, enable_schedule.
 Framework-agnostic: primitives in, dicts out, curated exceptions only.
 """
 import logging
+import time
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -19,6 +20,7 @@ from functions import WEEKDAY_MAP, get_next_weekday_datetime
 from rollcall_manager import manager
 from db import (
     create_or_update_template,
+    create_scheduled_rollcall,
     delete_template,
     disable_template_schedule,
     enable_template_schedule,
@@ -65,8 +67,23 @@ def _serialize_template(t: dict) -> dict:
 # ─── List / get ───────────────────────────────────────────────────────────────
 
 def list_templates(chat_id: int) -> list[dict]:
-    """Return all templates for a chat."""
-    return [_serialize_template(t) for t in get_templates(chat_id)]
+    """Return all REUSABLE templates for a chat.
+
+    Excludes /schedule_once's internal one-off templates (reserved-name
+    prefix — see the module note below) from every admin-facing listing
+    this backs: /templates, the web page's template manager, the token-
+    gated REST API. Those rows exist purely to carry fields through to a
+    single firing and get deleted the moment that happens; before they
+    fire, they are still real rows an admin could otherwise see and be
+    confused by ("what is __once_-100.._1790..., did I create that?").
+
+    get_template(chat_id, name) — singular, used by list_pending_once and
+    the firing logic to resolve a name it already knows — is intentionally
+    NOT filtered: that is exactly how a one-off's fields get found again at
+    fire time.
+    """
+    return [_serialize_template(t) for t in get_templates(chat_id)
+            if not is_reserved_once_template_name(t.get("name"))]
 
 
 def list_pending_once(chat_id: int) -> list[dict]:
@@ -101,6 +118,142 @@ def list_pending_once(chat_id: int) -> list[dict]:
             "limit": tmpl.get("inlistlimit") if tmpl else None,
         })
     return out
+
+
+# ─── One-off scheduling (no persistent template required) ─────────────────────
+#
+# A one-off ("this Friday only, because of the holiday") is created through
+# the SAME mechanism as a recurring template's one-time web schedule — a
+# template row referenced by name from a scheduled_rollcalls row — because
+# that mechanism already exists, is already tested, and a prior version of
+# this project explicitly rejected adding new columns to scheduled_rollcalls
+# for exactly this kind of case (there's nothing a one-off needs that a
+# template doesn't already carry: title/location/fee/limit/event_day/
+# event_time). See CLAUDE.md's schema-reuse precedent.
+#
+# What WAS missing: every existing path (the web "Schedule -> Once" modal,
+# and until now every Telegram command) forces the admin to name and keep a
+# real, permanent template for what is conceptually a single event — /templates
+# lists every template row forever, with no cleanup tied to a one-off firing.
+# One /schedule_once a week is one more permanent row a week.
+#
+# The fix: template creation is OPTIONAL. Omit save_as_template and this uses
+# an internally-generated, clearly-marked name that gets deleted the moment
+# it fires — /templates never sees it. Pass save_as_template=<name> and you
+# get a real, reusable template exactly like /set_template would produce,
+# left in place afterward on purpose.
+
+ONCE_TEMPLATE_PREFIX = "__once_"
+
+
+def is_reserved_once_template_name(name: str) -> bool:
+    """True for the internally-generated names schedule_once() hands to
+    upsert_template() when the admin didn't ask to keep one. Used by the
+    scheduler to know which fired templates are safe to delete, and by the
+    public template-naming entry points (/set_template, the REST template
+    route) to stop a human from accidentally typing a name that would make
+    their own template look disposable and get deleted out from under them.
+    """
+    return (name or "").strip().lower().startswith(ONCE_TEMPLATE_PREFIX)
+
+
+def _generate_once_template_name(chat_id: int) -> str:
+    """chat_id + current second is enough uniqueness in practice — a
+    collision needs two /schedule_once calls in the same chat in the same
+    second, and even then upsert_template's merge-on-existing semantics
+    make it harmless: the second call just overwrites the still-pending
+    first one rather than corrupting anything."""
+    return f"{ONCE_TEMPLATE_PREFIX}{chat_id}_{int(time.time())}"
+
+
+def resolve_next_weekday_utc_iso(chat_id: int, weekday: str, time_str: str) -> str:
+    """"tuesday" + "09:00" -> the next such instant, as a UTC ISO string in
+    the exact format create_scheduled_rollcall/get_pending_scheduled_rollcalls
+    compare against ("%Y-%m-%dT%H:%M:%SZ" — see db.py's scheduled_rollcalls
+    queries, which do a plain lexicographic string comparison, so the format
+    must match exactly or "is it due yet" silently compares wrong).
+
+    Platform-agnostic (pure computation from the chat's own timezone), kept
+    separate from schedule_once() itself so schedule_once can take an
+    already-resolved instant — matching create_scheduled_rollcall's existing
+    contract — and a future caller with its own picker (a web "quick
+    schedule" flow, say) can supply one directly without this weekday parse.
+
+    Raises incorrectParameter if weekday/time_str can't be read — this is a
+    closing-time-shaped input, and the project's rule since the 10.5 audit is
+    that an unreadable one is refused, never silently dropped.
+    """
+    if (weekday or "").strip().lower() not in WEEKDAY_MAP:
+        raise incorrectParameter(
+            f"'{weekday}' is not a valid weekday. "
+            "Use: monday, tuesday, wednesday, thursday, friday, saturday, sunday"
+        )
+    chat = manager.get_chat(chat_id)
+    tzname = chat.get("timezone", "Asia/Kolkata")
+    try:
+        tz = pytz.timezone(tzname)
+    except Exception:
+        tz = pytz.timezone("Asia/Kolkata")
+    dt = get_next_weekday_datetime(tz, weekday, time_str)
+    if dt is None:
+        raise incorrectParameter(
+            f"Couldn't read '{time_str}' as a time. Expected 24-hour HH:MM, e.g. 09:00."
+        )
+    return dt.astimezone(pytz.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def schedule_once(
+    chat_id: int,
+    *,
+    fire_at_iso: str,
+    title: str,
+    admin_user_id: int,
+    admin_name: str,
+    limit: Optional[int] = None,
+    location: Optional[str] = None,
+    fee: Optional[str] = None,
+    event_day: Optional[str] = None,
+    event_time: Optional[str] = None,
+    save_as_template: Optional[str] = None,
+) -> dict:
+    """Schedule a rollcall to auto-open once at `fire_at_iso`, without
+    requiring the admin to manage a permanent template — see the module
+    note above for why a template still exists internally either way.
+
+    save_as_template=None (the default): the underlying template is given
+    a reserved, hidden name and deleted by the scheduler once it fires —
+    nothing left in /templates.
+
+    save_as_template="name": the underlying template is saved under that
+    real name and kept afterward, exactly like /set_template would produce
+    — for an admin who realizes this one is worth reusing.
+
+    Returns {"scheduled_at", "template_name", "persistent"}.
+    Raises: incorrectParameter (bad event_day/event_time, or
+    save_as_template collides with the reserved prefix).
+    """
+    if save_as_template:
+        if is_reserved_once_template_name(save_as_template):
+            raise incorrectParameter(
+                f"Template names can't start with '{ONCE_TEMPLATE_PREFIX}' "
+                "— that prefix is reserved for one-off schedules."
+            )
+        name = save_as_template
+        persistent = True
+    else:
+        name = _generate_once_template_name(chat_id)
+        persistent = False
+
+    upsert_template(
+        chat_id, name, admin_user_id, admin_name,
+        title=title, limit=limit, location=location, fee=fee,
+        event_day=event_day, event_time=event_time,
+    )
+    create_scheduled_rollcall(
+        chat_id=chat_id, title=name, scheduled_at=fire_at_iso,
+        created_by_uid=admin_user_id, created_by_name=admin_name,
+    )
+    return {"scheduled_at": fire_at_iso, "template_name": name, "persistent": persistent}
 
 
 def upcoming_events(chat_id: int, limit: int = 10) -> list[dict]:
@@ -191,6 +344,19 @@ def get_one_template(chat_id: int, name: str) -> dict:
 _UNSAFE_NAME_CHARS = set("<>\"'`\\")
 
 
+def _valid_hhmm(value: str) -> bool:
+    """True if `value` parses as a 24-hour HH:MM — by construction, not by
+    hand: "25:99" splits into two fine-looking ints and only fails inside
+    datetime(), which is exactly the check functions.py's
+    get_next_weekday_datetime already applies for the same reason."""
+    try:
+        hour, minute = value.split(":")
+        datetime(2000, 1, 1, int(hour), int(minute))
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
 def _validate_name(name: str) -> str:
     """Used by every template operation (get/start/delete/schedule/upsert)
     — deliberately lenient (non-empty only). The unsafe-character check
@@ -255,6 +421,18 @@ def upsert_template(
         raise incorrectParameter(
             f"'{event_day}' is not a valid weekday. "
             "Use: monday, tuesday, wednesday, thursday, friday, saturday, sunday"
+        )
+    if event_time and not _valid_hhmm(event_time):
+        # A bad event_day was already rejected above, but event_time had no
+        # equivalent check — it was accepted here, stored, and then silently
+        # produced rc.finalizeDate = None every time the template fired
+        # (build_rollcall_from_template's get_next_weekday_datetime call
+        # returns None for anything it can't parse, per the fix in
+        # services/rollcalls.py's _resolve_close_time). A template that
+        # never closes is the same silent-failure shape the 10.4
+        # template-offset bug had, just reachable from a different command.
+        raise incorrectParameter(
+            f"'{event_time}' isn't a 24-hour time. Use HH:MM, e.g. 18:30."
         )
 
     def _norm_str(v):

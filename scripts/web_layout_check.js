@@ -814,6 +814,90 @@ const WIDTHS = [
     await page.close();
   }
 
+  // ── New Rollcall modal: optional template on the Once tab ────────────────
+  // Static analysis (web_ui_check.py) proves every id/handler here resolves;
+  // it cannot prove the runtime SHOW/HIDE toggle actually flips the right
+  // blocks, which is exactly the class of bug a typo'd element id produces
+  // (both blocks visible, or both hidden, or the wrong one shown) without
+  // ever throwing a JS error. Driven through the real app.js in a real
+  // browser, not a re-implementation of the toggle logic.
+  {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1280, height: 900 });
+    await page.setRequestInterception(true);
+    page.on("request", req =>
+      req.url().startsWith(BASE) ? req.continue()
+                                 : req.respond({ status: 200, contentType: "text/plain", body: "" }));
+    const errs = [];
+    page.on("pageerror", e => errs.push(String(e.message)));
+
+    await page.goto(`${BASE}/web/group/testtoken123`, { waitUntil: "load" });
+    await new Promise(r => setTimeout(r, 400));
+    await page.evaluate(() => {
+      document.getElementById("loading").classList.add("hidden");
+      document.getElementById("main").classList.remove("hidden");
+    });
+
+    let s = await page.evaluate(() => {
+      openNewRollcallModal();
+      _nrcSetTiming("schedule");
+      // Default recurrence is "once" — the optional block should already
+      // be the one showing, with no re-render needed to reach that state.
+      const vis = id => {
+        const e = document.getElementById(id);
+        return !!e && e.offsetParent !== null;
+      };
+      return {
+        recurrence: document.getElementById("nrc-recurrence")?.value,
+        optionalVisibleByDefault: vis("nrc-tmplname-optional"),
+        requiredVisibleByDefault: vis("nrc-tmplname-required"),
+      };
+    });
+    if (s.recurrence !== "once") failures.push(`nrc: default recurrence was "${s.recurrence}", expected "once"`);
+    if (!s.optionalVisibleByDefault) failures.push("nrc: optional template block is not visible on the default Once tab");
+    if (s.requiredVisibleByDefault) failures.push("nrc: required template block is ALSO visible on the Once tab (should be hidden)");
+
+    // Switch to a recurring type — the required field must take over, since
+    // a repeat genuinely needs a real, named template to live in between
+    // firings (unlike a one-off, which schedule_once handles on its own).
+    s = await page.evaluate(() => {
+      document.getElementById("nrc-recurrence").value = "weekly";
+      _nrcOnRecurrenceChange("weekly");
+      const vis = id => {
+        const e = document.getElementById(id);
+        return !!e && e.offsetParent !== null;
+      };
+      return { optional: vis("nrc-tmplname-optional"), required: vis("nrc-tmplname-required") };
+    });
+    if (s.optional) failures.push("nrc: optional template block is still visible after switching to Weekly");
+    if (!s.required) failures.push("nrc: required template block did not appear after switching to Weekly");
+
+    // Back to Once, then exercise the checkbox itself — unchecked means the
+    // name row stays hidden (nothing will be kept); checking it reveals the
+    // name input, matching the immediate-start tab's own established pattern.
+    s = await page.evaluate(() => {
+      document.getElementById("nrc-recurrence").value = "once";
+      _nrcOnRecurrenceChange("once");
+      const rowHiddenInitially = document.getElementById("nrc-once-template-row").classList.contains("hidden");
+      const check = document.getElementById("nrc-once-save-template-check");
+      check.checked = true;
+      check.dispatchEvent(new Event("change"));
+      const rowVisibleAfterCheck = !document.getElementById("nrc-once-template-row").classList.contains("hidden");
+      check.checked = false;
+      check.dispatchEvent(new Event("change"));
+      const rowHiddenAfterUncheck = document.getElementById("nrc-once-template-row").classList.contains("hidden");
+      return { rowHiddenInitially, rowVisibleAfterCheck, rowHiddenAfterUncheck };
+    });
+    if (!s.rowHiddenInitially) failures.push("nrc: once-template name row is visible before the checkbox is ever checked");
+    if (!s.rowVisibleAfterCheck) failures.push("nrc: once-template name row did not appear after checking 'save as template'");
+    if (!s.rowHiddenAfterUncheck) failures.push("nrc: once-template name row stayed visible after unchecking 'save as template'");
+
+    if (errs.length) failures.push(`nrc: JS error — ${errs[0]}`);
+
+    console.log(`  new-rollcall: Once tab's template field is optional, toggles correctly`);
+    await page.close();
+  }
+
   await browser.close();
   server.close();
 

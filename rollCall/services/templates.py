@@ -214,11 +214,25 @@ def schedule_once(
     fee: Optional[str] = None,
     event_day: Optional[str] = None,
     event_time: Optional[str] = None,
+    offset_days: Optional[int] = None,
+    offset_hours: Optional[int] = None,
+    offset_minutes: Optional[int] = None,
     save_as_template: Optional[str] = None,
 ) -> dict:
     """Schedule a rollcall to auto-open once at `fire_at_iso`, without
     requiring the admin to manage a permanent template — see the module
     note above for why a template still exists internally either way.
+
+    The single entry point for BOTH surfaces that offer this: the
+    /schedule_once Telegram command (weekday+time close, via event_day/
+    event_time) and the web "New Rollcall" modal's Schedule -> Once tab
+    (an exact calendar close time, converted client-side to offset_* from
+    the open moment — a calendar picker has no "next Friday" to give).
+    Passing both closing styles at once is the caller's mistake, not
+    something this function tries to referee; upsert_template applies
+    event_day/event_time first and only falls back to offset_* when
+    neither is set, same precedence build_rollcall_from_template already
+    uses at fire time.
 
     save_as_template=None (the default): the underlying template is given
     a reserved, hidden name and deleted by the scheduler once it fires —
@@ -226,7 +240,9 @@ def schedule_once(
 
     save_as_template="name": the underlying template is saved under that
     real name and kept afterward, exactly like /set_template would produce
-    — for an admin who realizes this one is worth reusing.
+    — for an admin who realizes this one is worth reusing. Offered
+    identically on both surfaces so the choice is never Telegram-only or
+    web-only.
 
     Returns {"scheduled_at", "template_name", "persistent"}.
     Raises: incorrectParameter (bad event_day/event_time, or
@@ -248,12 +264,13 @@ def schedule_once(
         chat_id, name, admin_user_id, admin_name,
         title=title, limit=limit, location=location, fee=fee,
         event_day=event_day, event_time=event_time,
+        offset_days=offset_days, offset_hours=offset_hours, offset_minutes=offset_minutes,
     )
-    create_scheduled_rollcall(
+    row_id = create_scheduled_rollcall(
         chat_id=chat_id, title=name, scheduled_at=fire_at_iso,
         created_by_uid=admin_user_id, created_by_name=admin_name,
     )
-    return {"scheduled_at": fire_at_iso, "template_name": name, "persistent": persistent}
+    return {"id": row_id, "scheduled_at": fire_at_iso, "template_name": name, "persistent": persistent}
 
 
 def upcoming_events(chat_id: int, limit: int = 10) -> list[dict]:

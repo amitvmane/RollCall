@@ -1040,6 +1040,18 @@ async def create_scheduled_rollcall(
     body: ScheduledRollcallRequest,
     group_token: str = Path(...),
 ) -> ScheduledRollcallCreateResponse:
+    """Schedule a one-off rollcall — the web counterpart to the Telegram
+    /schedule_once command, both calling services.templates.schedule_once
+    so "does this leave a template behind" answers the same way on either
+    surface, not just similarly.
+
+    body.title is the rollcall's real DISPLAY title now, not a pre-existing
+    template name to look up — the caller no longer creates a template
+    first. Historical rows from before this (or from the Telegram command)
+    still repurpose scheduled_rollcalls.title to hold a template name; that
+    is exactly what schedule_once still does internally, so the firing
+    logic and the GET list route below need no changes.
+    """
     chat = _db.get_chat_by_group_web_token(group_token)
     if not chat:
         raise HTTPException(status_code=404, detail="Invalid group token")
@@ -1053,7 +1065,6 @@ async def create_scheduled_rollcall(
     if not _re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}", body.scheduled_at):
         raise HTTPException(status_code=422, detail="scheduled_at must be ISO 8601 datetime (e.g. 2026-07-01T09:00:00Z)")
 
-    from db import upsert_chat_member as _upsert
     actor_name = "(web admin)"
     try:
         from db import get_member_display_info as _gmi
@@ -1063,36 +1074,39 @@ async def create_scheduled_rollcall(
     except Exception:
         pass
 
-    row_id = _db.create_scheduled_rollcall(
-        chat_id=chat_id,
+    # incorrectParameter (bad event_day/event_time, a reserved
+    # save_as_template name) is left to propagate -- api/main.py's global
+    # handler already maps it to 422 for every route, so catching it here
+    # too would just be a second copy of a mapping that already exists once.
+    from services import templates as _tmpl_svc
+    result = _tmpl_svc.schedule_once(
+        chat_id,
+        fire_at_iso=body.scheduled_at,
         title=body.title,
-        scheduled_at=body.scheduled_at,
-        created_by_uid=actor_user_id,
-        created_by_name=actor_name,
+        admin_user_id=actor_user_id, admin_name=actor_name,
+        limit=body.limit, location=body.location, fee=body.fee,
+        event_day=body.event_day, event_time=body.event_time,
+        offset_days=body.offset_days, offset_hours=body.offset_hours,
+        offset_minutes=body.offset_minutes,
+        save_as_template=body.save_as_template,
     )
 
-    # Non-blocking event log so the group knows a rollcall was scheduled via web.
-    # body.title may be a template NAME rather than a display title (the
-    # unified "New Rollcall" flow's one-time path always saves a template
-    # first, then schedules by referencing its name here — no new column
-    # needed to link them, see check_reminders.py's firing logic) — prefer
-    # the template's actual title for the announcement when one matches.
+    # Non-blocking event log so the group knows a rollcall was scheduled via
+    # web. body.title is always the real display title now (schedule_once
+    # saves it as the template's own title), so no lookup is needed here —
+    # unlike the historical/Telegram-created rows the GET route below still
+    # resolves by repurposed name.
     from functions import format_iso_utc_local
     _dt_label = format_iso_utc_local(body.scheduled_at, chat.get("timezone") or "Asia/Kolkata")
-    _display_title = body.title
-    try:
-        from db import get_template as _get_tmpl
-        _tmpl_row = _get_tmpl(chat_id, body.title)
-        if _tmpl_row and _tmpl_row.get("title"):
-            _display_title = _tmpl_row["title"]
-    except Exception:
-        pass
     await _send_event_notification(
         chat_id,
-        f"📅 Rollcall scheduled: \"{_display_title}\" at {_dt_label} (by {actor_name}, via web)",
+        f"📅 Rollcall scheduled: \"{body.title}\" at {_dt_label} (by {actor_name}, via web)",
     )
 
-    return ScheduledRollcallCreateResponse(id=row_id, title=body.title, scheduled_at=body.scheduled_at)
+    return ScheduledRollcallCreateResponse(
+        id=result["id"], title=body.title, scheduled_at=body.scheduled_at,
+        template_name=result["template_name"], persistent=result["persistent"],
+    )
 
 
 @router.get(

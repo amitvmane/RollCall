@@ -1912,23 +1912,113 @@ class TestWebScheduledRollcallsTemplateReference(unittest.TestCase):
         self.assertIsNone(item["limit"])
         self.assertEqual(item["title"], "Just A Title")
 
-    def test_create_announcement_uses_template_display_title(self):
+    def test_create_announcement_uses_the_display_title_directly(self):
+        """Under the current contract, body.title IS the real display title
+        (schedule_once saves it as the template's own title) -- no name-to-
+        title lookup needed any more. This is the direct replacement for
+        the old test of the same name, which exercised the RETIRED contract
+        (title as a pre-existing template's internal name)."""
         import api.routes.web as _web_mod
-        tmpl = {"name": "FridayMatch", "title": "Friday Match Night"}
         with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
              patch.object(_web_mod._db, "is_web_admin", return_value=True), \
              patch.object(_web_mod._db, "get_member_display_info", return_value={"first_name": "Amit"}), \
              patch("api.identity.verify_identity_token", return_value=99), \
-             patch.object(_web_mod._db, "create_scheduled_rollcall", return_value=7), \
-             patch.object(_web_mod._db, "get_template", return_value=tmpl), \
+             patch("services.templates.upsert_template") as mock_upsert, \
+             patch("services.templates.create_scheduled_rollcall", return_value=7), \
              patch.object(_web_mod, "_send_event_notification", new_callable=AsyncMock) as notify:
             resp = _client().post(
                 "/api/v1/web/group/grp123/scheduled-rollcalls",
-                json={"id_token": "tok", "title": "FridayMatch",
+                json={"id_token": "tok", "title": "Friday Match Night",
                       "scheduled_at": "2026-07-25T13:00:00Z"})
         self.assertEqual(resp.status_code, 201)
         notify.assert_awaited_once()
         self.assertIn("Friday Match Night", notify.call_args[0][1])
+        mock_upsert.assert_called_once()
+        self.assertEqual(mock_upsert.call_args.kwargs.get("title") or mock_upsert.call_args.args[5],
+                         "Friday Match Night")
+
+    def test_create_without_save_as_template_uses_a_hidden_name(self):
+        """The web counterpart to /schedule_once's default: nothing left in
+        /templates unless the admin explicitly opts in — same behaviour,
+        same underlying function, just reached from the other surface."""
+        import api.routes.web as _web_mod
+        from services.templates import is_reserved_once_template_name
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value=None), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.templates.upsert_template"), \
+             patch("services.templates.create_scheduled_rollcall", return_value=7), \
+             patch.object(_web_mod, "_send_event_notification", new_callable=AsyncMock):
+            resp = _client().post(
+                "/api/v1/web/group/grp123/scheduled-rollcalls",
+                json={"id_token": "tok", "title": "One-off Game",
+                      "scheduled_at": "2026-07-25T13:00:00Z"})
+        self.assertEqual(resp.status_code, 201)
+        body = resp.json()
+        self.assertFalse(body["persistent"])
+        self.assertTrue(is_reserved_once_template_name(body["template_name"]))
+
+    def test_create_with_save_as_template_keeps_a_real_template(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value=None), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.templates.upsert_template"), \
+             patch("services.templates.create_scheduled_rollcall", return_value=7), \
+             patch.object(_web_mod, "_send_event_notification", new_callable=AsyncMock):
+            resp = _client().post(
+                "/api/v1/web/group/grp123/scheduled-rollcalls",
+                json={"id_token": "tok", "title": "Weekly Standup",
+                      "scheduled_at": "2026-07-25T13:00:00Z",
+                      "save_as_template": "standup"})
+        self.assertEqual(resp.status_code, 201)
+        body = resp.json()
+        self.assertTrue(body["persistent"])
+        self.assertEqual(body["template_name"], "standup")
+
+    def test_create_passes_location_fee_limit_and_close_fields_through(self):
+        """The full field set a one-off can carry — same fields /set_template
+        accepts, plumbed straight to schedule_once (and from there to
+        upsert_template) with no web-specific re-derivation."""
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value=None), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.templates.upsert_template") as mock_upsert, \
+             patch("services.templates.create_scheduled_rollcall", return_value=7), \
+             patch.object(_web_mod, "_send_event_notification", new_callable=AsyncMock):
+            resp = _client().post(
+                "/api/v1/web/group/grp123/scheduled-rollcalls",
+                json={"id_token": "tok", "title": "Weekend Cricket",
+                      "scheduled_at": "2026-07-25T13:00:00Z",
+                      "location": "Oval Ground", "fee": "150", "limit": 20,
+                      "offset_days": 0, "offset_hours": 3, "offset_minutes": 0})
+        self.assertEqual(resp.status_code, 201)
+        kwargs = mock_upsert.call_args.kwargs
+        self.assertEqual(kwargs.get("location"), "Oval Ground")
+        self.assertEqual(kwargs.get("fee"), "150")
+        self.assertEqual(kwargs.get("limit"), 20)
+        self.assertEqual(kwargs.get("offset_hours"), 3)
+
+    def test_create_maps_a_bad_closing_time_to_422_not_500(self):
+        """event_time that can't be read as HH:MM -- upsert_template's own
+        validation (added alongside /schedule_once) raises incorrectParameter,
+        which this route must map to a curated 422, not let bubble into a
+        generic 500."""
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value=None), \
+             patch("api.identity.verify_identity_token", return_value=99):
+            resp = _client().post(
+                "/api/v1/web/group/grp123/scheduled-rollcalls",
+                json={"id_token": "tok", "title": "X",
+                      "scheduled_at": "2026-07-25T13:00:00Z",
+                      "event_day": "friday", "event_time": "9pm"})
+        self.assertEqual(resp.status_code, 422)
 
     def test_create_announcement_converts_to_chat_timezone(self):
         """The announcement must show the chat's LOCAL time with a timezone

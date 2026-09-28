@@ -2481,8 +2481,20 @@ function _nrcRenderTimingBody(){
       </div>
       <div style="font-size:.72rem;color:var(--sub);margin-top:4px">The template stays — only the recurring schedule turns off, and you can re-enable it anytime.</div>
     </div>
-    <label style="font-size:.8rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">Template name</label>
-    <input id="nrc-template-name" type="text" placeholder="e.g. sunday-cricket" maxlength="50" value="${esc(_nrcState.templateName||"")}" oninput="_nrcSetTemplateName(this.value)" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem"/>
+    <div id="nrc-tmplname-required">
+      <label style="font-size:.8rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">Template name</label>
+      <input id="nrc-template-name" type="text" placeholder="e.g. sunday-cricket" maxlength="50" value="${esc(_nrcState.templateName||"")}" oninput="_nrcSetTemplateName(this.value)" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem"/>
+    </div>
+    <div id="nrc-tmplname-optional" style="display:none">
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer">
+        <input type="checkbox" id="nrc-once-save-template-check" ${_nrcState.templateName?"checked":""} onchange="document.getElementById('nrc-once-template-row').classList.toggle('hidden',!this.checked)"/>
+        <span style="font-size:.85rem;font-weight:600">💾 Also save as a reusable template</span>
+      </label>
+      <div id="nrc-once-template-row" class="${_nrcState.templateName?"":"hidden"}">
+        <input id="nrc-once-template-name" type="text" placeholder="Template name (for reuse — not shown to voters)" maxlength="50" value="${esc(_nrcState.templateName||"")}" oninput="_nrcSetTemplateName(this.value)" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem"/>
+      </div>
+      <div style="font-size:.72rem;color:var(--sub);margin-top:4px">Leave unchecked and nothing is kept once this fires — no entry in your templates list.</div>
+    </div>
   `;
   // Pre-fill the date picker default (1 hour from now) and the recurrence
   // day/time defaults the same way the old modals did.
@@ -2538,6 +2550,11 @@ window._nrcOnRecurrenceChange=function(value){
   show("nrc-rec-monthly",value==="monthly","flex");
   show("nrc-rec-eventclose",value!=="once","block");
   show("nrc-rec-expiry",value!=="once","block");
+  // Only "once" gets the optional template — every recurring type genuinely
+  // needs a real, named template to hold its recurrence columns, so those
+  // keep the always-required field unchanged.
+  show("nrc-tmplname-required",value!=="once","block");
+  show("nrc-tmplname-optional",value==="once","block");
 };
 
 function _nrcRenderTemplateOptions(){
@@ -2556,6 +2573,11 @@ window._nrcOnTemplateSelect=function(name){
     _nrcState.templateName="";_nrcState.eventDay="";_nrcState.eventTime="";
     const nameInp=document.getElementById("nrc-template-name");
     if(nameInp)nameInp.value="";
+    const onceNameInp=document.getElementById("nrc-once-template-name");
+    if(onceNameInp)onceNameInp.value="";
+    const onceCheck=document.getElementById("nrc-once-save-template-check");
+    if(onceCheck)onceCheck.checked=false;
+    document.getElementById("nrc-once-template-row")?.classList.add("hidden");
     return;
   }
   set("nrc-title",t.title||t.name);
@@ -2573,6 +2595,14 @@ window._nrcOnTemplateSelect=function(name){
   _nrcState.templateName=name;
   const nameInp=document.getElementById("nrc-template-name");
   if(nameInp)nameInp.value=name;
+  // "Once" mode's optional name field mirrors the same pick — starting from
+  // an existing template implies wanting to keep updating THAT one, so the
+  // checkbox is pre-checked rather than left for the admin to notice and tick.
+  const onceNameInp=document.getElementById("nrc-once-template-name");
+  if(onceNameInp)onceNameInp.value=name;
+  const onceCheck=document.getElementById("nrc-once-save-template-check");
+  if(onceCheck)onceCheck.checked=true;
+  document.getElementById("nrc-once-template-row")?.classList.remove("hidden");
 };
 
 window.submitNewRollcall=async function(){
@@ -2626,12 +2656,22 @@ window.submitNewRollcall=async function(){
     return;
   }
 
-  // Schedule path — always saves/updates a template first, then either
-  // fires it once (scheduled_rollcalls row referencing the template by
-  // name) or sets its recurring schedule (existing templates columns).
-  const templateName=(document.getElementById("nrc-template-name")?.value||"").trim();
-  if(!templateName){toast("Enter a template name — scheduling needs one to reuse.",3000);return;}
+  // Schedule path. RECURRING types always save/update a real template
+  // first, then set its recurring schedule (existing templates columns) —
+  // a repeat needs somewhere to keep living between firings, so a name is
+  // genuinely required there. "Once" is different: schedule-once (below)
+  // creates whatever template it needs internally and only keeps it if
+  // asked to, so no name is required up front.
   const recurrence=_nrcState.recurrence;
+  const onceSaveAsTemplate=document.getElementById("nrc-once-save-template-check")?.checked;
+  const onceTemplateName=(document.getElementById("nrc-once-template-name")?.value||"").trim();
+  if(recurrence==="once"&&onceSaveAsTemplate&&!onceTemplateName){
+    toast("Enter a name for the template, or uncheck 'save as template'.",3000);return;
+  }
+  const templateName=recurrence==="once"
+    ? (onceSaveAsTemplate?onceTemplateName:null)
+    : (document.getElementById("nrc-template-name")?.value||"").trim();
+  if(recurrence!=="once"&&!templateName){toast("Enter a template name — scheduling needs one to reuse.",3000);return;}
 
   let scheduledAt=null,schedDay=null,schedTime=null,monthDay=null;
   let offsetDays=null,offsetHours=null,offsetMinutes=null;
@@ -2684,25 +2724,32 @@ window.submitNewRollcall=async function(){
 
   if(btn){btn.disabled=true;btn.textContent="Scheduling…";}
   try{
-    const tmplBody={id_token:_idToken,title,location,fee,limit:limit||0,event_day:eventDay,event_time:eventTime};
     if(recurrence==="once"){
-      tmplBody.offset_days=offsetDays;tmplBody.offset_hours=offsetHours;tmplBody.offset_minutes=offsetMinutes;
-    }
-    const tmplRes=await fetch(`/api/v1/web/group/${URL_TOKEN}/templates/${encodeURIComponent(templateName)}`,{
-      method:"PUT",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify(tmplBody),
-      signal:AbortSignal.timeout(8000),
-    });
-    if(!tmplRes.ok)throw new Error((await tmplRes.json().catch(()=>({}))).detail||"Failed to save template");
-
-    if(recurrence==="once"){
+      // ONE call — no separate template PUT. schedule_once() on the server
+      // creates whatever template it needs internally (hidden and deleted
+      // on fire, or real and kept, depending on save_as_template) — the
+      // exact same function the /schedule_once Telegram command calls, so
+      // "does this leave a template behind" answers identically either way.
       const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/scheduled-rollcalls`,{
         method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({id_token:_idToken,title:templateName,scheduled_at:scheduledAt}),
+        body:JSON.stringify({
+          id_token:_idToken,title,scheduled_at:scheduledAt,
+          location,fee,limit:limit||null,
+          offset_days:offsetDays,offset_hours:offsetHours,offset_minutes:offsetMinutes,
+          save_as_template:onceSaveAsTemplate?onceTemplateName:null,
+        }),
         signal:AbortSignal.timeout(10000),
       });
       if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"Failed to schedule rollcall");
     }else{
+      const tmplBody={id_token:_idToken,title,location,fee,limit:limit||0,event_day:eventDay,event_time:eventTime};
+      const tmplRes=await fetch(`/api/v1/web/group/${URL_TOKEN}/templates/${encodeURIComponent(templateName)}`,{
+        method:"PUT",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(tmplBody),
+        signal:AbortSignal.timeout(8000),
+      });
+      if(!tmplRes.ok)throw new Error((await tmplRes.json().catch(()=>({}))).detail||"Failed to save template");
+
       const schedBody={id_token:_idToken,recurrence_type:recurrence,schedule_time:schedTime,expires_at:expiresAt};
       if(recurrence==="monthly")schedBody.monthly_day=monthDay;
       else if(recurrence!=="daily")schedBody.schedule_day=schedDay;

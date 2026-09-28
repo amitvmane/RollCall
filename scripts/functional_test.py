@@ -67,6 +67,8 @@ print(f"pyTelegramBotAPI version: {_TBL_VER}")
 import bot_state  # noqa: E402
 import handlers  # noqa: F401, E402  -- registers all @bot.message_handler decorators
 import db as _db  # noqa: E402
+from services import templates as templates_svc  # noqa: E402
+from rollcall_manager import manager  # noqa: E402
 
 _db.init_db()  # in case bot_state didn't already
 
@@ -1107,6 +1109,141 @@ async def run_all():
             break
     record("/schedules emits an inline-keyboard reply_markup", has_markup,
            f"outbound: {[(n, list(k.keys())) for n,_,k in out if isinstance(k, dict)]}")
+
+    print("\n=== Phase 8c: /schedule_once -- one-off, no lingering template ===\n")
+    print("    User's ask: schedule a single non-recurring event (a holiday-")
+    print("    shifted Friday game, set up from Tuesday) without leaving a")
+    print("    permanent template behind in /templates.")
+
+    raw_before = len(_db.get_templates(CHAT_ID))       # unfiltered — sees everything
+    visible_before = len(templates_svc.list_templates(CHAT_ID))  # admin-facing — hides one-offs
+
+    out = await feed(
+        '/schedule_once tuesday 09:00 "Friday Holiday Football" '
+        "location=GroundZero fee=200 limit=16 event_day=friday event_time=07:00",
+        ALICE,
+    )
+    no_err = len(_errors) == 0
+    record("/schedule_once (full args): no exceptions",
+           no_err, str(error_msgs()) if not no_err else "")
+    ok, d = contains(out, "friday holiday football")
+    record("/schedule_once confirms the title and open time", ok, d)
+
+    record("A hidden template row DOES exist internally (unfiltered count +1)",
+           len(_db.get_templates(CHAT_ID)) == raw_before + 1,
+           f"raw template count: {len(_db.get_templates(CHAT_ID))}")
+    record("But it is invisible to the admin-facing listing (filtered count unchanged)",
+           len(templates_svc.list_templates(CHAT_ID)) == visible_before,
+           f"visible template count: {len(templates_svc.list_templates(CHAT_ID))}")
+    out = await feed("/templates", ALICE)
+    ok, d = contains(out, "__once_")
+    record("/templates NEVER shows the internal reserved name to an admin",
+           not ok, f"got: {text_of(out)[:200]!r}")
+
+    out = await feed("/schedules", ALICE)
+    ok, d = contains(out, "friday holiday football", "one-time")
+    record("/schedules surfaces it under one-time (pending)", ok, d)
+
+    # Force it due and fire it through the REAL scheduler function -- not a
+    # re-implementation of the firing logic, the actual one that runs every
+    # minute in production.
+    # Dialect-aware placeholder -- this whole file also runs against real
+    # Postgres (see the module docstring on why), and a bare "?" is a SQLite-
+    # only syntax that raises a psycopg2.errors.SyntaxError under PG. Matches
+    # the "ph = ..." pattern every db.py function already uses.
+    _ph = "%s" if _db.db_type == "postgresql" else "?"
+    with _db._cursor(commit=True) as cur:
+        cur.execute(
+            f"UPDATE scheduled_rollcalls SET scheduled_at = '2000-01-01T00:00:00Z' "
+            f"WHERE chat_id = {_ph}", (CHAT_ID,)
+        )
+    from check_reminders import _fire_scheduled_rollcalls
+    await _fire_scheduled_rollcalls()
+
+    rollcalls = manager.get_rollcalls(CHAT_ID)
+    fired = next((rc for rc in rollcalls if rc.title == "Friday Holiday Football"), None)
+    record("Firing actually created the rollcall with the template's fields",
+           fired is not None and fired.location == "GroundZero"
+           and fired.inListLimit == 16,
+           f"rollcalls: {[(rc.title, rc.location, rc.inListLimit) for rc in rollcalls]}")
+    record("Opens-Tuesday-closes-Friday resolves with no special-casing "
+           "(finalizeDate lands on a Friday, in the future)",
+           fired is not None and fired.finalizeDate is not None
+           and fired.finalizeDate.weekday() == 4,
+           f"finalizeDate: {fired.finalizeDate if fired else None}")
+
+    record("THE regression this phase exists to catch: the hidden template "
+           "is gone once it fires -- raw count back to where it started",
+           len(_db.get_templates(CHAT_ID)) == raw_before,
+           f"raw template count after firing: {len(_db.get_templates(CHAT_ID))}")
+
+    if fired is not None:
+        idx = rollcalls.index(fired)
+        await feed(f"/erc ::{idx + 1}", ALICE)
+
+    print("\n=== Phase 8c: /schedule_once with save_as_template (opted in) ===\n")
+
+    visible_before2 = len(templates_svc.list_templates(CHAT_ID))
+    out = await feed(
+        '/schedule_once wednesday 18:00 "Weekly Standup Game" '
+        "save_as_template=standup_keeper",
+        ALICE,
+    )
+    no_err = len(_errors) == 0
+    record("/schedule_once with save_as_template: no exceptions",
+           no_err, str(error_msgs()) if not no_err else "")
+    ok, d = contains(out, "standup")  # markdown-escapes the underscore, so match loosely
+    record("Confirms the KEPT template's name back to the admin", ok, d)
+    record("save_as_template creates exactly one NAMED, VISIBLE template "
+           "(unlike the default, which does not touch the admin-facing count)",
+           len(templates_svc.list_templates(CHAT_ID)) == visible_before2 + 1,
+           f"visible template count: {len(templates_svc.list_templates(CHAT_ID))}")
+
+    with _db._cursor(commit=True) as cur:
+        cur.execute(
+            f"UPDATE scheduled_rollcalls SET scheduled_at = '2000-01-01T00:00:00Z' "
+            f"WHERE chat_id = {_ph} AND title = 'standup_keeper'", (CHAT_ID,)
+        )
+    await _fire_scheduled_rollcalls()
+    record("A named (opted-in) template SURVIVES firing -- it's meant to be reused",
+           len(templates_svc.list_templates(CHAT_ID)) == visible_before2 + 1,
+           f"visible template count after firing: {len(templates_svc.list_templates(CHAT_ID))}")
+
+    rollcalls = manager.get_rollcalls(CHAT_ID)
+    kept = next((rc for rc in rollcalls if rc.title == "Weekly Standup Game"), None)
+    if kept is not None:
+        idx = rollcalls.index(kept)
+        await feed(f"/erc ::{idx + 1}", ALICE)
+    out = await feed("/delete_template standup_keeper", ALICE)
+    ok = len(_errors) == 0
+    record("Cleanup: /delete_template standup_keeper (test hygiene)", ok)
+
+    print("\n=== Phase 8c: /schedule_once error paths ===\n")
+
+    out = await feed('/schedule_once notaday 09:00 "X"', ALICE)
+    ok, d = contains(out, "not a valid weekday")
+    record("/schedule_once with a bad weekday returns a curated error", ok, d)
+
+    out = await feed('/schedule_once tuesday 25:99 "X"', ALICE)
+    ok, d = contains(out, "24-hour", "time")
+    record("/schedule_once with an unreadable time returns a curated error", ok, d)
+
+    out = await feed('/schedule_once tuesday 09:00 "X" event_day=friday event_time=9pm', ALICE)
+    ok, d = contains(out, "24-hour", "time")
+    record("/schedule_once with an unreadable CLOSE time also returns a curated error", ok, d)
+
+    out = await feed('/schedule_once tuesday 09:00 "X" save_as_template=__once_hijack', ALICE)
+    ok, d = contains(out, "reserved")
+    record("/schedule_once refuses a save_as_template name using the reserved prefix", ok, d)
+
+    out = await feed('/set_template __once_sneaky "Y"', ALICE)
+    ok, d = contains(out, "reserved")
+    record("/set_template ALSO refuses to create a new template with the reserved prefix",
+           ok, d)
+
+    out = await feed("/schedule_once", ALICE)
+    ok = len(out) >= 1
+    record("/schedule_once with no args shows usage, doesn't crash", ok)
 
     # /set_template within already-running rollcall
     await feed("/src TemplateContextTest", ALICE)

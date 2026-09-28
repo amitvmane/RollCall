@@ -320,6 +320,7 @@ For adding non-Telegram members to a rollcall. Proxy names are limited to **40 c
 | `/schedule_template name off` | Disable auto-start for a template |
 | `/schedule_template name` | Show current schedule for a template |
 | `/schedules` | View all scheduled templates with inline ☑️ multi-select; tap to check/uncheck, then bulk ⏸ Pause or ▶️ Resume selected |
+| `/schedule_once <weekday> <HH:MM> "Title" [limit=N] [location=X] [fee=X] [event_day=X] [event_time=HH:MM] [save_as_template=name]` | One-off auto-start for something that doesn't repeat (a holiday-shifted game, a single meetup) — `<weekday> <HH:MM>` is when it opens, `event_day`/`event_time` is when it auto-closes. No template is kept afterward unless you add `save_as_template=name`. |
 
 ### Ghost Tracking (admin only)
 

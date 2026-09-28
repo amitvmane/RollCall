@@ -882,6 +882,16 @@ async def _fire_scheduled_rollcalls():
                 )
                 rc = manager.get_rollcall(chat_id, result["rc_index"])
                 rc_index = result["rc_index"]
+                # /schedule_once's default (no save_as_template): the template
+                # existed only to carry fields through to this rollcall and was
+                # never meant to be kept. Its reserved name says so; delete it
+                # now that build_rollcall_from_template has already copied
+                # everything onto rc. A real admin-named template (created via
+                # /set_template, or /schedule_once ... save_as_template=name)
+                # never matches the reserved prefix and is never touched here.
+                if _tmpl_svc.is_reserved_once_template_name(title):
+                    from db import delete_template as _delete_template
+                    _delete_template(chat_id, title)
             else:
                 rc = manager.add_rollcall(chat_id, title)
                 rc.save()

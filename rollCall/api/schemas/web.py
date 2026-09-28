@@ -70,6 +70,21 @@ class ScheduledRollcallRequest(BaseModel):
     id_token: str = Field(..., description="Signed identity token of the admin")
     title: str = Field(..., min_length=1, max_length=200, description="Rollcall title")
     scheduled_at: str = Field(..., description="ISO 8601 UTC datetime when the rollcall should auto-start, e.g. 2026-07-01T09:00:00Z")
+    location: Optional[str] = Field(None, max_length=200)
+    fee: Optional[str] = Field(None, max_length=50)
+    limit: Optional[int] = Field(None, ge=1, le=1000)
+    event_day: Optional[str] = Field(None, description="Weekday to auto-close on (both-or-neither with event_time)")
+    event_time: Optional[str] = Field(None, description="HH:MM to auto-close at (both-or-neither with event_day)")
+    offset_days: Optional[int] = Field(None, ge=0, description="Alternative to event_day/event_time: close N days after opening")
+    offset_hours: Optional[int] = Field(None, ge=0)
+    offset_minutes: Optional[int] = Field(None, ge=0)
+    save_as_template: Optional[str] = Field(
+        None, max_length=50,
+        description="If set, also keeps a reusable template under this name. "
+                    "Omit it (the default) and nothing is left in /templates "
+                    "once this fires — same choice /schedule_once's Telegram "
+                    "command and start-rollcall's save_as_template both offer."
+    )
 
 
 class ScheduledRollcallItem(BaseModel):
@@ -94,6 +109,8 @@ class ScheduledRollcallCreateResponse(BaseModel):
     id: int
     title: str
     scheduled_at: str
+    template_name: Optional[str] = Field(None, description="Internal template name — a reserved, hidden one unless save_as_template was given")
+    persistent: bool = Field(False, description="True if save_as_template was given and a real, reusable template was kept")
 
 
 class WebEndRollcallResponse(BaseModel):

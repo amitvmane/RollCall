@@ -19,6 +19,8 @@ from unittest.mock import MagicMock, AsyncMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "rollCall"))
 
+from exceptions import incorrectParameter  # noqa: E402 -- used by TestScheduleOnce etc.
+
 # ---------------------------------------------------------------------------
 # Helpers shared across all test cases
 # ---------------------------------------------------------------------------
@@ -1664,6 +1666,183 @@ class TestTemplatesService(unittest.IsolatedAsyncioTestCase):
             row = {"name": "t", "schedule_enabled": truthy}
             self.assertTrue(_serialize_template(row)["schedule_enabled"],
                             f"Expected True for {truthy!r}")
+
+
+# ---------------------------------------------------------------------------
+# services.templates — /schedule_once (one-off, no persistent template
+# required unless the admin explicitly asks to keep one)
+# ---------------------------------------------------------------------------
+
+class TestScheduleOnce(unittest.TestCase):
+    """schedule_once() and its two small helpers.
+
+    Real behaviour (the firing loop actually calling start_template, the
+    template actually getting deleted, "opens Tuesday closes Friday"
+    resolving correctly) is covered end-to-end in
+    scripts/functional_test.py's Phase 8c against a real SQLite DB and the
+    real scheduler function — these tests are the service-layer edge cases
+    that would be slow or awkward to reach through the full Telegram
+    round-trip: the reserved-prefix guard from both directions, the
+    generated name's shape, and upsert_template's now-added event_time
+    validation in isolation.
+    """
+
+    def test_reserved_name_detection(self):
+        from services.templates import is_reserved_once_template_name, ONCE_TEMPLATE_PREFIX
+        self.assertTrue(is_reserved_once_template_name(f"{ONCE_TEMPLATE_PREFIX}-100_123"))
+        self.assertTrue(is_reserved_once_template_name(f"{ONCE_TEMPLATE_PREFIX.upper()}-100_123"),
+                        "must be case-insensitive — a human could type it in caps")
+        self.assertFalse(is_reserved_once_template_name("sunday_game"))
+        self.assertFalse(is_reserved_once_template_name(""))
+        self.assertFalse(is_reserved_once_template_name(None))
+
+    def test_generated_name_is_reserved_and_fits_the_50_char_limit(self):
+        """/set_template's own handler rejects a name over 50 chars — the
+        generated name must never accidentally exceed that, even for a
+        chat_id at the large end of Telegram's supergroup id range."""
+        from services.templates import _generate_once_template_name, is_reserved_once_template_name
+        name = _generate_once_template_name(-1001999999999999)
+        self.assertTrue(is_reserved_once_template_name(name))
+        self.assertLessEqual(len(name), 50)
+
+    def test_generated_names_are_unique_across_chats(self):
+        from services.templates import _generate_once_template_name
+        self.assertNotEqual(
+            _generate_once_template_name(-100111),
+            _generate_once_template_name(-100222),
+        )
+
+    def test_schedule_once_default_uses_a_reserved_name(self):
+        from services.templates import schedule_once, is_reserved_once_template_name
+        with patch("services.templates.upsert_template") as mock_upsert, \
+             patch("services.templates.create_scheduled_rollcall") as mock_create:
+            result = schedule_once(
+                -100, fire_at_iso="2026-10-01T09:00:00Z", title="Once Off",
+                admin_user_id=1, admin_name="Alice",
+            )
+        self.assertFalse(result["persistent"])
+        self.assertTrue(is_reserved_once_template_name(result["template_name"]))
+        mock_upsert.assert_called_once()
+        self.assertEqual(mock_upsert.call_args.args[1], result["template_name"])
+        mock_create.assert_called_once_with(
+            chat_id=-100, title=result["template_name"],
+            scheduled_at="2026-10-01T09:00:00Z",
+            created_by_uid=1, created_by_name="Alice",
+        )
+
+    def test_schedule_once_with_save_as_template_keeps_the_real_name(self):
+        from services.templates import schedule_once
+        with patch("services.templates.upsert_template") as mock_upsert, \
+             patch("services.templates.create_scheduled_rollcall"):
+            result = schedule_once(
+                -100, fire_at_iso="2026-10-01T09:00:00Z", title="Once Off",
+                admin_user_id=1, admin_name="Alice",
+                save_as_template="my_reusable_name",
+            )
+        self.assertTrue(result["persistent"])
+        self.assertEqual(result["template_name"], "my_reusable_name")
+        self.assertEqual(mock_upsert.call_args.args[1], "my_reusable_name")
+
+    def test_schedule_once_refuses_half_a_closing_pair(self):
+        """event_day without event_time (or vice versa) — the same
+        half-pair guard PR #31 added on the direct-rollcall path
+        (services/rollcalls.py) applies here too, via upsert_template's own
+        both-or-neither check. "Close it every Friday" with no time must
+        not silently produce a rollcall that never closes."""
+        from services.templates import schedule_once
+        with patch("services.templates.create_scheduled_rollcall"), \
+             patch("services.templates.get_template", return_value=None):
+            with self.assertRaises(incorrectParameter):
+                schedule_once(
+                    -100, fire_at_iso="2026-10-01T09:00:00Z", title="X",
+                    admin_user_id=1, admin_name="Alice", event_day="friday",
+                )
+
+    def test_schedule_once_refuses_a_reserved_save_as_template_name(self):
+        """The one thing that would let a human collide with the cleanup
+        mechanism: naming their OWN template with the reserved prefix,
+        which the scheduler would then delete out from under them the next
+        time ANY one-off happens to fire. Refused outright."""
+        from services.templates import schedule_once, ONCE_TEMPLATE_PREFIX
+        with patch("services.templates.upsert_template") as mock_upsert:
+            with self.assertRaises(incorrectParameter):
+                schedule_once(
+                    -100, fire_at_iso="2026-10-01T09:00:00Z", title="X",
+                    admin_user_id=1, admin_name="Alice",
+                    save_as_template=f"{ONCE_TEMPLATE_PREFIX}hijack",
+                )
+        mock_upsert.assert_not_called()
+
+    def test_resolve_next_weekday_utc_iso_rejects_bad_weekday(self):
+        from services.templates import resolve_next_weekday_utc_iso
+        with patch("services.templates.manager") as mock_mgr:
+            mock_mgr.get_chat.return_value = {"timezone": "Asia/Kolkata"}
+            with self.assertRaises(incorrectParameter):
+                resolve_next_weekday_utc_iso(-100, "notaday", "09:00")
+
+    def test_resolve_next_weekday_utc_iso_rejects_bad_time(self):
+        """The exact class of input that used to slip through silently:
+        "25:99" parses as two fine-looking ints and only fails inside
+        datetime() — see functions.py's get_next_weekday_datetime, which
+        this wraps."""
+        from services.templates import resolve_next_weekday_utc_iso
+        with patch("services.templates.manager") as mock_mgr:
+            mock_mgr.get_chat.return_value = {"timezone": "Asia/Kolkata"}
+            with self.assertRaises(incorrectParameter):
+                resolve_next_weekday_utc_iso(-100, "friday", "25:99")
+
+    def test_resolve_next_weekday_utc_iso_falls_back_on_a_bad_chat_timezone(self):
+        from services.templates import resolve_next_weekday_utc_iso
+        with patch("services.templates.manager") as mock_mgr:
+            mock_mgr.get_chat.return_value = {"timezone": "Not/A/Real/Zone"}
+            iso = resolve_next_weekday_utc_iso(-100, "friday", "09:00")
+        self.assertRegex(iso, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+    def test_resolve_next_weekday_utc_iso_format_matches_what_the_scheduler_compares_against(self):
+        """db.get_pending_scheduled_rollcalls does a plain lexicographic
+        string comparison (scheduled_at <= now) — the format must be
+        exactly this, or "is it due yet" silently compares wrong."""
+        from services.templates import resolve_next_weekday_utc_iso
+        with patch("services.templates.manager") as mock_mgr:
+            mock_mgr.get_chat.return_value = {"timezone": "Asia/Kolkata"}
+            iso = resolve_next_weekday_utc_iso(-100, "friday", "09:00")
+        self.assertRegex(iso, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+
+class TestUpsertTemplateValidatesEventTime(unittest.TestCase):
+    """upsert_template already rejected a bad event_day; event_time had no
+    equivalent check, so it was accepted, stored, and silently produced
+    rc.finalizeDate = None every time that template fired — a template that
+    never closes, the same silent-failure shape as the 10.4 template-offset
+    bug, just reachable from a different command. Fixed alongside
+    /schedule_once because that command feeds admin-typed event_time
+    straight into this same function."""
+
+    def setUp(self):
+        self.get_template = patch("services.templates.get_template", return_value=None).start()
+        self.create = patch("services.templates.create_or_update_template", return_value=True).start()
+        patch("services.templates.log_admin_action").start()
+        self.addCleanup(patch.stopall)
+
+    def test_bad_event_time_is_refused(self):
+        from services.templates import upsert_template
+        for bad in ("9pm", "25:99", "6.30pm", "18-30"):
+            with self.subTest(bad=bad):
+                with self.assertRaises(incorrectParameter):
+                    upsert_template(-100, "t", 1, "Alice",
+                                    event_day="friday", event_time=bad)
+
+    def test_valid_event_time_is_accepted(self):
+        from services.templates import upsert_template
+        upsert_template(-100, "t", 1, "Alice", event_day="friday", event_time="18:30")
+        self.create.assert_called_once()
+
+    def test_omitting_event_time_entirely_is_still_valid(self):
+        """An open-ended template (no fixed close slot) is a normal,
+        supported case — must not be rejected."""
+        from services.templates import upsert_template
+        upsert_template(-100, "t", 1, "Alice", title="Whatever")
+        self.create.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

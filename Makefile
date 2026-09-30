@@ -502,6 +502,7 @@ backup-remote-get: ## Download one snapshot from the remote: make backup-remote-
 	@dest="$(or $(DEST),.)"; mkdir -p "$$dest"; \
 	docker run --rm -v "$(RCLONE_CONFIG_PATH):/config/rclone:ro" \
 	  -v "$$(cd "$$dest" && pwd):/out" \
+	  --user "$$(id -u):$$(id -g)" \
 	  rclone/rclone copy "$(call _env,RCLONE_REMOTE)/$(FILE)" /out \
 	  --config /config/rclone/rclone.conf; \
 	echo "✅  downloaded $$dest/$(FILE)"; \

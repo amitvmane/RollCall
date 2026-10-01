@@ -249,6 +249,8 @@ COMMANDS = [
             "• Do NOT break streaks — they are treated as if the session never happened\n"
             "• Do NOT trigger ghost tracking\n\n"
             "An optional reason can be added: /xrc rain    /xrc venue closed\n\n"
+            "Also available as a 🗑 Cancel RollCall button on the panel and on "
+            "the group web page — both ask for the reason too, but it's optional there.\n\n"
             "Use /erc to end a session normally (stats recorded)."
         ),
     },

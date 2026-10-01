@@ -635,6 +635,33 @@ async def phase_remaining_surface():
     out = await feed("/cancel_roll_call rain", ALICE)
     record("/cancel_roll_call cancels without recording stats", bool(out))
 
+    print("\n=== Phase 26b: Cancel RollCall panel button + optional reason ===\n")
+
+    await feed("/src Panel Cancel Test", ALICE)
+    out = await feed_cb("btn_cancelrc_1", ALICE)
+    record("btn_cancelrc shows confirmation", has_call(out, "edit_message_text"))
+
+    out = await feed_cb("btn_cancelyes_1", ALICE)
+    record("btn_cancelyes asks for an optional reason",
+           has_call(out, "edit_message_text"))
+    record("rollcall still open while the reason is pending",
+           len(manager.get_rollcalls(CHAT_ID)) == 1)
+
+    out = await feed("low count", ALICE)
+    record("free-text reply cancels the rollcall with that reason",
+           has_call(out, "edit_message_text") and "low count" in text_of(out).lower())
+    record("rollcall actually gone after the reason reply",
+           len(manager.get_rollcalls(CHAT_ID)) == 0)
+
+    await feed("/src Panel Cancel Skip Test", ALICE)
+    await feed_cb("btn_cancelrc_1", ALICE)
+    await feed_cb("btn_cancelyes_1", ALICE)
+    out = await feed_cb("btn_cancelskip_1", ALICE)
+    record("btn_cancelskip cancels immediately with no reason",
+           has_call(out, "edit_message_text"))
+    record("rollcall actually gone after Skip",
+           len(manager.get_rollcalls(CHAT_ID)) == 0)
+
     print("\n=== Phase 27: Repeat & broadcast ===\n")
 
     # /repeat clones the last ENDED rollcall, so it needs one to exist.

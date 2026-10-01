@@ -493,6 +493,12 @@ class TestRouteOrdering(unittest.TestCase):
         paths = _all_route_paths(app)
         self.assertIn("/api/v1/web/group/{group_token}/end-rollcall", paths)
 
+    def test_cancel_rollcall_route_present(self):
+        from api.main import create_app
+        app = create_app()
+        paths = _all_route_paths(app)
+        self.assertIn("/api/v1/web/group/{group_token}/cancel-rollcall", paths)
+
 
 # ---------------------------------------------------------------------------
 # Fee field in WebRollcallResponse
@@ -566,22 +572,115 @@ class TestWebEndRollcall(unittest.TestCase):
         import api.routes.web as _web_mod
         end_result = {
             "rc_number_ended_1based": 1,
-            "ended": {},
+            "ended": {"title": "Weekly Game"},
             "ghost_eligible": False,
             "ghost_rc_db_id": None,
-            "ended_by": {"id": 99, "name": "(web)", "username": None},
+            "ended_by": {"id": 99, "name": "Priya", "username": None},
+            "remaining": [],
+            "renumbered": [],
+        }
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value={"first_name": "Priya"}), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.rollcalls.end_rollcall", new_callable=AsyncMock, return_value=end_result), \
+             patch.object(_web_mod, "_mirror_panel_to_telegram", new_callable=AsyncMock), \
+             patch.object(_web_mod, "_send_event_notification", new_callable=AsyncMock) as mock_notify:
+            resp = _client().post("/api/v1/web/group/grp123/end-rollcall",
+                                  json={"id_token": "tok", "rollcall_num": 1})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["ended"], 1)
+        # Mirroring the panel alone doesn't say WHO ended it — this must be
+        # announced explicitly, same as /erc and the panel button do.
+        mock_notify.assert_called_once()
+        notified_text = mock_notify.call_args[0][1]
+        self.assertIn("Priya", notified_text)
+        self.assertIn("Weekly Game", notified_text)
+
+
+@unittest.skipUnless(FASTAPI_AVAILABLE, "fastapi not installed")
+class TestWebCancelRollcall(unittest.TestCase):
+    """Web parity for /xrc — cancels without recording stats."""
+
+    def setUp(self):
+        from api.rate_limit import reset_buckets_for_tests
+        reset_buckets_for_tests()
+
+    def test_missing_id_token_returns_422(self):
+        resp = _client().post("/api/v1/web/group/grp123/cancel-rollcall",
+                              json={"rollcall_num": 1})
+        self.assertEqual(resp.status_code, 422)
+
+    def test_invalid_group_token_returns_404(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value=None):
+            resp = _client().post("/api/v1/web/group/badgrp/cancel-rollcall",
+                                  json={"id_token": "tok", "rollcall_num": 1})
+        self.assertEqual(resp.status_code, 404)
+
+    def test_non_admin_returns_403(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=False), \
+             patch("api.identity.verify_identity_token", return_value=77):
+            resp = _client().post("/api/v1/web/group/grp123/cancel-rollcall",
+                                  json={"id_token": "tok", "rollcall_num": 1})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_invalid_id_token_returns_401(self):
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch("api.identity.verify_identity_token", return_value=None):
+            resp = _client().post("/api/v1/web/group/grp123/cancel-rollcall",
+                                  json={"id_token": "bad", "rollcall_num": 1})
+        self.assertEqual(resp.status_code, 401)
+
+    def test_cancel_rollcall_calls_service(self):
+        import api.routes.web as _web_mod
+        cancel_result = {
+            "cancelled": {"title": "Friday Football"},
+            "rc_number_ended_1based": 1,
+            "remaining": [],
+            "renumbered": [],
+        }
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value={"first_name": "Priya"}), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.rollcalls.cancel_rollcall", new_callable=AsyncMock, return_value=cancel_result) as mock_cancel, \
+             patch.object(_web_mod, "_mirror_panel_to_telegram", new_callable=AsyncMock), \
+             patch.object(_web_mod, "_send_event_notification", new_callable=AsyncMock) as mock_notify:
+            resp = _client().post("/api/v1/web/group/grp123/cancel-rollcall",
+                                  json={"id_token": "tok", "rollcall_num": 1, "reason": "rain"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["cancelled"], 1)
+        mock_cancel.assert_called_once()
+        self.assertEqual(mock_cancel.call_args[1].get("reason"), "rain")
+        self.assertEqual(mock_cancel.call_args[1].get("cancelled_by_name"), "Priya")
+        # Who cancelled it must be named in the group announcement too.
+        mock_notify.assert_called_once()
+        notified_text = mock_notify.call_args[0][1]
+        self.assertIn("Priya", notified_text)
+        self.assertIn("Friday Football", notified_text)
+
+    def test_reason_is_optional(self):
+        import api.routes.web as _web_mod
+        cancel_result = {
+            "cancelled": {"title": "Friday Football"},
+            "rc_number_ended_1based": 1,
             "remaining": [],
             "renumbered": [],
         }
         with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
              patch.object(_web_mod._db, "is_web_admin", return_value=True), \
              patch("api.identity.verify_identity_token", return_value=99), \
-             patch("services.rollcalls.end_rollcall", new_callable=AsyncMock, return_value=end_result), \
-             patch("api.telegram_mirror.mirror_panel_to_telegram", new_callable=AsyncMock):
-            resp = _client().post("/api/v1/web/group/grp123/end-rollcall",
+             patch("services.rollcalls.cancel_rollcall", new_callable=AsyncMock, return_value=cancel_result) as mock_cancel, \
+             patch.object(_web_mod, "_mirror_panel_to_telegram", new_callable=AsyncMock), \
+             patch.object(_web_mod, "_send_event_notification", new_callable=AsyncMock):
+            resp = _client().post("/api/v1/web/group/grp123/cancel-rollcall",
                                   json={"id_token": "tok", "rollcall_num": 1})
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()["ended"], 1)
+        self.assertIsNone(mock_cancel.call_args[1].get("reason"))
 
 
 class TestWebProxyVote(unittest.TestCase):

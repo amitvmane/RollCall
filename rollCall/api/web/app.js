@@ -2797,6 +2797,41 @@ window.doEndRcWeb=async function(){
   }
 };
 
+// Cancel — /xrc parity. Unlike End, this records no stats at all: for a
+// session that didn't happen (rain, too few players), not one that just
+// finished. The reason field is read but never required.
+window.doCancelRcWeb=async function(){
+  if(!_idToken){toast("Verify your Telegram identity first.",3500);return;}
+  if(!activeRcData){toast("No active rollcall to cancel.",2500);return;}
+  if(!await _confirmAction(`Cancel rollcall "${activeRcData.title}"? No attendance will be recorded.`))return;
+  const reasonEl=document.getElementById("cancel-rc-reason");
+  const reason=(reasonEl?.value||"").trim();
+  const btn=document.getElementById("cancel-rc-btn");
+  if(btn){btn.disabled=true;btn.textContent="Cancelling…";}
+  try{
+    const rollcall_num=activeTabIdx+1;
+    const body={id_token:_idToken,rollcall_num};
+    if(reason)body.reason=reason;
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/cancel-rollcall`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(body),
+      signal:AbortSignal.timeout(10000),
+    });
+    if(!res.ok){
+      const d=await res.json().catch(()=>({}));
+      throw new Error(d.detail||"Failed to cancel rollcall");
+    }
+    toast("❌ Rollcall cancelled",2500);
+    if(reasonEl)reasonEl.value="";
+    activeTabIdx=0;
+    await loadGroup();
+  }catch(e){
+    toast(e.message||"Could not cancel rollcall",4000);
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent="🗑 Cancel Rollcall (no stats)";}
+  }
+};
+
 // ── Proxy vote (admin votes for a non-Telegram member — /sif parity) ─────
 let _proxyVoting=false;
 window.doProxyVoteWeb=async function(voteType){

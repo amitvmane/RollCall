@@ -585,7 +585,8 @@ async def close_game(
         f"📊 Game closed: *{title}*\n"
         f"🏟 Ground: ₹{ground_cost}{subsidy_line}\n"
         f"👥 Players: {in_count}  |  Per head: ₹{per_head}"
-        f"{remainder_line}{collector_line}{upi_line}"
+        f"{remainder_line}{collector_line}{upi_line}\n"
+        f"👤 Closed by {admin_name}"
     )
 
     fund_balance_after = db.get_fund_balance(chat_id)

@@ -290,6 +290,16 @@ class WebEndRollcallRequest(BaseModel):
     rollcall_num: int = Field(1, ge=1, description="1-based rollcall number to end (defaults to first)")
 
 
+class WebCancelRollcallRequest(BaseModel):
+    id_token: str = Field(..., description="Signed identity token of the admin cancelling the rollcall")
+    rollcall_num: int = Field(1, ge=1, description="1-based rollcall number to cancel (defaults to first)")
+    reason: Optional[str] = Field(None, max_length=200, description="Optional free-text reason (e.g. 'rain', 'low count')")
+
+
+class WebCancelRollcallResponse(BaseModel):
+    cancelled: int = Field(..., description="1-based rollcall number that was cancelled")
+
+
 class WebAdminStatusResponse(BaseModel):
     is_admin: bool
 

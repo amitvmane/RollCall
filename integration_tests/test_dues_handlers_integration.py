@@ -602,6 +602,26 @@ class TestSettleDuesPicker(IntegrationBase):
             await self.vote_in(u)
         await self.end_roll_call(self.msg("/erc", ADMIN_USER))
 
+    async def test_settle_dues_on_active_rollcall_announces_who_ended_it(self):
+        """/settle_dues with no args on a still-open rollcall ends it and
+        jumps straight to the guided settlement flow — skipping /erc's own
+        finish-list entirely. Without a dedicated line here this path ends a
+        rollcall with no attribution message at all."""
+        _enable_dues()
+        await self.start_rc("Live Game")
+        await self.event_fee(self.msg("/ef 300", ADMIN_USER))
+        await self.vote_in(USERS[0])
+        get_mock_bot().send_message.reset_mock()
+
+        await self.dues_settle_dues(self.msg("/settle_dues", ADMIN_USER))
+
+        texts = self.sent_texts()
+        self.assertTrue(
+            any("ended by" in t.lower() and "admin" in t.lower() for t in texts),
+            texts,
+        )
+        self.assertEqual(len(self.mgr.get_rollcalls(CHAT_ID)), 0)
+
     async def test_single_unsettled_game_opens_penalty_panel_no_picker(self):
         """No picker for a single unsettled game — goes straight to the
         penalty panel (guided flow), not a direct close and not a picker."""

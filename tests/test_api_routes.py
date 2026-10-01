@@ -240,6 +240,36 @@ class TestRollcallRoutes(unittest.TestCase):
             )
         self.assertEqual(resp.status_code, 403)
 
+    def test_end_rollcall_announces_who_ended_it(self):
+        """The REST route must say WHO ended it in the group, not just mirror
+        the panel — mirroring alone is silent about the actor, unlike /erc
+        and the panel button, which both post 'Ended by X'."""
+        auth_a, auth_b = _auth_patches(_ADMIN_ROW)
+        end_result = {
+            "ended": _RC_DICT,
+            "rc_number_ended_1based": 1,
+            "ghost_eligible": False,
+            "ghost_rc_db_id": None,
+            "ended_by": {"id": 1, "name": "Admin", "username": None},
+            "remaining": [],
+            "renumbered": [],
+        }
+        with auth_a, auth_b, \
+             patch("services.rollcalls.end_rollcall", new_callable=AsyncMock, return_value=end_result), \
+             patch("api.routes.rollcalls.send_event_notification", new_callable=AsyncMock) as mock_notify:
+            client = TestClient(self._app(), raise_server_exceptions=False)
+            resp = client.request(
+                "DELETE",
+                "/api/v1/chats/100/rollcalls/1",
+                headers={**self._headers(), "Content-Type": "application/json"},
+                content=_json.dumps({"ended_by_user_id": 1, "ended_by_name": "Admin"}),
+            )
+        self.assertEqual(resp.status_code, 200)
+        mock_notify.assert_called_once()
+        notified_text = mock_notify.call_args[0][1]
+        self.assertIn("Admin", notified_text)
+        self.assertIn("Weekly Game", notified_text)
+
     def test_missing_auth_header_returns_401(self):
         auth_a, auth_b = _auth_patches(None)
         with auth_a, auth_b:

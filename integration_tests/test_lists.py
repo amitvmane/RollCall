@@ -175,3 +175,22 @@ class TestBuzz(IntegrationBase):
         # Now buzz without any active rollcall
         await self.buzz_command(self.msg("/buzz Heads up!", ADMIN_USER))
         self.assertGreater(self.sent_count(), 0)
+
+    async def test_buzz_does_not_reping_out_voter_with_colliding_name(self):
+        """Regression: two real members sharing a first_name with no
+        @username set (both None == None) must not be treated as one
+        identity. Before the fix, the second member's /out vote was
+        silently blocked by a false "duplicate identity" guard — they never
+        landed in outList, so /buzz kept pinging them despite having voted.
+        """
+        await self.start_rc()
+        amit1 = {"id": 501, "first_name": "Amit", "last_name": None, "username": None}
+        amit2 = {"id": 502, "first_name": "Amit", "last_name": None, "username": None}
+        await self.vote_in(amit1)
+        await self.vote_out(amit2)
+
+        get_mock_bot().send_message.reset_mock()
+        await self.buzz_command(self.msg("/buzz", ADMIN_USER))
+        full = " ".join(self.sent_texts())
+        self.assertNotIn("id=502", full, f"OUT voter with colliding name/username was re-pinged: {full}")
+        self.assertNotIn("id=501", full, f"IN voter with colliding name/username was re-pinged: {full}")

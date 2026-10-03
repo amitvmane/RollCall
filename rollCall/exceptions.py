@@ -34,6 +34,9 @@ class duesGameAlreadyClosed(Exception):
 class duesNothingToClose(Exception):
     pass
 
+class rateLimited(Exception):
+    pass
+
 class databaseError(Exception):
     """A write that was asked for did not land.
 

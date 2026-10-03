@@ -17,7 +17,7 @@ from bot_state import (
     format_mention_with_name_md, _esc_md,
     warn_no_username, _dm_promoted_real_user, reply_error,
 )
-from exceptions import rollCallNotStarted, incorrectParameter, alreadyInList
+from exceptions import rollCallNotStarted, incorrectParameter, alreadyInList, rateLimited
 from functions import roll_call_not_started
 from rollcall_manager import manager
 from handlers.promotion import announce_one
@@ -45,7 +45,7 @@ async def in_user(message):
         if roll_call_not_started(message, manager) is False:
             raise rollCallNotStarted("Roll call is not active")
         if _is_rate_limited(message.chat.id, message.from_user.id):
-            return
+            raise rateLimited("You're voting too fast — please wait a moment and try again.")
 
         cid = message.chat.id
         rc_number, comment = _parse_rc_and_comment(message.text)
@@ -119,7 +119,7 @@ async def out_user(message):
         if roll_call_not_started(message, manager) is False:
             raise rollCallNotStarted("Roll call is not active")
         if _is_rate_limited(message.chat.id, message.from_user.id):
-            return
+            raise rateLimited("You're voting too fast — please wait a moment and try again.")
 
         cid = message.chat.id
         rc_number, comment = _parse_rc_and_comment(message.text)
@@ -177,7 +177,7 @@ async def maybe_user(message):
         if roll_call_not_started(message, manager) is False:
             raise rollCallNotStarted("Roll call is not active")
         if _is_rate_limited(message.chat.id, message.from_user.id):
-            return
+            raise rateLimited("You're voting too fast — please wait a moment and try again.")
 
         cid = message.chat.id
         rc_number, comment = _parse_rc_and_comment(message.text)

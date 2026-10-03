@@ -72,17 +72,27 @@ class TestWaitlistBehavior(IntegrationBase):
 
 class TestRateLimiting(IntegrationBase):
 
-    async def test_rapid_votes_ignored_silently(self):
+    async def test_rapid_votes_ignored_with_visible_feedback(self):
+        """Regression: a rate-limited /out used to return silently with zero
+        feedback — the vote never landed (user stayed IN) but nothing told
+        them why, so they'd believe they voted OUT and /buzz would keep
+        pinging them. It must now raise rateLimited so reply_error surfaces
+        a visible message, same as the inline-button toast."""
         await self.start_rc()
         user = USERS[0]
         await self.vote_in(user)
         # Inject a fresh rate-limit entry AFTER the successful IN vote
         import time
         self.bs._rate_limits[(CHAT_ID, user["id"])] = time.time()
+        get_mock_bot().send_message.reset_mock()
         # Call out_user directly (bypass vote_out helper which clears rate limit)
         await self.out_user(self.msg("/out", user))
-        # Rate-limited: user stays IN (out ignored)
+        # Rate-limited: user stays IN (out ignored)...
         self.assertEqual(len(self.rc(0).inList), 1)
+        # ...but unlike before, they're told why instead of silence.
+        texts = self.sent_texts()
+        self.assertTrue(any("fast" in t.lower() for t in texts),
+                        f"Expected a visible rate-limit message, got: {texts}")
 
     async def test_inline_button_rate_limited_sends_toast(self):
         await self.start_rc()

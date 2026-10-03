@@ -483,12 +483,17 @@ async def settle_dues(message):
                 # on the game that was just ended.
                 rc = manager.get_rollcall(cid, 0)
                 title = rc.title or "<Empty>"
+                ended_by = message.from_user.first_name or message.from_user.username or "someone"
                 async with manager.get_chat_write_lock(cid):
                     end_result = await rollcalls_svc.end_rollcall(
                         cid, 0,
                         message.from_user.id, message.from_user.first_name,
                         message.from_user.username,
                     )
+                # /erc's own finish list says "Ended by X" — this path skips
+                # straight to settlement, so without this line it's the one
+                # ending with no attribution at all.
+                await bot.send_message(cid, f"🏁 *{_esc_md(title)}* ended by {_esc_md(ended_by)}.", parse_mode="Markdown")
                 await _post_end_cleanup(
                     cid, end_result["rc_number_ended_1based"], end_result, rc_title=title,
                     settle_nudge=False,

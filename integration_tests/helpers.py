@@ -14,6 +14,7 @@ def _import_all():
     from handlers.lifecycle import (
         start_roll_call, repeat_roll_call, end_roll_call, callback_handler,
         get_status_keyboard, show_panel_for_rollcall, set_title, show_panel,
+        cancel_roll_call, cancel_reason_reply,
     )
     from handlers.voting import in_user, out_user, maybe_user
     from handlers.proxy import set_in_for, set_out_for, set_maybe_for
@@ -137,6 +138,8 @@ class IntegrationBase(unittest.IsolatedAsyncioTestCase):
         cls.get_status_keyboard = staticmethod(h["get_status_keyboard"])
         cls.set_title = staticmethod(h["set_title"])
         cls.show_panel = staticmethod(h["show_panel"])
+        cls.cancel_roll_call = staticmethod(h["cancel_roll_call"])
+        cls.cancel_reason_reply = staticmethod(h["cancel_reason_reply"])
         cls.in_user = staticmethod(h["in_user"])
         cls.out_user = staticmethod(h["out_user"])
         cls.maybe_user = staticmethod(h["maybe_user"])
@@ -229,6 +232,7 @@ class IntegrationBase(unittest.IsolatedAsyncioTestCase):
         self.bs._pending_overrides.clear()
         self.bs._pending_subsidy_input.clear()
         self.bs._pending_payment_input.clear()
+        self.bs._pending_cancel_reason.clear()
         self.bs._rate_limits.clear()
         self.bs._buzz_cooldowns.clear()
         self.bs._panel_msg_ids.clear()

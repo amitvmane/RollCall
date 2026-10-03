@@ -449,6 +449,8 @@
         <button class="btn btn-primary" style="width:100%;padding:12px" onclick="openNewRollcallModal()">＋ New Rollcall</button>
         <div id="end-rc-row" style="display:none;margin-top:8px">
           <button class="btn btn-danger" id="end-rc-btn" style="width:100%;padding:12px" onclick="doEndRcWeb()">⏹ End Active Rollcall</button>
+          <input id="cancel-rc-reason" type="text" placeholder="Cancel reason (optional)" maxlength="200" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg);color:var(--text);font-size:.88rem;margin-top:8px"/>
+          <button class="btn btn-secondary" id="cancel-rc-btn" style="width:100%;padding:12px;margin-top:6px" onclick="doCancelRcWeb()">🗑 Cancel Rollcall (no stats)</button>
         </div>
       </div>
 

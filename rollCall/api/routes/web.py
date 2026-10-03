@@ -50,6 +50,8 @@ from api.schemas.web import (
     WebGhostSessionsResponse,
     WebEndRollcallRequest,
     WebEndRollcallResponse,
+    WebCancelRollcallRequest,
+    WebCancelRollcallResponse,
     WebDiscardIdentityRequest,
     WebDiscardIdentityResponse,
     WebDismissSuggestionRequest,
@@ -443,19 +445,77 @@ async def web_end_rollcall(
     from services import rollcalls as rc_svc
     from rollcall_manager import manager as _mgr
 
+    actor_name = await _actor_display_name(chat_id, actor_user_id)
     rc_index = body.rollcall_num - 1
     async with _mgr.get_chat_write_lock(chat_id):
         result = await rc_svc.end_rollcall(
             chat_id=chat_id,
             rc_number=rc_index,
             ended_by_user_id=actor_user_id,
-            ended_by_name="(web)",
+            ended_by_name=actor_name,
         )
 
     rc_num_ended = result["rc_number_ended_1based"]
+    title = result["ended"].get("title") or "Rollcall"
+    # Mirroring the panel alone doesn't say WHO ended it — the bot-driven
+    # paths (/erc, the panel button) always post that as the finish-list
+    # header, and a web-triggered end must not be the one silent exception.
+    await _send_event_notification(chat_id, f"🏁 '{title}' ended by {actor_name} (via web).")
     await _mirror_panel_to_telegram(chat_id, rc_num_ended)
 
     return WebEndRollcallResponse(ended=result["rc_number_ended_1based"])
+
+
+@router.post(
+    "/web/group/{group_token}/cancel-rollcall",
+    status_code=status.HTTP_200_OK,
+    response_model=WebCancelRollcallResponse,
+    summary="Cancel a rollcall via web — no stats recorded (requires web-admin identity)",
+)
+async def web_cancel_rollcall(
+    body: WebCancelRollcallRequest,
+    group_token: str = Path(...),
+) -> WebCancelRollcallResponse:
+    """Web parity for /xrc — same service call, same append-only is_cancelled
+    semantics (excluded from attendance rate/streaks, no ghost tracking)."""
+    chat = _db.get_chat_by_group_web_token(group_token)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Invalid group token")
+
+    actor_user_id = require_identity(
+        body.id_token, detail="Verify with Telegram before cancelling a rollcall."
+    )
+
+    chat_id = int(chat["chat_id"])
+    if not await check_web_admin_live(chat_id, actor_user_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not a web admin for this group.",
+        )
+
+    from services import rollcalls as rc_svc
+    from rollcall_manager import manager as _mgr
+
+    actor_name = await _actor_display_name(chat_id, actor_user_id)
+    rc_index = body.rollcall_num - 1
+    async with _mgr.get_chat_write_lock(chat_id):
+        result = await rc_svc.cancel_rollcall(
+            chat_id=chat_id,
+            rc_number=rc_index,
+            cancelled_by_user_id=actor_user_id,
+            cancelled_by_name=actor_name,
+            reason=body.reason,
+        )
+
+    rc_num_cancelled = result["rc_number_ended_1based"]
+    title = result["cancelled"].get("title") or "Rollcall"
+    reason_part = f" — {body.reason}" if body.reason else ""
+    await _send_event_notification(
+        chat_id, f"❌ '{title}' cancelled by {actor_name} (via web){reason_part}. No attendance recorded."
+    )
+    await _mirror_panel_to_telegram(chat_id, rc_num_cancelled)
+
+    return WebCancelRollcallResponse(cancelled=rc_num_cancelled)
 
 
 @router.post(

@@ -500,7 +500,8 @@ async def memory_prune_loop(interval_seconds: int = 600):
     from bot_state import (
         _rate_limits, _buzz_cooldowns, _pending_deletes, _pending_overrides,
         _pending_proxy_add, _pending_reconf, _pending_subsidy_input,
-        _pending_payment_input, _prune_pending, _panel_msg_ids, _sched_selection,
+        _pending_payment_input, _pending_cancel_reason, _prune_pending,
+        _panel_msg_ids, _sched_selection,
         _group_warning_cooldowns, _ghost_selections, _ghost_show_out,
     )
     from handlers.dues import _settle_nudge_msgs
@@ -567,6 +568,7 @@ async def memory_prune_loop(interval_seconds: int = 600):
             _prune_pending(_pending_reconf)
             _prune_pending(_pending_subsidy_input)
             _prune_pending(_pending_payment_input)
+            _prune_pending(_pending_cancel_reason)
 
             if len(_sched_selection) > SCHED_SELECTION_MAX:
                 _sched_selection.clear()

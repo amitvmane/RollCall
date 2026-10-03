@@ -141,6 +141,14 @@ _pending_subsidy_input: dict = {}
 # (chat_id, admin_user_id) -> {'member_name': str, '_ts': float}
 _pending_payment_input: dict = {}
 
+# Pending cancel-rollcall reason, after the panel's "Yes, cancel" confirm —
+# the next free-text reply from this admin (or the Skip button) supplies the
+# optional /xrc-style reason. Keyed by rc_db_id, not rc_number: renumbering
+# from another admin's action while this one is still typing must not cancel
+# the wrong rollcall.
+# (chat_id, admin_user_id) -> {'rc_db_id': int, 'title': str, 'message_id': int, '_ts': float}
+_pending_cancel_reason: dict = {}
+
 # How long pending confirmations stay valid before being garbage-collected (seconds).
 _PENDING_TTL_SECONDS = 3600
 

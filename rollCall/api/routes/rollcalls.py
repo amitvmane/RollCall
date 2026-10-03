@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, Path, status
 from services import rollcalls as rc_svc
 
 from api.auth import AuthedToken, require_scope
-from api.telegram_mirror import mirror_panel_to_telegram
+from api.telegram_mirror import mirror_panel_to_telegram, send_event_notification
 from api.schemas.rollcalls import (
     EndRollcallRequest,
     EndRollcallResponse,
@@ -104,5 +104,12 @@ async def end_rollcall(
             ended_by_name=body.ended_by_name,
             ended_by_username=body.ended_by_username,
         )
+    # Mirroring the panel alone never says WHO ended it — without this an
+    # API-driven end is the one silent path, unlike /erc and the panel
+    # button, which both post "Ended by X" as part of the finish list.
+    title = result.get("ended", {}).get("title") or "Rollcall"
+    await send_event_notification(
+        chat_id, f"🏁 '{title}' ended by {body.ended_by_name} (via API)."
+    )
     await mirror_panel_to_telegram(chat_id, result.get("rc_number_ended_1based", rc_number))
     return EndRollcallResponse(**result)

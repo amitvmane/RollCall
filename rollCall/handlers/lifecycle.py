@@ -13,6 +13,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot_state import (
     bot, _panel_msg_ids, _pending_deletes, _pending_overrides,
+    _pending_cancel_reason, _prune_pending,
     _log_task_exc,
     _is_rate_limited, _get_display_name, format_mention_with_name,
     format_mention_with_name_md, _esc_md,
@@ -113,6 +114,33 @@ async def _post_end_cleanup(cid: int, ended_number: int, result: dict, rc_title:
                 await bot.send_message(cid, text)
 
 
+async def _post_cancel_cleanup(cid: int, ended_number: int, result: dict) -> None:
+    """Panel-ID cleanup and renumber announcements after a rollcall is cancelled.
+
+    Mirrors _post_end_cleanup's renumber-announcement shape exactly (same
+    plain-text repost, no badges/ghost/settle-nudge step — a cancelled
+    session recorded no stats, so there is nothing to settle or ghost-check).
+    Shared by /xrc and the panel's Cancel button so the two paths can't drift.
+    """
+    _panel_msg_ids.pop((cid, ended_number), None)
+    for entry in sorted(result["renumbered"], key=lambda x: x["old"]):
+        old_key = (cid, entry["old"])
+        if old_key in _panel_msg_ids:
+            _panel_msg_ids[(cid, entry["new"])] = _panel_msg_ids.pop(old_key)
+
+    updated_rollcalls = manager.get_rollcalls(cid)
+    if updated_rollcalls:
+        lines = [f"⚠️ Rollcall #{ended_number} cancelled. IDs updated:"]
+        for entry in result["renumbered"]:
+            lines.append(f"  #{entry['old']} '{entry['title']}' → #{entry['new']}")
+        if not manager.get_shh_mode(cid):
+            await bot.send_message(cid, "\n".join(lines))
+            for idx, rollcall in enumerate(updated_rollcalls):
+                new_id = idx + 1
+                text = f"Rollcall number {new_id}\n\n" + _build_panel_text(rollcall, new_id)
+                await bot.send_message(cid, text)
+
+
 def _group_web_url(cid: int) -> str:
     """Return the permanent group web URL for the keyboard button, or empty string."""
     base = os.environ.get("WEB_BASE_URL", "").rstrip("/")
@@ -159,6 +187,9 @@ async def get_status_keyboard(rc_number: int, chat_id: int) -> InlineKeyboardMar
     markup.add(
         InlineKeyboardButton(f"🛑 End RollCall #{rc_number}", callback_data=f"btn_end_{rc_number}")
     )
+    markup.add(
+        InlineKeyboardButton(f"🗑 Cancel RollCall #{rc_number}", callback_data=f"btn_cancelrc_{rc_number}")
+    )
     return markup
 
 
@@ -182,6 +213,21 @@ async def get_end_confirm_keyboard(rc_number: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton("✅ Yes",    callback_data=f"btn_endconfirm_{rc_number}"),
         InlineKeyboardButton("❌ Cancel", callback_data=f"btn_endcancel_{rc_number}"),
     )
+    return markup
+
+
+async def get_cancelrc_confirm_keyboard(rc_number: int) -> InlineKeyboardMarkup:
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton("✅ Yes, cancel", callback_data=f"btn_cancelyes_{rc_number}"),
+        InlineKeyboardButton("❌ No",          callback_data=f"btn_canceldismiss_{rc_number}"),
+    )
+    return markup
+
+
+async def get_cancelrc_skip_keyboard(rc_number: int) -> InlineKeyboardMarkup:
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("⏭ Skip", callback_data=f"btn_cancelskip_{rc_number}"))
     return markup
 
 
@@ -569,24 +615,7 @@ async def cancel_roll_call(message):
                 parse_mode="Markdown",
             )
 
-            # Panel ID cleanup + renumbering (same as /erc)
-            _panel_msg_ids.pop((cid, ended_number), None)
-            for entry in sorted(result["renumbered"], key=lambda x: x["old"]):
-                old_key = (cid, entry["old"])
-                if old_key in _panel_msg_ids:
-                    _panel_msg_ids[(cid, entry["new"])] = _panel_msg_ids.pop(old_key)
-
-            updated_rollcalls = manager.get_rollcalls(cid)
-            if updated_rollcalls:
-                lines = [f"⚠️ Rollcall #{ended_number} cancelled. IDs updated:"]
-                for entry in result["renumbered"]:
-                    lines.append(f"  #{entry['old']} '{entry['title']}' → #{entry['new']}")
-                if not manager.get_shh_mode(cid):
-                    await bot.send_message(cid, "\n".join(lines))
-                    for idx, rollcall in enumerate(updated_rollcalls):
-                        new_id = idx + 1
-                        text = f"Rollcall number {new_id}\n\n" + _build_panel_text(rollcall, new_id)
-                        await bot.send_message(cid, text)
+            await _post_cancel_cleanup(cid, ended_number, result)
     except Exception as e:
         await reply_error(message, e)
 
@@ -967,6 +996,153 @@ async def _cb_end_cancel(call, cid: int, rc_number: int, rc) -> None:
             logging.warning("Endcancel edit failed (chat=%s msg=%s): %s", cid, call.message.message_id, e)
 
 
+async def _cb_cancelrc_prompt(call, cid: int, rc_number: int, rc) -> None:
+    """btn_cancelrc_{rc_number} — show the "are you sure?" cancel confirmation.
+
+    Mirrors _cb_end_prompt, but the wording makes clear this records no
+    stats at all — it's for a session that didn't happen, not one ending
+    normally.
+    """
+    member = await bot.get_chat_member(cid, call.from_user.id)
+    admin_mode = manager.get_admin_rights(cid)
+    if admin_mode and member.status not in ["administrator", "creator"]:
+        await bot.answer_callback_query(call.id, "⛔ Only admins can cancel rollcalls", show_alert=True)
+        return
+    await bot.answer_callback_query(call.id)
+    markup = await get_cancelrc_confirm_keyboard(rc_number)
+    rc_label = f"'{rc.title}'" if rc.title and rc.title != "<Empty>" else "this rollcall"
+    try:
+        await bot.edit_message_text(
+            f"Cancel {rc_label} (#{rc_number})? No stats will be recorded — use this "
+            "for a session that didn't happen (rain, too few players, etc.), not one that just ended.",
+            cid, call.message.message_id, reply_markup=markup,
+        )
+    except Exception as e:
+        if "message is not modified" not in str(e).lower():
+            logging.warning("Cancelrc-confirm edit failed (chat=%s msg=%s): %s", cid, call.message.message_id, e)
+
+
+async def _cb_cancelrc_dismiss(call, cid: int, rc_number: int, rc) -> None:
+    """btn_canceldismiss_{rc_number} — dismiss the cancel-confirmation, back to panel."""
+    await bot.answer_callback_query(call.id, "Dismissed")
+    text = _build_panel_text(rc, rc_number)
+    markup = await get_status_keyboard(rc_number, cid)
+    try:
+        await bot.edit_message_text(text, cid, call.message.message_id, reply_markup=markup)
+    except Exception as e:
+        if "message is not modified" not in str(e).lower():
+            logging.warning("Canceldismiss edit failed (chat=%s msg=%s): %s", cid, call.message.message_id, e)
+
+
+async def _cb_cancelrc_yes(call, cid: int, rc_number: int, rc) -> None:
+    """btn_cancelyes_{rc_number} — confirmed; ask for an optional reason
+    before actually cancelling. The next free-text reply from this admin, or
+    the Skip button, finishes the job via _execute_cancel."""
+    admin_mode = manager.get_admin_rights(cid)
+    if admin_mode:
+        member = await bot.get_chat_member(cid, call.from_user.id)
+        if member.status not in ["administrator", "creator"]:
+            await bot.answer_callback_query(call.id, "⛔ Only admins can cancel rollcalls", show_alert=True)
+            return
+    rc_db_id = getattr(rc, "db_id", None) or getattr(rc, "id", None)
+    _prune_pending(_pending_cancel_reason)
+    _pending_cancel_reason[(cid, call.from_user.id)] = {
+        "rc_db_id": rc_db_id, "title": rc.title, "message_id": call.message.message_id,
+        "_ts": datetime.now().timestamp(),
+    }
+    await bot.answer_callback_query(call.id)
+    skip_markup = await get_cancelrc_skip_keyboard(rc_number)
+    try:
+        await bot.edit_message_text(
+            "✏️ Reason for cancelling (optional)? Reply with text, or tap Skip.",
+            cid, call.message.message_id, reply_markup=skip_markup,
+        )
+    except Exception as e:
+        if "message is not modified" not in str(e).lower():
+            logging.warning("Cancel-reason prompt edit failed (chat=%s msg=%s): %s", cid, call.message.message_id, e)
+
+
+async def _execute_cancel(cid: int, actor, pending: dict, message_id: int, reason: str | None) -> None:
+    """Shared tail for both post-confirm paths (typed reason, or Skip tap).
+
+    Re-resolves the rollcall by rc_db_id rather than trusting any rc_number
+    captured earlier — time has passed waiting for the reply, and another
+    admin could have ended or cancelled a different rollcall in the meantime,
+    shifting numbers.
+    """
+    if not pending:
+        return
+    rc_db_id = pending.get("rc_db_id")
+    actor_name = actor.first_name or actor.username or "someone"
+
+    async with manager.get_chat_write_lock(cid):
+        rollcalls = manager.get_rollcalls(cid)
+        idx = next(
+            (i for i, r in enumerate(rollcalls)
+             if (getattr(r, "db_id", None) or getattr(r, "id", None)) == rc_db_id),
+            None,
+        )
+        if idx is None:
+            try:
+                await bot.edit_message_text(
+                    "That rollcall is no longer open — nothing to cancel.",
+                    cid, message_id, reply_markup=None,
+                )
+            except Exception:
+                pass
+            return
+
+        ended_number = idx + 1
+        result = await rollcalls_svc.cancel_rollcall(
+            cid, idx, actor.id, actor_name, getattr(actor, "username", None),
+            reason=reason,
+        )
+
+        reason_part = f" — {_esc_md(reason)}" if reason else ""
+        final_text = (
+            f"❌ *{_esc_md(pending.get('title') or 'Rollcall')}* has been cancelled "
+            f"by {_esc_md(actor_name)}{reason_part}.\nNo attendance was recorded."
+        )
+        try:
+            await bot.edit_message_text(final_text, cid, message_id, reply_markup=None, parse_mode="Markdown")
+        except Exception:
+            logging.exception(f"Failed to edit cancel-confirm message for chat {cid}")
+            try:
+                await bot.send_message(cid, final_text, parse_mode="Markdown")
+            except Exception:
+                logging.exception(f"Failed to send cancel result for chat {cid}")
+
+        await _post_cancel_cleanup(cid, ended_number, result)
+
+
+async def _cb_cancelrc_skip(call, cid: int) -> None:
+    """btn_cancelskip_{rc_number} — skip the optional reason, cancel now."""
+    pending = _pending_cancel_reason.pop((cid, call.from_user.id), None)
+    await bot.answer_callback_query(call.id)
+    await _execute_cancel(cid, call.from_user, pending, call.message.message_id, reason=None)
+
+
+@bot.message_handler(func=lambda m: (
+    m.from_user is not None
+    and m.text is not None
+    and not m.text.startswith("/")
+    and (m.chat.id, m.from_user.id) in _pending_cancel_reason
+))
+async def cancel_reason_reply(message):
+    """Free-text reply to the "reason for cancelling?" prompt — consumed
+    once, same mechanism as _pending_subsidy_input / _pending_payment_input."""
+    try:
+        cid = message.chat.id
+        uid = message.from_user.id
+        pending = _pending_cancel_reason.pop((cid, uid), None)
+        if not pending:
+            return
+        reason = message.text.strip() or None
+        await _execute_cancel(cid, message.from_user, pending, pending["message_id"], reason=reason)
+    except Exception as e:
+        await reply_error(message, e)
+
+
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("btn_"))
 async def callback_handler(call):
     try:
@@ -1030,6 +1206,26 @@ async def callback_handler(call):
         # ── Cancel end rollcall ───────────────────────────────────────────────
         if action == "endcancel":
             await _cb_end_cancel(call, cid, rc_number, rc)
+            return
+
+        # ── Cancel rollcall (no stats) — show confirmation ──────────────────────
+        if action == "cancelrc":
+            await _cb_cancelrc_prompt(call, cid, rc_number, rc)
+            return
+
+        # ── Confirm cancel rollcall — ask for optional reason ───────────────────
+        if action == "cancelyes":
+            await _cb_cancelrc_yes(call, cid, rc_number, rc)
+            return
+
+        # ── Dismiss cancel-rollcall confirmation ────────────────────────────────
+        if action == "canceldismiss":
+            await _cb_cancelrc_dismiss(call, cid, rc_number, rc)
+            return
+
+        # ── Skip the optional reason, cancel now ────────────────────────────────
+        if action == "cancelskip":
+            await _cb_cancelrc_skip(call, cid)
             return
 
         await bot.answer_callback_query(call.id, "Unknown action")

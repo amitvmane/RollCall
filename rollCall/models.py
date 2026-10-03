@@ -373,16 +373,11 @@ class RollCall:
                 # New proxy not yet in allNames — resolve display name conflict
                 self._resolve_display_name_conflict(user)
         else:
-            # REAL USER — block only real-vs-real duplicate identity
-            for us in self.allNames:
-                if (
-                    us.first_name == user.first_name and
-                    us.username == user.username and
-                    us.user_id != user.user_id and
-                    type(us.user_id) == int
-                ):
-                    return "AB"
-            # If proxy with same first_name exists → update this real user's display name
+            # REAL USER — if proxy with same first_name exists, update this
+            # real user's display name (no identity block here: different
+            # user_ids are different people even when first_name/username
+            # collide, e.g. two real members who both leave @username unset —
+            # User.__init__ already disambiguates their display name above).
             self._resolve_display_name_conflict(user)
 
         if self.inListLimit is None:
@@ -457,15 +452,8 @@ class RollCall:
                 # New proxy not yet in allNames — resolve display name conflict
                 self._resolve_display_name_conflict(user)
         else:
-            # REAL USER — block only real-vs-real duplicate identity
-            for us in self.allNames:
-                if (
-                    us.first_name == user.first_name and
-                    us.username == user.username and
-                    us.user_id != user.user_id and
-                    type(us.user_id) == int
-                ):
-                    return "AB"
+            # REAL USER — see addIn's comment: no identity block, just
+            # display-name disambiguation against any same-named proxy.
             self._resolve_display_name_conflict(user)
 
         for us in self.outList:
@@ -523,15 +511,8 @@ class RollCall:
                 # New proxy not yet in allNames — resolve display name conflict
                 self._resolve_display_name_conflict(user)
         else:
-            # REAL USER — block only real-vs-real duplicate identity
-            for us in self.allNames:
-                if (
-                    us.first_name == user.first_name and
-                    us.username == user.username and
-                    us.user_id != user.user_id and
-                    type(us.user_id) == int
-                ):
-                    return "AB"
+            # REAL USER — see addIn's comment: no identity block, just
+            # display-name disambiguation against any same-named proxy.
             self._resolve_display_name_conflict(user)
 
         for us in self.maybeList:

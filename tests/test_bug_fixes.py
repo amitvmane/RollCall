@@ -2134,5 +2134,69 @@ class TestProxyGhostEventUserName(unittest.TestCase):
             )
 
 
+# ---------------------------------------------------------------------------
+# BUG-8: addIn/addOut/addMaybe falsely blocked two DIFFERENT real users who
+# share a first_name and have no @username set (both None == None). Telegram
+# user_id is already the unique identity; two distinct user_ids are two
+# distinct people no matter what their first_name/username look like.
+#
+# Symptom reported by a user: voted OUT, got told "you're already OUT" (the
+# AB/alreadyInList path) even though their vote was never recorded in
+# outList — so /buzz kept pinging them as a non-responder.
+# ---------------------------------------------------------------------------
+
+class TestRealVsRealNameCollisionNoLongerBlocksVoting(unittest.TestCase):
+    """Two different real users, same first_name, both username=None, must
+    each be able to vote independently — not be treated as "already voted"
+    just because they collide on display fields that aren't the identity."""
+
+    def test_second_same_named_user_can_vote_out(self):
+        rc = make_rollcall()
+        first = make_user("Amit", None, 111)
+        rc.addIn(first)
+
+        second = make_user("Amit", None, 222)
+        result = rc.addOut(second)
+
+        self.assertNotEqual(result, "AB",
+            "Different user_id must not be blocked as a duplicate identity")
+        self.assertIn(222, [u.user_id for u in rc.outList])
+
+    def test_second_same_named_user_can_vote_in(self):
+        rc = make_rollcall()
+        first = make_user("Amit", None, 111)
+        rc.addOut(first)
+
+        second = make_user("Amit", None, 222)
+        result = rc.addIn(second)
+
+        self.assertNotEqual(result, "AB")
+        self.assertIn(222, [u.user_id for u in rc.inList])
+
+    def test_second_same_named_user_can_vote_maybe(self):
+        rc = make_rollcall()
+        first = make_user("Amit", None, 111)
+        rc.addIn(first)
+
+        second = make_user("Amit", None, 222)
+        result = rc.addMaybe(second)
+
+        self.assertNotEqual(result, "AB")
+        self.assertIn(222, [u.user_id for u in rc.maybeList])
+
+    def test_out_vote_actually_lands_in_outlist_so_buzz_wont_reping(self):
+        """Direct regression for the reported symptom: voting OUT must
+        actually populate outList (what services/lists.get_non_responders
+        checks), not silently no-op behind an 'already OUT' message."""
+        rc = make_rollcall()
+        other = make_user("Amit", None, 111)
+        rc.addIn(other)
+
+        voter = make_user("Amit", None, 222)
+        rc.addOut(voter)
+
+        self.assertTrue(any(u.user_id == 222 for u in rc.outList))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

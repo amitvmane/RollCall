@@ -2780,7 +2780,7 @@ window.doEndRcWeb=async function(){
     const rollcall_num=activeTabIdx+1;
     const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/end-rollcall`,{
       method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({id_token:_idToken,rollcall_num}),
+      body:JSON.stringify({id_token:_idToken,rollcall_num,rollcall_id:activeRcData.rollcall_id}),
       signal:AbortSignal.timeout(10000),
     });
     if(!res.ok){
@@ -2810,7 +2810,7 @@ window.doCancelRcWeb=async function(){
   if(btn){btn.disabled=true;btn.textContent="Cancelling…";}
   try{
     const rollcall_num=activeTabIdx+1;
-    const body={id_token:_idToken,rollcall_num};
+    const body={id_token:_idToken,rollcall_num,rollcall_id:activeRcData.rollcall_id};
     if(reason)body.reason=reason;
     const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/cancel-rollcall`,{
       method:"POST",headers:{"Content-Type":"application/json"},

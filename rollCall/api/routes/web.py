@@ -424,6 +424,33 @@ async def web_start_rollcall(
     return WebRollcallResponse(**_serialize_web_rollcall(rc))
 
 
+def _current_rc_index(mgr, chat_id: int, rollcall_num: int, rollcall_id: Optional[int]) -> int:
+    """0-based index of the rollcall an end/cancel request means. Call it
+    INSIDE the chat write lock — the answer is only true while that is held.
+
+    rollcall_num is the tab position the page showed, and positions shift:
+    /erc, /xrc or another admin's web action on #1 renumbers #2 to #1. A page
+    loaded before that, still showing the old numbering, would end or cancel
+    the WRONG rollcall — the one action here with no undo. When the page also
+    sends rollcall_id (the db id it was rendered from), this finds where that
+    rollcall is NOW, or refuses if it has closed; the Telegram panel's cancel
+    path already re-resolves by db id the same way.
+
+    rollcall_id is optional so a page cached from before this still works,
+    with the old positional behaviour.
+    """
+    if rollcall_id is None:
+        return rollcall_num - 1
+    for idx, rc in enumerate(mgr.get_rollcalls(chat_id)):
+        if getattr(rc, "id", None) == rollcall_id:
+            return idx
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="That rollcall is no longer open — someone else may have ended or "
+               "cancelled it. Refresh to see the current list.",
+    )
+
+
 @router.post(
     "/web/group/{group_token}/end-rollcall",
     status_code=status.HTTP_200_OK,
@@ -453,8 +480,8 @@ async def web_end_rollcall(
     from rollcall_manager import manager as _mgr
 
     actor_name = await _actor_display_name(chat_id, actor_user_id)
-    rc_index = body.rollcall_num - 1
     async with _mgr.get_chat_write_lock(chat_id):
+        rc_index = _current_rc_index(_mgr, chat_id, body.rollcall_num, body.rollcall_id)
         result = await rc_svc.end_rollcall(
             chat_id=chat_id,
             rc_number=rc_index,
@@ -504,8 +531,8 @@ async def web_cancel_rollcall(
     from rollcall_manager import manager as _mgr
 
     actor_name = await _actor_display_name(chat_id, actor_user_id)
-    rc_index = body.rollcall_num - 1
     async with _mgr.get_chat_write_lock(chat_id):
+        rc_index = _current_rc_index(_mgr, chat_id, body.rollcall_num, body.rollcall_id)
         result = await rc_svc.cancel_rollcall(
             chat_id=chat_id,
             rc_number=rc_index,

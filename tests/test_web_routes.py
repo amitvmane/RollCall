@@ -683,6 +683,65 @@ class TestWebCancelRollcall(unittest.TestCase):
         self.assertIsNone(mock_cancel.call_args[1].get("reason"))
 
 
+@unittest.skipUnless(FASTAPI_AVAILABLE, "fastapi not installed")
+class TestWebEndCancelFollowTheRollcallNotThePosition(unittest.TestCase):
+    """Positions shift: when #1 closes, #2 becomes #1. A page still showing
+    the old numbering used to end/cancel whatever now sat at the position it
+    remembered — a different game, with no undo. Given the db id it was
+    rendered from, the route acts on THAT rollcall wherever it now sits."""
+
+    def setUp(self):
+        from api.rate_limit import reset_buckets_for_tests
+        reset_buckets_for_tests()
+
+    def _post(self, route, svc_name, result, body):
+        import api.routes.web as _web_mod
+        still_open = [MagicMock(id=22)]  # #1 (id 21) was closed; id 22 moved up to #1
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value=None), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("rollcall_manager.manager.get_rollcalls", return_value=still_open), \
+             patch(f"services.rollcalls.{svc_name}", new_callable=AsyncMock, return_value=result) as svc, \
+             patch.object(_web_mod, "_mirror_panel_to_telegram", new_callable=AsyncMock), \
+             patch.object(_web_mod, "_send_event_notification", new_callable=AsyncMock):
+            resp = _client().post(f"/api/v1/web/group/grp123/{route}",
+                                  json={"id_token": "tok", **body})
+        return resp, svc
+
+    _END = {"rc_number_ended_1based": 1, "ended": {"title": "G"}, "ghost_eligible": False,
+            "ghost_rc_db_id": None, "ended_by": {}, "remaining": [], "renumbered": []}
+    _CANCEL = {"cancelled": {"title": "G"}, "rc_number_ended_1based": 1,
+               "remaining": [], "renumbered": []}
+
+    def test_end_acts_on_the_rollcall_the_page_showed(self):
+        resp, svc = self._post("end-rollcall", "end_rollcall", self._END,
+                               {"rollcall_num": 2, "rollcall_id": 22})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(svc.call_args.kwargs["rc_number"], 0)
+
+    def test_cancel_acts_on_the_rollcall_the_page_showed(self):
+        resp, svc = self._post("cancel-rollcall", "cancel_rollcall", self._CANCEL,
+                               {"rollcall_num": 2, "rollcall_id": 22})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(svc.call_args.kwargs["rc_number"], 0)
+
+    def test_a_rollcall_that_already_closed_is_refused_not_substituted(self):
+        for route, name, result in (("end-rollcall", "end_rollcall", self._END),
+                                    ("cancel-rollcall", "cancel_rollcall", self._CANCEL)):
+            resp, svc = self._post(route, name, result, {"rollcall_num": 1, "rollcall_id": 21})
+            self.assertEqual(resp.status_code, 409, route)
+            self.assertIn("no longer open", resp.json()["detail"])
+            svc.assert_not_called()
+
+    def test_a_page_without_the_id_keeps_the_old_positional_behaviour(self):
+        """A copy of app.js cached from before this still works."""
+        resp, svc = self._post("cancel-rollcall", "cancel_rollcall", self._CANCEL,
+                               {"rollcall_num": 1})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(svc.call_args.kwargs["rc_number"], 0)
+
+
 class TestWebProxyVote(unittest.TestCase):
     """Web parity for /sif /sof /smf — admin-gated proxy voting on the group
     page (flow-audit #4)."""

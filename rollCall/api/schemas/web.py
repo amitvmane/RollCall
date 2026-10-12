@@ -288,11 +288,13 @@ class WebStartRollcallRequest(BaseModel):
 class WebEndRollcallRequest(BaseModel):
     id_token: str = Field(..., description="Signed identity token of the admin ending the rollcall")
     rollcall_num: int = Field(1, ge=1, description="1-based rollcall number to end (defaults to first)")
+    rollcall_id: Optional[int] = Field(None, description="DB id of the rollcall the page showed. When given, the server acts on THAT rollcall wherever it now sits (409 if it has closed) instead of trusting rollcall_num, which shifts when another rollcall ends first")
 
 
 class WebCancelRollcallRequest(BaseModel):
     id_token: str = Field(..., description="Signed identity token of the admin cancelling the rollcall")
     rollcall_num: int = Field(1, ge=1, description="1-based rollcall number to cancel (defaults to first)")
+    rollcall_id: Optional[int] = Field(None, description="DB id of the rollcall the page showed. When given, the server acts on THAT rollcall wherever it now sits (409 if it has closed) instead of trusting rollcall_num, which shifts when another rollcall ends first")
     reason: Optional[str] = Field(None, max_length=200, description="Optional free-text reason (e.g. 'rain', 'low count')")
 
 

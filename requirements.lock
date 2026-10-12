@@ -113,7 +113,7 @@ pydantic-core==2.50.1
     # via pydantic
 pyparsing==3.3.3
     # via matplotlib
-pytelegrambotapi==4.34.0
+pytelegrambotapi==4.37.0
     # via -r requirements.txt
 python-dateutil==2.9.0.post0
     # via matplotlib

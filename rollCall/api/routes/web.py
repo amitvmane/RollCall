@@ -375,8 +375,15 @@ async def web_start_rollcall(
     # the rollcall. Independent of the start itself: if this fails, the
     # rollcall still starts (the template is a convenience, not a
     # precondition), so it's best-effort and doesn't hold the write lock.
+    #
+    # The NAME is checked first, though, and outside that best-effort: an
+    # existing template would otherwise be silently rewritten (see
+    # check_new_template_name), and the swallow below would leave the admin
+    # believing it was saved. incorrectParameter maps to a 422 globally,
+    # before anything has started.
     if body.save_as_template:
         from services import templates as tmpl_svc
+        tmpl_svc.check_new_template_name(chat_id, body.save_as_template)
         try:
             tmpl_svc.upsert_template(
                 chat_id=chat_id, name=body.save_as_template,

@@ -1733,6 +1733,7 @@ class TestScheduleOnce(unittest.TestCase):
     def test_schedule_once_with_save_as_template_keeps_the_real_name(self):
         from services.templates import schedule_once
         with patch("services.templates.upsert_template") as mock_upsert, \
+             patch("services.templates.get_template", return_value=None), \
              patch("services.templates.create_scheduled_rollcall"):
             result = schedule_once(
                 -100, fire_at_iso="2026-10-01T09:00:00Z", title="Once Off",
@@ -1772,6 +1773,24 @@ class TestScheduleOnce(unittest.TestCase):
                     save_as_template=f"{ONCE_TEMPLATE_PREFIX}hijack",
                 )
         mock_upsert.assert_not_called()
+
+    def test_schedule_once_refuses_to_overwrite_an_existing_template(self):
+        """save_as_template=friday, where "friday" is the group's weekly
+        template, used to merge the one-off's fields into it — silently, with
+        no record of the old values, and the next weekly auto-open came up
+        as a hybrid. Refused before anything is written."""
+        from services.templates import schedule_once
+        with patch("services.templates.get_template", return_value={"name": "friday"}), \
+             patch("services.templates.upsert_template") as mock_upsert, \
+             patch("services.templates.create_scheduled_rollcall") as mock_create:
+            with self.assertRaises(incorrectParameter) as ctx:
+                schedule_once(
+                    -100, fire_at_iso="2026-10-01T09:00:00Z", title="Holiday Friday",
+                    admin_user_id=1, admin_name="Alice", save_as_template="friday",
+                )
+        self.assertIn("already exists", str(ctx.exception))
+        mock_upsert.assert_not_called()
+        mock_create.assert_not_called()
 
     def test_resolve_next_weekday_utc_iso_rejects_bad_weekday(self):
         from services.templates import resolve_next_weekday_utc_iso

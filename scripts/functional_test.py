@@ -1263,6 +1263,20 @@ async def run_all():
     ok, d = contains(out, "reserved")
     record("/schedule_once refuses a save_as_template name using the reserved prefix", ok, d)
 
+    await feed('/set_template weekly_keep "Weekly Original" limit=12', ALICE)
+    out = await feed(
+        '/schedule_once tuesday 09:00 "Holiday One-Off" limit=30 save_as_template=weekly_keep',
+        ALICE,
+    )
+    ok, d = contains(out, "already exists")
+    kept_tmpl = _db.get_template(CHAT_ID, "weekly_keep") or {}
+    untouched = (kept_tmpl.get("title") == "Weekly Original"
+                 and str(kept_tmpl.get("inlistlimit")) == "12")
+    record("/schedule_once refuses a save_as_template name that already exists", ok, d)
+    record("...and leaves that existing template exactly as it was",
+           untouched, f"template after refusal: {kept_tmpl}")
+    await feed("/delete_template weekly_keep", ALICE)
+
     out = await feed('/set_template __once_sneaky "Y"', ALICE)
     ok, d = contains(out, "reserved")
     record("/set_template ALSO refuses to create a new template with the reserved prefix",

@@ -157,6 +157,34 @@ def is_reserved_once_template_name(name: str) -> bool:
     return (name or "").strip().lower().startswith(ONCE_TEMPLATE_PREFIX)
 
 
+def check_new_template_name(chat_id: int, name: str) -> None:
+    """Refuse a save_as_template name that is reserved or already taken.
+
+    save_as_template means "also keep this as a NEW template". It went through
+    upsert_template, which merges into an existing row — so naming the group's
+    weekly template ("friday") silently rewrote its title/cap/location/fee
+    with a one-off's values, keeping whichever old fields the one-off didn't
+    set, and the next weekly auto-open came up as a hybrid of the two. Nothing
+    recorded the old values. Refusing costs one retry; editing an existing
+    template stays /set_template's job (and the web template editor's).
+
+    The one rule for every save_as_template entry point — /schedule_once (both
+    surfaces, via schedule_once below) and the web New Rollcall form's
+    start-now path — so they can't disagree about what a name may be.
+    """
+    if is_reserved_once_template_name(name):
+        raise incorrectParameter(
+            f"Template names can't start with '{ONCE_TEMPLATE_PREFIX}' "
+            "— that prefix is reserved for one-off schedules."
+        )
+    if get_template(chat_id, name) is not None:
+        raise incorrectParameter(
+            f"A template named '{name}' already exists. Pick a different name "
+            "— to change that template itself, edit it with /set_template or on "
+            "the group web page."
+        )
+
+
 def _generate_once_template_name(chat_id: int) -> str:
     """chat_id + current second is enough uniqueness in practice — a
     collision needs two /schedule_once calls in the same chat in the same
@@ -249,11 +277,7 @@ def schedule_once(
     save_as_template collides with the reserved prefix).
     """
     if save_as_template:
-        if is_reserved_once_template_name(save_as_template):
-            raise incorrectParameter(
-                f"Template names can't start with '{ONCE_TEMPLATE_PREFIX}' "
-                "— that prefix is reserved for one-off schedules."
-            )
+        check_new_template_name(chat_id, save_as_template)
         name = save_as_template
         persistent = True
     else:

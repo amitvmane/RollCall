@@ -1921,6 +1921,7 @@ class TestWebStartRollcallFullFields(unittest.TestCase):
              patch.object(_web_mod._db, "is_web_admin", return_value=True), \
              patch.object(_web_mod._db, "get_member_display_info", return_value={"first_name": "Amit"}), \
              patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.templates.get_template", return_value=None), \
              patch("services.templates.upsert_template", return_value={}) as tmpl_svc, \
              patch("services.rollcalls.start_rollcall", new_callable=AsyncMock,
                    return_value={"rc_index": 0}), \
@@ -1947,6 +1948,7 @@ class TestWebStartRollcallFullFields(unittest.TestCase):
              patch.object(_web_mod._db, "is_web_admin", return_value=True), \
              patch.object(_web_mod._db, "get_member_display_info", return_value=None), \
              patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.templates.get_template", return_value=None), \
              patch("services.templates.upsert_template", side_effect=Exception("db down")), \
              patch("services.rollcalls.start_rollcall", new_callable=AsyncMock,
                    return_value={"rc_index": 0}) as rc_svc, \
@@ -1958,6 +1960,26 @@ class TestWebStartRollcallFullFields(unittest.TestCase):
                 json={"id_token": "tok", "title": "Match Day", "save_as_template": "FridayMatch"})
         self.assertEqual(resp.status_code, 201)
         rc_svc.assert_awaited_once()
+
+    def test_save_as_template_refuses_an_existing_name_before_starting(self):
+        """An existing template must not be silently rewritten — and the
+        refusal must come before the start, since the upsert below it is
+        best-effort and would otherwise swallow it after the fact."""
+        import api.routes.web as _web_mod
+        with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
+             patch.object(_web_mod._db, "is_web_admin", return_value=True), \
+             patch.object(_web_mod._db, "get_member_display_info", return_value=None), \
+             patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.templates.get_template", return_value={"name": "FridayMatch"}), \
+             patch("services.templates.upsert_template") as mock_upsert, \
+             patch("services.rollcalls.start_rollcall", new_callable=AsyncMock) as rc_svc:
+            resp = _client().post(
+                "/api/v1/web/group/grp123/start-rollcall",
+                json={"id_token": "tok", "title": "Match Day", "save_as_template": "FridayMatch"})
+        self.assertEqual(resp.status_code, 422)
+        self.assertIn("already exists", resp.json()["detail"])
+        mock_upsert.assert_not_called()
+        rc_svc.assert_not_awaited()
 
 
 @unittest.skipUnless(FASTAPI_AVAILABLE, "fastapi not installed")
@@ -2064,6 +2086,7 @@ class TestWebScheduledRollcallsTemplateReference(unittest.TestCase):
              patch.object(_web_mod._db, "is_web_admin", return_value=True), \
              patch.object(_web_mod._db, "get_member_display_info", return_value=None), \
              patch("api.identity.verify_identity_token", return_value=99), \
+             patch("services.templates.get_template", return_value=None), \
              patch("services.templates.upsert_template"), \
              patch("services.templates.create_scheduled_rollcall", return_value=7), \
              patch.object(_web_mod, "_send_event_notification", new_callable=AsyncMock):

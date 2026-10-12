@@ -1043,6 +1043,26 @@ def _existing_columns(cursor, table):
         return set()
 
 
+def _table_definitely_absent(cursor, table) -> bool:
+    """True only when the database positively reports `table` doesn't exist.
+
+    Any error answers False ("might exist"), unlike _existing_columns, which
+    folds errors into "absent". For a guard in front of a standing repair,
+    that difference is the whole point: an unsure probe must let the repair
+    run, not quietly skip it forever.
+    """
+    try:
+        if db_type == 'postgresql':
+            cursor.execute("SELECT to_regclass(%s)", (table,))
+            row = cursor.fetchone()
+            value = row[0] if row is not None and not isinstance(row, dict) else (row or {}).get("to_regclass")
+            return value is None
+        cursor.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,))
+        return cursor.fetchone() is None
+    except Exception:
+        return False
+
+
 def _reconcile_columns(conn, cursor):
     """Add any expected column that is missing from a table.
 
@@ -1110,23 +1130,33 @@ def _run_migrations(conn, cursor):
     # reached zero owners by any route, and an ownerless chat cannot be fixed
     # from inside the app because only owners may promote. It reads like a
     # one-time backfill and is really a standing repair.
-    try:
-        cursor.execute(
-            """SELECT chat_id, MIN(id) AS first_id FROM web_admins
-               WHERE chat_id NOT IN (SELECT chat_id FROM web_admins WHERE role = 'owner')
-               GROUP BY chat_id"""
-        )
-        rows = cursor.fetchall()
-        ph = "%s" if db_type == "postgresql" else "?"
-        for r in rows:
-            first_id = r["first_id"] if isinstance(r, dict) else r[1]
-            cursor.execute(f"UPDATE web_admins SET role = 'owner' WHERE id = {ph}", (first_id,))
-        if rows:
-            conn.commit()
-            logging.warning("Schema reconcile: promoted %d chat(s) earliest web admin to owner", len(rows))
-    except Exception:
-        conn.rollback()
-        logging.exception("Schema reconcile: could not backfill web_admins.role")
+    #
+    # Skipped (not attempted-and-caught) when web_admins doesn't exist yet: on
+    # a fresh database this runs before the CREATE further down, and an empty
+    # table has nobody to promote anyway. Attempting it logged a full ERROR
+    # traceback — and a Sentry event — on every first boot and on EVERY boot
+    # under MEMORY_MODE, training anyone reading the logs to ignore this line.
+    # _table_definitely_absent (not _existing_columns, which reads any error as
+    # "absent") so a failed probe still attempts the repair rather than
+    # silently skipping it.
+    if not _table_definitely_absent(cursor, "web_admins"):
+        try:
+            cursor.execute(
+                """SELECT chat_id, MIN(id) AS first_id FROM web_admins
+                   WHERE chat_id NOT IN (SELECT chat_id FROM web_admins WHERE role = 'owner')
+                   GROUP BY chat_id"""
+            )
+            rows = cursor.fetchall()
+            ph = "%s" if db_type == "postgresql" else "?"
+            for r in rows:
+                first_id = r["first_id"] if isinstance(r, dict) else r[1]
+                cursor.execute(f"UPDATE web_admins SET role = 'owner' WHERE id = {ph}", (first_id,))
+            if rows:
+                conn.commit()
+                logging.warning("Schema reconcile: promoted %d chat(s) earliest web admin to owner", len(rows))
+        except Exception:
+            conn.rollback()
+            logging.exception("Schema reconcile: could not backfill web_admins.role")
 
     # Add ghost_tracking_enabled to chats (may not exist in older deployments)
     if db_type == 'postgresql':

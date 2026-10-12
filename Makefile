@@ -65,7 +65,7 @@ BACKUP_DIR  := $(DATA_DIR)/backups
 # it complains.
 BACKUP_MAX_AGE_HOURS ?= 48
 
-.PHONY: help up down restart build rebuild logs logs-cf status url notify token group-token chats \
+.PHONY: help up down start stop restart build rebuild logs logs-cf status url notify token group-token chats \
         backup-now backup-check backup-list backup-remote backup-remote-logs backup-remote-ls \
         migrate-data check-data-dir restore backup-remote-get backup-remote-latest restore-remote \
         up-postgres db-shell db-counts backup-remote-prune backup-remote-size \
@@ -76,6 +76,7 @@ help: ## Show this help
 	@printf "\n\033[4mLIFECYCLE\033[0m\n"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make up"      "Start/recreate bot (tunnel is managed by the blobsystems repo)"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make down"    "Stop all containers"
+	@printf "  \033[36m%-16s\033[0m %s\n" "make start/stop" "Same as up/down (the names deploy tools use)"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make restart" "Restart bot (picks up .env changes)"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make build"   "Rebuild bot image and restart"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make rebuild" "Clean start: down, rebuild image, up (use after git pull)"
@@ -207,6 +208,11 @@ up: check-data-dir ## Start/recreate bot + backup + watchdog sidecars (tunnel is
 down: ## Stop all containers
 	$(COMPOSE) down
 
+# start/stop: the names a deploy tool (e.g. the homelab repo's appctl) calls
+# every app's lifecycle by. Aliases only -- up/down stay the real targets.
+start: up ## Same as up
+stop: down ## Same as down
+
 restart: ## Restart bot (picks up .env changes)
 	$(COMPOSE) restart $(BOT)
 	@echo "Bot restarted"
@@ -221,8 +227,11 @@ rebuild: ## Clean start: stop everything, rebuild image from current code, start
 	@$(COMPOSE) build $(BOT)
 	@$(MAKE) up
 
-logs: ## Tail bot logs (Ctrl+C to stop)
-	docker compose logs -f $(BOT)
+# FOLLOW=--tail=200 prints recent lines and returns (for a web page or a
+# script); the default follows, as before.
+FOLLOW ?= -f
+logs: ## Tail bot logs (Ctrl+C to stop; FOLLOW=--tail=200 to just print recent lines)
+	docker compose logs $(FOLLOW) $(BOT)
 
 logs-cf: ## Tail Cloudflare tunnel logs (blobsystems-cloudflared container)
 	docker logs -f blobsystems-cloudflared

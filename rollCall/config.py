@@ -33,9 +33,10 @@ MEMORY_MODE = _memory_mode_raw in ("1", "true", "yes", "on")
 # Default to SQLite if DATABASE_URL is not set
 DATABASE_URL = "sqlite:///:memory:" if MEMORY_MODE else os.environ.get("DATABASE_URL", "sqlite:///rollcall.db")
 if not DATABASE_URL.startswith(("sqlite://", "postgresql://", "postgres://")):
+    from version_info import redact_dsn
     raise ValueError(
         f"DATABASE_URL must start with sqlite://, postgresql://, or postgres:// "
-        f"(got: {DATABASE_URL!r}). db.py silently treats any other scheme as a "
+        f"(got: {redact_dsn(DATABASE_URL)!r}). db.py silently treats any other scheme as a "
         f"literal sqlite file path, which is easy to misconfigure by accident."
     )
 

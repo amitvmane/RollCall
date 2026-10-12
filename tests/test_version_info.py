@@ -136,6 +136,36 @@ class TestRedactDsn(unittest.TestCase):
         dsn = "postgresql://host:5432/rollcall"
         self.assertEqual(version_info._redact_dsn(dsn), dsn)
 
+    def test_unencoded_slash_or_at_in_password_is_still_stripped(self):
+        """The old pattern stopped at the first "/" or "@" — so it either
+        didn't match at all or left the tail of the password in the log."""
+        for dsn in ("postgresql://u:pa/ss@host/db",
+                    "postgresql://u:p@ss@host/db",
+                    "postgresql://:onlypass@host/db"):
+            out = version_info.redact_dsn(dsn)
+            self.assertEqual(out, "postgresql://***@host/db", dsn)
+
+
+class TestNoCallSiteLogsARawDsn(unittest.TestCase):
+    """runner.validate_environment() and config.py's scheme check both used to
+    print DATABASE_URL verbatim — on every boot, for the first. Pin that every
+    place echoing it goes through redact_dsn."""
+
+    def _source(self, rel):
+        path = os.path.join(os.path.dirname(__file__), "..", "rollCall", rel)
+        with open(path) as fh:
+            return fh.read()
+
+    def test_runner_redacts(self):
+        src = self._source("runner.py")
+        self.assertIn("redact_dsn(DATABASE_URL", src)
+        self.assertNotIn("configured: {DATABASE_URL", src)
+
+    def test_config_redacts(self):
+        src = self._source("config.py")
+        self.assertIn("redact_dsn(DATABASE_URL)", src)
+        self.assertNotIn("{DATABASE_URL!r}", src)
+
 
 class TestCollectAndLog(unittest.TestCase):
     """collect() and log_startup_banner() end to end, against whatever is

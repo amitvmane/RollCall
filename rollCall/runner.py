@@ -176,7 +176,8 @@ def validate_environment():
         logger.warning("⚠️  DATABASE_URL not set, using default SQLite")
         logger.warning("Database will be created at: /app/data/rollcall.db")
     else:
-        logger.info(f"✅ DATABASE_URL configured: {DATABASE_URL.split('?')[0]}")
+        from version_info import redact_dsn
+        logger.info(f"✅ DATABASE_URL configured: {redact_dsn(DATABASE_URL.split('?')[0])}")
     
     # Check admin list
     if not ADMINS or len(ADMINS) == 0:

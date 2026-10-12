@@ -75,19 +75,26 @@ def _build_info() -> dict:
         return {"commit": "unknown", "built_at": "unknown"}
 
 
-_DSN_CREDENTIALS = re.compile(r"://[^:/@]+:[^@/]+@")
+# Everything from "://" to the LAST "@" before any query/fragment. Greedy on
+# purpose: a password pasted unencoded can contain "/" or "@", and a
+# redactor that stops at the first one fails open and logs the rest.
+_DSN_CREDENTIALS = re.compile(r"://[^?#]*@")
 
 
-def _redact_dsn(url: str) -> str:
+def redact_dsn(url: str) -> str:
     """postgresql://user:pass@host/db -> postgresql://***@host/db.
 
-    validate_environment() elsewhere logs DATABASE_URL unredacted (it only
-    strips query params, not userinfo) — a pre-existing pattern this file
-    doesn't otherwise touch. But this is a new call site, logged on every
-    single boot, so it isn't worth reproducing a credential leak just for
-    consistency with a line it doesn't share code with.
+    The one place a database URL is made safe to log. Lives here because
+    this module imports only the stdlib, so config.py (which validates
+    DATABASE_URL before anything else loads) can use it without a cycle.
+    Every log line or error message that echoes DATABASE_URL goes through
+    this — runner.validate_environment() and config.py's scheme check used
+    to print it verbatim, password included, on every boot.
     """
     return _DSN_CREDENTIALS.sub("://***@", url)
+
+
+_redact_dsn = redact_dsn  # original private name, kept for existing callers
 
 
 def deployed_app_version() -> str:

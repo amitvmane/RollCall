@@ -10,7 +10,17 @@ import logging
 import sqlite3
 from unittest.mock import MagicMock
 
+import pytest
+
 import db
+
+
+@pytest.fixture(autouse=True)
+def _sqlite_dialect(monkeypatch):
+    """These tests drive the migration code over their own throwaway sqlite
+    connection, so it must speak sqlite even in the Postgres CI job (where
+    db.db_type is 'postgresql' and would send %s / to_regclass to sqlite)."""
+    monkeypatch.setattr(db, "db_type", "sqlite")
 
 
 def _fresh():

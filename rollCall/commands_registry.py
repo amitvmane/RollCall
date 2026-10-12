@@ -416,8 +416,20 @@ COMMANDS = [
             "/templates. Add save_as_template=name to keep it as a real, reusable "
             "template instead, same choice /src's save_as_template already offers "
             "for an immediate start.\n\n"
-            "Shows up under /schedules 🕐 One-time while pending. For something "
+            "Shows up under /schedules 🕐 One-time while pending; /cancel_once "
+            "cancels it. For something "
             "that repeats every week, use /set_template + /schedule_template instead."
+        ),
+    },
+    {
+        "name": "cancel_once", "aliases": [], "scope": "admin", "category": "Templates",
+        "args": "", "sample": "/cancel_once",
+        "summary": "Cancel a pending one-off before it opens",
+        "details": (
+            "Lists the rollcalls scheduled with /schedule_once that haven't opened yet, "
+            "with a cancel button for each. Asks to confirm, then tells the group. "
+            "Nothing is left behind (a save_as_template template is kept). "
+            "The same buttons appear under 🕐 One-time in /schedules."
         ),
     },
     {

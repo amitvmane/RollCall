@@ -1286,6 +1286,37 @@ async def run_all():
     ok = len(out) >= 1
     record("/schedule_once with no args shows usage, doesn't crash", ok)
 
+    print("\n=== Phase 8c: /cancel_once -- cancel a one-off from Telegram ===\n")
+
+    raw_before = len(_db.get_templates(CHAT_ID))
+    await feed('/schedule_once thursday 10:00 "Cancel Me Game"', ALICE)
+    pending = [p for p in templates_svc.list_pending_once(CHAT_ID)
+               if p.get("display_title") == "Cancel Me Game"]
+    record("Setup: the one-off to cancel is pending", len(pending) == 1, str(pending))
+    out = await feed("/cancel_once", ALICE)
+    ok, d = contains(out, "cancel me game")
+    record("/cancel_once lists the pending one-off by its real title", ok, d)
+    ok, _ = contains(out, "__once_")
+    record("/cancel_once never shows the internal reserved name", not ok,
+           f"got: {text_of(out)[:200]!r}")
+    if pending:
+        item_id = pending[0]["id"]
+        await feed_cb(f"oncecancel_ask_{item_id}", ALICE)
+        out = await feed_cb(f"oncecancel_yes_{item_id}", ALICE)
+        ok, d = contains(out, "cancel me game", "cancelled")
+        record("Confirming tells the group what was cancelled", ok, d)
+        record("The one-off is no longer pending",
+               all(p["id"] != item_id for p in templates_svc.list_pending_once(CHAT_ID)))
+        record("...and its hidden template went with it (raw count back)",
+               len(_db.get_templates(CHAT_ID)) == raw_before,
+               f"raw template count: {len(_db.get_templates(CHAT_ID))}")
+        out = await feed_cb(f"oncecancel_yes_{item_id}", ALICE)
+        ok, d = contains(out, "already fired")
+        record("A second tap on a stale button cancels nothing and says so", ok, d)
+    out = await feed("/cancel_once", ALICE)
+    ok, d = contains(out, "nothing is scheduled")
+    record("/cancel_once with nothing pending says so", ok, d)
+
     # /set_template within already-running rollcall
     await feed("/src TemplateContextTest", ALICE)
     out = await feed('/set_template inside "Inside Title" limit=5', ALICE)

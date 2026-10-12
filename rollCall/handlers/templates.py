@@ -176,6 +176,17 @@ def _fmt_pending_once_entry(p: dict) -> str:
     return f"🕐 <b>{html.escape(title)}</b>\n   Fires once at {html.escape(when)}{meta_line}"
 
 
+def _add_once_cancel_buttons(markup: InlineKeyboardMarkup, pending_once: list) -> InlineKeyboardMarkup:
+    """One cancel button per pending one-off. The callback carries the row's
+    database id, never its position — a list shown an hour ago must still
+    cancel the one it named even if an earlier one has fired since."""
+    for p in pending_once:
+        title = p.get("display_title") or p.get("title") or ""
+        markup.row(InlineKeyboardButton(f"🗑 Cancel {title[:40]}",
+                                        callback_data=f"oncecancel_ask_{p['id']}"))
+    return markup
+
+
 async def _send_schedules(cid: int, edit_msg_id: int = None):
     templates = templates_svc.list_templates(cid)
     scheduled = [t for t in templates
@@ -208,6 +219,8 @@ async def _send_schedules(cid: int, edit_msg_id: int = None):
         sections.append(f"{header}\n{body}")
     text = "\n\n".join(sections)
     markup = _build_schedules_keyboard(scheduled, cid) if scheduled else None
+    if pending_once:
+        markup = _add_once_cancel_buttons(markup or InlineKeyboardMarkup(), pending_once)
 
     if edit_msg_id:
         try:
@@ -861,6 +874,93 @@ async def schedules_toggle_callback(call):
             await bot.answer_callback_query(call.id, "Error updating schedule")
         except Exception:
             pass  # already logged above; nothing more useful to do if even the alert fails
+
+
+# ── Cancel a pending one-off (/cancel_once, and the buttons in /schedules) ───
+
+@bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/cancel_once")
+async def cancel_once_command(message):
+    """Telegram's way to cancel a /schedule_once one-off before it fires —
+    the web page could, the bot couldn't. Lists what's pending with a cancel
+    button each; the cleanup itself is cancel_pending_once, shared with web."""
+    cid = message.chat.id
+    try:
+        if await admin_rights(message, manager) is False:
+            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
+        pending = templates_svc.list_pending_once(cid)
+        if not pending:
+            await bot.send_message(cid, "Nothing is scheduled to open once. (/schedule_once sets one up.)")
+            return
+        body = "\n\n".join(_fmt_pending_once_entry(p) for p in pending)
+        await bot.send_message(
+            cid, f"<b>🕐 Pending one-time rollcalls</b>\n\n{body}\n\nTap one to cancel it.",
+            parse_mode="HTML", reply_markup=_add_once_cancel_buttons(InlineKeyboardMarkup(), pending))
+    except Exception as e:
+        await reply_error(message, e)
+
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("oncecancel_"))
+async def cancel_once_callback(call):
+    try:
+        cid = call.message.chat.id
+        data = call.data
+
+        # Same gate as the template-delete buttons below.
+        if manager.get_admin_rights(cid):
+            member = await bot.get_chat_member(cid, call.from_user.id)
+            if member.status not in ("administrator", "creator"):
+                await bot.answer_callback_query(call.id, "⛔ Only admins can cancel scheduled rollcalls",
+                                                show_alert=True)
+                return
+
+        if data.startswith("oncecancel_ask_"):
+            item_id = int(data[len("oncecancel_ask_"):])
+            row = next((p for p in templates_svc.list_pending_once(cid) if p["id"] == item_id), None)
+            if row is None:
+                await bot.answer_callback_query(call.id, "Already fired or cancelled.", show_alert=True)
+                return
+            title = row.get("display_title") or row.get("title")
+            confirm = InlineKeyboardMarkup(row_width=2)
+            confirm.add(
+                InlineKeyboardButton("✅ Yes, cancel it", callback_data=f"oncecancel_yes_{item_id}"),
+                InlineKeyboardButton("↩️ Keep it", callback_data="oncecancel_no"),
+            )
+            await bot.answer_callback_query(call.id)
+            await bot.send_message(cid, f'Cancel the scheduled rollcall "{title}"? It will not open.',
+                                   reply_markup=confirm)
+            return
+
+        if data == "oncecancel_no":
+            await bot.answer_callback_query(call.id, "Kept")
+            await safe_edit_text(cid, call.message.message_id, "↩️ Kept — it will still open as scheduled.")
+            return
+
+        if data.startswith("oncecancel_yes_"):
+            item_id = int(data[len("oncecancel_yes_"):])
+            cancelled = templates_svc.cancel_pending_once(cid, item_id)
+            if cancelled is None:
+                await bot.answer_callback_query(call.id, "Already fired or cancelled.", show_alert=True)
+                await safe_edit_text(cid, call.message.message_id, "Nothing to cancel — it already fired or was cancelled.")
+                return
+            await bot.answer_callback_query(call.id, "🗑 Cancelled")
+            # Edit the confirm prompt into the announcement, so the group sees
+            # who cancelled what, same as the web path's event message.
+            text = (f'🗑 Scheduled rollcall "{cancelled["display_title"]}" cancelled '
+                    f'by {call.from_user.first_name}')
+            if not await safe_edit_text(cid, call.message.message_id, text):
+                await bot.send_message(cid, text)
+            return
+
+    except Exception as e:
+        err_str = str(e)
+        if "query is too old" in err_str or "query ID is invalid" in err_str:
+            logging.warning(f"[{_ts()}] Stale one-off cancel callback ignored")
+            return
+        logging.exception("Error in cancel_once_callback")
+        try:
+            await bot.answer_callback_query(call.id, "Error cancelling scheduled rollcall")
+        except Exception:
+            pass
 
 
 # ── Template delete (inline, from /templates) ─────────────────────────────────

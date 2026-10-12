@@ -39,9 +39,13 @@ _env = $(shell grep -m1 '^$(1)=' .env 2>/dev/null | cut -d= -f2- | tr -d '"' | t
 # Host port the health endpoint is published on (matches HEALTH_CHECK_HOST_PORT in .env)
 HC_PORT := $(or $(call _env,HEALTH_CHECK_HOST_PORT),8080)
 
-# Public URL for the bot's web app — the stable blobsystems.xyz domain, not an
-# auto-detected trycloudflare.com URL. Override via WEB_BASE_URL in .env.
-WEB_URL := $(or $(call _env,WEB_BASE_URL),https://rbot.blobsystems.xyz)
+# Public URL for the bot's web app: WEB_BASE_URL from .env, the same value the
+# bot itself uses for voting links (production sets its stable blobsystems.xyz
+# domain there). No fallback: a default of production's domain made any other
+# instance (a test bot, a homelab copy) announce -- and `make notify` DM --
+# links to rock's deployment instead of its own.
+WEB_URL := $(call _env,WEB_BASE_URL)
+NO_WEB_URL := WEB_BASE_URL is not set in .env -- this instance has no public web URL
 
 # Where the database lives on the HOST. Must match DATA_DIR in docker-compose.yml
 # (both read it from .env). Defaults outside the git working tree on purpose —
@@ -302,9 +306,10 @@ status: ## Show container status + external service reachability
 	  && echo "✅  reachable" \
 	  || echo "❌  unreachable"
 	@printf "  Tunnel endpoint:  "; \
-	curl -sf --max-time 8 "$(WEB_URL)/api/v1/health" > /dev/null 2>&1 \
+	if [ -z "$(WEB_URL)" ]; then echo "—   not configured (WEB_BASE_URL unset in .env)"; \
+	else curl -sf --max-time 8 "$(WEB_URL)/api/v1/health" > /dev/null 2>&1 \
 	  && echo "✅  $(WEB_URL)" \
-	  || echo "❌  $(WEB_URL) (unreachable — check blobsystems-cloudflared and blobsystems-nginx on the other repo)"
+	  || echo "❌  $(WEB_URL) (unreachable — check blobsystems-cloudflared and blobsystems-nginx on the other repo)"; fi
 	@echo ""
 	@echo "=== Bot Health ==="
 	@HEALTH=$$(curl -sf --max-time 5 http://localhost:$(HC_PORT)/health 2>/dev/null); \
@@ -530,6 +535,7 @@ backup-remote-ls: ## List what's actually on the remote (the real proof it works
 
 url: ## Show public URL and all group voting links
 	@URL="$(WEB_URL)"; \
+	if [ -z "$$URL" ]; then echo "$(NO_WEB_URL)."; exit 0; fi; \
 	echo "Public URL: $$URL"; \
 	echo "API docs:   $$URL/api/docs"; \
 	echo ""; \
@@ -581,6 +587,7 @@ chats: ## List all known groups with chat IDs (use these with make group-token)
 
 notify: ## Send all voting links to Telegram admin (safe to run when banned — prints links if unreachable)
 	@URL="$(WEB_URL)"; \
+	if [ -z "$$URL" ]; then echo "$(NO_WEB_URL); not sending links." >&2; exit 1; fi; \
 	API_KEY=$$(grep -m1 '^API_KEY=' .env | cut -d= -f2- | tr -d '"' | tr -d "'"); \
 	ADMIN1=$$(grep -m1 '^ADMIN1=' .env | cut -d= -f2- | tr -d '"' | tr -d "'"); \
 	LINKS=$$(sqlite3 $(DB) \

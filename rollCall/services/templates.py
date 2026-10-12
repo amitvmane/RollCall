@@ -21,6 +21,7 @@ from rollcall_manager import manager
 from db import (
     create_or_update_template,
     create_scheduled_rollcall,
+    delete_scheduled_rollcall,
     delete_template,
     disable_template_schedule,
     enable_template_schedule,
@@ -118,6 +119,33 @@ def list_pending_once(chat_id: int) -> list[dict]:
             "limit": tmpl.get("inlistlimit") if tmpl else None,
         })
     return out
+
+
+def cancel_pending_once(chat_id: int, item_id: int) -> Optional[dict]:
+    """Cancel a pending one-time scheduled rollcall. None if there was nothing
+    to cancel (unknown id, another chat's id, or it already fired).
+
+    Deleting the scheduled row alone left two things behind for a
+    /schedule_once one-off. Its hidden __once_ template only ever gets deleted
+    by the scheduler AT FIRE TIME — and a cancelled one never fires, so the
+    row stayed forever, invisible to /templates. And the caller announced the
+    row's raw title, which for a one-off IS that internal name, so the group
+    read 'Scheduled rollcall "__once_-1001234_1790000000" cancelled'.
+
+    A real, admin-named template (save_as_template, or the older web flow
+    that referenced an existing one) is never deleted here — only the
+    reserved prefix marks a template as disposable.
+
+    Returns {"display_title": str} — the name to show people.
+    """
+    row = next((r for r in list_pending_once(chat_id) if r["id"] == item_id), None)
+    if not delete_scheduled_rollcall(item_id, chat_id):
+        return None
+    name = row["title"] if row else None
+    if name and is_reserved_once_template_name(name):
+        delete_template(chat_id, name)
+    display = (row.get("display_title") or row["title"]) if row else f"#{item_id}"
+    return {"display_title": display}
 
 
 # ─── One-off scheduling (no persistent template required) ─────────────────────

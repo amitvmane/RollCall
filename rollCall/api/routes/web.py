@@ -1215,19 +1215,14 @@ async def delete_scheduled_rollcall(
     if not await check_web_admin_live(chat_id, actor_user_id):
         raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
 
-    # Grab title before deletion so we can include it in the notification
-    _sched_title = next(
-        (r["title"] for r in _db.get_upcoming_scheduled_rollcalls(chat_id) if r["id"] == item_id),
-        None,
-    )
-
-    deleted = _db.delete_scheduled_rollcall(item_id, chat_id)
-    if not deleted:
+    from services import templates as _tmpl_svc
+    cancelled = _tmpl_svc.cancel_pending_once(chat_id, item_id)
+    if cancelled is None:
         raise HTTPException(status_code=404, detail="Scheduled rollcall not found or already fired.")
 
     # Non-blocking event log so the group knows the scheduled rollcall was cancelled
-    _label = f'"{_sched_title}"' if _sched_title else f"#{item_id}"
-    await _send_event_notification(chat_id, f"🗑 Scheduled rollcall {_label} cancelled (via web)")
+    await _send_event_notification(
+        chat_id, f'🗑 Scheduled rollcall "{cancelled["display_title"]}" cancelled (via web)')
 
 
 # ── Web login token issuance (admin → member) ────────────────────────────────

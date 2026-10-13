@@ -73,7 +73,7 @@ BACKUP_MAX_AGE_HOURS ?= 48
         backup-now backup-check backup-list backup-remote backup-remote-logs backup-remote-ls \
         migrate-data check-data-dir restore backup-remote-get backup-remote-latest restore-remote \
         up-postgres db-shell db-counts backup-remote-prune backup-remote-size \
-        watchdog-logs watchdog-test
+        watchdog-logs watchdog-test uninstall
 
 help: ## Show this help
 	@printf "\n\033[1mRollCall — deployment manager\033[0m\n"
@@ -85,6 +85,7 @@ help: ## Show this help
 	@printf "  \033[36m%-16s\033[0m %s\n" "make build"   "Rebuild bot image and restart"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make rebuild" "Clean start: down, rebuild image, up (use after git pull)"
 	@printf "  \033[36m%-16s\033[0m %s\n" "make up-postgres" "Start PostgreSQL, wait for it, then start the bot"
+	@printf "  \033[36m%-16s\033[0m %s\n" "make uninstall" "Remove containers + networks -- never data or .env (PLAN=1: only show)"
 	@printf "\n\033[4mOBSERVABILITY\033[0m\n"
 	@printf "  \033[36m%-20s\033[0m %s\n" "make logs"    "Tail bot logs (Ctrl+C to stop)"
 	@printf "  \033[36m%-20s\033[0m %s\n" "make logs-cf" "Tail Cloudflare tunnel logs (blobsystems-cloudflared container)"
@@ -605,3 +606,7 @@ notify: ## Send all voting links to Telegram admin (safe to run when banned — 
 	  --data-urlencode "text=🔗 Web voting links:%0A%0A$$LINKS%0A%0AOpen your group link to vote." > /dev/null \
 	  && echo "Sent to Telegram admin ($$ADMIN1)" \
 	  || echo "(Telegram unreachable — share the links above manually)"
+
+uninstall: ## Remove this app's containers and networks -- never its data or .env (PLAN=1: only show; REMOVE_IMAGES=1: images too)
+	@COMPOSE="$(COMPOSE) --profile postgres --profile backup-remote" DATA_KEY=DATA_DIR DATA_DEFAULT="../rollcall-data" ENV_FILE=".env" \
+	  PLAN="$(PLAN)" CONFIRM="$(CONFIRM)" REMOVE_IMAGES="$(REMOVE_IMAGES)" scripts/uninstall.sh

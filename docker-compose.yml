@@ -152,7 +152,10 @@ services:
       # Health-check endpoint. HEALTH_CHECK_HOST_PORT is the HOST port (change it
       # to avoid clashes with other services on 8080); HEALTH_CHECK_PORT is the
       # in-container port the app binds. Both default to 8080.
-      - "${HEALTH_CHECK_HOST_PORT:-8080}:${HEALTH_CHECK_PORT:-8080}"
+      # Host loopback only: `make status` and the homelab admin page check it
+      # on localhost, and the watchdog over the Docker network -- nothing
+      # needs it from the LAN or tailnet.
+      - "127.0.0.1:${HEALTH_CHECK_HOST_PORT:-8080}:${HEALTH_CHECK_PORT:-8080}"
       # Port 8081 (REST API) is intentionally NOT exposed to the host.
       # cloudflared reaches it over the internal Docker network instead.
 
@@ -312,13 +315,14 @@ services:
     # copy of the ledger, so a silent upstream swap on the next `pull`/reboot is
     # the worst possible place for one.
     #
-    # 1.75.1 is upstream's current stable (released 2026-09-04), chosen
-    # deliberately rather than read off the running container — the host isn't
-    # reachable from this checkout. If the sidecar is live on an older version
+    # 1.75.2 (2026-10-09): the security release on top of 1.75.1, which this
+    # was pinned to before -- GHSA-w33h-3qgq-8mv8, GHSA-44pm-2q5p-fm63 and six
+    # more, mostly in `serve webdav`/selfupdate, which this sidecar doesn't
+    # use; patched anyway since this holds the only off-site copy. If the sidecar is live on an older version
     # and you'd rather freeze exactly what has been working, run:
     #   docker exec rollcall-backup-sync rclone version | head -1
     # and put that version here instead. Bump deliberately; update this note.
-    image: rclone/rclone:1.75.1
+    image: rclone/rclone:1.75.2
     container_name: rollcall-backup-sync
     restart: unless-stopped
     profiles:

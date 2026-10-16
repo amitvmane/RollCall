@@ -236,12 +236,19 @@ async def _run_rest_api_server():
     # login limiter) collapses onto one shared bucket for the whole user
     # base. proxy_headers=True makes uvicorn parse X-Forwarded-For and
     # rewrite request.client to the real visitor IP. forwarded_allow_ips
-    # controls which direct peers are trusted to set that header — "*" is
-    # safe ONLY because the port isn't host-exposed (nothing but the
-    # trusted proxy container can ever be the direct peer); if that
-    # topology changes (e.g. this port gets published to the host),
-    # TRUSTED_PROXY_IPS must be tightened to the proxy's actual container
-    # IP/CIDR or this becomes a client-spoofable rate-limit bypass.
+    # controls which direct peers are trusted to set that header.
+    #
+    # With "*", uvicorn takes the LEFT-MOST X-Forwarded-For entry — and
+    # keeping the port off the host is NOT enough to make that safe. The
+    # visitor writes that entry: Cloudflare and Nginx append to whatever
+    # X-Forwarded-For the visitor sent, so "6.6.6.6, <real>, <cloudflared>"
+    # arrives here and request.client becomes 6.6.6.6 — a free rate-limit
+    # bypass. "*" is safe only because the proxy in front REPLACES the
+    # header with one value the visitor can't forge (blobsystems'
+    # nginx/conf.d/rollcall.conf sets it to $http_cf_connecting_ip). Any
+    # proxy put in front of this must do the same; if the port is ever
+    # published to the host, tighten TRUSTED_PROXY_IPS to that proxy's
+    # IP/CIDR as well.
     config = uvicorn.Config(
         api_app,
         host=host,

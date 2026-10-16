@@ -178,7 +178,7 @@ variables:
 | `CORS_ALLOWED_ORIGINS` | No | Comma-separated allowed origins (default: your `WEB_BASE_URL`, not `*`) |
 | `REST_API_RATE_LIMIT_WINDOW_SECONDS` | No | Rate-limit window in seconds (default: `60`) |
 | `REST_API_RATE_LIMIT_MAX_REQUESTS` | No | Max requests per window per token/IP (default: `60`) |
-| `TRUSTED_PROXY_IPS` | No | Peers trusted to set `X-Forwarded-For` (default: `*`, safe only because port 8081 isn't published to the host) |
+| `TRUSTED_PROXY_IPS` | No | Peers trusted to set `X-Forwarded-For` (default: `*`). uvicorn then uses the *first* `X-Forwarded-For` entry, so the proxy in front must **replace** that header with one the visitor can't forge (e.g. `proxy_set_header X-Forwarded-For $http_cf_connecting_ip;`), not append to it — otherwise visitors can choose their own IP and bypass rate limits |
 | `DB_POOL_MINCONN` / `DB_POOL_MAXCONN` | No | PostgreSQL pool bounds (default: `1` / `5`) — raise max if `/health` reports `db_pool_saturated` |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | No | Web-Push keypair. Unset disables push; rotating them forces members to re-subscribe |
 | `MEMORY_MODE` | No | `true` for in-memory SQLite — **all data is lost on restart**; overrides `DATABASE_URL` |

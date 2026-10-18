@@ -17,6 +17,7 @@ Push notifications:
 import json
 import logging
 import os
+from pathlib import Path as _PathlibPath
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
@@ -142,6 +143,9 @@ async def push_unsubscribe(
     push_svc.unsubscribe(body.endpoint, group_token)
 
 
+_STATIC_MANIFEST = _PathlibPath(__file__).resolve().parent.parent / "web" / "manifest.json"
+
+
 @router.get(
     "/web/group/{group_token}/manifest.json",
     summary="Dynamic PWA manifest for this group",
@@ -158,22 +162,15 @@ async def group_manifest(
     group_name = (chat or {}).get("group_name") or "RollCall"
     web_base = os.environ.get("WEB_BASE_URL", "").rstrip("/")
     start_url = f"{web_base}/web/group/{group_token}" if web_base else f"/web/group/{group_token}"
-    manifest = {
+    # Built from the static manifest so the two can't drift: this route used
+    # to carry its own copy of every field, and icon/scope fixes landed in one
+    # and not the other. Only the group-specific fields differ.
+    manifest = json.loads(_STATIC_MANIFEST.read_text())
+    manifest.update({
         "name": f"RollCall — {group_name}",
-        "short_name": "RollCall",
         "description": f"Vote on rollcalls for {group_name}",
         "start_url": start_url,
-        "scope": "/web/",
-        "display": "standalone",
-        "orientation": "portrait",
-        "theme_color": "#2563eb",
-        "background_color": "#f0f4f8",
-        "icons": [
-            {"src": "/web/logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"},
-            {"src": "/web/icon-192.png", "sizes": "192x192", "type": "image/png"},
-            {"src": "/web/icon-512.png", "sizes": "512x512", "type": "image/png"},
-        ],
-    }
+    })
     return Response(
         content=json.dumps(manifest),
         media_type="application/manifest+json",

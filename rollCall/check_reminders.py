@@ -162,6 +162,14 @@ async def _dm_non_responders(chat_id: int, rc_number: int, title: str, when_phra
     logging.info(
         f"[reminder-dm] sent {sent}/{len(candidates)} DM(s) for rollcall #{rc_number} in chat {chat_id}"
     )
+    # Same reminder to the same people in the web app, for members who vote
+    # there and never started the bot (whose DM above just failed).
+    from services import push as push_svc
+    await push_svc.notify_users(
+        chat_id, [c.get("user_id") for c in candidates],
+        f"⏰ {title}", f"You haven't voted yet — it {when_phrase}. Tap to vote.",
+        tag=f"remind-{rc_number}",
+    )
 
 
 async def check(rollcalls, timezone, chat_id):

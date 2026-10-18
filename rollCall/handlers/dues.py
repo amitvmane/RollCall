@@ -2043,6 +2043,7 @@ async def _send_dues_dms(cid: int, result: dict) -> None:
     clear context of which proxy the amount is for. Unowned proxies are
     already noted in the group announcement.
     """
+    from services import push as push_svc
     upi     = result.get("upi_vpa")
     targets = result.get("dm_targets", [])
     sent    = 0
@@ -2070,6 +2071,9 @@ async def _send_dues_dms(cid: int, result: dict) -> None:
             sent += 1
         except Exception:
             failed.append(name)
+        push_body = (f"Your proxy {name} owes ₹{balance} to the group." if is_proxy
+                     else f"You owe ₹{balance} to the group.")
+        await push_svc.notify_users(cid, [uid], "📢 Dues reminder", push_body, tag="dues")
 
     if failed or sent:
         summary = f"✅ Reminders sent to {sent} member(s)."

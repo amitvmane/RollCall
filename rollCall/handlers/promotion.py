@@ -65,6 +65,15 @@ async def announce_promotions(
             if isinstance(p_id, int):
                 _t = asyncio.create_task(_dm_promoted_real_user(p_id, rc_title, rc_number_1based))
                 _t.add_done_callback(_log_task_exc)
+                # Web-app twin of the DM. Both, not either: the DM fails for
+                # anyone who never started the bot, which is exactly the
+                # member who lives in the installed web app.
+                from services import push as push_svc
+                _push = push_svc.notify_users(
+                    cid, [p_id], f"🎉 You're IN — {rc_title}",
+                    f"A spot opened up and you're now IN for #{rc_number_1based}. See you there!",
+                    tag="promoted")
+                asyncio.create_task(_push).add_done_callback(_log_task_exc)
             if rc is not None:
                 from handlers.lifecycle import notify_proxy_owner_wait_to_in
                 await notify_proxy_owner_wait_to_in(rc, p_obj, cid, rc_title, rc_number_1based)

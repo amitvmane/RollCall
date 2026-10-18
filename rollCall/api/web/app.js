@@ -1472,6 +1472,11 @@ function _adoptVerifiedIdentity(data){
   toast(`✅ Verified as ${data.name}! Your identity is now locked to your Telegram account.`,4500);
   renderIdentity();detectCurrentVote();
   _checkWebAdmin().catch(()=>{});
+  // On the home screen, signing in is what makes the server's group list
+  // available — fetch it now. Without this a freshly installed app (which
+  // starts with empty storage, so no recent groups) stayed on "No groups yet"
+  // after a successful sign-in until the user thought to restart it.
+  if(!URL_TOKEN)_loadHomeGroups().catch(()=>{});
   // Re-link any existing push subscription with the now-known user ID
   _relinkPushSubscription();
 }
@@ -1498,6 +1503,13 @@ async function _pollVerify(){
     _adoptVerifiedIdentity(data);
   }catch(_){}
 }
+
+// Coming back from Telegram is the moment verification has just finished.
+// Phones freeze timers in a backgrounded page — an installed app especially —
+// so check at once instead of leaving the user waiting for the next tick.
+document.addEventListener("visibilitychange",()=>{
+  if(document.visibilityState==="visible"&&_verifyCode)_pollVerify();
+});
 
 function _stopVerifyPoll(){
   if(_verifyPollTimer){clearInterval(_verifyPollTimer);_verifyPollTimer=null;}
@@ -1609,11 +1621,26 @@ function _urlB64ToUint8Array(b64) {
   return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
 }
 
+// iPhone/iPad Safari has no install prompt and no PushManager until the page
+// is added to the home screen (iOS 16.4+). Detected so both buttons can say
+// how to get there instead of silently not existing. iPadOS reports itself as
+// a Mac, hence the touch-points check.
+const _IS_IOS=/iP(hone|ad|od)/.test(navigator.userAgent)||
+  (navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);
+const _IS_STANDALONE=window.navigator.standalone===true||
+  (window.matchMedia&&window.matchMedia("(display-mode: standalone)").matches);
+const _IOS_NEEDS_INSTALL=_IS_IOS&&!_IS_STANDALONE;
+
+function _iosInstallHelp(why){
+  toast(`${why}On iPhone: tap Share ⬆︎ in Safari, then “Add to Home Screen”, and open RollCall from there.`,7000);
+}
+
 function _initPushUI() {
   const btn = $("notify-btn");
-  if (!btn || !("PushManager" in window)) return;
+  if (!btn) return;
   // Show the bell button only in group mode (not TG mini-app — Telegram has its own notifications)
   if (tg) return;
+  if (!("PushManager" in window) && !_IOS_NEEDS_INSTALL) return;
   btn.classList.remove("hidden");
   _updateNotifyBtn();
 }
@@ -1621,7 +1648,8 @@ function _initPushUI() {
 function _updateNotifyBtn() {
   const btn = $("notify-btn");
   if (!btn) return;
-  const perm = Notification.permission;
+  // iOS Safari outside the home screen has no Notification global at all.
+  const perm = typeof Notification !== "undefined" ? Notification.permission : "default";
   if (perm === "granted") {
     btn.textContent = "🔔";
     btn.title = "Notifications ON — tap to turn off";
@@ -1638,7 +1666,11 @@ function _updateNotifyBtn() {
 }
 
 window.toggleNotifications = async function() {
-  if (!_swReg) { toast("Notifications not available on this browser"); return; }
+  if (_IOS_NEEDS_INSTALL && !("PushManager" in window)) {
+    _iosInstallHelp("Notifications need RollCall on your home screen. ");
+    return;
+  }
+  if (!_swReg || !("PushManager" in window)) { toast("Notifications not available on this browser"); return; }
   const perm = Notification.permission;
 
   if (perm === "denied") {
@@ -1707,6 +1739,10 @@ function _hideInstallBtn(){
   document.querySelectorAll(".brand-install-btn").forEach(b=>b.classList.add("hidden"));
 }
 
+// iOS never fires beforeinstallprompt, so the button would never appear there;
+// show it and let triggerInstall explain the Share-sheet route instead.
+if(_IOS_NEEDS_INSTALL)_showInstallBtn();
+
 window.addEventListener("beforeinstallprompt", e => {
   e.preventDefault();
   _installPrompt = e;
@@ -1720,7 +1756,10 @@ window.addEventListener("appinstalled", () => {
 });
 
 window.triggerInstall = async function(){
-  if(!_installPrompt)return;
+  if(!_installPrompt){
+    if(_IOS_NEEDS_INSTALL)_iosInstallHelp("");
+    return;
+  }
   _installPrompt.prompt();
   const{outcome} = await _installPrompt.userChoice;
   if(outcome === "accepted"){

@@ -5492,31 +5492,47 @@ def save_push_subscription(group_token: str, endpoint: str, p256dh: str, auth: s
                         created_at  = CURRENT_TIMESTAMP
                 """, (group_token, endpoint, p256dh, auth, tg_user_id))
             else:
+                # A real upsert, NOT `INSERT OR REPLACE`: that deletes and
+                # re-inserts the row, so a re-subscribe without an id_token
+                # (bell tapped before signing in) wiped the stored tg_user_id
+                # and the member silently stopped getting personal pushes.
+                # Same trap set_web_admin fell into with `role`.
                 cursor.execute(f"""
-                    INSERT OR REPLACE INTO push_subscriptions (group_token, endpoint, p256dh, auth, active, tg_user_id)
+                    INSERT INTO push_subscriptions (group_token, endpoint, p256dh, auth, active, tg_user_id)
                     VALUES ({ph}, {ph}, {ph}, {ph}, 1, {ph})
+                    ON CONFLICT (endpoint) DO UPDATE SET
+                        group_token = excluded.group_token,
+                        p256dh      = excluded.p256dh,
+                        auth        = excluded.auth,
+                        active      = 1,
+                        tg_user_id  = COALESCE(excluded.tg_user_id, push_subscriptions.tg_user_id),
+                        created_at  = CURRENT_TIMESTAMP
                 """, (group_token, endpoint, p256dh, auth, tg_user_id))
     except Exception:
         logging.exception("save_push_subscription failed")
 
 
 def get_push_subscriptions(group_token: str) -> List[Dict]:
-    """Return all active push subscriptions for a group."""
+    """Return all active push subscriptions for a group.
+
+    tg_user_id is None for a subscriber who never signed in on that device.
+    """
     try:
         with _cursor() as cursor:
             ph = '%s' if db_type == 'postgresql' else '?'
             active_val = 'TRUE' if db_type == 'postgresql' else '1'
             cursor.execute(
-                f"SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE group_token = {ph} AND active = {active_val}",
+                f"SELECT endpoint, p256dh, auth, tg_user_id FROM push_subscriptions WHERE group_token = {ph} AND active = {active_val}",
                 (group_token,)
             )
             rows = cursor.fetchall()
             result = []
             for row in rows:
                 if isinstance(row, dict):
-                    result.append({'endpoint': row['endpoint'], 'p256dh': row['p256dh'], 'auth': row['auth']})
+                    result.append({'endpoint': row['endpoint'], 'p256dh': row['p256dh'], 'auth': row['auth'],
+                                   'tg_user_id': row['tg_user_id']})
                 else:
-                    result.append({'endpoint': row[0], 'p256dh': row[1], 'auth': row[2]})
+                    result.append({'endpoint': row[0], 'p256dh': row[1], 'auth': row[2], 'tg_user_id': row[3]})
             return result
     except Exception:
         logging.exception("get_push_subscriptions failed")

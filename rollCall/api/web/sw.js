@@ -3,8 +3,12 @@
 
 // Bump on any change to the caching strategy below. Note this is NOT the only
 // thing that ships new code any more — see the fetch handler.
-const CACHE = "rc-v4";
-const PRECACHE = ["/web/", "/web/app.js", "/web/style.css", "/web/logo.svg", "/web/icon-192.png", "/web/manifest.json"];
+const CACHE = "rc-v5";
+// /shared/ is outside this worker's scope, but a controlled page's
+// subresources still pass through it — and without these the offline shell
+// renders with no theme tokens at all.
+const PRECACHE = ["/web/", "/web/app.js", "/web/style.css", "/web/logo.svg", "/web/icon-192.png", "/web/manifest.json",
+                  "/shared/tokens.css", "/shared/account.css", "/shared/theme-init.js"];
 
 // ── Install: precache shell ───────────────────────────────────────────────────
 self.addEventListener("install", e => {
@@ -43,7 +47,7 @@ self.addEventListener("fetch", e => {
   //
   // Correctness of the deployed code matters more here than shaving a request,
   // and the app is online-centric anyway — an offline user can't vote.
-  if (url.pathname.startsWith("/web/") &&
+  if ((url.pathname.startsWith("/web/") || url.pathname.startsWith("/shared/")) &&
       (url.pathname.endsWith(".js") || url.pathname.endsWith(".css"))) {
     e.respondWith(
       fetch(e.request).then(r => {
@@ -73,10 +77,25 @@ self.addEventListener("fetch", e => {
     return;
   }
 
-  // Network-first for HTML pages (always fresh vote state)
+  // Network-first for HTML pages (always fresh vote state). Offline, every
+  // /web/ page gets the cached shell — it is one HTML file that reads the
+  // group token from the URL, so it can stand in for any of them.
+  //
+  // Not `caches.match(a) || caches.match(b)`: caches.match returns a Promise,
+  // which is always truthy, so the fallback never ran — and when the shell
+  // wasn't cached, respondWith got `undefined` and the browser showed its own
+  // network error instead of anything of ours.
   if (e.request.mode === "navigate") {
     e.respondWith(
-      fetch(e.request).catch(() => caches.match("/web/") || caches.match(e.request))
+      fetch(e.request).catch(async () =>
+        (await caches.match("/web/")) || (await caches.match(e.request)) ||
+        new Response(
+          "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>" +
+          "<body style='font-family:system-ui;padding:24px;text-align:center'>" +
+          "<h3>You're offline</h3><p>RollCall needs a connection — try again once you're back online.</p>",
+          { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } }
+        )
+      )
     );
   }
 });
@@ -93,12 +112,16 @@ self.addEventListener("push", e => {
       badge:   "/web/icon-192.png",
       vibrate: [200, 100, 200],
       data:    { url: data.url },
-      actions: [
+      // "Vote now" only where there is a vote to cast — not on a dues
+      // reminder or a "closed" notice.
+      actions: /^(rollcall-open|remind-)/.test(data.tag || "rollcall-open") ? [
         { action: "vote", title: "Vote now" },
         { action: "dismiss", title: "Dismiss" },
-      ],
+      ] : [],
       requireInteraction: false,
-      tag: "rollcall-open",   // replaces previous unread notification
+      // Same tag replaces the previous unread notification; the server sends
+      // a different one per kind so a promotion can't overwrite "opened".
+      tag: data.tag || "rollcall-open",
     })
   );
 });

@@ -4,9 +4,13 @@ Web push notification service.
 VAPID keys are auto-generated on first use and stored in system_config.
 Environment variables VAPID_PRIVATE_KEY / VAPID_PUBLIC_KEY take priority.
 
-Sending is fire-and-forget: callers await notify_rollcall_started() which
-schedules work on a small thread pool (webpush is synchronous) and does not
-raise on individual send failures.
+Sending is fire-and-forget: callers await notify_rollcall_started() /
+notify_users() which schedule work on a small thread pool (webpush is
+synchronous) and never raise on send failures.
+
+No VAPID env vars is a working configuration, not a disabled one: the keypair
+is generated on first use and persisted. Setting the env vars only matters to
+pin the keys across a lost database (new keys = every member re-subscribes).
 """
 from __future__ import annotations
 
@@ -149,26 +153,59 @@ async def _dispatch(subs: list, payload: str, priv_pem: str) -> int:
     return sent
 
 
-async def notify_rollcall_ended(group_token: str, title: str, url: str) -> None:
-    """Fire push to all active subscribers when a rollcall closes."""
+def group_link(chat_id: int) -> tuple[Optional[str], Optional[str]]:
+    """Return (group_token, page_url) for a chat, or (None, None) if it has no web page.
+
+    The one place every push call site resolves where a notification should
+    open, so "which URL does a tap land on" can't drift between them.
+    get_or_create_chat, not manager.get_chat -- that cache only ever populates
+    a hardcoded 6-field subset and never included group_web_token, so it
+    always read None and push silently no-op'd.
+    """
+    chat = _db.get_or_create_chat(chat_id)
+    group_token = chat.get("group_web_token") if chat else None
     if not group_token:
-        return
+        return None, None
+    web_base = os.environ.get("WEB_BASE_URL", "").rstrip("/")
+    return group_token, f"{web_base}/web/group/{group_token}"
+
+
+async def _notify(group_token: str, subs: list, title: str, body: str, url: str,
+                  tag: str, label: str) -> int:
+    """Send one notification to `subs`. Never raises; returns how many landed.
+
+    `tag` groups notifications on the device: a new one with the same tag
+    replaces the old rather than stacking, so it must differ between kinds
+    (a waitlist promotion must not overwrite "rollcall opened").
+    """
+    if not subs:
+        return 0
     try:
-        subs = _db.get_push_subscriptions(group_token)
-        if not subs:
-            return
         priv_pem, _ = _load_or_create_vapid()
         payload = json.dumps({
-            "title": f"📋 {title} closed",
-            "body": "The rollcall has ended — tap to see the final list",
+            "title": title,
+            "body": body,
             "url": url,
+            "tag": tag,
             "icon": "/web/icon-192.png",
             "badge": "/web/icon-192.png",
         })
         sent = await _dispatch(subs, payload, priv_pem)
-        logging.info("[push] notify_ended: sent=%d/%d group=%s title=%r", sent, len(subs), group_token[:12], title)
+        logging.info("[push] %s: sent=%d/%d group=%s", label, sent, len(subs), group_token[:12])
+        return sent
     except Exception:
-        logging.exception("[push] notify_rollcall_ended failed for group=%s", group_token[:12])
+        logging.exception("[push] %s failed for group=%s", label, group_token[:12])
+        return 0
+
+
+async def notify_rollcall_ended(group_token: str, title: str, url: str) -> None:
+    """Fire push to all active subscribers when a rollcall closes."""
+    if not group_token:
+        return
+    await _notify(group_token, _db.get_push_subscriptions(group_token),
+                  f"\U0001f4cb {title} closed",
+                  "The rollcall has ended — tap to see the final list",
+                  url, "rollcall-ended", "notify_ended")
 
 
 async def notify_rollcall_started(group_token: str, title: str, url: str) -> None:
@@ -178,19 +215,28 @@ async def notify_rollcall_started(group_token: str, title: str, url: str) -> Non
     """
     if not group_token:
         return
+    await _notify(group_token, _db.get_push_subscriptions(group_token),
+                  f"\U0001f3af {title}", "Rollcall just opened — tap to vote",
+                  url, "rollcall-open", "notify")
+
+
+async def notify_users(chat_id: int, user_ids, title: str, body: str, tag: str) -> int:
+    """Push to specific members of a group, on every device they subscribed from.
+
+    The web-app counterpart of a Telegram DM. Only subscriptions that were made
+    while signed in carry a tg_user_id, so an anonymous subscriber is never a
+    target here -- there is no way to know it is them. Never raises.
+    """
+    wanted = {u for u in user_ids if isinstance(u, int)}
+    if not wanted:
+        return 0
     try:
-        subs = _db.get_push_subscriptions(group_token)
-        if not subs:
-            return
-        priv_pem, _ = _load_or_create_vapid()
-        payload = json.dumps({
-            "title": f"\U0001f3af {title}",
-            "body": "Rollcall just opened — tap to vote",
-            "url": url,
-            "icon": "/web/icon-192.png",
-            "badge": "/web/icon-192.png",
-        })
-        sent = await _dispatch(subs, payload, priv_pem)
-        logging.info("[push] notify: sent=%d/%d group=%s title=%r", sent, len(subs), group_token[:12], title)
+        group_token, url = group_link(chat_id)
+        if not group_token:
+            return 0
+        subs = [s for s in _db.get_push_subscriptions(group_token)
+                if s.get("tg_user_id") in wanted]
     except Exception:
-        logging.exception("[push] notify_rollcall_started failed for group=%s", group_token[:12])
+        logging.exception("[push] notify_users lookup failed chat=%s", chat_id)
+        return 0
+    return await _notify(group_token, subs, title, body, url, tag, f"notify_users[{tag}]")

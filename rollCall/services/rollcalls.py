@@ -210,18 +210,10 @@ async def start_rollcall(
 async def _push_rollcall_started(chat_id: int, title: str) -> None:
     """Background task: send web push to group subscribers when a rollcall opens."""
     try:
-        import os as _os
         from services import push as push_svc
-        # get_or_create_chat, not manager.get_chat -- that cache only ever
-        # populates a hardcoded 6-field subset and never included
-        # group_web_token, so this always read None and silently no-op'd.
-        chat = get_or_create_chat(chat_id)
-        group_token = chat.get("group_web_token") if chat else None
-        if not group_token:
-            return
-        web_base = _os.environ.get("WEB_BASE_URL", "").rstrip("/")
-        url = f"{web_base}/web/group/{group_token}" if web_base else f"/web/group/{group_token}"
-        await push_svc.notify_rollcall_started(group_token, title, url)
+        group_token, url = push_svc.group_link(chat_id)
+        if group_token:
+            await push_svc.notify_rollcall_started(group_token, title, url)
     except Exception:
         logging.exception("[push] _push_rollcall_started failed chat=%s", chat_id)
 
@@ -229,17 +221,10 @@ async def _push_rollcall_started(chat_id: int, title: str) -> None:
 async def _push_rollcall_ended(chat_id: int, title: str) -> None:
     """Background task: send web push when a rollcall closes."""
     try:
-        import os as _os
         from services import push as push_svc
-        # get_or_create_chat, not manager.get_chat -- see the comment in
-        # _push_rollcall_started above.
-        chat = get_or_create_chat(chat_id)
-        group_token = chat.get("group_web_token") if chat else None
-        if not group_token:
-            return
-        web_base = _os.environ.get("WEB_BASE_URL", "").rstrip("/")
-        url = f"{web_base}/web/group/{group_token}" if web_base else f"/web/group/{group_token}"
-        await push_svc.notify_rollcall_ended(group_token, title, url)
+        group_token, url = push_svc.group_link(chat_id)
+        if group_token:
+            await push_svc.notify_rollcall_ended(group_token, title, url)
     except Exception:
         logging.exception("[push] _push_rollcall_ended failed chat=%s", chat_id)
 

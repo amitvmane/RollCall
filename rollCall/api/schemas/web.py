@@ -269,6 +269,18 @@ class PushUnsubscribeRequest(BaseModel):
     endpoint: str = Field(..., min_length=10)
 
 
+class PushStatusRequest(BaseModel):
+    endpoint: str = Field(..., min_length=10)
+
+
+class PushStatusResponse(BaseModel):
+    subscribed: bool
+
+
+class PushRelinkRequest(BaseModel):
+    endpoint: str = Field(..., min_length=10)
+
+
 class VapidPublicKeyResponse(BaseModel):
     public_key: str
 

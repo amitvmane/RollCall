@@ -5,6 +5,7 @@ Supports both PostgreSQL and SQLite
 from __future__ import annotations
 
 import os
+import re
 import json
 import logging
 import threading
@@ -270,6 +271,79 @@ def _cursor(commit: bool = False):
             cur.close()
         if db_type == 'postgresql':
             release_connection(conn)
+
+
+def _migrate_push_subscriptions_per_group(conn, cursor) -> None:
+    """One push subscription per (browser, group), not one per browser.
+
+    `endpoint` used to be UNIQUE on its own, so a browser could only ever be
+    subscribed to ONE group: turning on the bell in group B re-pointed the
+    row away from group A, silently, while A's bell still showed ON. The
+    installed web app is exactly where one device follows several groups.
+
+    Idempotent and data-preserving: endpoint was unique, so every existing
+    row is already unique on (endpoint, group_token) and is copied as-is.
+    Safe to run on every boot — it only acts while the old constraint exists.
+    """
+    if db_type == 'postgresql':
+        try:
+            # The inline UNIQUE got a generated name; find it by shape
+            # (a single-column unique constraint) rather than guessing it.
+            cursor.execute("""
+                SELECT conname FROM pg_constraint
+                WHERE conrelid = 'push_subscriptions'::regclass AND contype = 'u'
+                  AND array_length(conkey, 1) = 1
+            """)
+            for row in cursor.fetchall():
+                conname = row[0] if not isinstance(row, dict) else row["conname"]
+                cursor.execute(f'ALTER TABLE push_subscriptions DROP CONSTRAINT IF EXISTS "{conname}"')
+                logging.info("Migrated push_subscriptions: dropped per-browser constraint %s", conname)
+            cursor.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS push_subscriptions_endpoint_group "
+                "ON push_subscriptions(endpoint, group_token)"
+            )
+            conn.commit()
+        except Exception:
+            logging.exception("Error migrating push_subscriptions to per-group")
+            conn.rollback()
+        return
+
+    try:
+        cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='push_subscriptions'")
+        row = cursor.fetchone()
+        table_sql = (row[0] if row else '') or ''
+        if re.search(r"endpoint\s+TEXT\s+NOT\s+NULL\s+UNIQUE", table_sql, re.IGNORECASE):
+            # SQLite can't drop a column constraint — rebuild. A leftover
+            # _new table from an interrupted earlier attempt is discarded
+            # first so its rows can't be copied in twice.
+            cursor.execute("DROP TABLE IF EXISTS push_subscriptions_new")
+            cursor.execute("""CREATE TABLE push_subscriptions_new (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_token TEXT NOT NULL,
+                endpoint    TEXT NOT NULL,
+                p256dh      TEXT NOT NULL,
+                auth        TEXT NOT NULL,
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                active      INTEGER NOT NULL DEFAULT 1,
+                tg_user_id  INTEGER DEFAULT NULL
+            )""")
+            cursor.execute("""INSERT INTO push_subscriptions_new
+                    (id, group_token, endpoint, p256dh, auth, created_at, active, tg_user_id)
+                SELECT id, group_token, endpoint, p256dh, auth, created_at, active, tg_user_id
+                FROM push_subscriptions""")
+            cursor.execute("DROP TABLE push_subscriptions")
+            cursor.execute("ALTER TABLE push_subscriptions_new RENAME TO push_subscriptions")
+            cursor.execute("CREATE INDEX IF NOT EXISTS push_subscriptions_group_token ON push_subscriptions(group_token)")
+            conn.commit()
+            logging.info("Migrated push_subscriptions: one row per (endpoint, group)")
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS push_subscriptions_endpoint_group "
+            "ON push_subscriptions(endpoint, group_token)"
+        )
+        conn.commit()
+    except Exception:
+        logging.exception("Error migrating push_subscriptions to per-group")
+        conn.rollback()
 
 
 def create_tables():
@@ -1472,7 +1546,7 @@ def _run_migrations(conn, cursor):
             CREATE TABLE IF NOT EXISTS push_subscriptions (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 group_token TEXT NOT NULL,
-                endpoint   TEXT NOT NULL UNIQUE,
+                endpoint   TEXT NOT NULL,
                 p256dh     TEXT NOT NULL,
                 auth       TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -1482,7 +1556,7 @@ def _run_migrations(conn, cursor):
             CREATE TABLE IF NOT EXISTS push_subscriptions (
                 id         SERIAL PRIMARY KEY,
                 group_token TEXT NOT NULL,
-                endpoint   TEXT NOT NULL UNIQUE,
+                endpoint   TEXT NOT NULL,
                 p256dh     TEXT NOT NULL,
                 auth       TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -1512,6 +1586,8 @@ def _run_migrations(conn, cursor):
             conn.commit()
         except Exception:
             conn.rollback()  # column already exists — safe to ignore
+
+    _migrate_push_subscriptions_per_group(conn, cursor)
 
     # web_admins — Telegram users granted web-admin rights for a chat (cached from /weblink caller)
     try:
@@ -5475,7 +5551,10 @@ def set_system_config(key: str, value: str) -> None:
 
 
 def save_push_subscription(group_token: str, endpoint: str, p256dh: str, auth: str, tg_user_id: Optional[int] = None) -> None:
-    """Upsert a push subscription for a group. Re-activates if previously unsubscribed."""
+    """Upsert this browser's subscription to ONE group. Re-activates if previously unsubscribed.
+
+    Other groups the same browser follows have their own rows and are untouched.
+    """
     try:
         with _cursor(commit=True) as cursor:
             ph = '%s' if db_type == 'postgresql' else '?'
@@ -5483,8 +5562,7 @@ def save_push_subscription(group_token: str, endpoint: str, p256dh: str, auth: s
                 cursor.execute(f"""
                     INSERT INTO push_subscriptions (group_token, endpoint, p256dh, auth, active, tg_user_id)
                     VALUES ({ph}, {ph}, {ph}, {ph}, TRUE, {ph})
-                    ON CONFLICT (endpoint) DO UPDATE SET
-                        group_token = EXCLUDED.group_token,
+                    ON CONFLICT (endpoint, group_token) DO UPDATE SET
                         p256dh      = EXCLUDED.p256dh,
                         auth        = EXCLUDED.auth,
                         active      = TRUE,
@@ -5500,8 +5578,7 @@ def save_push_subscription(group_token: str, endpoint: str, p256dh: str, auth: s
                 cursor.execute(f"""
                     INSERT INTO push_subscriptions (group_token, endpoint, p256dh, auth, active, tg_user_id)
                     VALUES ({ph}, {ph}, {ph}, {ph}, 1, {ph})
-                    ON CONFLICT (endpoint) DO UPDATE SET
-                        group_token = excluded.group_token,
+                    ON CONFLICT (endpoint, group_token) DO UPDATE SET
                         p256dh      = excluded.p256dh,
                         auth        = excluded.auth,
                         active      = 1,
@@ -5537,6 +5614,43 @@ def get_push_subscriptions(group_token: str) -> List[Dict]:
     except Exception:
         logging.exception("get_push_subscriptions failed")
         return []
+
+
+def is_push_subscribed(endpoint: str, group_token: str) -> bool:
+    """Whether this browser currently gets this group's notifications."""
+    try:
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            active_val = 'TRUE' if db_type == 'postgresql' else '1'
+            cursor.execute(
+                f"SELECT 1 FROM push_subscriptions WHERE endpoint = {ph} AND group_token = {ph} AND active = {active_val}",
+                (endpoint, group_token),
+            )
+            return cursor.fetchone() is not None
+    except Exception:
+        logging.exception("is_push_subscribed failed")
+        return False
+
+
+def link_push_endpoint(endpoint: str, tg_user_id: int) -> int:
+    """Attach a now-verified identity to every group this browser follows.
+
+    Signing in happens on one group's page, but the device may have turned on
+    the bell in several. Only fills rows with no identity yet: a row already
+    linked to someone stays theirs (re-pointing it is what a later explicit
+    subscribe, signed in, is for). Returns rows updated.
+    """
+    try:
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(
+                f"UPDATE push_subscriptions SET tg_user_id = {ph} WHERE endpoint = {ph} AND tg_user_id IS NULL",
+                (tg_user_id, endpoint),
+            )
+            return cursor.rowcount
+    except Exception:
+        logging.exception("link_push_endpoint failed")
+        return 0
 
 
 def delete_push_subscription(endpoint: str, group_token: Optional[str] = None) -> bool:

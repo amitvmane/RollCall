@@ -35,6 +35,9 @@ from services import push as push_svc
 from api.schemas.web import (
     PushSubscribeRequest,
     PushUnsubscribeRequest,
+    PushRelinkRequest,
+    PushStatusRequest,
+    PushStatusResponse,
     ScheduledRollcallCreateResponse,
     ScheduledRollcallItem,
     ScheduledRollcallRequest,
@@ -141,6 +144,41 @@ async def push_unsubscribe(
     # clause. It previously deleted by endpoint alone, which let any group's
     # public link unsubscribe an endpoint belonging to a different group.
     push_svc.unsubscribe(body.endpoint, group_token)
+
+
+@router.post(
+    "/web/group/{group_token}/push-status",
+    summary="Whether this browser gets this group's notifications",
+)
+async def push_status(
+    body: PushStatusRequest,
+    group_token: str = Path(...),
+) -> PushStatusResponse:
+    # A browser holds ONE push subscription however many groups it follows,
+    # so "the browser has a subscription" no longer means "this group's bell
+    # is on". Each group page asks. Unauthenticated like unsubscribe: the
+    # endpoint is an unguessable URL only that browser knows, and the answer
+    # is a single bit about that browser.
+    if not _db.get_chat_by_group_web_token(group_token):
+        raise HTTPException(404, "Invalid group token")
+    return PushStatusResponse(subscribed=_db.is_push_subscribed(body.endpoint, group_token))
+
+
+@router.post(
+    "/web/push-relink",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Attach a verified identity to every group this browser follows",
+)
+async def push_relink(
+    body: PushRelinkRequest,
+    id_token: Optional[str] = Depends(identity_from_header),
+) -> None:
+    # Sign-in happens on one group's page; the bell may be on in several.
+    # Without this only the current group's row learnt who the device belongs
+    # to, and per-member pushes (promotion, reminders, dues) from the others
+    # could never reach it.
+    tg_user_id = require_identity(id_token)
+    _db.link_push_endpoint(body.endpoint, tg_user_id)
 
 
 _STATIC_MANIFEST = _PathlibPath(__file__).resolve().parent.parent / "web" / "manifest.json"

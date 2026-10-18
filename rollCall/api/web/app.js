@@ -1578,16 +1578,17 @@ window.onTelegramAuth=async function(user){
 
 async function _relinkPushSubscription(){
   try{
-    if(!_swReg)return;
+    if(!_swReg||!_idToken||!("PushManager" in window))return;
     const existing=await _swReg.pushManager.getSubscription();
     if(!existing)return;
-    const j=existing.toJSON();
-    // id_token, not a raw user id — the server derives the identity, so a
-    // subscription can't be filed under somebody else's account.
-    await fetch(`/api/v1/web/group/${URL_TOKEN}/push-subscribe`,{
-      method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({endpoint:j.endpoint,keys:{p256dh:j.keys.p256dh,auth:j.keys.auth},
-                           ...(_idToken?{id_token:_idToken}:{})}),
+    // Tell every group this browser follows who it belongs to — not just
+    // this page's. This used to re-subscribe the CURRENT group instead,
+    // which also silently moved the browser's notifications to whichever
+    // group page you happened to sign in on. The server derives the
+    // identity from the token, so a device can't be filed under someone else.
+    await fetch("/api/v1/web/push-relink",{
+      method:"POST",headers:{"Content-Type":"application/json","X-Identity-Token":_idToken},
+      body:JSON.stringify({endpoint:existing.endpoint}),
       signal:AbortSignal.timeout(5000),
     });
   }catch(_){}
@@ -1641,8 +1642,30 @@ function _initPushUI() {
   // Show the bell button only in group mode (not TG mini-app — Telegram has its own notifications)
   if (tg) return;
   if (!("PushManager" in window) && !_IOS_NEEDS_INSTALL) return;
+  if (!IS_GROUP) return;
   btn.classList.remove("hidden");
   _updateNotifyBtn();
+  _refreshPushHere();
+}
+
+// Whether THIS group's notifications are on for this browser. A browser has a
+// single push subscription shared by every group it follows, so the
+// subscription existing (or permission being granted) says nothing about this
+// group — the server's per-group row does. null = not known yet.
+let _pushOnHere = null;
+
+async function _refreshPushHere() {
+  try {
+    if (!_swReg || !("PushManager" in window)) return;
+    const existing = await _swReg.pushManager.getSubscription();
+    if (!existing) { _pushOnHere = false; _updateNotifyBtn(); return; }
+    const r = await fetch(`/api/v1/web/group/${URL_TOKEN}/push-status`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ endpoint: existing.endpoint }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (r.ok) { _pushOnHere = !!(await r.json()).subscribed; _updateNotifyBtn(); }
+  } catch (_) {}
 }
 
 function _updateNotifyBtn() {
@@ -1650,17 +1673,17 @@ function _updateNotifyBtn() {
   if (!btn) return;
   // iOS Safari outside the home screen has no Notification global at all.
   const perm = typeof Notification !== "undefined" ? Notification.permission : "default";
-  if (perm === "granted") {
-    btn.textContent = "🔔";
-    btn.title = "Notifications ON — tap to turn off";
-    btn.classList.add("notify-on");
-  } else if (perm === "denied") {
+  if (perm === "denied") {
     btn.textContent = "🔕";
     btn.title = "Notifications blocked in browser settings";
     btn.classList.add("notify-blocked");
+  } else if (perm === "granted" && _pushOnHere) {
+    btn.textContent = "🔔";
+    btn.title = "Notifications ON for this group — tap to turn off";
+    btn.classList.add("notify-on");
   } else {
     btn.textContent = "🔔";
-    btn.title = "Get notified when a rollcall opens";
+    btn.title = "Get notified when this group opens a rollcall";
     btn.classList.remove("notify-on", "notify-blocked");
   }
 }
@@ -1678,35 +1701,40 @@ window.toggleNotifications = async function() {
     return;
   }
 
-  // Check if already subscribed
   const existing = await _swReg.pushManager.getSubscription();
 
-  if (existing) {
-    // Unsubscribe
+  if (existing && _pushOnHere) {
+    // Turn off THIS group only. The browser-level subscription stays: other
+    // groups this browser follows share it, and calling existing.unsubscribe()
+    // here used to silently switch all of them off too.
     try {
-      await fetch(`/api/v1/web/group/${URL_TOKEN}/push-unsubscribe`, {
+      const r = await fetch(`/api/v1/web/group/${URL_TOKEN}/push-unsubscribe`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ endpoint: existing.endpoint }),
         signal: AbortSignal.timeout(5000),
       });
-      await existing.unsubscribe();
-      toast("Notifications turned off");
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      _pushOnHere = false;
+      toast("Notifications turned off for this group");
       _updateNotifyBtn();
     } catch (e) { toast("Could not unsubscribe: " + e.message, 3000); }
     return;
   }
 
-  // Subscribe
+  // Subscribe this group — reusing the browser's subscription if it has one.
   try {
-    const keyResp = await fetch("/api/v1/web/vapid-public-key", { signal: AbortSignal.timeout(5000) });
-    const { public_key } = await keyResp.json();
-    const sub = await _swReg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: _urlB64ToUint8Array(public_key),
-    });
+    let sub = existing;
+    if (!sub) {
+      const keyResp = await fetch("/api/v1/web/vapid-public-key", { signal: AbortSignal.timeout(5000) });
+      const { public_key } = await keyResp.json();
+      sub = await _swReg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: _urlB64ToUint8Array(public_key),
+      });
+    }
     const j = sub.toJSON();
-    await fetch(`/api/v1/web/group/${URL_TOKEN}/push-subscribe`, {
+    const r = await fetch(`/api/v1/web/group/${URL_TOKEN}/push-subscribe`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1716,7 +1744,9 @@ window.toggleNotifications = async function() {
       }),
       signal: AbortSignal.timeout(5000),
     });
-    toast("🔔 You'll be notified when a rollcall opens!", 3500);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    _pushOnHere = true;
+    toast("🔔 You'll be notified when this group opens a rollcall!", 3500);
     _updateNotifyBtn();
   } catch (e) {
     if (e.name === "NotAllowedError") {

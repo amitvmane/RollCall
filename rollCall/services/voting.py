@@ -31,7 +31,7 @@ from db import (
     upsert_chat_member,
 )
 
-from .common import (record_promotion_stats, resolve_rollcall_or_raise,
+from .common import (record_promotion_stats, resolve_rollcall_ref,
                      serialize_rollcall, serialize_user)
 
 
@@ -49,6 +49,7 @@ def check_ghost_reconfirmation_needed(
     chat_id: int,
     user_id: int,
     rc_number: int = 0,
+    rollcall_id: int | None = None,
 ) -> dict:
     """
     Check whether a real user trying to vote IN should be prompted to
@@ -76,7 +77,7 @@ def check_ghost_reconfirmation_needed(
         return {"needed": False, "ghost_count": 0, "absent_limit": 0,
                 "already_in": False, "rollcall_title": ""}
 
-    rc = resolve_rollcall_or_raise(chat_id, rc_number)
+    _, rc = resolve_rollcall_ref(chat_id, rc_number, rollcall_id)
     from services.identity import combined_ghost_count
     ghost_count = combined_ghost_count(chat_id, user_id=user_id)
     absent_limit = manager.get_absent_limit(chat_id)
@@ -98,6 +99,7 @@ async def vote_in(
     username: str | None = None,
     comment: str | None = None,
     rc_number: int = 0,
+    rollcall_id: int | None = None,
 ) -> dict:
     """
     Cast an IN vote.
@@ -111,6 +113,10 @@ async def vote_in(
       username   — optional Telegram @handle
       comment    — optional vote comment
       rc_number  — 0-based index of the rollcall (default first)
+      rollcall_id — db id of the rollcall. When given it wins over
+                    rc_number and is resolved INSIDE the write lock, so a
+                    vote that races /erc can never land in whichever rollcall
+                    slid into the old position (raises rollCallClosed).
 
     Returns:
       {
@@ -126,40 +132,49 @@ async def vote_in(
       alreadyInList        — user is already on the IN list
     """
     async with manager.get_chat_write_lock(chat_id):
-        rc = resolve_rollcall_or_raise(chat_id, rc_number)
-        user = User(first_name, username, user_id, rc.allNames)
-        user.comment = comment or ""
+        return vote_in_locked(chat_id, user_id, first_name, username, comment,
+                              rc_number, rollcall_id)
 
-        if isinstance(user.user_id, int):
-            upsert_chat_member(chat_id, user.user_id, first_name, username)
 
-        result = rc.addIn(user)
-        rc.save()
+def vote_in_locked(chat_id, user_id, first_name, username=None, comment=None,
+                   rc_number: int = 0, rollcall_id: int | None = None) -> dict:
+    """vote_in's body, for a caller that ALREADY holds the chat write lock
+    (asyncio locks aren't re-entrant) and must do more under the same hold —
+    the web vote replacing a stale guest entry with the verified member."""
+    rc_number, rc = resolve_rollcall_ref(chat_id, rc_number, rollcall_id)
+    user = User(first_name, username, user_id, rc.allNames)
+    user.comment = comment or ""
 
-        rc_db_id = _rc_db_id(rc)
-        if result not in ("AB", "AC", "AU", "AW", "AUW") and rc_db_id is not None and isinstance(user.user_id, int):
-            increment_user_stat(chat_id, user.user_id, "total_in")
-            increment_rollcall_stat(rc_db_id, "total_in")
+    if isinstance(user.user_id, int):
+        upsert_chat_member(chat_id, user.user_id, first_name, username)
 
-        if result == "AB":
-            raise alreadyInList(f"{user.name}, you're already IN for '{rc.title}'.")
-        if result == "AW":
-            pos = next((i + 1 for i, u in enumerate(rc.waitList) if u.user_id == user.user_id), None)
-            pos_note = f" (#{pos} in line)" if pos else ""
-            raise alreadyInList(
-                f"{user.name}, you're on the WAITING list for '{rc.title}'{pos_note} — "
-                "you'll be moved IN automatically when a spot opens."
-            )
+    result = rc.addIn(user)
+    rc.save()
 
-        # AUW = comment updated while still waitlisted — must announce WAITING,
-        # not IN (the member's status hasn't changed).
-        action = "waitlisted" if result in ("AC", "AUW") else "added"
-        return {
-            "action": action,
-            "rollcall": serialize_rollcall(rc, rc_number),
-            "user": serialize_user(user),
-            "rc_number_1based": rc_number + 1,
-        }
+    rc_db_id = _rc_db_id(rc)
+    if result not in ("AB", "AC", "AU", "AW", "AUW") and rc_db_id is not None and isinstance(user.user_id, int):
+        increment_user_stat(chat_id, user.user_id, "total_in")
+        increment_rollcall_stat(rc_db_id, "total_in")
+
+    if result == "AB":
+        raise alreadyInList(f"{user.name}, you're already IN for '{rc.title}'.")
+    if result == "AW":
+        pos = next((i + 1 for i, u in enumerate(rc.waitList) if u.user_id == user.user_id), None)
+        pos_note = f" (#{pos} in line)" if pos else ""
+        raise alreadyInList(
+            f"{user.name}, you're on the WAITING list for '{rc.title}'{pos_note} — "
+            "you'll be moved IN automatically when a spot opens."
+        )
+
+    # AUW = comment updated while still waitlisted — must announce WAITING,
+    # not IN (the member's status hasn't changed).
+    action = "waitlisted" if result in ("AC", "AUW") else "added"
+    return {
+        "action": action,
+        "rollcall": serialize_rollcall(rc, rc_number),
+        "user": serialize_user(user),
+        "rc_number_1based": rc_number + 1,
+    }
 
 
 async def vote_out(
@@ -169,6 +184,7 @@ async def vote_out(
     username: str | None = None,
     comment: str | None = None,
     rc_number: int = 0,
+    rollcall_id: int | None = None,
 ) -> dict:
     """
     Cast an OUT vote. If the user was previously IN and a waitlist exists,
@@ -189,45 +205,52 @@ async def vote_out(
       rollCallNotStarted, incorrectParameter, alreadyInList
     """
     async with manager.get_chat_write_lock(chat_id):
-        rc = resolve_rollcall_or_raise(chat_id, rc_number)
-        user = User(first_name, username, user_id, rc.allNames)
-        user.comment = comment or ""
+        return vote_out_locked(chat_id, user_id, first_name, username, comment,
+                               rc_number, rollcall_id)
 
-        if isinstance(user.user_id, int):
-            upsert_chat_member(chat_id, user.user_id, first_name, username)
 
-        was_in = any(u.user_id == user.user_id for u in rc.inList)
-        result = rc.addOut(user)
-        rc.save()
+def vote_out_locked(chat_id, user_id, first_name, username=None, comment=None,
+                    rc_number: int = 0, rollcall_id: int | None = None) -> dict:
+    """vote_out's body for a caller already holding the write lock."""
+    rc_number, rc = resolve_rollcall_ref(chat_id, rc_number, rollcall_id)
+    user = User(first_name, username, user_id, rc.allNames)
+    user.comment = comment or ""
 
-        rc_db_id = _rc_db_id(rc)
-        if result not in ("AB", "AU") and rc_db_id is not None and isinstance(user.user_id, int):
-            increment_user_stat(chat_id, user.user_id, "total_out")
-            increment_rollcall_stat(rc_db_id, "total_out")
+    if isinstance(user.user_id, int):
+        upsert_chat_member(chat_id, user.user_id, first_name, username)
 
-        if result == "AB":
-            raise alreadyInList(f"{user.name}, you're already OUT for '{rc.title}'.")
+    was_in = any(u.user_id == user.user_id for u in rc.inList)
+    result = rc.addOut(user)
+    rc.save()
 
-        promoted = None
-        action = "added"
-        if isinstance(result, User):
-            promoted = serialize_user(result)
-            action = "moved"
-            record_promotion_stats(chat_id, rc_db_id, result.user_id)
-        elif was_in:
-            # The voter was on IN list, now moved to OUT — still "added" semantics
-            # for the caller, but flagging via was_in tells adapter to phrase it
-            # as a move rather than a fresh OUT.
-            action = "moved"
+    rc_db_id = _rc_db_id(rc)
+    if result not in ("AB", "AU") and rc_db_id is not None and isinstance(user.user_id, int):
+        increment_user_stat(chat_id, user.user_id, "total_out")
+        increment_rollcall_stat(rc_db_id, "total_out")
 
-        return {
-            "action": action,
-            "was_in": was_in,
-            "promoted": promoted,
-            "rollcall": serialize_rollcall(rc, rc_number),
-            "user": serialize_user(user),
-            "rc_number_1based": rc_number + 1,
-        }
+    if result == "AB":
+        raise alreadyInList(f"{user.name}, you're already OUT for '{rc.title}'.")
+
+    promoted = None
+    action = "added"
+    if isinstance(result, User):
+        promoted = serialize_user(result)
+        action = "moved"
+        record_promotion_stats(chat_id, rc_db_id, result.user_id)
+    elif was_in:
+        # The voter was on IN list, now moved to OUT — still "added" semantics
+        # for the caller, but flagging via was_in tells adapter to phrase it
+        # as a move rather than a fresh OUT.
+        action = "moved"
+
+    return {
+        "action": action,
+        "was_in": was_in,
+        "promoted": promoted,
+        "rollcall": serialize_rollcall(rc, rc_number),
+        "user": serialize_user(user),
+        "rc_number_1based": rc_number + 1,
+    }
 
 
 async def vote_maybe(
@@ -237,6 +260,7 @@ async def vote_maybe(
     username: str | None = None,
     comment: str | None = None,
     rc_number: int = 0,
+    rollcall_id: int | None = None,
 ) -> dict:
     """
     Cast a MAYBE vote. Same promotion semantics as vote_out — if the voter
@@ -256,39 +280,46 @@ async def vote_maybe(
       rollCallNotStarted, incorrectParameter, alreadyInList
     """
     async with manager.get_chat_write_lock(chat_id):
-        rc = resolve_rollcall_or_raise(chat_id, rc_number)
-        user = User(first_name, username, user_id, rc.allNames)
-        user.comment = comment or ""
+        return vote_maybe_locked(chat_id, user_id, first_name, username, comment,
+                                 rc_number, rollcall_id)
 
-        if isinstance(user.user_id, int):
-            upsert_chat_member(chat_id, user.user_id, first_name, username)
 
-        was_in = any(u.user_id == user.user_id for u in rc.inList)
-        result = rc.addMaybe(user)
-        rc.save()
+def vote_maybe_locked(chat_id, user_id, first_name, username=None, comment=None,
+                      rc_number: int = 0, rollcall_id: int | None = None) -> dict:
+    """vote_maybe's body for a caller already holding the write lock."""
+    rc_number, rc = resolve_rollcall_ref(chat_id, rc_number, rollcall_id)
+    user = User(first_name, username, user_id, rc.allNames)
+    user.comment = comment or ""
 
-        rc_db_id = _rc_db_id(rc)
-        if result not in ("AB", "AU") and rc_db_id is not None and isinstance(user.user_id, int):
-            increment_user_stat(chat_id, user.user_id, "total_maybe")
-            increment_rollcall_stat(rc_db_id, "total_maybe")
+    if isinstance(user.user_id, int):
+        upsert_chat_member(chat_id, user.user_id, first_name, username)
 
-        if result == "AB":
-            raise alreadyInList(f"{user.name}, you're already MAYBE for '{rc.title}'.")
+    was_in = any(u.user_id == user.user_id for u in rc.inList)
+    result = rc.addMaybe(user)
+    rc.save()
 
-        promoted = None
-        action = "added"
-        if isinstance(result, User):
-            promoted = serialize_user(result)
-            action = "moved"
-            record_promotion_stats(chat_id, rc_db_id, result.user_id)
-        elif was_in:
-            action = "moved"
+    rc_db_id = _rc_db_id(rc)
+    if result not in ("AB", "AU") and rc_db_id is not None and isinstance(user.user_id, int):
+        increment_user_stat(chat_id, user.user_id, "total_maybe")
+        increment_rollcall_stat(rc_db_id, "total_maybe")
 
-        return {
-            "action": action,
-            "was_in": was_in,
-            "promoted": promoted,
-            "rollcall": serialize_rollcall(rc, rc_number),
-            "user": serialize_user(user),
-            "rc_number_1based": rc_number + 1,
-        }
+    if result == "AB":
+        raise alreadyInList(f"{user.name}, you're already MAYBE for '{rc.title}'.")
+
+    promoted = None
+    action = "added"
+    if isinstance(result, User):
+        promoted = serialize_user(result)
+        action = "moved"
+        record_promotion_stats(chat_id, rc_db_id, result.user_id)
+    elif was_in:
+        action = "moved"
+
+    return {
+        "action": action,
+        "was_in": was_in,
+        "promoted": promoted,
+        "rollcall": serialize_rollcall(rc, rc_number),
+        "user": serialize_user(user),
+        "rc_number_1based": rc_number + 1,
+    }

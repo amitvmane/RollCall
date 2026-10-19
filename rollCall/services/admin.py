@@ -16,7 +16,7 @@ from exceptions import (incorrectParameter, insufficientPermissions,
 from rollcall_manager import manager
 from db import log_admin_action, delete_user_by_id, get_admin_audit_log, count_admin_audit_log
 
-from .common import (fill_waitlist_slots, resolve_rollcall_or_raise,
+from .common import (fill_waitlist_slots, resolve_rollcall_ref,
                      serialize_rollcall, serialize_user)
 
 
@@ -47,12 +47,28 @@ def get_audit_log(chat_id: int, page: int = 1, per_page: int = 15) -> dict:
     }
 
 
+def _find_by_user_id(rc, user_id) -> list:
+    """[(user, status)] for the member with exactly this id — an int for a
+    Telegram member, the proxy's name for a proxy. Exact, so two members who
+    share a first name (or a display label like "Ravi (@ravi)") can each be
+    addressed on their own."""
+    found = []
+    for lst, status_name in ((rc.inList, "in"), (rc.outList, "out"),
+                             (rc.maybeList, "maybe"), (rc.waitList, "waitlist")):
+        for u in lst:
+            if u.user_id == user_id and isinstance(u.user_id, type(user_id)):
+                found.append((u, status_name))
+    return found
+
+
 def delete_user_from_rollcall(
     chat_id: int,
     rc_number: int,
     name: str,
     admin_user_id: int,
     admin_name: str,
+    rollcall_id: int | None = None,
+    user_id=None,
 ) -> dict:
     """
     Remove a user (real or proxy) from any list in the specified rollcall.
@@ -62,6 +78,10 @@ def delete_user_from_rollcall(
       rc_number    — 0-based rollcall index
       name         — display name or @username of the user to remove
       admin_user_* — identity of the admin performing the action
+      rollcall_id  — db id of the rollcall; wins over rc_number (see
+                     services.common.resolve_rollcall_by_id_or_raise)
+      user_id      — exact member id (int) or proxy name (str); wins over
+                     `name`, which can't tell namesakes apart
 
     Returns:
       {"deleted": name, "rc_number_1based": int, "promoted": [...],
@@ -72,14 +92,29 @@ def delete_user_from_rollcall(
     announced. Empty when the rollcall has no limit or no waitlist.
 
     Raises:
-      rollCallNotStarted — no active rollcall
+      rollCallNotStarted — no active rollcall (rollCallClosed if it closed)
       incorrectParameter — rc_number out of range or user not found
       parameterMissing   — name is empty
     """
-    if not name or not name.strip():
+    if user_id is None and (not name or not name.strip()):
         raise parameterMissing("User name is required.")
-    rc = resolve_rollcall_or_raise(chat_id, rc_number)
-    if not rc.delete_user(name):
+    rc_number, rc = resolve_rollcall_ref(chat_id, rc_number, rollcall_id)
+    if user_id is not None:
+        found = _find_by_user_id(rc, user_id)
+        if not found:
+            raise incorrectParameter(
+                f"User '{name or user_id}' not found in rollcall #{rc_number + 1}."
+            )
+        target = found[0][0]
+        name = target.name
+        if isinstance(target.user_id, int):
+            rc_id = getattr(rc, "db_id", None) or getattr(rc, "id", None)
+            if not delete_user_by_id(rc_id, target.user_id):
+                raise incorrectParameter(f"User '{name}' not found in rollcall #{rc_number + 1}.")
+            rc._load_users_from_db()
+        elif not rc.delete_user(target.user_id):
+            raise incorrectParameter(f"User '{name}' not found in rollcall #{rc_number + 1}.")
+    elif not rc.delete_user(name):
         raise incorrectParameter(f"User '{name}' not found in rollcall #{rc_number + 1}.")
     promoted = fill_waitlist_slots(rc)
     rc.save()
@@ -105,6 +140,8 @@ def set_user_status(
     new_status: str,
     admin_user_id: int,
     admin_name: str,
+    rollcall_id: int | None = None,
+    user_id=None,
 ) -> dict:
     """
     Move a user to a different status list within a rollcall.
@@ -118,6 +155,16 @@ def set_user_status(
       name         — display name or @username to match
       new_status   — "in", "out", or "maybe"
       admin_user_* — identity of the admin performing the action
+      rollcall_id  — db id of the rollcall; wins over rc_number
+      user_id      — exact member id (int) or proxy name (str); wins over name
+
+    Moving someone to IN when the IN list is already at its limit is
+    REFUSED (incorrectParameter) rather than performed. The alternatives were
+    both worse: the old code reported "moved to IN" while actually appending
+    the member to the END of the waitlist (silently costing a waitlister
+    their place in line), and jumping them straight into IN over the cap
+    would break the limit the admin set. Refusing changes nothing and says
+    what to do instead.
 
     Returns:
       {"moved": name, "from_status": str, "to_status": str, "rc_number_1based": int,
@@ -131,25 +178,29 @@ def set_user_status(
       incorrectParameter — rc_number out of range / user not found / bad status / same status
       parameterMissing   — name or new_status is empty
     """
-    if not name or not name.strip():
+    if user_id is None and (not name or not name.strip()):
         raise parameterMissing("User name is required.")
     if new_status not in ("in", "out", "maybe"):
         raise incorrectParameter("Status must be one of: in, out, maybe")
 
-    rc = resolve_rollcall_or_raise(chat_id, rc_number)
+    rc_number, rc = resolve_rollcall_ref(chat_id, rc_number, rollcall_id)
 
-    bucket_map = (
-        (rc.inList, "in"),
-        (rc.outList, "out"),
-        (rc.maybeList, "maybe"),
-        (rc.waitList, "waitlist"),
-    )
-    wanted = name.lstrip("@").lower()
-    candidates = []
-    for lst, status_name in bucket_map:
-        for u in lst:
-            if (u.username and u.username.lower() == wanted) or u.name.lower() == name.lower():
-                candidates.append((u, status_name))
+    if user_id is not None:
+        candidates = _find_by_user_id(rc, user_id)
+        name = name or str(user_id)
+    else:
+        bucket_map = (
+            (rc.inList, "in"),
+            (rc.outList, "out"),
+            (rc.maybeList, "maybe"),
+            (rc.waitList, "waitlist"),
+        )
+        wanted = name.lstrip("@").lower()
+        candidates = []
+        for lst, status_name in bucket_map:
+            for u in lst:
+                if (u.username and u.username.lower() == wanted) or u.name.lower() == name.lower():
+                    candidates.append((u, status_name))
 
     if not candidates:
         raise incorrectParameter(f"User '{name}' not found in rollcall #{rc_number + 1}.")
@@ -167,11 +218,27 @@ def set_user_status(
             f"User '{found_user.name}' is already {new_status.upper()} in rollcall #{rc_number + 1}."
         )
 
+    if (new_status == "in" and rc.inListLimit is not None
+            and len(rc.inList) >= int(rc.inListLimit)):
+        where = "on the waitlist" if current_status == "waitlist" else current_status.upper()
+        raise incorrectParameter(
+            f"IN is full for '{rc.title}' ({len(rc.inList)}/{rc.inListLimit}), so "
+            f"{found_user.name} stays {where}. Raise the limit or move someone "
+            "out first."
+        )
+
+    # A proxy's owner lives in rc.proxy_owners, which the reload below
+    # rebuilds from the db AFTER the row is gone — so the re-add would write
+    # proxy_owner_id NULL and the owner would stop hearing about their proxy.
+    proxy_owner = rc.get_proxy_owner(found_user.user_id) if isinstance(found_user.user_id, str) else None
+
     # Remove from current list, then add to new list.
     rc_db_id = getattr(rc, "db_id", None) or getattr(rc, "id", None)
     if rc_db_id is not None:
         delete_user_by_id(rc_db_id, found_user.user_id)
     rc._load_users_from_db()
+    if proxy_owner is not None:
+        rc.set_proxy_owner(found_user.user_id, proxy_owner)
 
     promoted = []
     try:

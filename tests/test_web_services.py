@@ -270,24 +270,26 @@ class TestVoteByToken(unittest.IsolatedAsyncioTestCase):
              patch("services.web.manager", _mgr), \
              patch("services.web.proxy_svc") as mock_proxy:
             mock_db.get_rollcall_by_web_token.return_value = _row
-            mock_proxy.set_in_for = AsyncMock()
-            mock_proxy.set_out_for = AsyncMock()
-            mock_proxy.set_maybe_for = AsyncMock()
+            # vote_by_token holds the lock itself and calls the *_locked
+            # variants with the rollcall's db id (42) — never a bare position.
+            mock_proxy.set_in_for_locked = MagicMock()
+            mock_proxy.set_out_for_locked = MagicMock()
+            mock_proxy.set_maybe_for_locked = MagicMock()
             result = await vote_by_token(token, name, vote_type)
             return result, mock_proxy
 
     async def test_vote_in_calls_set_in_for(self):
         result, proxy = await self._call("abc123token", "Alice", "in")
-        proxy.set_in_for.assert_awaited_once_with(100, 0, "web", "Alice", rc_number=0, comment=None)
+        proxy.set_in_for_locked.assert_called_once_with(100, 0, "web", "Alice", None, 0, 42)
         self.assertEqual(result["title"], "Friday Football")
 
     async def test_vote_out_calls_set_out_for(self):
         _, proxy = await self._call("abc123token", "Bob", "out")
-        proxy.set_out_for.assert_awaited_once_with(100, 0, "web", "Bob", rc_number=0, comment=None)
+        proxy.set_out_for_locked.assert_called_once_with(100, 0, "web", "Bob", None, 0, 42)
 
     async def test_vote_maybe_calls_set_maybe_for(self):
         _, proxy = await self._call("abc123token", "Carol", "maybe")
-        proxy.set_maybe_for.assert_awaited_once_with(100, 0, "web", "Carol", rc_number=0, comment=None)
+        proxy.set_maybe_for_locked.assert_called_once_with(100, 0, "web", "Carol", None, 0, 42)
 
     async def test_empty_name_raises(self):
         from exceptions import parameterMissing
@@ -327,12 +329,12 @@ class TestVoteByToken(unittest.IsolatedAsyncioTestCase):
 
     async def test_name_whitespace_stripped(self):
         _, proxy = await self._call("abc123token", "  Alice  ", "in")
-        proxy.set_in_for.assert_awaited_once_with(100, 0, "web", "Alice", rc_number=0, comment=None)
+        proxy.set_in_for_locked.assert_called_once_with(100, 0, "web", "Alice", None, 0, 42)
 
     async def test_name_truncated_to_64_chars(self):
         long_name = "A" * 100
         _, proxy = await self._call("abc123token", long_name, "in")
-        called_name = proxy.set_in_for.call_args[0][3]  # proxy_name is 4th positional arg
+        called_name = proxy.set_in_for_locked.call_args[0][3]  # proxy_name is 4th positional arg
         self.assertEqual(len(called_name), 64)
 
     async def test_returns_updated_rollcall_state(self):
@@ -345,7 +347,7 @@ class TestVoteByToken(unittest.IsolatedAsyncioTestCase):
              patch("services.web.manager", mgr), \
              patch("services.web.proxy_svc") as mock_proxy:
             mock_db.get_rollcall_by_web_token.return_value = _db_row()
-            mock_proxy.set_in_for = AsyncMock()
+            mock_proxy.set_in_for_locked = MagicMock()
             result = await vote_by_token("abc123token", "Alice", "in")
         self.assertEqual(len(result["in"]), 1)
         self.assertEqual(result["in"][0]["name"], "Alice")

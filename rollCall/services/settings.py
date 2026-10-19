@@ -92,14 +92,13 @@ def set_rollcall_limit(
     Set the IN-list cap for one rollcall.
     Pass limit=0 to remove the cap.
     """
-    rc = resolve_rollcall_or_raise(chat_id, rc_number)
-    if limit < 0:
-        raise incorrectParameter("Limit must be 0 (no cap) or a positive integer.")
-    rc.inListLimit = limit if limit > 0 else None
-    rc.save()
-    log_admin_action(chat_id, admin_user_id, admin_name,
-                     "set_limit", details=str(limit))
-    return serialize_rollcall(rc, rc_number)
+    # One implementation of "the cap moved". This used to just overwrite
+    # inListLimit, so clearing the cap (limit=0) left everyone on the
+    # waitlist stranded there — invisible on the panel (no limit → no
+    # waitlist section) and liable to be promoted later after voting OUT.
+    # Callers that announce should use set_wait_limit for its promoted/
+    # demoted lists.
+    return set_wait_limit(chat_id, limit, admin_user_id, admin_name, rc_number)["rollcall"]
 
 
 def _rc_db_id(rc) -> int | None:
@@ -121,7 +120,7 @@ def set_wait_limit(
       - old_limit: int | None
       - new_limit: int
       - was_full: bool
-      - demoted: list[dict]  — users moved IN → WAIT (real users only, serialized)
+      - demoted: list[dict]  — users moved IN → front of WAIT (real and proxy, serialized)
       - promoted: list[dict] — users moved WAIT → IN (serialized)
     """
     rc = resolve_rollcall_or_raise(chat_id, rc_number)
@@ -163,13 +162,20 @@ def set_wait_limit(
                      "set_limit", details=str(limit))
 
     if len(rc.inList) > limit:
+        # Demoted members go to the FRONT of the waitlist, in their IN order:
+        # they had a place on the list before any waiter did, so a lowered
+        # cap must not queue them behind people who arrived after them.
         excess = rc.inList[limit:]
-        rc.waitList.extend(excess)
         rc.inList = rc.inList[:limit]
+        rc.waitList = excess + rc.waitList
         for u in excess:
             rc._save_user_to_db(u, "waitlist")
+        from db import reorder_waitlist
+        reorder_waitlist(_rc_db_id(rc), [u.user_id for u in rc.waitList])
         rc.save()
-        demoted = [serialize_user(u) for u in excess if isinstance(u.user_id, int)]
+        # Proxies too — a guest pushed off the list is a state change the
+        # group must hear about just like a member's.
+        demoted = [serialize_user(u) for u in excess]
 
     elif len(rc.inList) < limit:
         slots = limit - len(rc.inList)

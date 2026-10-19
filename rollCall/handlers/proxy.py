@@ -60,11 +60,13 @@ async def set_in_for(message):
         reconf = proxy_svc.check_proxy_ghost_reconfirmation_needed(cid, proxy_name)
         if reconf["needed"]:
             _prune_pending(_pending_proxy_add)
+            rc = manager.get_rollcall(cid, rc_number)
+            from services.common import rc_db_id
             _pending_proxy_add[(cid, message.from_user.id, proxy_name)] = {
                 "comment": comment,
+                "rc_db_id": rc_db_id(rc) if rc is not None else None,
                 "_ts": datetime.now().timestamp(),
             }
-            rc = manager.get_rollcall(cid, rc_number)
             rc_title = rc.title if rc else ""
             markup = InlineKeyboardMarkup(row_width=2)
             markup.add(

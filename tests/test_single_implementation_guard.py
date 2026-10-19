@@ -64,6 +64,17 @@ class TestSingleImplementation(unittest.TestCase):
             "Use services.common.resolve_rollcall_or_raise instead.",
         )
 
+    def test_resolve_by_rollcall_id_lives_in_one_place(self):
+        """Acting on a rollcall someone picked earlier goes through
+        services.common.resolve_rollcall_by_id_or_raise. Positions drift when
+        an earlier rollcall closes; copies of 'find it by id' had already
+        drifted into re-fetching by position inside the lock."""
+        self.assertEqual(
+            self._files_containing("That rollcall has already closed — it was ended"),
+            ["services/common.py"],
+            "Use services.common.resolve_rollcall_by_id_or_raise instead.",
+        )
+
     def test_chat_write_lock_has_one_name_at_call_sites(self):
         """Two names for one lock is how a codebase stops being greppable for
         'is this path locked?'. get_erc_lock survives only as the shim."""

@@ -825,10 +825,13 @@ function renderRollcall(rc){
 // Admin-only per-row controls (move to another list / remove) — web parity
 // for the admin console's Rollcalls-tab actions. "waiting" has no manual
 // move target (it's a computed overflow list, same as the admin console).
-function _rowAdminActs(name,statusKey){
+// Rows carry the member's exact key (Telegram id, or "is a proxy" + its
+// name): the display label alone can't address "Ravi (@ravi)" or tell two
+// username-less namesakes apart.
+function _rowAdminActs(u,statusKey){
   const moveOpts=["in","out","maybe"].filter(s=>s!==statusKey)
     .map(s=>`<option value="${s}">${s.toUpperCase()}</option>`).join("");
-  return `<span class="li-admin-acts" data-name="${esc(name)}">
+  return `<span class="li-admin-acts" data-name="${esc(u.name)}" data-uid="${u.user_id==null?"":esc(String(u.user_id))}" data-proxy="${u.is_proxy?"1":""}">
     <select class="li-move-sel" title="Move to another list">
       <option value="">Move→</option>${moveOpts}
     </select>
@@ -839,26 +842,27 @@ function _rowAdminActs(name,statusKey){
 function _wireRowAdminActs(){
   document.querySelectorAll("#lists-container .li-admin-acts").forEach(el=>{
     const name=el.dataset.name;
+    const who={user_id:el.dataset.uid?Number(el.dataset.uid):null,is_proxy:!!el.dataset.proxy};
     const sel=el.querySelector(".li-move-sel");
     const delBtn=el.querySelector(".li-remove-btn");
     sel.addEventListener("change",()=>{
       if(!sel.value)return;
-      doMoveUser(name,sel.value);
+      doMoveUser(name,sel.value,who);
       sel.value="";
     });
     delBtn.addEventListener("click",async()=>{
       if(!await _confirmAction(`Remove ${name} from this rollcall?`))return;
-      doRemoveUser(name);
+      doRemoveUser(name,who);
     });
   });
 }
 
-window.doMoveUser=async function(name,newStatus){
+window.doMoveUser=async function(name,newStatus,who){
   if(!_idToken){toast("Verify with Telegram first.",3000);return;}
   try{
     const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/rollcalls/move-user`,{
       method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({id_token:_idToken,rollcall_num:activeTabIdx+1,name,new_status:newStatus}),
+      body:JSON.stringify({id_token:_idToken,rollcall_num:activeTabIdx+1,rollcall_id:activeRcData?.rollcall_id,name,new_status:newStatus,...(who||{})}),
       signal:AbortSignal.timeout(8000),
     });
     if(!res.ok){const d=await res.json().catch(()=>({}));throw new Error(d.detail||"Failed to move");}
@@ -872,12 +876,12 @@ window.doMoveUser=async function(name,newStatus){
   }
 };
 
-window.doRemoveUser=async function(name){
+window.doRemoveUser=async function(name,who){
   if(!_idToken){toast("Verify with Telegram first.",3000);return;}
   try{
     const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/rollcalls/remove-user`,{
       method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({id_token:_idToken,rollcall_num:activeTabIdx+1,name}),
+      body:JSON.stringify({id_token:_idToken,rollcall_num:activeTabIdx+1,rollcall_id:activeRcData?.rollcall_id,name,...(who||{})}),
       signal:AbortSignal.timeout(8000),
     });
     if(!res.ok){const d=await res.json().catch(()=>({}));throw new Error(d.detail||"Failed to remove");}
@@ -900,7 +904,7 @@ function renderLists(){
       const av=`<span class="av" style="background:${avColor(u.name)}">${esc((u.name[0]||"?").toUpperCase())}</span>`;
       const cm=u.comment?`<span class="li-comment">— ${esc(u.comment)}</span>`:"";
       const tgDot=u.is_proxy===false?'<span class="tg-dot" title="Telegram user"></span>':"";
-      const adminActs=(_isWebAdmin&&statusKey!=="waiting")?_rowAdminActs(u.name,statusKey):"";
+      const adminActs=(_isWebAdmin&&statusKey!=="waiting")?_rowAdminActs(u,statusKey):"";
       return `<li class="${isYou?"you":""}">
         <span class="li-pos">${i+1}</span>${av}
         <span class="li-name">${esc(u.name)}${tgDot}</span>${cm}
@@ -2914,7 +2918,7 @@ window.doProxyVoteWeb=async function(voteType){
   try{
     const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/proxy-vote`,{
       method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({id_token:_idToken,rollcall_num:activeTabIdx+1,proxy_name:name,vote:voteType}),
+      body:JSON.stringify({id_token:_idToken,rollcall_num:activeTabIdx+1,rollcall_id:activeRcData.rollcall_id,proxy_name:name,vote:voteType}),
       signal:AbortSignal.timeout(10000),
     });
     if(!res.ok){

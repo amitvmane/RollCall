@@ -7,6 +7,7 @@ class WebUser(BaseModel):
     name: str
     comment: str = ""
     is_proxy: bool = True
+    user_id: Optional[int] = Field(None, description="Telegram user id of a real member (null for a guest/proxy) — lets admin actions address namesakes exactly")
 
 
 class WebRollcallResponse(BaseModel):
@@ -136,6 +137,7 @@ class WebProxyVoteRequest(BaseModel):
     from a client-supplied id."""
     id_token: str = Field(..., description="Signed identity token of the acting web admin")
     rollcall_num: int = Field(..., ge=1, description="1-based rollcall number")
+    rollcall_id: Optional[int] = Field(None, description="Db id of the rollcall the page was showing. Wins over rollcall_num, whose position shifts when an earlier rollcall closes; 409 if it has closed")
     proxy_name: str = Field(..., min_length=1, max_length=64, description="Name of the member being voted for")
     vote: Literal["in", "out", "maybe"]
     comment: Optional[str] = Field(None, max_length=100, description="Optional note to attach to the vote")
@@ -145,14 +147,20 @@ class WebRemoveUserRequest(BaseModel):
     """Web parity for the admin console's per-voter remove action."""
     id_token: str = Field(..., description="Signed identity token of the acting web admin")
     rollcall_num: int = Field(..., ge=1, description="1-based rollcall number")
+    rollcall_id: Optional[int] = Field(None, description="Db id of the rollcall the page was showing. Wins over rollcall_num, whose position shifts when an earlier rollcall closes; 409 if it has closed")
     name: str = Field(..., min_length=1, max_length=64, description="Display name or @username of the user to remove")
+    user_id: Optional[int] = Field(None, description="Exact Telegram user id of a real member — wins over name, which can't tell two same-named members apart")
+    is_proxy: Optional[bool] = Field(None, description="True → `name` is the exact proxy/guest name")
 
 
 class WebMoveUserRequest(BaseModel):
     """Web parity for the admin console's per-voter move-to-list action."""
     id_token: str = Field(..., description="Signed identity token of the acting web admin")
     rollcall_num: int = Field(..., ge=1, description="1-based rollcall number")
+    rollcall_id: Optional[int] = Field(None, description="Db id of the rollcall the page was showing. Wins over rollcall_num, whose position shifts when an earlier rollcall closes; 409 if it has closed")
     name: str = Field(..., min_length=1, max_length=64, description="Display name or @username to match")
+    user_id: Optional[int] = Field(None, description="Exact Telegram user id of a real member — wins over name, which can't tell two same-named members apart")
+    is_proxy: Optional[bool] = Field(None, description="True → `name` is the exact proxy/guest name")
     new_status: Literal["in", "out", "maybe"]
 
 

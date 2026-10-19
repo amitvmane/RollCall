@@ -132,6 +132,64 @@ def resolve_rollcall_or_raise(chat_id: int, rc_number: int):
     return rc
 
 
+ROLLCALL_CLOSED_MSG = (
+    "That rollcall has already closed — it was ended or cancelled. "
+    "Check /rollcalls for the ones still open."
+)
+
+
+def rc_db_id(rc):
+    """The rollcall's database id (`.id`, or the legacy `.db_id` alias)."""
+    return getattr(rc, "id", None) or getattr(rc, "db_id", None)
+
+
+def find_rollcall_index(chat_id: int, rollcall_id, mgr=None):
+    """0-based position of the OPEN rollcall whose db id is `rollcall_id`,
+    or None if it has ended, been cancelled, or never existed here."""
+    if rollcall_id is None:
+        return None
+    if mgr is None:
+        from rollcall_manager import manager as mgr
+    for idx, rc in enumerate(mgr.get_rollcalls(chat_id)):
+        if rc_db_id(rc) == rollcall_id:
+            return idx
+    return None
+
+
+def resolve_rollcall_by_id_or_raise(chat_id: int, rollcall_id, mgr=None):
+    """Return (rc_index_0based, rc) for the open rollcall with this db id.
+
+    THE way to act on a rollcall someone picked earlier. Positions shift —
+    ending or cancelling #1 renumbers #2 to #1 — so a panel button, a
+    confirmation prompt or a web page that captured "#2" before that and
+    resolves it afterwards lands on a DIFFERENT rollcall. A db id can't drift:
+    either the rollcall is still open and this finds where it is now, or it
+    has closed and this refuses. Call it INSIDE the chat write lock; the
+    answer is only true while that is held.
+
+    Raises rollCallClosed (a curated rollCallNotStarted) when it's gone.
+    """
+    from exceptions import rollCallClosed
+
+    if mgr is None:
+        from rollcall_manager import manager as mgr
+    if rollcall_id is not None:
+        for idx, rc in enumerate(mgr.get_rollcalls(chat_id)):
+            if rc_db_id(rc) == rollcall_id:
+                return idx, rc
+    raise rollCallClosed(ROLLCALL_CLOSED_MSG)
+
+
+def resolve_rollcall_ref(chat_id: int, rc_number: int, rollcall_id=None):
+    """Return (rc_index_0based, rc): by db id when one is given (see
+    resolve_rollcall_by_id_or_raise), else by the 0-based position — the
+    behaviour callers that only ever had a number (`/in ::2`, REST paths)
+    already rely on."""
+    if rollcall_id is not None:
+        return resolve_rollcall_by_id_or_raise(chat_id, rollcall_id)
+    return rc_number, resolve_rollcall_or_raise(chat_id, rc_number)
+
+
 def record_promotion_stats(chat_id: int, rc_db_id, user_id) -> None:
     """Count one waitlist→IN promotion.
 

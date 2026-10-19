@@ -2261,6 +2261,21 @@ def get_rollcall_by_web_token(token: str) -> Optional[Dict]:
         return None
 
 
+def is_closed_rollcall_panel(chat_id: int, panel_msg_id: int) -> bool:
+    """True if `panel_msg_id` is the recorded panel of a rollcall in this chat
+    that has ended or been cancelled. Lets a pre-id panel button tell "my
+    rollcall closed" apart from "my rollcall is still #N"."""
+    ph = '%s' if db_type == 'postgresql' else '?'
+    inactive = 'FALSE' if db_type == 'postgresql' else '0'
+    with _cursor() as cursor:
+        cursor.execute(
+            f"SELECT 1 FROM rollcalls WHERE chat_id = {ph} AND panel_msg_id = {ph} "
+            f"AND is_active = {inactive} LIMIT 1",
+            (chat_id, panel_msg_id),
+        )
+        return cursor.fetchone() is not None
+
+
 _VALID_ROLLCALL_FIELDS = {
     'chat_id', 'title', 'is_active', 'finalize_date', 'location',
     'event_fee', 'in_list_limit', 'panel_msg_id', 'web_token',
@@ -2524,6 +2539,31 @@ def get_all_chat_ids() -> List[int]:
 
 
 _VALID_STATUSES = {'in', 'out', 'maybe', 'waitlist'}
+
+
+def reorder_waitlist(rollcall_id: int, ordered_ids: list) -> None:
+    """Rewrite wait_pos 1..N for the rollcall's waitlist in `ordered_ids`
+    order (int → real member, str → proxy name).
+
+    Waitlist positions are otherwise only ever appended at the end, which is
+    right for someone joining the queue and wrong for someone pushed OFF the
+    IN list by a lowered limit — they were already ahead of every waiter.
+    """
+    ph = '%s' if db_type == 'postgresql' else '?'
+    with _cursor(commit=True) as cursor:
+        for pos, uid in enumerate(ordered_ids, start=1):
+            if isinstance(uid, int):
+                cursor.execute(
+                    f"UPDATE users SET wait_pos = {ph} WHERE rollcall_id = {ph} "
+                    f"AND user_id = {ph} AND status = 'waitlist'",
+                    (pos, rollcall_id, uid),
+                )
+            else:
+                cursor.execute(
+                    f"UPDATE proxy_users SET wait_pos = {ph} WHERE rollcall_id = {ph} "
+                    f"AND name = {ph} AND status = 'waitlist'",
+                    (pos, rollcall_id, str(uid)),
+                )
 
 
 def _next_pos_with_cursor(cursor, rollcall_id: int, status: str) -> int:

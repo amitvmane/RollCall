@@ -366,6 +366,8 @@ async def wait_limit(message):
                     cid,
                     f"{name} moved from IN to WAITING because limit was set to {limit} for '{rc_title}' (ID: {rc_number_1})."
                 )
+            if not isinstance(uid, int):
+                continue  # a proxy has no Telegram account to DM
             async def _dm_demoted(uid=uid, title=rc_title, rcn=rc_number_1):
                 try:
                     await bot.send_message(

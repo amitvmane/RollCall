@@ -15,7 +15,7 @@ from exceptions import (
 from functions import admin_rights, roll_call_not_started
 from models import User
 from rollcall_manager import manager
-from services.common import ensure_rc_number
+from services.common import ensure_rc_number, rc_db_id
 from services import admin as admin_svc
 from utils.text import parse_rc_suffix
 
@@ -127,9 +127,14 @@ async def delete_user(message):
 
         _prune_pending(_pending_deletes)
         _prune_pending(_pending_overrides)
+        # Stash the rollcall's db id, not just its position: the confirm tap
+        # resolves by id, so an earlier rollcall closing in the meantime
+        # can't redirect the delete onto a different one.
+        target_rc = manager.get_rollcall(cid, rc_number)
         _pending_deletes[(cid, admin_id)] = {
             'name': name,
             'rc_number': rc_number,
+            'rc_db_id': rc_db_id(target_rc) if target_rc is not None else None,
             '_ts': datetime.now().timestamp(),
         }
         markup = InlineKeyboardMarkup(row_width=2)
@@ -237,6 +242,7 @@ async def set_status_override(message):
             'user': found_user,
             'new_status': new_status,
             'rc_number': rc_number,
+            'rc_db_id': rc_db_id(rc),
             '_ts': datetime.now().timestamp(),
         }
 

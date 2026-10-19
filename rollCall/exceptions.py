@@ -4,6 +4,17 @@ class rollCallAlreadyStarted(Exception):
 class rollCallNotStarted(Exception):
     pass
 
+class rollCallClosed(rollCallNotStarted):
+    """The specific rollcall an action was aimed at has ended or been
+    cancelled since the action was prepared (a panel tap, a confirmation
+    button, a web page loaded earlier).
+
+    A subclass of rollCallNotStarted so every existing handler and the
+    bot's reply_error treat it as curated text; the REST layer maps it to 409
+    rather than 404 because the request was valid when it was built.
+    """
+    pass
+
 class insufficientPermissions(Exception):
     pass
 

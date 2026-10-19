@@ -63,17 +63,28 @@ async def in_user(message):
         reconf = vote_svc.check_ghost_reconfirmation_needed(cid, user_id, rc_number)
         if reconf["needed"]:
             if (cid, user_id) in _pending_reconf:
+                # Silence here read as the bot ignoring them.
+                await bot.send_message(
+                    cid,
+                    f"{display_name}, you already have a confirmation waiting — "
+                    "tap ✅ or ❌ on the earlier message.",
+                )
                 return
+            rc = manager.get_rollcall(cid, rc_number)
+            from services.common import rc_db_id
+            rc_id = rc_db_id(rc) if rc is not None else None
             _pending_reconf[(cid, user_id)] = {
                 "rc_number": rc_number,
+                "rc_db_id": rc_id,
                 "comment": comment,
                 "_ts": datetime.now().timestamp(),
             }
             rc_title = reconf["rollcall_title"]
+            from handlers.lifecycle import reconf_callback
             markup = InlineKeyboardMarkup(row_width=2)
             markup.add(
-                InlineKeyboardButton("✅ Yes, I'll be there!", callback_data=f"reconf_in_{rc_number}_{user_id}"),
-                InlineKeyboardButton("❌ I'm out", callback_data=f"reconf_out_{rc_number}_{user_id}"),
+                InlineKeyboardButton("✅ Yes, I'll be there!", callback_data=reconf_callback("in", rc_number, user_id, rc_id)),
+                InlineKeyboardButton("❌ I'm out", callback_data=reconf_callback("out", rc_number, user_id, rc_id)),
             )
             await bot.send_message(
                 cid,

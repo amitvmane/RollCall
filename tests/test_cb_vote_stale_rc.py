@@ -34,9 +34,11 @@ class TestCbVoteStaleRollcall(unittest.IsolatedAsyncioTestCase):
             "was_in": True,
             "promoted": None,
             "user": {"user_id": 2, "name": "Bob", "username": "bob"},
+            "rc_number_1based": 1,
         }
         mgr = MagicMock()
         mgr.get_rollcall.return_value = None  # /erc ended it between vote and refetch
+        mgr.get_rollcalls.return_value = []   # ...so it can't be found by id either
         mgr.get_shh_mode.return_value = False
 
         with patch.object(lc, "manager", mgr), \
@@ -48,7 +50,9 @@ class TestCbVoteStaleRollcall(unittest.IsolatedAsyncioTestCase):
             mock_bot.edit_message_text = AsyncMock()
             call = _make_call()
             # Must not raise despite rc being None.
-            await lc._cb_vote(call, 100, 1, "out")
+            rc = MagicMock()
+            rc.id = 7
+            await lc._cb_vote(call, 100, 1, rc, "out")
 
         mock_bot.answer_callback_query.assert_awaited_once()
         msg = mock_bot.answer_callback_query.await_args.args[1]

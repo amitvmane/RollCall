@@ -2261,6 +2261,21 @@ def get_rollcall_by_web_token(token: str) -> Optional[Dict]:
         return None
 
 
+def is_closed_rollcall_panel(chat_id: int, panel_msg_id: int) -> bool:
+    """True if `panel_msg_id` is the recorded panel of a rollcall in this chat
+    that has ended or been cancelled. Lets a pre-id panel button tell "my
+    rollcall closed" apart from "my rollcall is still #N"."""
+    ph = '%s' if db_type == 'postgresql' else '?'
+    inactive = 'FALSE' if db_type == 'postgresql' else '0'
+    with _cursor() as cursor:
+        cursor.execute(
+            f"SELECT 1 FROM rollcalls WHERE chat_id = {ph} AND panel_msg_id = {ph} "
+            f"AND is_active = {inactive} LIMIT 1",
+            (chat_id, panel_msg_id),
+        )
+        return cursor.fetchone() is not None
+
+
 _VALID_ROLLCALL_FIELDS = {
     'chat_id', 'title', 'is_active', 'finalize_date', 'location',
     'event_fee', 'in_list_limit', 'panel_msg_id', 'web_token',

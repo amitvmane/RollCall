@@ -120,10 +120,14 @@ class TestReconfPromptSuppression(IntegrationBase):
         # First /in triggers the warning
         await self.vote_in(u)
         first_count = self.sent_count()
-        # Second /in with pending entry — should be silent no-op
+        # Second /in with pending entry — no new PROMPT, just a one-line hint
+        # pointing at the existing one (silence read as the bot ignoring them).
         await self.vote_in(u)
-        self.assertEqual(self.sent_count(), first_count,
-                         "Repeat /in while reconf pending should not send another message")
+        self.assertEqual(self.sent_count(), first_count + 1,
+                         "Repeat /in while reconf pending should send exactly one hint")
+        self.assertIn("already have a confirmation waiting", self.sent_texts()[-1])
+        self.assertIsNone(self.last_sent_markup(),
+                          "the hint must not be a second set of confirm buttons")
         # And user is still NOT in IN list (commitment not made yet)
         self.assertEqual(len(self.rc(0).inList), 0)
 

@@ -24,11 +24,12 @@ from config import ADMINS
 from exceptions import (
     rollCallNotStarted, insufficientPermissions, parameterMissing, incorrectParameter,
     duplicateProxy, repeatlyName, amountOfRollCallsReached, alreadyInList,
+    rollCallClosed,
 )
 from functions import admin_rights, roll_call_not_started
 from models import User
 from rollcall_manager import manager
-from services.common import ensure_rc_number
+from services.common import ensure_rc_number, find_rollcall_index, rc_db_id as _rc_db_id
 import db
 from db import update_rollcall
 from services import rollcalls as rollcalls_svc
@@ -45,6 +46,26 @@ def _build_panel_text(rc, rc_number: int) -> str:
     return rc.allList().replace("__RCID__", str(rc_number))
 
 
+async def _retire_panel(cid: int, ended_number: int, rc_id) -> None:
+    """Forget the closed rollcall's panel and take its buttons away.
+
+    A panel left with live buttons after /erc or /xrc kept addressing
+    "rollcall #N" — and once the next rollcall slid into #N, tapping IN on the
+    dead panel voted in the wrong one. The scheduler's auto-close already
+    stripped them; this is the same step for the manual paths. Best-effort:
+    the rollcall is closed either way, and a message someone deleted must not
+    turn into an error.
+    """
+    msg_id = _panel_msg_ids.pop((cid, ended_number), None)
+    if msg_id is None and rc_id:
+        try:
+            msg_id = (db.get_rollcall(rc_id) or {}).get("panel_msg_id")
+        except Exception:
+            msg_id = None
+    if msg_id:
+        await safe_edit_markup(cid, msg_id, reply_markup=None)
+
+
 async def _post_end_cleanup(cid: int, ended_number: int, result: dict, rc_title: str = "",
                             settle_nudge: bool = True) -> None:
     """Panel-ID cleanup, ghost prompt, and renumber announcements after a rollcall ends.
@@ -54,7 +75,7 @@ async def _post_end_cleanup(cid: int, ended_number: int, result: dict, rc_title:
     `settle_nudge=False` skips the pinned settle reminder — used by the
     /settle_dues paths, where settlement is already in progress or done.
     """
-    _panel_msg_ids.pop((cid, ended_number), None)
+    await _retire_panel(cid, ended_number, result.get("rc_db_id"))
     for entry in sorted(result["renumbered"], key=lambda x: x["old"]):
         old_key = (cid, entry["old"])
         if old_key in _panel_msg_ids:
@@ -122,7 +143,7 @@ async def _post_cancel_cleanup(cid: int, ended_number: int, result: dict) -> Non
     session recorded no stats, so there is nothing to settle or ghost-check).
     Shared by /xrc and the panel's Cancel button so the two paths can't drift.
     """
-    _panel_msg_ids.pop((cid, ended_number), None)
+    await _retire_panel(cid, ended_number, (result.get("cancelled") or {}).get("id"))
     for entry in sorted(result["renumbered"], key=lambda x: x["old"]):
         old_key = (cid, entry["old"])
         if old_key in _panel_msg_ids:
@@ -157,6 +178,20 @@ def _group_web_url(cid: int) -> str:
 
 # ── Inline keyboards ──────────────────────────────────────────────────────────
 
+def _btn(action: str, rc_number: int, rc_id) -> str:
+    """Callback data for a panel button: btn_<action>_<N>_<rollcall db id>.
+
+    N is only the label the panel was drawn with; the db id is what the tap
+    acts on. Positions shift when an earlier rollcall closes, and a button
+    that resolved "#2" by position after #1 ended would act on whatever is
+    #2 now. The legacy three-part form (no id) is still accepted for panels
+    posted before this change — see callback_handler.
+    """
+    if rc_id:
+        return f"btn_{action}_{rc_number}_{rc_id}"
+    return f"btn_{action}_{rc_number}"
+
+
 async def get_status_keyboard(rc_number: int, chat_id: int) -> InlineKeyboardMarkup:
     """The vote panel's keyboard. Always offers the web link when one exists.
 
@@ -169,65 +204,68 @@ async def get_status_keyboard(rc_number: int, chat_id: int) -> InlineKeyboardMar
     through a call site that did pass it.
 
     An optional argument that silently degrades a feature is the bug. Taking
-    the chat id instead means there is nothing left to omit.
+    the chat id instead means there is nothing left to omit. The rollcall's
+    db id (stamped into every button) is derived here for the same reason.
     """
     web_url = _group_web_url(chat_id)
+    rc = manager.get_rollcall(chat_id, rc_number - 1)
+    rc_id = _rc_db_id(rc) if rc is not None else None
     markup = InlineKeyboardMarkup(row_width=3)
     markup.add(
-        InlineKeyboardButton("✅ IN",       callback_data=f"btn_in_{rc_number}"),
-        InlineKeyboardButton("❌ OUT",      callback_data=f"btn_out_{rc_number}"),
-        InlineKeyboardButton("❓ MAYBE",    callback_data=f"btn_maybe_{rc_number}"),
+        InlineKeyboardButton("✅ IN",       callback_data=_btn("in", rc_number, rc_id)),
+        InlineKeyboardButton("❌ OUT",      callback_data=_btn("out", rc_number, rc_id)),
+        InlineKeyboardButton("❓ MAYBE",    callback_data=_btn("maybe", rc_number, rc_id)),
     )
     markup.add(
-        InlineKeyboardButton("📋 Lists",   callback_data=f"btn_lists_{rc_number}"),
-        InlineKeyboardButton("🔄 Refresh", callback_data=f"btn_refresh_{rc_number}"),
+        InlineKeyboardButton("📋 Lists",   callback_data=_btn("lists", rc_number, rc_id)),
+        InlineKeyboardButton("🔄 Refresh", callback_data=_btn("refresh", rc_number, rc_id)),
     )
     if web_url:
         markup.add(InlineKeyboardButton("🌐 Vote on Web", url=web_url))
     markup.add(
-        InlineKeyboardButton(f"🛑 End RollCall #{rc_number}", callback_data=f"btn_end_{rc_number}")
+        InlineKeyboardButton(f"🛑 End RollCall #{rc_number}", callback_data=_btn("end", rc_number, rc_id))
     )
     markup.add(
-        InlineKeyboardButton(f"🗑 Cancel RollCall #{rc_number}", callback_data=f"btn_cancelrc_{rc_number}")
+        InlineKeyboardButton(f"🗑 Cancel RollCall #{rc_number}", callback_data=_btn("cancelrc", rc_number, rc_id))
     )
     return markup
 
 
-async def get_lists_keyboard(rc_number: int = 0) -> InlineKeyboardMarkup:
+async def get_lists_keyboard(rc_number: int, rc_id) -> InlineKeyboardMarkup:
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
-        InlineKeyboardButton("✅ Who's IN",    callback_data=f"btn_wi_{rc_number}"),
-        InlineKeyboardButton("❌ Who's OUT",   callback_data=f"btn_wo_{rc_number}"),
+        InlineKeyboardButton("✅ Who's IN",    callback_data=_btn("wi", rc_number, rc_id)),
+        InlineKeyboardButton("❌ Who's OUT",   callback_data=_btn("wo", rc_number, rc_id)),
     )
     markup.add(
-        InlineKeyboardButton("❓ Who's Maybe", callback_data=f"btn_wm_{rc_number}"),
-        InlineKeyboardButton("⏳ Waiting",     callback_data=f"btn_ww_{rc_number}"),
+        InlineKeyboardButton("❓ Who's Maybe", callback_data=_btn("wm", rc_number, rc_id)),
+        InlineKeyboardButton("⏳ Waiting",     callback_data=_btn("ww", rc_number, rc_id)),
     )
-    markup.add(InlineKeyboardButton("🔙 Back", callback_data=f"btn_status_{rc_number}"))
+    markup.add(InlineKeyboardButton("🔙 Back", callback_data=_btn("status", rc_number, rc_id)))
     return markup
 
 
-async def get_end_confirm_keyboard(rc_number: int) -> InlineKeyboardMarkup:
+async def get_end_confirm_keyboard(rc_number: int, rc_id) -> InlineKeyboardMarkup:
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
-        InlineKeyboardButton("✅ Yes",    callback_data=f"btn_endconfirm_{rc_number}"),
-        InlineKeyboardButton("❌ Cancel", callback_data=f"btn_endcancel_{rc_number}"),
+        InlineKeyboardButton("✅ Yes",    callback_data=_btn("endconfirm", rc_number, rc_id)),
+        InlineKeyboardButton("❌ Cancel", callback_data=_btn("endcancel", rc_number, rc_id)),
     )
     return markup
 
 
-async def get_cancelrc_confirm_keyboard(rc_number: int) -> InlineKeyboardMarkup:
+async def get_cancelrc_confirm_keyboard(rc_number: int, rc_id) -> InlineKeyboardMarkup:
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
-        InlineKeyboardButton("✅ Yes, cancel", callback_data=f"btn_cancelyes_{rc_number}"),
-        InlineKeyboardButton("❌ No",          callback_data=f"btn_canceldismiss_{rc_number}"),
+        InlineKeyboardButton("✅ Yes, cancel", callback_data=_btn("cancelyes", rc_number, rc_id)),
+        InlineKeyboardButton("❌ No",          callback_data=_btn("canceldismiss", rc_number, rc_id)),
     )
     return markup
 
 
-async def get_cancelrc_skip_keyboard(rc_number: int) -> InlineKeyboardMarkup:
+async def get_cancelrc_skip_keyboard(rc_number: int, rc_id) -> InlineKeyboardMarkup:
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("⏭ Skip", callback_data=f"btn_cancelskip_{rc_number}"))
+    markup.add(InlineKeyboardButton("⏭ Skip", callback_data=_btn("cancelskip", rc_number, rc_id)))
     return markup
 
 
@@ -706,14 +744,67 @@ async def show_panel(message):
 
 
 # ── btn_* callback handler ────────────────────────────────────────────────────
+
+def reconf_callback(choice: str, rc_index: int, user_id: int, rc_id) -> str:
+    """reconf_<in|out>_<index>_<uid>[_<rollcall db id>] — the ghost
+    re-confirmation buttons. The id is what the confirm acts on (see
+    handlers/ghost.py); the index is kept for prompts posted before it."""
+    base = f"reconf_{choice}_{rc_index}_{user_id}"
+    return f"{base}_{rc_id}" if rc_id else base
+
+
+async def _resolve_legacy_panel(call, cid: int, rc_number: int):
+    """0-based index for a panel posted before buttons carried the rollcall's
+    db id (btn_<action>_<N>), or None after answering the tap.
+
+    Position is all such a button knows, and position is exactly what drifts.
+    The tapped message's own id is the tie-breaker: if it is the recorded
+    panel of an open rollcall, act on THAT one whatever its number is now; if
+    it is the recorded panel of a rollcall that has since closed, refuse
+    rather than act on whichever rollcall took its number. Only a message we
+    have no record of falls back to the old by-position behaviour.
+    """
+    rollcalls = manager.get_rollcalls(cid)
+    msg_id = getattr(call.message, "message_id", None)
+    if isinstance(msg_id, int):
+        for i, r in enumerate(rollcalls):
+            if getattr(r, "panel_msg_id", None) == msg_id:
+                return i
+        try:
+            closed = db.is_closed_rollcall_panel(cid, msg_id)
+        except Exception:
+            closed = False
+        if closed:
+            await _refuse_closed_panel(call, cid)
+            return None
+    if rc_number < 1 or rc_number > len(rollcalls):
+        await bot.answer_callback_query(call.id, "Invalid rollcall!")
+        return None
+    return rc_number - 1
+
+
+async def _refuse_closed_panel(call, cid: int) -> None:
+    """A tap on a panel whose rollcall has closed: say so, and take the dead
+    buttons away so nobody else taps them."""
+    try:
+        await bot.answer_callback_query(call.id, "This rollcall has already closed.", show_alert=True)
+    except Exception:
+        logging.warning("closed-panel answer failed (chat=%s)", cid, exc_info=True)
+    await safe_edit_markup(cid, call.message.message_id, reply_markup=None)
+
 # NOTE: the @callback_query_handler decorator lives on callback_handler (the
 # single-arg dispatcher further down), NOT on these _cb_* helpers — telebot
 # invokes handlers as fn(call), so registering a multi-arg helper breaks every
 # panel button with a TypeError swallowed inside telebot's dispatch.
 
-async def _cb_vote(call, cid: int, rc_number: int, action: str) -> None:
-    """btn_{in,out,maybe}_{rc_number} — vote dispatch, ghost reconfirmation
-    gate, waitlist/promotion announcements, and panel refresh."""
+async def _cb_vote(call, cid: int, rc_number: int, rc, action: str) -> None:
+    """btn_{in,out,maybe}_{rc_number}_{rc_id} — vote dispatch, ghost
+    reconfirmation gate, waitlist/promotion announcements, and panel refresh.
+
+    `rc` is the rollcall the tapped panel belongs to; every step below goes
+    by its db id, never by position, so a vote racing /erc lands in this
+    rollcall or nowhere — not in whichever one slid into its number."""
+    rc_id = _rc_db_id(rc)
     if _is_rate_limited(cid, call.from_user.id):
         await bot.answer_callback_query(call.id, "You're voting too fast — please wait a moment.")
         return
@@ -722,51 +813,57 @@ async def _cb_vote(call, cid: int, rc_number: int, action: str) -> None:
         asyncio.create_task(warn_no_username(cid, call.from_user.first_name)).add_done_callback(_log_task_exc)
     _first_name = _get_display_name(call.from_user)
 
-    # Ghost reconfirmation check for IN votes (uses service helper)
-    if action == "in":
-        from bot_state import _pending_reconf
-        reconf = voting_svc.check_ghost_reconfirmation_needed(cid, call.from_user.id, rc_number - 1)
-        if reconf["needed"]:
-            if (cid, call.from_user.id) in _pending_reconf:
-                await bot.answer_callback_query(call.id, "You already have a pending confirmation — please use the earlier buttons.")
-                return
-            _pending_reconf[(cid, call.from_user.id)] = {
-                'rc_number': rc_number - 1,
-                'comment': '',
-                '_ts': datetime.now().timestamp(),
-            }
-            ghost_markup = InlineKeyboardMarkup(row_width=2)
-            ghost_markup.add(
-                InlineKeyboardButton("✅ Yes, I'll be there!", callback_data=f"reconf_in_{rc_number - 1}_{call.from_user.id}"),
-                InlineKeyboardButton("❌ I'm out", callback_data=f"reconf_out_{rc_number - 1}_{call.from_user.id}"),
-            )
-            _user_obj = User(_first_name, _username, call.from_user.id, [])
-            await bot.send_message(
-                cid,
-                f"👻 *Warning:* {format_mention_with_name_md(_user_obj)}, you've ghosted *{reconf['ghost_count']}* session(s) before.\n"
-                f"⚠️ Absent Limit: *{reconf['absent_limit']}*\n\n"
-                f"Are you committing to be at *{_esc_md(reconf['rollcall_title'])}*?",
-                parse_mode="Markdown",
-                reply_markup=ghost_markup
-            )
-            return
-
     try:
+        # Ghost reconfirmation check for IN votes (uses service helper)
         if action == "in":
-            svc_result = await voting_svc.vote_in(cid, call.from_user.id, _first_name, _username, rc_number=rc_number - 1)
+            from bot_state import _pending_reconf
+            reconf = voting_svc.check_ghost_reconfirmation_needed(
+                cid, call.from_user.id, rc_number - 1, rollcall_id=rc_id)
+            if reconf["needed"]:
+                if (cid, call.from_user.id) in _pending_reconf:
+                    await bot.answer_callback_query(call.id, "You already have a pending confirmation — please use the earlier buttons.")
+                    return
+                _pending_reconf[(cid, call.from_user.id)] = {
+                    'rc_number': rc_number - 1,
+                    'rc_db_id': rc_id,
+                    'comment': '',
+                    '_ts': datetime.now().timestamp(),
+                }
+                ghost_markup = InlineKeyboardMarkup(row_width=2)
+                ghost_markup.add(
+                    InlineKeyboardButton("✅ Yes, I'll be there!", callback_data=reconf_callback("in", rc_number - 1, call.from_user.id, rc_id)),
+                    InlineKeyboardButton("❌ I'm out", callback_data=reconf_callback("out", rc_number - 1, call.from_user.id, rc_id)),
+                )
+                _user_obj = User(_first_name, _username, call.from_user.id, [])
+                await bot.send_message(
+                    cid,
+                    f"👻 *Warning:* {format_mention_with_name_md(_user_obj)}, you've ghosted *{reconf['ghost_count']}* session(s) before.\n"
+                    f"⚠️ Absent Limit: *{reconf['absent_limit']}*\n\n"
+                    f"Are you committing to be at *{_esc_md(reconf['rollcall_title'])}*?",
+                    parse_mode="Markdown",
+                    reply_markup=ghost_markup
+                )
+                return
+
+        if action == "in":
+            svc_result = await voting_svc.vote_in(cid, call.from_user.id, _first_name, _username, rc_number=rc_number - 1, rollcall_id=rc_id)
         elif action == "out":
-            svc_result = await voting_svc.vote_out(cid, call.from_user.id, _first_name, _username, rc_number=rc_number - 1)
+            svc_result = await voting_svc.vote_out(cid, call.from_user.id, _first_name, _username, rc_number=rc_number - 1, rollcall_id=rc_id)
         else:
-            svc_result = await voting_svc.vote_maybe(cid, call.from_user.id, _first_name, _username, rc_number=rc_number - 1)
+            svc_result = await voting_svc.vote_maybe(cid, call.from_user.id, _first_name, _username, rc_number=rc_number - 1, rollcall_id=rc_id)
     except alreadyInList as e:
         await bot.answer_callback_query(call.id, str(e) or "You're already in this status!")
         return
+    except rollCallClosed:
+        await _refuse_closed_panel(call, cid)
+        return
 
-    # Re-fetch rc after service mutation for panel update. The write lock was
-    # released inside vote_in/out/maybe, so a concurrent /erc could have ended
-    # (or renumbered) this rollcall in the meantime — guard against a stale
-    # or missing reference rather than crashing on rc.title below.
-    rc = manager.get_rollcall(cid, rc_number - 1)
+    # The service resolved the rollcall by id inside the lock and reports
+    # where it is NOW. The lock is released again, so a concurrent /erc
+    # could have closed it since — re-find it by id for the panel refresh.
+    rc_number = svc_result["rc_number_1based"]
+    idx = find_rollcall_index(cid, rc_id, manager) if rc_id else rc_number - 1
+    rc = manager.get_rollcall(cid, idx) if idx is not None else None
     if rc is None:
         logging.warning(
             "Rollcall #%s in chat %s vanished between vote and panel refresh",
@@ -774,6 +871,7 @@ async def _cb_vote(call, cid: int, rc_number: int, action: str) -> None:
         )
         await bot.answer_callback_query(call.id, "Vote recorded, but this rollcall has since ended.")
         return
+    rc_number = idx + 1
     user_d = svc_result["user"]
     user_id_v = user_d["user_id"]
     user_name_v = user_d["name"]
@@ -820,10 +918,10 @@ async def _cb_vote(call, cid: int, rc_number: int, action: str) -> None:
             logging.warning("Panel edit failed after vote (chat=%s msg=%s): %s", cid, call.message.message_id, e)
 
 
-async def _cb_lists_menu(call, cid: int, rc_number: int) -> None:
+async def _cb_lists_menu(call, cid: int, rc_number: int, rc) -> None:
     """btn_lists_{rc_number} — show the lists submenu (wi/wo/wm/ww buttons)."""
     await bot.answer_callback_query(call.id)
-    markup = await get_lists_keyboard(rc_number)
+    markup = await get_lists_keyboard(rc_number, _rc_db_id(rc))
     try:
         await bot.edit_message_text("Select list:", cid, call.message.message_id, reply_markup=markup)
     except Exception as e:
@@ -846,7 +944,7 @@ async def _cb_list_view(call, cid: int, rc_number: int, rc, action: str) -> None
         await bot.edit_message_text(
             text if text.strip() else "List is empty.",
             cid, call.message.message_id,
-            reply_markup=await get_lists_keyboard(rc_number),
+            reply_markup=await get_lists_keyboard(rc_number, _rc_db_id(rc)),
         )
     except Exception as e:
         if "message is not modified" not in str(e).lower():
@@ -886,7 +984,7 @@ async def _cb_end_prompt(call, cid: int, rc_number: int, rc) -> None:
         await bot.answer_callback_query(call.id, "⛔ Only admins can end rollcalls", show_alert=True)
         return
     await bot.answer_callback_query(call.id)
-    markup = await get_end_confirm_keyboard(rc_number)
+    markup = await get_end_confirm_keyboard(rc_number, _rc_db_id(rc))
     # Auto-started rollcalls + /src with no args can leave rc.title empty
     # or "<Empty>". Show a sensible label instead of "''" in the prompt.
     if rc.title and rc.title != "<Empty>":
@@ -913,11 +1011,19 @@ async def _cb_end_confirm(call, cid: int, rc_number: int, rc) -> None:
             await bot.answer_callback_query(call.id, "⛔ Only admins can end rollcalls", show_alert=True)
             return
 
+    # Re-find THIS rollcall by db id inside the lock. Re-fetching by
+    # position instead (as this did) ended whichever rollcall had slid into
+    # #N while the "are you sure?" prompt sat there — the one action here
+    # with no undo.
+    rc_id = _rc_db_id(rc)
     async with manager.get_chat_write_lock(cid):
-        rc = manager.get_rollcall(cid, rc_number - 1)
+        idx = find_rollcall_index(cid, rc_id, manager) if rc_id else rc_number - 1
+        rc = manager.get_rollcall(cid, idx) if idx is not None else None
         if rc is None:
             await bot.answer_callback_query(call.id, "Rollcall already ended.")
+            await safe_edit_markup(cid, call.message.message_id, reply_markup=None)
             return
+        rc_number = idx + 1
 
         ended_by = call.from_user.first_name or call.from_user.username or "someone"
         ended_number = rc_number
@@ -954,8 +1060,9 @@ async def _cb_end_confirm(call, cid: int, rc_number: int, rc) -> None:
             except Exception:
                 logging.exception(f"Failed to send finish list for chat {cid}")
 
-        # Update panel IDs
-        _panel_msg_ids.pop((cid, ended_number), None)
+        # Update panel IDs. This message (the panel itself) was just
+        # stripped above; any other copy of the panel goes too.
+        await _retire_panel(cid, ended_number, result.get("rc_db_id"))
         for entry in sorted(result["renumbered"], key=lambda x: x["old"]):
             old_key = (cid, entry["old"])
             if old_key in _panel_msg_ids:
@@ -1009,7 +1116,7 @@ async def _cb_cancelrc_prompt(call, cid: int, rc_number: int, rc) -> None:
         await bot.answer_callback_query(call.id, "⛔ Only admins can cancel rollcalls", show_alert=True)
         return
     await bot.answer_callback_query(call.id)
-    markup = await get_cancelrc_confirm_keyboard(rc_number)
+    markup = await get_cancelrc_confirm_keyboard(rc_number, _rc_db_id(rc))
     rc_label = f"'{rc.title}'" if rc.title and rc.title != "<Empty>" else "this rollcall"
     try:
         await bot.edit_message_text(
@@ -1051,7 +1158,7 @@ async def _cb_cancelrc_yes(call, cid: int, rc_number: int, rc) -> None:
         "_ts": datetime.now().timestamp(),
     }
     await bot.answer_callback_query(call.id)
-    skip_markup = await get_cancelrc_skip_keyboard(rc_number)
+    skip_markup = await get_cancelrc_skip_keyboard(rc_number, rc_db_id)
     try:
         await bot.edit_message_text(
             "✏️ Reason for cancelling (optional)? Reply with text, or tap Skip.",
@@ -1150,7 +1257,7 @@ async def callback_handler(call):
         cid = call.message.chat.id
 
         data = raw_data.split("_")
-        if len(data) != 3 or data[0] != "btn":
+        if len(data) not in (3, 4) or data[0] != "btn":
             await bot.answer_callback_query(call.id, "Invalid action")
             return
 
@@ -1158,25 +1265,40 @@ async def callback_handler(call):
 
         try:
             rc_number = int(data[2])
+            rc_id = int(data[3]) if len(data) == 4 else None
         except ValueError:
             await bot.answer_callback_query(call.id, "Invalid rollcall number")
             return
 
-        rollcalls = manager.get_rollcalls(cid)
-        if rc_number < 1 or rc_number > len(rollcalls):
-            await bot.answer_callback_query(call.id, "Invalid rollcall!")
+        if action == "cancelskip":
+            # Acts on the rollcall stashed by btn_cancelyes (by db id), not
+            # on anything in this button — and must still answer after that
+            # rollcall closed.
+            await _cb_cancelrc_skip(call, cid)
             return
 
-        rc = rollcalls[rc_number - 1]
+        if rc_id is not None:
+            idx = find_rollcall_index(cid, rc_id, manager)
+            if idx is None:
+                await _refuse_closed_panel(call, cid)
+                return
+            rc_number = idx + 1
+        else:
+            idx = await _resolve_legacy_panel(call, cid, rc_number)
+            if idx is None:
+                return
+            rc_number = idx + 1
+
+        rc = manager.get_rollcalls(cid)[rc_number - 1]
 
         # ── IN / OUT / MAYBE ──────────────────────────────────────────────────
         if action in ("in", "out", "maybe"):
-            await _cb_vote(call, cid, rc_number, action)
+            await _cb_vote(call, cid, rc_number, rc, action)
             return
 
         # ── Lists submenu ─────────────────────────────────────────────────────
         if action == "lists":
-            await _cb_lists_menu(call, cid, rc_number)
+            await _cb_lists_menu(call, cid, rc_number, rc)
             return
 
         if action in ("wi", "wo", "wm", "ww"):
@@ -1221,11 +1343,6 @@ async def callback_handler(call):
         # ── Dismiss cancel-rollcall confirmation ────────────────────────────────
         if action == "canceldismiss":
             await _cb_cancelrc_dismiss(call, cid, rc_number, rc)
-            return
-
-        # ── Skip the optional reason, cancel now ────────────────────────────────
-        if action == "cancelskip":
-            await _cb_cancelrc_skip(call, cid)
             return
 
         await bot.answer_callback_query(call.id, "Unknown action")

@@ -31,6 +31,7 @@ from db import (
 from services import admin as admin_svc
 from services import ghost as ghost_svc
 from services import voting as voting_svc
+from services.common import find_rollcall_index
 
 
 def _ts() -> str:
@@ -342,54 +343,50 @@ async def ghost_callback_handler(call):
             await safe_edit_text(cid, call.message.message_id, f"👻 Ghost session recorded!\n\n{summary}")
             return
 
-        # ── reconf_in ────────────────────────────────────────────────────────
-        if data.startswith("reconf_in_"):
+        # ── reconf_in / reconf_out ───────────────────────────────────────────
+        # reconf_<in|out>_<index>_<uid>[_<rollcall db id>]. The vote goes to
+        # the rollcall the prompt was about, found by db id inside the vote's
+        # lock — never "whatever is at <index> now", which after an earlier
+        # rollcall closed is a different one.
+        if data.startswith("reconf_in_") or data.startswith("reconf_out_"):
             parts = data.split("_")
+            choice = parts[1]
             rc_number = int(parts[2])
             uid = int(parts[3])
+            data_rc_id = int(parts[4]) if len(parts) > 4 else None
             if call.from_user.id != uid:
                 await bot.answer_callback_query(call.id, "This confirmation is not for you.")
                 return
-            state = _pending_reconf.pop((cid, uid), {})
-            rollcalls = manager.get_rollcalls(cid)
-            if rc_number >= len(rollcalls):
-                await bot.answer_callback_query(call.id, "Roll call no longer active.")
-                return
+            state = _pending_reconf.pop((cid, uid), None) or {}
+            rc_id = data_rc_id or state.get('rc_db_id')
             _username = call.from_user.username or None
             _display = _get_display_name(call.from_user)
             try:
-                await voting_svc.vote_in(cid, uid, _display, _username,
-                                         comment=state.get('comment', ''),
-                                         rc_number=rc_number)
+                if choice == "in":
+                    res = await voting_svc.vote_in(cid, uid, _display, _username,
+                                                   comment=state.get('comment', ''),
+                                                   rc_number=rc_number, rollcall_id=rc_id)
+                else:
+                    res = await voting_svc.vote_out(cid, uid, _display, _username,
+                                                    rc_number=rc_number, rollcall_id=rc_id)
+                rc_number = res["rc_number_1based"] - 1
             except alreadyInList:
-                pass  # already IN from a concurrent vote — still show confirmation
-            rc = manager.get_rollcall(cid, rc_number)
-            await bot.answer_callback_query(call.id, "💪 You're IN!")
-            await safe_edit_text(cid, call.message.message_id, f"💪 {_display} committed to IN!\n\n{rc.allList().replace('__RCID__', str(rc_number + 1))}")
-            return
-
-        # ── reconf_out ───────────────────────────────────────────────────────
-        if data.startswith("reconf_out_"):
-            parts = data.split("_")
-            rc_number = int(parts[2])
-            uid = int(parts[3])
-            if call.from_user.id != uid:
-                await bot.answer_callback_query(call.id, "This confirmation is not for you.")
-                return
-            _pending_reconf.pop((cid, uid), None)
-            rollcalls = manager.get_rollcalls(cid)
-            if rc_number >= len(rollcalls):
+                pass  # already in that status from a concurrent vote — still show confirmation
+            except (rollCallNotStarted, incorrectParameter):
                 await bot.answer_callback_query(call.id, "Roll call no longer active.")
+                await safe_edit_text(cid, call.message.message_id,
+                                     "That rollcall has already closed — nothing was recorded.")
                 return
-            _username = call.from_user.username or None
-            _display = _get_display_name(call.from_user)
-            try:
-                await voting_svc.vote_out(cid, uid, _display, _username, rc_number=rc_number)
-            except alreadyInList:
-                pass  # already OUT — still show confirmation
-            rc = manager.get_rollcall(cid, rc_number)
-            await bot.answer_callback_query(call.id, "❌ Marked as Out")
-            await safe_edit_text(cid, call.message.message_id, f"❌ {_display} is out.\n\n{rc.allList().replace('__RCID__', str(rc_number + 1))}")
+            idx = find_rollcall_index(cid, rc_id, manager) if rc_id else rc_number
+            rc = manager.get_rollcall(cid, idx) if idx is not None else None
+            if choice == "in":
+                await bot.answer_callback_query(call.id, "💪 You're IN!")
+                head = f"💪 {_display} committed to IN!"
+            else:
+                await bot.answer_callback_query(call.id, "❌ Marked as Out")
+                head = f"❌ {_display} is out."
+            body = f"\n\n{rc.allList().replace('__RCID__', str(idx + 1))}" if rc is not None else ""
+            await safe_edit_text(cid, call.message.message_id, head + body)
             return
 
         # ── proxy_add ────────────────────────────────────────────────────────
@@ -398,24 +395,49 @@ async def ghost_callback_handler(call):
             rc_number = int(parts[2])
             proxy_name = parts[3]
 
+            # Only the admin who ran /sif can confirm it: the pending entry is
+            # keyed on them. This used to fall back to an empty entry, so in
+            # an admin-locked group ANY member could tap "Yes, add anyway" and
+            # become the proxy's owner.
             proxy_owner_id = call.from_user.id
-            pending = _pending_proxy_add.pop((cid, proxy_owner_id, proxy_name), {})
-            comment = pending.get('comment', '')
-
-            async with manager.get_chat_write_lock(cid):
-                rc = manager.get_rollcall(cid, rc_number)
-                if not rc:
-                    await bot.answer_callback_query(call.id, "Rollcall not found")
+            pending = _pending_proxy_add.pop((cid, proxy_owner_id, proxy_name), None)
+            if pending is None:
+                await bot.answer_callback_query(
+                    call.id, "Only the admin who asked can confirm this (or it expired — run /sif again).",
+                    show_alert=True)
+                return
+            if manager.get_admin_rights(cid):
+                member = await bot.get_chat_member(cid, proxy_owner_id)
+                if member.status not in ("administrator", "creator"):
+                    await bot.answer_callback_query(call.id, "⛔ Only admins can add proxies", show_alert=True)
                     return
 
-                user = User(proxy_name, None, proxy_name, rc.allNames)
-                user.comment = comment
-                rc.set_proxy_owner(proxy_name, proxy_owner_id)
-                rc.addIn(user)
-                rc.save()
+            from services import proxy as proxy_svc
+            from exceptions import duplicateProxy, repeatlyName
+            try:
+                res = await proxy_svc.set_in_for(
+                    cid, proxy_owner_id, call.from_user.first_name, proxy_name,
+                    pending.get('comment', ''), rc_number,
+                    rollcall_id=pending.get('rc_db_id'),
+                )
+            except (rollCallNotStarted, incorrectParameter):
+                await bot.answer_callback_query(call.id, "Rollcall not found")
+                await safe_edit_text(cid, call.message.message_id,
+                                     "That rollcall has already closed — nobody was added.")
+                return
+            except (duplicateProxy, repeatlyName) as e:
+                await bot.answer_callback_query(call.id, str(e), show_alert=True)
+                await safe_edit_text(cid, call.message.message_id, f"⚠️ {proxy_name} was not added: {e}")
+                return
 
-            await bot.answer_callback_query(call.id, f"✅ Added {proxy_name}")
-            await safe_edit_text(cid, call.message.message_id, f"✅ {proxy_name} added to IN list")
+            rc_number_1 = res["rc_number_1based"]
+            if res["action"] == "waitlisted":
+                await bot.answer_callback_query(call.id, f"⏳ {proxy_name} is WAITING")
+                await safe_edit_text(cid, call.message.message_id,
+                                     f"⏳ IN is full — {proxy_name} added to the WAITING list")
+            else:
+                await bot.answer_callback_query(call.id, f"✅ Added {proxy_name}")
+                await safe_edit_text(cid, call.message.message_id, f"✅ {proxy_name} added to IN list")
             # force_new=False (the default everywhere else a vote lands: /in,
             # /sif with no ghost history, every panel button) — quietly edits
             # the existing panel in place instead of posting a second, brand
@@ -427,15 +449,19 @@ async def ghost_callback_handler(call):
             # decided whether the group saw a fresh full list or a quiet edit
             # to an existing message elsewhere in the chat — reported as
             # "sometimes it shows the whole list, sometimes it doesn't".
-            from handlers.lifecycle import _update_panel
-            await _update_panel(cid, rc_number + 1, rc)
+            rc = manager.get_rollcall(cid, rc_number_1 - 1)
+            if rc is not None:
+                from handlers.lifecycle import _update_panel
+                await _update_panel(cid, rc_number_1, rc)
             return
 
         # ── proxy_cancel ─────────────────────────────────────────────────────
         if data.startswith("proxy_cancel_"):
             parts = data.split("_", 3)
             proxy_name = parts[3] if len(parts) > 3 else ""
-            _pending_proxy_add.pop((cid, call.from_user.id, proxy_name), None)
+            if _pending_proxy_add.pop((cid, call.from_user.id, proxy_name), None) is None:
+                await bot.answer_callback_query(call.id, "This confirmation is not for you.", show_alert=True)
+                return
             await bot.answer_callback_query(call.id, "❌ Cancelled")
             await safe_edit_text(cid, call.message.message_id, "❌ Cancelled — user not added")
             return
@@ -468,22 +494,32 @@ async def ghost_callback_handler(call):
             rc_number = pending['rc_number']
             try:
                 async with manager.get_chat_write_lock(cid):
+                    # By the db id stashed when /delete_user was typed — the
+                    # prompt may have sat while an earlier rollcall closed.
                     del_result = admin_svc.delete_user_from_rollcall(
-                        cid, rc_number, name, admin_id, call.from_user.first_name
+                        cid, rc_number, name, admin_id, call.from_user.first_name,
+                        rollcall_id=pending.get('rc_db_id'),
                     )
+                    rc_number = del_result["rc_number_1based"] - 1
                     rc_after = manager.get_rollcall(cid, rc_number)
-                # Removing someone from a capped IN list frees a slot, so the
-                # waitlist drains just as it does on /out — announce it.
-                if del_result.get("promoted") and rc_after is not None:
-                    from handlers.promotion import announce_promotions
-                    await announce_promotions(
-                        cid, del_result["promoted"], rc_after.title, rc_number + 1, rc_after
-                    )
-                await bot.answer_callback_query(call.id, f"✅ Deleted {name}")
-                await safe_edit_text(cid, call.message.message_id, f"✅ *{_esc_md(name)}* removed from rollcall #{rc_number + 1}.", parse_mode="Markdown")
+            except rollCallNotStarted:
+                await bot.answer_callback_query(call.id, "Rollcall already closed")
+                await safe_edit_text(cid, call.message.message_id,
+                                     "⚠️ That rollcall has already closed — nobody was removed.")
+                return
             except incorrectParameter:
                 await bot.answer_callback_query(call.id, "User not found")
                 await safe_edit_text(cid, call.message.message_id, f"⚠️ User *{_esc_md(name)}* not found.", parse_mode="Markdown")
+                return
+            # Removing someone from a capped IN list frees a slot, so the
+            # waitlist drains just as it does on /out — announce it.
+            if del_result.get("promoted") and rc_after is not None:
+                from handlers.promotion import announce_promotions
+                await announce_promotions(
+                    cid, del_result["promoted"], rc_after.title, rc_number + 1, rc_after
+                )
+            await bot.answer_callback_query(call.id, f"✅ Deleted {name}")
+            await safe_edit_text(cid, call.message.message_id, f"✅ *{_esc_md(name)}* removed from rollcall #{rc_number + 1}.", parse_mode="Markdown")
             return
 
         # ── ovrd_yes / ovrd_no ───────────────────────────────────────────────
@@ -506,44 +542,31 @@ async def ghost_callback_handler(call):
             status = pending['new_status']
             rc_number = pending['rc_number']
 
-            async with manager.get_chat_write_lock(cid):
-                rc = manager.get_rollcall(cid, rc_number)
-                if not rc:
-                    await bot.answer_callback_query(call.id, "Rollcall not found")
-                    await safe_edit_text(cid, call.message.message_id, "⚠️ Rollcall not found.")
-                    return
-
-                ovrd_promoted = []
-                try:
+            # Exactly the member and the rollcall the admin confirmed: by db
+            # id and user id, inside the lock. There used to be a fallback
+            # here that, when the member wasn't found, re-added them with
+            # rc.addIn/addOut directly — onto whichever rollcall sat at the
+            # old position, or back onto a list they had just been deleted
+            # from. Not found now means not found.
+            try:
+                async with manager.get_chat_write_lock(cid):
                     ovrd_result = admin_svc.set_user_status(
-                        cid, rc_number, user.name, status, admin_id, call.from_user.first_name
+                        cid, rc_number, user.name, status, admin_id, call.from_user.first_name,
+                        rollcall_id=pending.get('rc_db_id'), user_id=user.user_id,
                     )
-                    ovrd_promoted = ovrd_result.get("promoted") or []
-                except incorrectParameter:
-                    # User may have been in a non-standard list (e.g. waitlist) so fall back
-                    # to the direct manipulation path for waitlist entries.
-                    from db import delete_user_by_id as _del_by_id
-                    rc_db_id = get_rc_db_id(rc)
-                    if rc_db_id is not None:
-                        _del_by_id(rc_db_id, user.user_id)
-                    rc._load_users_from_db()
-                    moved_up = None
-                    if status == 'in':
-                        rc.addIn(user)
-                    elif status == 'out':
-                        moved_up = rc.addOut(user)
-                    else:
-                        moved_up = rc.addMaybe(user)
-                    if moved_up is not None and not isinstance(moved_up, str):
-                        from services.common import serialize_user as _ser_u
-                        ovrd_promoted = [_ser_u(moved_up)]
-                    rc.save()
-                    log_admin_action(cid, admin_id, call.from_user.first_name, "set_status",
-                                     target_name=f"{user.name} → {status}",
-                                     rollcall_id=getattr(rc, 'db_id', None) or getattr(rc, 'id', None),
-                                     details=rc.title)
+                    rc_number = ovrd_result["rc_number_1based"] - 1
+                    rc = manager.get_rollcall(cid, rc_number)
+            except rollCallNotStarted:
+                await bot.answer_callback_query(call.id, "Rollcall already closed")
+                await safe_edit_text(cid, call.message.message_id,
+                                     "⚠️ That rollcall has already closed — nothing was changed.")
+                return
+            except incorrectParameter as e:
+                await bot.answer_callback_query(call.id, "Not changed")
+                await safe_edit_text(cid, call.message.message_id, f"⚠️ {e}")
+                return
+            ovrd_promoted = ovrd_result.get("promoted") or []
 
-                rc = manager.get_rollcall(cid, rc_number)
             if not manager.get_shh_mode(cid):
                 await bot.send_message(cid, f"✅ Done! {user.name}'s status for '{rc.title}' updated to {status.upper()}.")
             if ovrd_promoted and rc is not None:

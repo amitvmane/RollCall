@@ -3299,7 +3299,7 @@ function renderCloseGame(){
     </div>
     <div class="dues-subsidy-row">
       <label for="close-subsidy">Subsidy (₹)</label>
-      <input id="close-subsidy" type="number" min="0" max="${p.fund_balance}" value="0" oninput="updateClosePreview()"/>
+      <input id="close-subsidy" type="number" min="0" max="${Math.max(0,Number(p.fund_balance)||0)}" value="0" oninput="updateClosePreview()"/>
     </div>
     <button class="btn btn-primary" style="width:100%;padding:12px" onclick="doCloseGame()">Close Game →</button>
     <div style="font-size:.75rem;color:var(--sub);margin-top:6px;text-align:center">Fund balance: ₹${p.fund_balance}${p.has_active?" · Ends active rollcall":""}</div>

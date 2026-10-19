@@ -775,9 +775,11 @@ COMMANDS = [
         "args": "[::N]", "sample": "/cancel_game_dues",
         "summary": "Reverse all share entries for a closed game",
         "details": (
-            "Writes compensating cancel_credit entries to undo share/adhoc charges. "
+            "Shows a confirm card for the game; tapping it writes compensating entries "
+            "that undo what the game still charges (and any collector ground-cost credit). "
             "Payments already recorded remain as credits (they genuinely happened). "
-            "Use /settle_dues again to re-close after fixing the event fee or player count.\n\n"
+            "Use /settle_dues again to re-close after fixing the event fee or player count. "
+            "Games from before /new_season can't be cancelled.\n\n"
             "Defaults to the most recently closed game.\n"
             "Use ::N to target an older game: /cancel_game_dues ::2 cancels the second most recent."
         ),

@@ -209,6 +209,21 @@ def set_location(
     return serialize_rollcall(rc, rc_number)
 
 
+def require_readable_fee(fee: str) -> int | None:
+    """Validate free-text fee input; returns the amount (None for empty =
+    clear). Raises incorrectParameter for no/ambiguous/non-positive amount."""
+    if not (fee or "").strip():
+        return None
+    from services.dues import parse_fee_amount
+    amount = parse_fee_amount(fee)
+    if amount is None or amount <= 0:
+        raise incorrectParameter(
+            f"Couldn't read a fee amount from '{fee.strip()}'. Use whole rupees, "
+            "e.g. /ef 1200, /ef 1,200 or /ef ₹1,500 (no shorthand like 1.2k)."
+        )
+    return amount
+
+
 def set_event_fee(
     chat_id: int,
     fee: str,
@@ -216,7 +231,12 @@ def set_event_fee(
     admin_name: str,
     rc_number: int = 0,
 ) -> dict:
-    """Set the event fee on a rollcall."""
+    """Set the event fee on a rollcall.
+
+    A non-empty fee must contain an amount /settle_dues can read the same
+    way (see services.dues.parse_fee_amount) — "1.2k" is refused here rather
+    than settled as ₹1 later."""
+    require_readable_fee(fee)
     rc = resolve_rollcall_or_raise(chat_id, rc_number)
     rc.event_fee = fee.strip() or None
     rc.save()

@@ -46,7 +46,14 @@ class DuesCancelGameRequest(BaseModel):
     id_token: str
     n_index: int = Field(
         0, ge=0,
-        description="Which closure to cancel: 0 = latest, 1 = second-most-recent, …",
+        description="Which closure to cancel: 0 = latest, 1 = second-most-recent, … "
+                    "Ignored when rollcall_id is given.",
+    )
+    rollcall_id: Optional[int] = Field(
+        None,
+        description="Cancel exactly this game. Preferred over n_index: positions "
+                    "shift after every cancel, so a retried n_index request reverses "
+                    "a different game, while a retried rollcall_id is refused.",
     )
 
 

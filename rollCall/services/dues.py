@@ -276,16 +276,49 @@ def close_preview(chat_id: int) -> dict:
 
 # ── Game close ───────────────────────────────────────────────────────────────
 
-def _parse_ground_cost(event_fee) -> int:
-    """Extract the first digit group from event_fee text.
+# First amount-shaped token: digits, optionally comma-grouped, optionally with
+# a decimal part. Comma grouping is validated separately (Western 1,200 /
+# 12,000 and Indian 1,20,000) so a stray "1,2" is never read as 12.
+_FEE_TOKEN = re.compile(r"\d+(?:,\d+)*(?:\.\d+)?")
+_FEE_GROUPING = re.compile(r"^(?:\d{1,3}(?:,\d{3})+|\d{1,2}(?:,\d{2})*,\d{3})$")
+# Shorthand multipliers ("1.2k", "2 lakh") — refuse rather than guess.
+_FEE_MULTIPLIER = re.compile(r"^\s*(?:k|l|lakhs?|lacs?|m|mn|cr|crores?)\b", re.IGNORECASE)
 
-    "600 + shuttles 200" → 600  (not 600200)
-    Returns 0 if nothing parseable.
+
+def parse_fee_amount(event_fee) -> int | None:
+    """Read the ground cost (whole rupees) out of free-text event_fee.
+
+    Takes the FIRST amount in the text, so "600 + shuttles 200" → 600, and
+    understands thousands separators and currency marks: "1,200" → 1200,
+    "₹1,20,000" → 120000, "Rs. 1500.00" → 1500.
+
+    Returns None when there is no amount or it is ambiguous — "1.2k",
+    "2 lakh", "1500.50", a malformed grouping like "1,2". Reading the first
+    digit group of "1,200" as ₹1 used to under-charge a whole game silently;
+    refusing makes the admin restate the fee instead.
     """
-    if not event_fee:
-        return 0
-    m = re.search(r"\d+", str(event_fee))
-    return int(m.group()) if m else 0
+    if event_fee is None:
+        return None
+    text = str(event_fee)
+    m = _FEE_TOKEN.search(text)
+    if not m:
+        return None
+    token = m.group()
+    if _FEE_MULTIPLIER.match(text[m.end():]):
+        return None
+    whole, _, frac = token.partition(".")
+    if frac and frac.strip("0"):
+        return None
+    if "," in whole:
+        if not _FEE_GROUPING.match(whole):
+            return None
+        whole = whole.replace(",", "")
+    return int(whole)
+
+
+def _parse_ground_cost(event_fee) -> int:
+    """Ground cost from event_fee text; 0 when unreadable (see parse_fee_amount)."""
+    return parse_fee_amount(event_fee) or 0
 
 
 def _in_list_from_active_rc(rc) -> list[dict]:
@@ -456,10 +489,18 @@ async def close_game(
         )
 
     fund_balance = db.get_fund_balance(chat_id)
-    if subsidy < 0 or subsidy > min(ground_cost, fund_balance):
+    # A fund can be overdrawn (log_expense / waive), and that must never stop
+    # a game being settled: "no subsidy" is always available.
+    max_subsidy = max(0, min(ground_cost, fund_balance))
+    if subsidy < 0 or subsidy > max_subsidy:
+        if fund_balance <= 0:
+            raise incorrectParameter(
+                f"The fund is at ₹{fund_balance}, so no subsidy is available — "
+                "settle with subsidy 0."
+            )
         raise incorrectParameter(
-            f"Subsidy must be between 0 and min(ground_cost={ground_cost}, fund={fund_balance}) = "
-            f"{min(ground_cost, fund_balance)}."
+            f"Subsidy must be between 0 and ₹{max_subsidy} "
+            f"(the smaller of ground cost ₹{ground_cost} and fund ₹{fund_balance})."
         )
 
     in_count = len(in_members)
@@ -542,16 +583,16 @@ async def close_game(
                 created_by_uid=admin_uid, created_by_name=admin_name,
             ))
 
-    # Collector reimbursement (if they fronted ground cost)
-    if collector_paid_ground and collector_uid:
-        # Collector fronted ground_cost; credit them so net = per_head − ground_cost
-        dues_entries.append(dict(
-            chat_id=chat_id, rollcall_id=rc_db_id, user_id=collector_uid,
-            member_name=collector_name or "Collector",
-            entry_type="reimbursement", amount=-ground_cost,
-            memo=f"fronted ground cost ₹{ground_cost}",
-            created_by_uid=admin_uid, created_by_name=admin_name,
-        ))
+    # Collector reimbursement (if they fronted ground cost): credit them so
+    # net = per_head − ground_cost. Reconciled against what the ledger already
+    # holds for this game rather than appended blindly — the paid flag
+    # survives /cancel_game_dues on the rollcalls row, and a pre-fix cancel
+    # never reversed the credit, so a blind append on re-close paid twice.
+    dues_entries.extend(_reimbursement_deltas(
+        chat_id, rc_db_id, ground_cost,
+        collector_uid, collector_name, bool(collector_paid_ground),
+        f"cancelled: {title}", admin_uid, admin_name,
+    ))
 
     fund_transactions: list[dict] = []
     if subsidy > 0:
@@ -1151,7 +1192,7 @@ def _next_rotation_collector(in_members: list, last_uid) -> tuple | None:
 def set_collector(
     chat_id: int,
     token: str,
-    paid_ground: bool,
+    paid_ground: bool | None,
     admin_uid: int,
     admin_name: str,
     rc_number: int = 0,
@@ -1160,9 +1201,16 @@ def set_collector(
     """Designate a collector for the current or most-recent game.
 
     Pre-close (active RC): persists to rollcalls table columns.
-    Post-close: updates game_closures collector metadata.
+    Post-close: updates game_closures collector metadata (and the rollcalls
+    row, so a cancel + re-close keeps it) AND reconciles the ledger: the
+    "fronted ground cost" credit is written when the collector becomes a
+    paying one, and withdrawn from whoever held it when it moves or is unset.
+    Netted against the game's existing reimbursement rows, so repeating the
+    command writes nothing.
     collector_upi is optional — if provided it overrides the group UPI in the
     close announcement so game fees are routed to this collector directly.
+    paid_ground=None keeps the current paid flag when re-setting the same
+    collector (e.g. only attaching a UPI), and means "not paid" for a new one.
     """
     all_names = _known_proxy_names(chat_id)
     member = _resolve_member(chat_id, token, dues_names=all_names)
@@ -1171,13 +1219,19 @@ def set_collector(
     if uid is None:
         raise incorrectParameter("Collector must be a real (Telegram) user, not a proxy.")
 
-    paid_flag = 1 if paid_ground else 0
+    def _paid_flag(current_uid, current_flag) -> int:
+        if paid_ground is None:
+            return 1 if (current_uid == uid and current_flag) else 0
+        return 1 if paid_ground else 0
 
+    credit_note = ""
     # Try active rollcall first
     active = manager.get_rollcalls(chat_id)
     if active:
         idx = rc_number if rc_number < len(active) else 0
         rc = manager.get_rollcalls(chat_id)[idx]
+        paid_flag = _paid_flag(getattr(rc, "collector_uid", None),
+                               getattr(rc, "collector_paid_ground", 0))
         rc_db_id = getattr(rc, "id", None) or getattr(rc, "db_id", None)
         if rc_db_id:
             db.update_rollcall(rc_db_id,
@@ -1198,14 +1252,32 @@ def set_collector(
         closure = db.get_latest_game_closure(chat_id)
         if closure is None:
             raise duesNothingToClose("No active rollcall or closed game to assign a collector to.")
+        paid_flag = _paid_flag(closure.get("collector_uid"), closure.get("collector_paid_ground"))
+        rc_id = closure["rollcall_id"]
+        deltas = _reimbursement_deltas(
+            chat_id, rc_id, closure.get("ground_cost") or 0, uid, name, bool(paid_flag),
+            f"collector changed — ground-cost credit withdrawn ({closure.get('title') or 'last game'})",
+            admin_uid, admin_name,
+        )
+        _write_entries(deltas)
         db.update_game_closure_collector(
-            closure["rollcall_id"], uid, name,
+            rc_id, uid, name,
             collector_paid_ground=paid_flag,
             collector_upi=collector_upi,
         )
+        db.update_rollcall(rc_id,
+                           collector_uid=uid, collector_name=name,
+                           collector_paid_ground=paid_flag,
+                           **({'collector_upi': collector_upi} if collector_upi else {}))
         source = "last game closure"
+        for d in deltas:
+            if d["amount"] < 0:
+                credit_note += f"\n💸 {_esc_md(d['member_name'])} credited ₹{-d['amount']} for the ground"
+            else:
+                credit_note += (f"\n↩️ {_esc_md(d['member_name'])}'s ₹{d['amount']} "
+                                "ground-cost credit withdrawn")
 
-    paid_note = " (fronted ground cost)" if paid_ground else ""
+    paid_note = " (fronted ground cost)" if paid_flag else ""
     upi_note = f" · `{collector_upi}`" if collector_upi else ""
     db.log_admin_action(chat_id, admin_uid, admin_name, "set_collector", target_name=name)
 
@@ -1215,7 +1287,7 @@ def set_collector(
         "collector_paid_ground": paid_flag,
         "collector_upi": collector_upi,
         "source": source,
-        "announcement": f"📦 Collector: {_esc_md(name)}{paid_note}{upi_note}",
+        "announcement": f"📦 Collector: {_esc_md(name)}{paid_note}{upi_note}{credit_note}",
     }
 
 
@@ -1409,7 +1481,112 @@ def add_adhoc(
     }
 
 
+# ── Per-game ledger nets ──────────────────────────────────────────────────────
+# A game's ledger lines are never edited, so "what does this game still charge
+# or credit" is always a SUM over its rows. Every reversal below writes the
+# difference between that sum and the target — never a replay of individual
+# rows. Replaying is what let a second /cancel_game_dues reverse the first
+# close's shares a second time (phantom credits).
+
+# Charges a cancel reverses. cancel_credit is included so earlier reversals
+# net out of the next one.
+_GAME_CHARGE_TYPES = ("share", "adhoc", "cancel_credit")
+# Collector ground-cost credits are their own bucket: entry_type
+# "reimbursement" carrying the game's rollcall_id (/reimburse never attaches
+# one), withdrawn by "reimbursement" rows of the opposite sign. The bucket's
+# sum is therefore always the credit currently standing for this game —
+# including for rows written before this netting existed.
+_GAME_REIMBURSEMENT_TYPE = "reimbursement"
+
+
+def _identity_key(user_id, member_name) -> tuple:
+    if user_id is not None:
+        return ("u", user_id)
+    return ("n", (member_name or "").strip().lower())
+
+
+def _game_nets(rollcall_id: int, entry_types) -> dict:
+    """{identity: {"user_id", "member_name", "net"}} summed over this game's
+    rows of the given types. member_name is the latest one written."""
+    nets: dict = {}
+    for e in db.get_dues_entries_for_rollcall(rollcall_id):
+        if e["entry_type"] not in entry_types:
+            continue
+        key = _identity_key(e.get("user_id"), e.get("member_name"))
+        slot = nets.setdefault(key, {"user_id": e.get("user_id"),
+                                     "member_name": e.get("member_name"), "net": 0})
+        slot["net"] += e["amount"]
+        slot["member_name"] = e.get("member_name") or slot["member_name"]
+    return nets
+
+
+def _reimbursement_deltas(
+    chat_id: int,
+    rollcall_id: int | None,
+    ground_cost: int,
+    collector_uid: int | None,
+    collector_name: str | None,
+    paid_ground: bool,
+    withdraw_memo: str,
+    admin_uid: int,
+    admin_name: str,
+) -> list[dict]:
+    """Entries that move this game's standing collector credit to its target:
+    −ground_cost for the collector when they fronted it, 0 for everyone else.
+    Idempotent — a second run with the same inputs returns []."""
+    target: dict = {}
+    if paid_ground and collector_uid and ground_cost > 0:
+        target[("u", collector_uid)] = -ground_cost
+    current = _game_nets(rollcall_id, (_GAME_REIMBURSEMENT_TYPE,)) if rollcall_id else {}
+    out: list[dict] = []
+    for key in list(current) + [k for k in target if k not in current]:
+        delta = target.get(key, 0) - current.get(key, {}).get("net", 0)
+        if delta == 0:
+            continue
+        if key in target:
+            uid, name = collector_uid, collector_name or "Collector"
+            memo = f"fronted ground cost ₹{ground_cost}"
+        else:
+            uid = current[key]["user_id"]
+            name = current[key]["member_name"] or "Collector"
+            memo = withdraw_memo
+        out.append(dict(
+            chat_id=chat_id, rollcall_id=rollcall_id, user_id=uid, member_name=name,
+            entry_type=_GAME_REIMBURSEMENT_TYPE, amount=delta, memo=memo,
+            created_by_uid=admin_uid, created_by_name=admin_name,
+        ))
+    return out
+
+
+def _write_entries(entries: list[dict]) -> None:
+    for e in entries:
+        db.add_dues_entry(
+            e["chat_id"], e["rollcall_id"], e["user_id"], e["member_name"],
+            e["entry_type"], e["amount"], e["memo"],
+            e["created_by_uid"], e["created_by_name"],
+        )
+
+
 # ── Cancel game dues ──────────────────────────────────────────────────────────
+
+def require_cancellable(chat_id: int, rollcall_id: int) -> dict:
+    """The game's closure, or raise if /cancel_game_dues must refuse it.
+    Shared by the confirm card and the reversal so both say the same thing."""
+    closure = db.get_game_closure(rollcall_id)
+    if closure is None or closure.get("chat_id", chat_id) != chat_id:
+        raise incorrectParameter(
+            "That game has no dues to cancel — it was already cancelled or never "
+            "settled. Check /settle_dues."
+        )
+    if db.rollcall_predates_dues_epoch(chat_id, rollcall_id):
+        raise incorrectParameter(
+            f"'{closure['title']}' was played before the current season started "
+            "(/new_season), and the season reset already cleared its dues — it "
+            "can't be cancelled or re-settled now. Use /adjust_dues for a one-off "
+            "correction."
+        )
+    return closure
+
 
 def cancel_game_credit(
     chat_id: int,
@@ -1417,32 +1594,40 @@ def cancel_game_credit(
     admin_uid: int,
     admin_name: str,
 ) -> dict:
-    """Reverse all share/adhoc dues entries for a game.
+    """Reverse what a closed game still charges and credits.
 
-    Writes compensating cancel_credit entries so members' balances return
-    to pre-game values. Payments already made become credits (the ledger
-    faithfully records what happened). Fund rounding/subsidy txns are also
-    reversed.
+    Writes compensating entries so each member's balance returns to its
+    pre-game value: one cancel_credit per identity for the NET of the game's
+    share/adhoc/cancel_credit rows, plus a reimbursement row withdrawing any
+    standing collector credit. Netting matters because an earlier,
+    already-cancelled close's rows stay in the ledger. Payments already made
+    become credits (the ledger faithfully records what happened). Fund
+    rounding/subsidy/adhoc txns are reversed by their net too.
+
+    Refuses a game that ended before the chat's dues epoch (/new_season):
+    the season reset already cleared its balances and the game can never be
+    re-closed, so cancelling would only hand everyone a new-season credit.
     """
-    closure = db.get_game_closure(rollcall_id)
-    if closure is None:
-        raise incorrectParameter(
-            f"No game closure found for rollcall id={rollcall_id}. "
-            "Use /settle_dues first, or check the rollcall id."
-        )
+    closure = require_cancellable(chat_id, rollcall_id)
+    title = closure["title"]
+    memo = f"cancelled: {title}"
 
-    entries = db.get_dues_entries_for_rollcall(rollcall_id)
-    reversible_types = {"share", "adhoc"}
-    reversed_count = 0
-
-    for e in entries:
-        if e["entry_type"] in reversible_types:
-            db.add_dues_entry(
-                chat_id, rollcall_id, e["user_id"], e["member_name"],
-                "cancel_credit", -e["amount"],
-                f"cancelled: {closure['title']}", admin_uid, admin_name,
-            )
-            reversed_count += 1
+    reversals: list[dict] = []
+    for net in _game_nets(rollcall_id, _GAME_CHARGE_TYPES).values():
+        if net["net"] == 0:
+            continue
+        reversals.append(dict(
+            chat_id=chat_id, rollcall_id=rollcall_id, user_id=net["user_id"],
+            member_name=net["member_name"], entry_type="cancel_credit",
+            amount=-net["net"], memo=memo,
+            created_by_uid=admin_uid, created_by_name=admin_name,
+        ))
+    reversed_count = len(reversals)
+    withdrawals = _reimbursement_deltas(
+        chat_id, rollcall_id, 0, None, None, False, memo, admin_uid, admin_name,
+    )
+    _write_entries(reversals + withdrawals)
+    collector_credit_withdrawn = sum(e["amount"] for e in withdrawals)
 
     # Reverse fund transactions for this rollcall.
     # Uses a targeted rollcall-scoped query (not a chat-wide scan with a limit)
@@ -1455,7 +1640,7 @@ def cancel_game_credit(
     if fund_net != 0:
         db.add_fund_transaction(
             chat_id, rollcall_id, "adjustment", -fund_net,
-            f"cancellation reversal: {closure['title']}", admin_uid, admin_name,
+            f"cancellation reversal: {title}", admin_uid, admin_name,
         )
 
     # Remove the closure row so the rollcall is eligible for re-close.
@@ -1465,17 +1650,23 @@ def cancel_game_credit(
     db.delete_game_closure(rollcall_id)
 
     db.log_admin_action(chat_id, admin_uid, admin_name, "cancel_game_dues",
-                        target_name=closure["title"])
+                        target_name=title)
 
+    collector_line = (
+        f"Collector's ₹{collector_credit_withdrawn} ground-cost credit withdrawn.\n"
+        if collector_credit_withdrawn > 0 else ""
+    )
     return {
         "rollcall_id": rollcall_id,
-        "title": closure["title"],
+        "title": title,
         "reversed_count": reversed_count,
+        "collector_credit_withdrawn": collector_credit_withdrawn,
         "fund_reversal": -fund_net,
         "announcement": (
-            f"🔁 Cancelled dues for '{_esc_md(closure['title'])}': "
+            f"🔁 Cancelled dues for '{_esc_md(title)}': "
             f"{reversed_count} share entries reversed. "
             f"Payments already recorded remain as credits.\n"
+            f"{collector_line}"
             f"Run /ef <amount> then /settle_dues to re-close with corrected figures."
         ),
     }

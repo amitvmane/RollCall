@@ -164,10 +164,10 @@ async def event_fee(message):
                 ensure_rc_number(cid, rc_number, manager)
 
         event_price = " ".join(pmts)
-        event_price_number = re.findall('[0-9]+', event_price)
-
-        if len(event_price_number) == 0 or int(event_price_number[0]) <= 0:
-            raise incorrectParameter("The correct format is '/event_fee Integer' Where 'Integer' it's up to 0 number")
+        # Same parser /settle_dues uses, so what /ef accepts is what gets charged.
+        if not event_price.strip():
+            raise incorrectParameter("Usage: /event_fee <amount>, e.g. /ef 1200")
+        settings_svc.require_readable_fee(event_price)
 
         if has_active:
             # Active rollcall: update in-memory object + DB and refresh the panel

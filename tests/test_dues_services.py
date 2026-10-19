@@ -1307,6 +1307,7 @@ class TestCancelGameCredit(unittest.TestCase):
             get_dues_entries_for_rollcall=MagicMock(return_value=entries),
             # Targeted per-rollcall query (replaced the chat-wide limit=1000 scan)
             get_fund_transactions_for_rollcall=MagicMock(return_value=fund_txns or []),
+            rollcall_predates_dues_epoch=MagicMock(return_value=False),
             add_dues_entry=MagicMock(),
             add_fund_transaction=MagicMock(),
             log_admin_action=MagicMock(),

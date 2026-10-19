@@ -60,6 +60,7 @@ def _import_all():
         set_collector as dues_set_collector,
         mark_paid as dues_mark_paid,
         cancel_game_dues as dues_cancel_game,
+        cancel_game_dues_confirm_callback as dues_cancel_game_confirm,
         my_dues as dues_my_dues,
         dues as dues_cmd,
         fund as dues_fund,
@@ -208,6 +209,7 @@ class IntegrationBase(unittest.IsolatedAsyncioTestCase):
         cls.dues_set_collector = staticmethod(h["dues_set_collector"])
         cls.dues_mark_paid = staticmethod(h["dues_mark_paid"])
         cls.dues_cancel_game = staticmethod(h["dues_cancel_game"])
+        cls.dues_cancel_game_confirm = staticmethod(h["dues_cancel_game_confirm"])
         cls.dues_my_dues = staticmethod(h["dues_my_dues"])
         cls.dues_cmd = staticmethod(h["dues_cmd"])
         cls.dues_fund = staticmethod(h["dues_fund"])
@@ -255,6 +257,17 @@ class IntegrationBase(unittest.IsolatedAsyncioTestCase):
 
     def call(self, data, user=None, message_id=500):
         return make_call(data, user, message_id=message_id)
+
+    async def cancel_game_dues_confirmed(self, n_index=0, user=None):
+        """/cancel_game_dues [::N] then tap the card's confirm button — the
+        card carries the rollcall_id resolved when it was shown."""
+        from db import get_nth_game_closure
+        closure = get_nth_game_closure(CHAT_ID, n_index)
+        suffix = f" ::{n_index + 1}" if n_index else ""
+        await self.dues_cancel_game(self.msg(f"/cancel_game_dues{suffix}", user))
+        if closure is not None:
+            await self.dues_cancel_game_confirm(
+                self.call(f"cgd_go:{closure['rollcall_id']}", user))
 
     def sent_texts(self):
         """All text args sent via bot.send_message."""

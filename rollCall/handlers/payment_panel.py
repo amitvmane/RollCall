@@ -17,15 +17,21 @@ user_id from this panel's snapshot — so the same rare ambiguity the command
 form has (two active members sharing a first name) can still surface here.
 Not changed, per the decision to keep mark_paid's existing behavior as-is.
 
-Callback data prefixes:
-  pay_pick:{idx}     — select a player from the list
-  pay_full:{idx}     — mark their full balance as paid
-  pay_partial:{idx}  — prompt for a partial amount (reply)
-  pay_history:{idx}  — show their recent ledger entries
-  pay_back:{idx}     — history view -> back to player-action view
-  pay_tolist         — player-action view -> back to the list
+Callback data prefixes ({key} is the row's stable identity, see _row_key):
+  pay_pick:{idx}:{key}     — select a player from the list
+  pay_full:{idx}:{key}     — mark their full balance as paid
+  pay_partial:{idx}:{key}  — prompt for a partial amount (reply)
+  pay_history:{idx}:{key}  — show their recent ledger entries
+  pay_back:{idx}:{key}     — history view -> back to player-action view
+  pay_tolist               — player-action view -> back to the list
+
+The index alone is not trusted: every refresh re-sorts session.balances, so
+a button rendered before another admin's tap could point at a different
+member by the time it is pressed. The key pins the member the button was
+drawn for; the row is re-found by key (inside the write lock for payments).
 """
 import logging
+import zlib
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Tuple
@@ -57,6 +63,24 @@ _sessions: Dict[tuple, _PaymentSession] = {}
 
 # ── Panel builders ────────────────────────────────────────────────────────────
 
+def _row_key(row: dict) -> str:
+    """Short, stable identity for callback data (64-byte limit): u<uid> for a
+    real user, n<crc32> of the lower-cased name for a proxy."""
+    if row.get("user_id") is not None:
+        return f"u{row['user_id']}"
+    return "n%08x" % (zlib.crc32((row.get("member_name") or "").lower().encode()) & 0xFFFFFFFF)
+
+
+def _resolve_row(session: "_PaymentSession", idx: int, key: str):
+    """The row the button was rendered for, or None if it left the list."""
+    if 0 <= idx < len(session.balances) and _row_key(session.balances[idx]) == key:
+        return idx, session.balances[idx]
+    for i, row in enumerate(session.balances):
+        if _row_key(row) == key:
+            return i, row
+    return None
+
+
 def _fmt_balance_label(row: dict) -> str:
     return f"{row['member_name']} — ₹{row['balance']}"[:64]
 
@@ -64,7 +88,7 @@ def _fmt_balance_label(row: dict) -> str:
 def _list_view(session: "_PaymentSession") -> Tuple[str, InlineKeyboardMarkup]:
     kb = InlineKeyboardMarkup(row_width=1)
     for idx, row in enumerate(session.balances):
-        kb.add(InlineKeyboardButton(_fmt_balance_label(row), callback_data=f"pay_pick:{idx}"))
+        kb.add(InlineKeyboardButton(_fmt_balance_label(row), callback_data=f"pay_pick:{idx}:{_row_key(row)}"))
     if not session.balances:
         return "✅ No outstanding balances.", kb
     return "💰 *Outstanding balances* — tap a name to mark paid:", kb
@@ -72,14 +96,15 @@ def _list_view(session: "_PaymentSession") -> Tuple[str, InlineKeyboardMarkup]:
 
 def _player_action_view(session: "_PaymentSession", idx: int) -> Tuple[str, InlineKeyboardMarkup]:
     row = session.balances[idx]
+    key = _row_key(row)
     text = f"💰 *{_esc_md(row['member_name'])}* owes ₹{row['balance']}\nMark as paid:"
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
-        InlineKeyboardButton(f"✅ Full ₹{row['balance']}", callback_data=f"pay_full:{idx}"),
-        InlineKeyboardButton("✏️ Partial", callback_data=f"pay_partial:{idx}"),
+        InlineKeyboardButton(f"✅ Full ₹{row['balance']}", callback_data=f"pay_full:{idx}:{key}"),
+        InlineKeyboardButton("✏️ Partial", callback_data=f"pay_partial:{idx}:{key}"),
     )
     kb.row(
-        InlineKeyboardButton("📜 History", callback_data=f"pay_history:{idx}"),
+        InlineKeyboardButton("📜 History", callback_data=f"pay_history:{idx}:{key}"),
         InlineKeyboardButton("⬅ Back", callback_data="pay_tolist"),
     )
     return text, kb
@@ -102,7 +127,7 @@ def _history_view(session: "_PaymentSession", idx: int) -> Tuple[str, InlineKeyb
         memo = _esc_md(e.get("memo") or "")
         lines.append(f"  {sign}₹{e['amount']} {_esc_md(e['entry_type'])} {memo} [{ts}]")
     kb = InlineKeyboardMarkup(row_width=1)
-    kb.add(InlineKeyboardButton("⬅ Back", callback_data=f"pay_back:{idx}"))
+    kb.add(InlineKeyboardButton("⬅ Back", callback_data=f"pay_back:{idx}:{_row_key(row)}"))
     return "\n".join(lines), kb
 
 
@@ -160,14 +185,17 @@ async def payment_panel_callback(call):
             await bot.answer_callback_query(call.id)
             return
 
+        parts = data.split(":")
         try:
-            idx = int(data.split(":")[-1])
-        except ValueError:
-            await bot.answer_callback_query(call.id)
-            return
-        if idx < 0 or idx >= len(session.balances):
+            idx, key = int(parts[1]), parts[2]
+        except (IndexError, ValueError):
             await bot.answer_callback_query(call.id, "That entry is stale — go back to the list.")
             return
+        found = _resolve_row(session, idx, key)
+        if found is None:
+            await bot.answer_callback_query(call.id, "That entry is stale — go back to the list.")
+            return
+        idx, _ = found
 
         if data.startswith("pay_pick:"):
             text, kb = _player_action_view(session, idx)
@@ -176,11 +204,18 @@ async def payment_panel_callback(call):
             await bot.answer_callback_query(call.id)
 
         elif data.startswith("pay_full:"):
-            row = session.balances[idx]
             actor = call.from_user
             actor_name = actor.first_name or actor.username or "Admin"
-            known = row["user_id"] if row["user_id"] is not None else row["member_name"]
             async with manager.get_chat_write_lock(cid):
+                # Re-find the member INSIDE the lock — a refresh may have
+                # re-sorted the list since this button was drawn.
+                found = _resolve_row(session, idx, key)
+                if found is None:
+                    await bot.answer_callback_query(
+                        call.id, "That entry is stale — go back to the list.")
+                    return
+                row = found[1]
+                known = row["user_id"] if row["user_id"] is not None else row["member_name"]
                 result = dues_svc.mark_paid(
                     cid, row["member_name"], actor.id, actor_name,
                     amount=None, is_admin=True, known_identity=known,

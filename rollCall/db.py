@@ -4095,193 +4095,118 @@ def create_ghost_selections_table() -> None:
         logging.error(f"Error creating ghost_selections table: {e}")
 
 
-def update_streak_on_checkin(chat_id: int, user_id: int) -> None:
-    """Increment current_streak by 1 for a user at rollcall end; update best_streak if exceeded."""
+def get_streaks_for(chat_id: int, user_ids=(), proxy_names=()) -> Dict:
+    """{current_streak, best_streak} for one person, computed from game history.
+
+    A streak is consecutive COMPLETED games of this group that the person
+    PLAYED (same rule as attendance — see _completed_sql). Pass every identity
+    that is the same person (a member plus the guest names merged into them).
+
+    Computed, not counted. The old counters were bumped at /erc and only reset
+    by an OUT/MAYBE vote, so a member who simply skipped three games kept their
+    streak; a cancelled game extended it; and merged aliases kept separate
+    counts. History can't drift from what actually happened.
+
+    Games are ordered by when they ended (id breaks ties — a batch closed
+    together on one boot shares a timestamp).
+    """
+    user_ids = [u for u in user_ids if isinstance(u, int)]
+    proxy_names = [n for n in proxy_names if n]
+    empty = {'current_streak': 0, 'best_streak': 0}
+    if not user_ids and not proxy_names:
+        return empty
     try:
-        with _cursor(commit=True) as cursor:
+        with _cursor() as cursor:
             ph = '%s' if db_type == 'postgresql' else '?'
-            if db_type == 'postgresql':
-                cursor.execute(f"""
-                    INSERT INTO user_stats (chat_id, user_id, current_streak, best_streak)
-                    VALUES ({ph}, {ph}, 1, 1)
-                    ON CONFLICT (chat_id, user_id) DO UPDATE SET
-                        current_streak = user_stats.current_streak + 1,
-                        best_streak    = GREATEST(user_stats.best_streak, user_stats.current_streak + 1),
-                        updated_at     = CURRENT_TIMESTAMP
-                """, (chat_id, user_id))
-            else:
-                cursor.execute(f"""
-                    INSERT OR IGNORE INTO user_stats (chat_id, user_id) VALUES ({ph}, {ph})
-                """, (chat_id, user_id))
-                cursor.execute(f"""
-                    UPDATE user_stats
-                    SET current_streak = current_streak + 1,
-                        best_streak    = MAX(best_streak, current_streak + 1),
-                        updated_at     = CURRENT_TIMESTAMP
-                    WHERE chat_id = {ph} AND user_id = {ph}
-                """, (chat_id, user_id))
-    except Exception as e:
-        logging.error(f"Error updating streak on checkin: {e}")
-
-
-def reset_user_streak(chat_id: int, user_id: int) -> None:
-    """Reset current_streak to 0. Called when a user breaks a streak — either
-    by being ghost-marked, or by ending a session as OUT / MAYBE rather than IN."""
-    conn = get_connection()
-    cursor = None
-    try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        cursor.execute(f"""
-            UPDATE user_stats SET current_streak = 0, updated_at = CURRENT_TIMESTAMP
-            WHERE chat_id = {ph} AND user_id = {ph}
-        """, (chat_id, user_id))
-        conn.commit()
-    except Exception as e:
-        try:
-            conn.rollback()
-        except Exception:
-            pass
-        logging.error(f"Error resetting streak: {e}")
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
-
-
-def update_proxy_streak_on_checkin(chat_id: int, proxy_name: str) -> None:
-    """Increment current_streak by 1 for a proxy at rollcall end; update
-    best_streak if exceeded. Mirrors update_streak_on_checkin for real users
-    but keyed on proxy_name and stored in the parallel proxy_stats table."""
-    conn = get_connection()
-    cursor = None
-    try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        if db_type == 'postgresql':
-            cursor.execute(f"""
-                INSERT INTO proxy_stats (chat_id, proxy_name, current_streak, best_streak)
-                VALUES ({ph}, {ph}, 1, 1)
-                ON CONFLICT (chat_id, proxy_name) DO UPDATE SET
-                    current_streak = proxy_stats.current_streak + 1,
-                    best_streak    = GREATEST(proxy_stats.best_streak, proxy_stats.current_streak + 1),
-                    updated_at     = CURRENT_TIMESTAMP
-            """, (chat_id, proxy_name))
-        else:
-            cursor.execute(f"""
-                INSERT OR IGNORE INTO proxy_stats (chat_id, proxy_name) VALUES ({ph}, {ph})
-            """, (chat_id, proxy_name))
-            cursor.execute(f"""
-                UPDATE proxy_stats
-                SET current_streak = current_streak + 1,
-                    best_streak    = MAX(best_streak, current_streak + 1),
-                    updated_at     = CURRENT_TIMESTAMP
-                WHERE chat_id = {ph} AND proxy_name = {ph}
-            """, (chat_id, proxy_name))
-        conn.commit()
-    except Exception as e:
-        try:
-            conn.rollback()
-        except Exception:
-            pass
-        logging.error(f"Error updating proxy streak on checkin: {e}")
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
-
-
-def reset_proxy_streak(chat_id: int, proxy_name: str) -> None:
-    """Reset a proxy's current_streak to 0 — called when a proxy's final
-    status at /erc is OUT or MAYBE (mirrors reset_user_streak for real
-    users)."""
-    conn = get_connection()
-    cursor = None
-    try:
-        cursor = conn.cursor()
-        ph = '%s' if db_type == 'postgresql' else '?'
-        cursor.execute(f"""
-            UPDATE proxy_stats SET current_streak = 0, updated_at = CURRENT_TIMESTAMP
-            WHERE chat_id = {ph} AND proxy_name = {ph}
-        """, (chat_id, proxy_name))
-        conn.commit()
-    except Exception as e:
-        try:
-            conn.rollback()
-        except Exception:
-            pass
-        logging.error(f"Error resetting proxy streak: {e}")
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if db_type == 'postgresql':
-            release_connection(conn)
+            cursor.execute(
+                f"SELECT r.id FROM rollcalls r WHERE r.chat_id = {ph} AND {_completed_sql('r')} "
+                f"ORDER BY r.ended_at, r.id",
+                (chat_id,),
+            )
+            games = [(row[0] if not isinstance(row, dict) else row['id']) for row in cursor.fetchall()]
+            played: set = set()
+            if user_ids:
+                cursor.execute(
+                    f"SELECT r.id FROM users u JOIN rollcalls r ON r.id = u.rollcall_id "
+                    f"WHERE r.chat_id = {ph} AND {_completed_sql('r')} AND {_user_played_sql('u', 'r')} "
+                    f"AND u.user_id IN ({','.join([ph] * len(user_ids))})",
+                    (chat_id, *user_ids),
+                )
+                played.update((row[0] if not isinstance(row, dict) else row['id']) for row in cursor.fetchall())
+            if proxy_names:
+                cursor.execute(
+                    f"SELECT r.id FROM proxy_users p JOIN rollcalls r ON r.id = p.rollcall_id "
+                    f"WHERE r.chat_id = {ph} AND {_completed_sql('r')} AND {_proxy_played_sql('p', 'r')} "
+                    f"AND LOWER(p.name) IN ({','.join(['LOWER(' + ph + ')'] * len(proxy_names))})",
+                    (chat_id, *proxy_names),
+                )
+                played.update((row[0] if not isinstance(row, dict) else row['id']) for row in cursor.fetchall())
+        run = best = 0
+        for gid in games:
+            run = run + 1 if gid in played else 0
+            best = max(best, run)
+        return {'current_streak': run, 'best_streak': best}
+    except Exception:
+        logging.exception("get_streaks_for failed chat=%s", chat_id)
+        return empty
 
 
 def get_user_streaks(chat_id: int, user_id: int) -> Dict:
-    """Return {current_streak, best_streak} for a real user, 0s if no stats row."""
-    try:
-        with _cursor() as cursor:
-            ph = '%s' if db_type == 'postgresql' else '?'
-            cursor.execute(f"""
-                SELECT current_streak, best_streak
-                FROM user_stats WHERE chat_id = {ph} AND user_id = {ph}
-            """, (chat_id, user_id))
-            row = cursor.fetchone()
-            if row is None:
-                return {'current_streak': 0, 'best_streak': 0}
-            if isinstance(row, dict):
-                return {
-                    'current_streak': int(row.get('current_streak') or 0),
-                    'best_streak':    int(row.get('best_streak') or 0),
-                }
-            return {'current_streak': int(row[0] or 0), 'best_streak': int(row[1] or 0)}
-    except Exception as e:
-        logging.error(f"Error fetching user streaks: {e}")
-        return {'current_streak': 0, 'best_streak': 0}
+    """Streaks for a real user, including games played under guest names
+    merged into them (they are this member's games)."""
+    return get_streaks_for(chat_id, [user_id], _merged_alias_names(chat_id, user_id))
 
 
 def get_proxy_streaks(chat_id: int, proxy_name: str) -> Dict:
-    """Return {current_streak, best_streak} for a proxy. Both default to 0
-    if the proxy has no proxy_stats row yet (i.e. hasn't been through an
-    /erc since proxy_stats was introduced)."""
-    try:
-        with _cursor() as cursor:
-            ph = '%s' if db_type == 'postgresql' else '?'
-            cursor.execute(f"""
-                SELECT current_streak, best_streak
-                FROM proxy_stats WHERE chat_id = {ph} AND proxy_name = {ph}
-            """, (chat_id, proxy_name))
-            row = cursor.fetchone()
-            if row is None:
-                return {'current_streak': 0, 'best_streak': 0}
-            if isinstance(row, dict):
-                return {
-                    'current_streak': int(row.get('current_streak') or 0),
-                    'best_streak':    int(row.get('best_streak') or 0),
-                }
-            return {'current_streak': int(row[0] or 0), 'best_streak': int(row[1] or 0)}
-    except Exception as e:
-        logging.error(f"Error fetching proxy streaks: {e}")
-        return {'current_streak': 0, 'best_streak': 0}
+    """Streaks for a guest/proxy name on its own. A name merged into someone
+    is part of THEIR streak — use services.identity for the folded view."""
+    return get_streaks_for(chat_id, [], [proxy_name])
+
+
+# ── What counts as a game played ──────────────────────────────────────────────
+# ONE definition, used by every attendance number the bot shows (/stats,
+# leaderboard, milestones, streaks, portal, wrap-up). These used to disagree:
+# some excluded cancelled games and some didn't, none excluded no-shows, and
+# milestones ignored merged aliases — so "game #10" was announced at a
+# member's real 9th game, or after a game they never turned up to.
+#
+#   a COMPLETED game  = ended, and not cancelled (/xrc games never happened)
+#   a member PLAYED it = final status IN, and not marked a no-show (ghost)
+#
+# ghost_events is the per-game no-show record; it is only ever written by
+# services.ghost.apply_marking and never deleted (forgiving / /clear_absent
+# reset the penalty COUNT, they don't say the person turned up).
+
+def _completed_sql(r: str = "r") -> str:
+    f = 'FALSE' if db_type == 'postgresql' else '0'
+    return f"{r}.is_active = {f} AND COALESCE({r}.is_cancelled, {f}) = {f}"
+
+
+def _user_played_sql(u: str = "u", r: str = "r") -> str:
+    return (f"{u}.status = 'in' AND NOT EXISTS (SELECT 1 FROM ghost_events ge "
+            f"WHERE ge.rollcall_id = {r}.id AND ge.user_id = {u}.user_id)")
+
+
+def _proxy_played_sql(p: str = "p", r: str = "r") -> str:
+    return (f"{p}.status = 'in' AND NOT EXISTS (SELECT 1 FROM ghost_events ge "
+            f"WHERE ge.rollcall_id = {r}.id AND ge.user_id IS NULL "
+            f"AND LOWER(ge.proxy_name) = LOWER({p}.name))")
 
 
 def get_chat_ended_rollcall_count(chat_id: int) -> int:
-    """Return the total number of ENDED rollcalls in this chat.
+    """Return the number of COMPLETED games in this chat (ended, not cancelled).
 
     Used as the denominator for Voting% and Attendance% in /stats — both
-    rates measure each user against ALL ended sessions, not just sessions
+    rates measure each user against ALL completed games, not just sessions
     they participated in. That's the only way "voting %" means engagement
     rather than "100% trivially because they voted at least once."
+    A cancelled game never happened, so it is in neither side of the ratio.
     """
     try:
         with _cursor() as cursor:
             ph = '%s' if db_type == 'postgresql' else '?'
-            active_false = 'FALSE' if db_type == 'postgresql' else '0'
             cursor.execute(
-                f"SELECT COUNT(*) FROM rollcalls WHERE chat_id = {ph} AND is_active = {active_false}",
+                f"SELECT COUNT(*) FROM rollcalls r WHERE r.chat_id = {ph} AND {_completed_sql('r')}",
                 (chat_id,),
             )
             row = cursor.fetchone()
@@ -4296,50 +4221,27 @@ def get_chat_ended_rollcall_count(chat_id: int) -> int:
 
 
 def get_chat_session_count(chat_id: int) -> int:
-    """Return the number of ended, non-cancelled rollcalls in this chat.
-
-    Same is_cancelled-excluding filter as the total_sessions subquery in
-    get_user_voted_chats — used for member-only rows in /portal/groups
-    (get_member_chats) that have no user_stats row to compute it inline
-    from, so the "N sessions" figure stays consistent across both sources.
-    """
-    try:
-        with _cursor() as cursor:
-            ph = '%s' if db_type == 'postgresql' else '?'
-            active_false = 'FALSE' if db_type == 'postgresql' else '0'
-            cancel_false = 'FALSE' if db_type == 'postgresql' else '0'
-            cursor.execute(
-                f"""SELECT COUNT(*) FROM rollcalls
-                    WHERE chat_id = {ph} AND is_active = {active_false}
-                    AND COALESCE(is_cancelled, {cancel_false}) = {cancel_false}""",
-                (chat_id,),
-            )
-            row = cursor.fetchone()
-            if row is None:
-                return 0
-            if isinstance(row, dict):
-                return int(next(iter(row.values())) or 0)
-            return int(row[0] or 0)
-    except Exception as e:
-        logging.error(f"Error in get_chat_session_count: {e}")
-        return 0
+    """Completed games in this chat — the portal's name for
+    get_chat_ended_rollcall_count. Kept as an alias so both screens are
+    guaranteed to use the same count."""
+    return get_chat_ended_rollcall_count(chat_id)
 
 
 def get_user_attendance_count(chat_id: int, user_id: int) -> int:
-    """Return the number of ENDED rollcalls in this chat where the user's
-    final status was IN. This is the authoritative attendance number —
-    user_stats.total_in counts every IN VOTE (which inflates if a user flips
-    IN→OUT→IN within one session), so it must not be used for attendance %.
+    """Return the number of games this user PLAYED in this chat (see
+    _completed_sql / _user_played_sql). This is the authoritative attendance
+    number — user_stats.total_in counts every IN VOTE (which inflates if a
+    user flips IN→OUT→IN within one session), so it must not be used for
+    attendance %. Does not fold merged aliases; services.identity does.
     """
     try:
         with _cursor() as cursor:
             ph = '%s' if db_type == 'postgresql' else '?'
-            active_false = 'FALSE' if db_type == 'postgresql' else '0'
             cursor.execute(f"""
                 SELECT COUNT(*) FROM users u
                 JOIN rollcalls r ON u.rollcall_id = r.id
                 WHERE r.chat_id = {ph} AND u.user_id = {ph}
-                  AND u.status = 'in' AND r.is_active = {active_false}
+                  AND {_completed_sql('r')} AND {_user_played_sql('u', 'r')}
             """, (chat_id, user_id))
             row = cursor.fetchone()
             if row is None:
@@ -4382,7 +4284,7 @@ def get_leaderboard_by_attendance(chat_id: int, limit: int = 10) -> List[Dict]:
                     SELECT u.user_id, COUNT(*) AS attended
                     FROM users u
                     JOIN rollcalls r ON u.rollcall_id = r.id
-                    WHERE r.chat_id = {ph} AND u.status = 'in' AND r.is_active = {active_false}
+                    WHERE r.chat_id = {ph} AND {_completed_sql('r')} AND {_user_played_sql('u', 'r')}
                     GROUP BY u.user_id
                 ) att ON att.user_id = us.user_id
                 WHERE us.chat_id = {ph}
@@ -4396,14 +4298,14 @@ def get_leaderboard_by_attendance(chat_id: int, limit: int = 10) -> List[Dict]:
             # counts at most once per rollcall.
             cursor.execute(f"""
                 SELECT pu.name,
-                       SUM(CASE WHEN pu.status = 'in'    THEN 1 ELSE 0 END) AS attended,
+                       SUM(CASE WHEN {_proxy_played_sql('pu', 'r')} THEN 1 ELSE 0 END) AS attended,
                        COUNT(*) AS total_rc,
                        SUM(CASE WHEN pu.status = 'in'    THEN 1 ELSE 0 END) AS total_in,
                        SUM(CASE WHEN pu.status = 'out'   THEN 1 ELSE 0 END) AS total_out,
                        SUM(CASE WHEN pu.status = 'maybe' THEN 1 ELSE 0 END) AS total_maybe
                 FROM proxy_users pu
                 JOIN rollcalls r ON pu.rollcall_id = r.id
-                WHERE r.chat_id = {ph} AND r.is_active = {active_false}
+                WHERE r.chat_id = {ph} AND {_completed_sql('r')}
                 GROUP BY pu.name
             """, (chat_id,))
             proxy_rows = cursor.fetchall()
@@ -4528,12 +4430,11 @@ def get_proxy_attendance_count(chat_id: int, proxy_name: str) -> int:
     try:
         with _cursor() as cursor:
             ph = '%s' if db_type == 'postgresql' else '?'
-            active_false = 'FALSE' if db_type == 'postgresql' else '0'
             cursor.execute(f"""
                 SELECT COUNT(*) FROM proxy_users pu
                 JOIN rollcalls r ON pu.rollcall_id = r.id
                 WHERE r.chat_id = {ph} AND pu.name = {ph}
-                  AND pu.status = 'in' AND r.is_active = {active_false}
+                  AND {_completed_sql('r')} AND {_proxy_played_sql('pu', 'r')}
             """, (chat_id, proxy_name))
             row = cursor.fetchone()
             if row is None:
@@ -4560,10 +4461,11 @@ def get_proxy_stats(chat_id: int, proxy_name: str) -> Dict:
                 SELECT COUNT(*) AS total_rc,
                        SUM(CASE WHEN pu.status = 'in'    THEN 1 ELSE 0 END) AS total_in,
                        SUM(CASE WHEN pu.status = 'out'   THEN 1 ELSE 0 END) AS total_out,
-                       SUM(CASE WHEN pu.status = 'maybe' THEN 1 ELSE 0 END) AS total_maybe
+                       SUM(CASE WHEN pu.status = 'maybe' THEN 1 ELSE 0 END) AS total_maybe,
+                       SUM(CASE WHEN {_proxy_played_sql('pu', 'r')} THEN 1 ELSE 0 END) AS attended
                 FROM proxy_users pu
                 JOIN rollcalls r ON pu.rollcall_id = r.id
-                WHERE r.chat_id = {ph} AND pu.name = {ph} AND r.is_active = {active_false}
+                WHERE r.chat_id = {ph} AND pu.name = {ph} AND {_completed_sql('r')}
             """, (chat_id, proxy_name))
             row = cursor.fetchone()
             if row is None:
@@ -4571,14 +4473,14 @@ def get_proxy_stats(chat_id: int, proxy_name: str) -> Dict:
             if isinstance(row, dict):
                 return {
                     'total_rollcalls': int(row.get('total_rc') or 0),
-                    'attended':        int(row.get('total_in') or 0),
+                    'attended':        int(row.get('attended') or 0),
                     'total_in':        int(row.get('total_in') or 0),
                     'total_out':       int(row.get('total_out') or 0),
                     'total_maybe':     int(row.get('total_maybe') or 0),
                 }
             return {
                 'total_rollcalls': int(row[0] or 0),
-                'attended':        int(row[1] or 0),
+                'attended':        int(row[4] or 0),
                 'total_in':        int(row[1] or 0),
                 'total_out':       int(row[2] or 0),
                 'total_maybe':     int(row[3] or 0),
@@ -4611,7 +4513,7 @@ def get_group_attendance_totals(chat_id: int) -> Dict:
         active_false = 'FALSE' if db_type == 'postgresql' else '0'
 
         cursor.execute(
-            f"SELECT COUNT(*) FROM rollcalls WHERE chat_id = {ph} AND is_active = {active_false}",
+            f"SELECT COUNT(*) FROM rollcalls r WHERE r.chat_id = {ph} AND {_completed_sql('r')}",
             (chat_id,),
         )
         row = cursor.fetchone()
@@ -4621,7 +4523,7 @@ def get_group_attendance_totals(chat_id: int) -> Dict:
             SELECT COUNT(*), COUNT(DISTINCT u.user_id)
             FROM users u
             JOIN rollcalls r ON u.rollcall_id = r.id
-            WHERE r.chat_id = {ph} AND u.status = 'in' AND r.is_active = {active_false}
+            WHERE r.chat_id = {ph} AND {_completed_sql('r')} AND {_user_played_sql('u', 'r')}
         """, (chat_id,))
         row = cursor.fetchone()
         if row is not None:
@@ -4637,7 +4539,7 @@ def get_group_attendance_totals(chat_id: int) -> Dict:
             SELECT COUNT(*), COUNT(DISTINCT pu.name)
             FROM proxy_users pu
             JOIN rollcalls r ON pu.rollcall_id = r.id
-            WHERE r.chat_id = {ph} AND pu.status = 'in' AND r.is_active = {active_false}
+            WHERE r.chat_id = {ph} AND {_completed_sql('r')} AND {_proxy_played_sql('pu', 'r')}
         """, (chat_id,))
         row = cursor.fetchone()
         if row is not None:
@@ -4673,7 +4575,7 @@ def get_group_attendance_totals(chat_id: int) -> Dict:
                    SUM(CASE WHEN pu.status = 'maybe' THEN 1 ELSE 0 END)
             FROM proxy_users pu
             JOIN rollcalls r ON pu.rollcall_id = r.id
-            WHERE r.chat_id = {ph} AND r.is_active = {active_false}
+            WHERE r.chat_id = {ph} AND {_completed_sql('r')}
         """, (chat_id,))
         row = cursor.fetchone()
         if row is not None:
@@ -4709,14 +4611,14 @@ def get_bot_attendance_totals() -> Dict:
         cursor = conn.cursor()
         active_false = 'FALSE' if db_type == 'postgresql' else '0'
 
-        cursor.execute(f"SELECT COUNT(*) FROM rollcalls WHERE is_active = {active_false}")
+        cursor.execute(f"SELECT COUNT(*) FROM rollcalls r WHERE {_completed_sql('r')}")
         row = cursor.fetchone()
         out['ended_rollcalls'] = int((row[0] if not isinstance(row, dict) else next(iter(row.values()))) or 0)
 
         cursor.execute(f"""
             SELECT COUNT(*), COUNT(DISTINCT u.user_id)
             FROM users u JOIN rollcalls r ON u.rollcall_id = r.id
-            WHERE u.status = 'in' AND r.is_active = {active_false}
+            WHERE {_completed_sql('r')} AND {_user_played_sql('u', 'r')}
         """)
         row = cursor.fetchone()
         if row is not None:
@@ -4731,7 +4633,7 @@ def get_bot_attendance_totals() -> Dict:
         cursor.execute(f"""
             SELECT COUNT(*), COUNT(DISTINCT pu.name)
             FROM proxy_users pu JOIN rollcalls r ON pu.rollcall_id = r.id
-            WHERE pu.status = 'in' AND r.is_active = {active_false}
+            WHERE {_completed_sql('r')} AND {_proxy_played_sql('pu', 'r')}
         """)
         row = cursor.fetchone()
         if row is not None:
@@ -4893,21 +4795,17 @@ def _merged_alias_names(chat_id: int, user_id: int) -> List[str]:
 
 
 def _proxy_attendance_count(chat_id: int, names: List[str]) -> int:
-    """Ended, non-cancelled sessions these proxy names were IN for."""
+    """Games these proxy names PLAYED (see _completed_sql / _proxy_played_sql)."""
     if not names:
         return 0
     try:
         with _cursor() as cursor:
             ph = '%s' if db_type == 'postgresql' else '?'
-            active_false = 'FALSE' if db_type == 'postgresql' else '0'
-            cancel_false = 'FALSE' if db_type == 'postgresql' else '0'
             lowered = ",".join([f"LOWER({ph})"] * len(names))
             cursor.execute(f"""
                 SELECT COUNT(*) FROM proxy_users p
                 JOIN rollcalls r ON r.id = p.rollcall_id
-                WHERE r.chat_id = {ph} AND p.status = 'in'
-                  AND r.is_active = {active_false}
-                  AND COALESCE(r.is_cancelled, {cancel_false}) = {cancel_false}
+                WHERE r.chat_id = {ph} AND {_completed_sql('r')} AND {_proxy_played_sql('p', 'r')}
                   AND LOWER(p.name) IN ({lowered})
             """, (chat_id, *names))
             row = cursor.fetchone()
@@ -4935,27 +4833,35 @@ def get_user_session_history(chat_id: int, user_id: int, limit: int = 15) -> Lis
             # The real-user row wins where both exist: a member who voted
             # themselves AND had a guest entry in the same session is one
             # person, and their own vote is the authoritative one.
+            # IN but marked a no-show reads 'ghost' — that game isn't counted
+            # as played (see _user_played_sql), so showing it as IN here
+            # would contradict the attendance number on the same page.
+            user_ghost = (f"(u.user_id IS NOT NULL AND u.status = 'in' AND NOT ({_user_played_sql('u', 'r')}))")
             if aliases:
                 proxy_join = (f"LEFT JOIN proxy_users p ON p.rollcall_id = r.id "
                               f"AND LOWER(p.name) IN ({','.join(['LOWER(' + ph + ')'] * len(aliases))})")
                 status_expr = "COALESCE(u.status, p.status, 'miss')"
+                ghost_expr = (f"{user_ghost} OR (u.user_id IS NULL AND p.name IS NOT NULL "
+                              f"AND p.status = 'in' AND NOT ({_proxy_played_sql('p', 'r')}))")
                 params = (user_id, *aliases, chat_id, limit)
             else:
                 proxy_join = ""
                 status_expr = "COALESCE(u.status, 'miss')"
+                ghost_expr = user_ghost
                 params = (user_id, chat_id, limit)
 
             cursor.execute(f"""
                 SELECT r.id, r.title, r.ended_at, r.finalize_date, r.created_at,
                        CASE WHEN COALESCE(r.is_cancelled, {cancel_false}) != {cancel_false}
                             THEN 'cancelled'
+                            WHEN {ghost_expr} THEN 'ghost'
                             ELSE {status_expr}
                        END AS status
                 FROM rollcalls r
                 LEFT JOIN users u ON u.rollcall_id = r.id AND u.user_id = {ph}
                 {proxy_join}
                 WHERE r.chat_id = {ph} AND r.is_active = {active_false}
-                ORDER BY r.ended_at DESC
+                ORDER BY r.ended_at DESC, r.id DESC
                 LIMIT {ph}
             """, params)
             return [dict(row) for row in cursor.fetchall()]
@@ -4988,8 +4894,7 @@ def get_user_voted_chats(tg_user_id: int) -> List[Dict]:
                     (SELECT COUNT(*) FROM users u2
                      JOIN rollcalls r2 ON u2.rollcall_id = r2.id
                      WHERE r2.chat_id = us.chat_id AND u2.user_id = us.user_id
-                       AND u2.status = 'in' AND r2.is_active = {active_false}
-                       AND COALESCE(r2.is_cancelled, {cancel_false}) = {cancel_false}
+                       AND {_completed_sql('r2')} AND {_user_played_sql('u2', 'r2')}
                     ) AS sessions_attended,
                     (SELECT COUNT(*) FROM rollcalls r3
                      WHERE r3.chat_id = us.chat_id AND r3.is_active = {active_false}
@@ -5013,6 +4918,9 @@ def get_user_voted_chats(tg_user_id: int) -> List[Dict]:
         # per-chat and the query above spans every chat at once.
         for row in rows:
             aliases = _merged_alias_names(row["chat_id"], tg_user_id)
+            # Streaks from history, not the old user_stats counters — same
+            # numbers /stats shows (see get_streaks_for).
+            row.update(get_streaks_for(row["chat_id"], [tg_user_id], aliases))
             if not aliases:
                 continue
             row["sessions_attended"] = int(row.get("sessions_attended") or 0) + \
@@ -7127,9 +7035,9 @@ def get_rollcalls_between(chat_id: int, start_utc: str, end_utc: str) -> List[Di
             ph = "%s" if db_type == "postgresql" else "?"
             active_false = "FALSE" if db_type == "postgresql" else "0"
             cursor.execute(
-                f"""SELECT r.id, r.title, r.ended_at,
-                    (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'in') +
-                    (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND p.status = 'in') AS in_count
+                f"""SELECT r.id, r.title, r.ended_at, r.finalize_date, r.created_at,
+                    (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND {_user_played_sql('u', 'r')}) +
+                    (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND {_proxy_played_sql('p', 'r')}) AS in_count
                     FROM rollcalls r
                     WHERE r.chat_id = {ph}
                       AND r.is_active = {active_false}
@@ -7183,7 +7091,7 @@ def get_attendance_between(chat_id: int, start_utc: str, end_utc: str) -> List[D
             cursor.execute(
                 f"""SELECT u.user_id AS uid, COUNT(*) AS cnt
                     FROM users u JOIN rollcalls r ON r.id = u.rollcall_id
-                    WHERE {window} AND u.status = 'in'
+                    WHERE {window} AND {_user_played_sql('u', 'r')}
                     GROUP BY u.user_id""",
                 (chat_id, start_utc, end_utc),
             )
@@ -7193,7 +7101,7 @@ def get_attendance_between(chat_id: int, start_utc: str, end_utc: str) -> List[D
             cursor.execute(
                 f"""SELECT p.name AS pname, COUNT(*) AS cnt
                     FROM proxy_users p JOIN rollcalls r ON r.id = p.rollcall_id
-                    WHERE {window} AND p.status = 'in' AND p.name IS NOT NULL
+                    WHERE {window} AND {_proxy_played_sql('p', 'r')} AND p.name IS NOT NULL
                     GROUP BY p.name""",
                 (chat_id, start_utc, end_utc),
             )

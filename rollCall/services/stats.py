@@ -71,58 +71,36 @@ def _pct(num: int, denom: int) -> Optional[float]:
     return round(num / denom * 100, 1) if denom > 0 else None
 
 
+_PERSON_KEYS = (
+    "total_rollcalls_in_chat", "sessions_attended", "attendance_rate",
+    "total_in_votes", "total_out_votes", "total_maybe_votes",
+    "total_sessions_voted", "voting_rate", "total_waiting_to_in",
+    "best_streak", "current_streak", "ghost_count", "absent_limit",
+)
+
+
 def personal_stats(chat_id: int, user_id: int) -> dict:
-    """Return attendance + vote stats for one real user in a chat."""
-    total_rollcalls = get_chat_ended_rollcall_count(chat_id)
-    attended = get_user_attendance_count(chat_id, user_id)
-    row = get_user_stats_row(chat_id, user_id) or {}
-    ghost_count = get_ghost_count(chat_id, user_id)
-    absent_limit = manager.get_absent_limit(chat_id)
-    return {
-        "user_id": user_id,
-        "total_rollcalls_in_chat": total_rollcalls,
-        "sessions_attended": attended,
-        "attendance_rate": _pct(attended, total_rollcalls),
-        "total_in_votes": int(row.get("total_in") or 0),
-        "total_out_votes": int(row.get("total_out") or 0),
-        "total_maybe_votes": int(row.get("total_maybe") or 0),
-        "total_sessions_voted": int(row.get("total_rollcalls") or 0),
-        "voting_rate": _pct(int(row.get("total_rollcalls") or 0), total_rollcalls),
-        "total_waiting_to_in": int(row.get("total_waiting_to_in") or 0),
-        "best_streak": int(row.get("best_streak") or 0),
-        "current_streak": int(row.get("current_streak") or 0),
-        "ghost_count": ghost_count,
-        "absent_limit": absent_limit,
-    }
+    """Return attendance + vote stats for one real user in a chat.
+
+    The whole person — guest names merged into them included — via
+    services.identity.identity_stats, the same numbers the leaderboard,
+    portal and milestones use. This used to read the user_id rows alone, so
+    /stats showed a member fewer games than the leaderboard right beside it.
+    """
+    from services.identity import identity_stats
+    data = identity_stats(chat_id, user_id=user_id)
+    return {"user_id": user_id, **{k: data[k] for k in _PERSON_KEYS}}
 
 
 def proxy_stats(chat_id: int, proxy_name: str) -> dict:
-    """Return attendance stats for a named proxy user."""
+    """Return attendance stats for a named proxy user (folded with whoever
+    it is merged into, if anyone — it is the same person)."""
     from exceptions import incorrectParameter
-    hit = find_proxy_in_chat(chat_id, proxy_name)
-    if not hit:
+    from services.identity import identity_stats
+    if not find_proxy_in_chat(chat_id, proxy_name):
         raise incorrectParameter(f"Proxy '{proxy_name}' not found in ended rollcalls.")
-    attended = get_proxy_attendance_count(chat_id, proxy_name)
-    total_rollcalls = get_chat_ended_rollcall_count(chat_id)
-    ps = get_proxy_stats(chat_id, proxy_name) or {}
-    streaks = get_proxy_streaks(chat_id, proxy_name) or {}
-    ghost = get_ghost_count_by_proxy_name(chat_id, proxy_name)
-    absent_limit = manager.get_absent_limit(chat_id)
-    return {
-        "proxy_name": proxy_name,
-        "total_rollcalls_in_chat": total_rollcalls,
-        "total_sessions_voted": int(ps.get("total_rollcalls") or 0),
-        "sessions_attended": attended,
-        "attendance_rate": _pct(attended, total_rollcalls),
-        "voting_rate": _pct(int(ps.get("total_rollcalls") or 0), total_rollcalls),
-        "total_in_votes": int(ps.get("total_in") or 0),
-        "total_out_votes": int(ps.get("total_out") or 0),
-        "total_maybe_votes": int(ps.get("total_maybe") or 0),
-        "best_streak": int(streaks.get("best_streak") or 0),
-        "current_streak": int(streaks.get("current_streak") or 0),
-        "ghost_count": ghost,
-        "absent_limit": absent_limit,
-    }
+    data = identity_stats(chat_id, proxy_name=proxy_name)
+    return {"proxy_name": proxy_name, **{k: data[k] for k in _PERSON_KEYS}}
 
 
 def group_stats(chat_id: int) -> dict:
@@ -153,7 +131,9 @@ def group_stats(chat_id: int) -> dict:
         "waitlist_promotions": int(totals.get("waitlist_promotions") or 0),
         "top_attendees": [
             {
-                "name": row.get("first_name") or row.get("proxy_name"),
+                # Leaderboard rows carry display_name; there is no first_name
+                # key, so real members used to come out nameless here.
+                "name": row.get("display_name") or row.get("proxy_name"),
                 "sessions": int(row.get("attended") or 0),
                 "attendance_rate": _pct(int(row.get("attended") or 0), total_rollcalls),
             }
@@ -233,7 +213,7 @@ def export_stats_csv(chat_id: int) -> str:
         else:
             name = entry["display_name"]
             ghost = get_ghost_count_by_proxy_name(chat_id, name)
-            streaks = get_proxy_streaks(chat_id, name) or {}
+            streaks = _folded_proxy_streaks(chat_id, name)
         rows.append({
             "rank": entry["rank"],
             "name": entry["display_name"],
@@ -311,8 +291,10 @@ def period_summary(chat_id: int, days: int = 7) -> dict:
     return {
         "days": days,
         "sessions": [
+            # When the game was played, not when the bot closed it (which
+            # lags by days after an outage) — same rule as /history.
             {"title": s.get("title"), "in_count": int(s.get("in_count") or 0),
-             "ended_at": str(s.get("ended_at") or "")}
+             "ended_at": session_display_date(s)}
             for s in sessions
         ],
         "session_count": n,
@@ -328,13 +310,23 @@ def period_summary(chat_id: int, days: int = 7) -> dict:
 _BADGE_GAMES_TIERS = (200, 100, 50, 25, 10)
 
 
+def _folded_proxy_streaks(chat_id: int, proxy_name: str) -> dict:
+    """Streaks for a canonical guest name plus any names merged into it —
+    leaderboard rows are already folded, so their streak must be too."""
+    from services.identity import get_alias_group
+    from db import get_streaks_for
+    group = get_alias_group(chat_id, proxy_name=proxy_name)
+    if group["kind"] == "user":
+        return get_user_streaks(chat_id, group["user_id"])
+    return get_streaks_for(chat_id, [], [group["proxy_name"], *group["aliases"]])
+
+
 def _entry_badges(chat_id: int, entry: dict) -> list:
     """Badge chips for a leaderboard entry — streak fire + highest games tier."""
-    from db import get_user_streaks, get_proxy_streaks
     badges = []
     try:
         if entry.get("kind") == "proxy" or entry.get("user_id") is None:
-            streak = get_proxy_streaks(chat_id, entry.get("display_name") or "").get("current_streak", 0)
+            streak = _folded_proxy_streaks(chat_id, entry.get("display_name") or "").get("current_streak", 0)
         else:
             streak = get_user_streaks(chat_id, entry["user_id"]).get("current_streak", 0)
         if streak >= 5:
@@ -366,7 +358,7 @@ def weekday_attendance(chat_id: int, days: int = 90) -> list:
     )
     by_day: dict = {}
     for s in sessions:
-        raw = str(s.get("ended_at") or "")[:10]
+        raw = session_display_date(s)[:10]
         try:
             day = datetime.strptime(raw, "%Y-%m-%d").strftime("%A")
         except ValueError:

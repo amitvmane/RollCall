@@ -165,6 +165,9 @@
 .status-out{background:var(--danger-bg);color:var(--danger-fg);}
 .status-maybe{background:var(--warn-bg);color:var(--warn-fg);}
 .status-miss{background:var(--hover);color:var(--sub);}
+/* IN but marked a no-show — not counted as a game played */
+.dot-ghost{background:var(--out);opacity:.45;}
+.status-ghost{background:var(--hover);color:var(--out);}
 .status-cancelled{background:var(--hover);color:var(--sub);font-style:italic;}
 .session-cancelled{opacity:.7;}
 .dark .status-cancelled{background:var(--border);color:var(--sub);}

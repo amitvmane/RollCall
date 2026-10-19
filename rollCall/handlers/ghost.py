@@ -25,7 +25,7 @@ from db import (
     mark_rollcall_absent_done, get_unprocessed_rollcalls,
     add_ghost_event, get_rollcall_in_users, get_rollcall_out_users,
     save_ghost_selections, load_ghost_selections,
-    reset_user_streak, log_admin_action, upsert_chat_member,
+    log_admin_action, upsert_chat_member,
     increment_user_stat, increment_rollcall_stat,
 )
 from services import admin as admin_svc

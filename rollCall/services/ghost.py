@@ -30,7 +30,6 @@ from db import (
     log_admin_action,
     mark_rollcall_absent_done,
     reset_ghost_count,
-    reset_user_streak,
     update_chat_settings,
 )
 
@@ -202,8 +201,9 @@ def apply_marking(chat_id: int, rollcall_id: int, selected: set, candidate_rows:
                 continue
             name = u.get("first_name") or u.get("username") or str(item)
             increment_ghost_count(chat_id, item, name)
+            # The ghost event is what removes this game from their games
+            # played and breaks their streak (both computed from history).
             add_ghost_event(rollcall_id, chat_id, item, name)
-            reset_user_streak(chat_id, item)
             lines.append(f"👻 {name} — ghosted {get_ghost_count(chat_id, item)} session(s) total")
         else:
             proxy_name = str(item)

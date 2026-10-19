@@ -356,11 +356,7 @@ class TestRollcallsService(unittest.IsolatedAsyncioTestCase):
         with patch("services.rollcalls.manager", mgr), \
              patch("rollcall_manager.manager", mgr), \
              patch("services.rollcalls.log_admin_action"), \
-             patch("services.rollcalls.update_streak_on_checkin"), \
-             patch("services.rollcalls.reset_user_streak"), \
-             patch("services.rollcalls.increment_user_stat"), \
-             patch("services.rollcalls.update_proxy_streak_on_checkin"), \
-             patch("services.rollcalls.reset_proxy_streak"):
+             patch("services.rollcalls.increment_user_stat"):
             from services.rollcalls import end_rollcall
             result = await end_rollcall(100, 0, 9, "Admin")
 
@@ -428,12 +424,10 @@ class TestRollcallsService(unittest.IsolatedAsyncioTestCase):
              patch("rollcall_manager.manager", mgr), \
              patch("services.rollcalls.log_admin_action"), \
              patch("services.rollcalls._db_update_rollcall"), \
-             patch("services.rollcalls.update_streak_on_checkin") as mock_streak, \
              patch("services.rollcalls.increment_user_stat") as mock_stat:
             from services.rollcalls import cancel_rollcall
             await cancel_rollcall(100, 0, 9, "Admin")
 
-        mock_streak.assert_not_called()
         mock_stat.assert_not_called()
 
     async def test_cancel_rollcall_with_reason(self):
@@ -1871,26 +1865,22 @@ class TestUpsertTemplateValidatesEventTime(unittest.TestCase):
 class TestStatsService(unittest.TestCase):
 
     def test_personal_stats_returns_dict(self):
-        cursor = MagicMock()
-        row_data = {
-            "total_in": 7, "total_out": 2, "total_maybe": 1,
-            "total_rollcalls": 10, "total_waiting_to_in": 0,
-            "best_streak": 5, "current_streak": 3,
+        """personal_stats is the folded per-person view (identity_stats)."""
+        folded = {
+            "total_rollcalls_in_chat": 10, "sessions_attended": 7, "attendance_rate": 70.0,
+            "total_in_votes": 7, "total_out_votes": 2, "total_maybe_votes": 1,
+            "total_sessions_voted": 10, "voting_rate": 100.0, "total_waiting_to_in": 0,
+            "best_streak": 5, "current_streak": 3, "ghost_count": 1, "absent_limit": 2,
+            "kind": "user", "aliases": [],
         }
-        cursor.fetchone.return_value = row_data
-        conn = MagicMock()
-        conn.cursor.return_value = cursor
-        with patch("services.stats.get_chat_ended_rollcall_count", return_value=10), \
-             patch("services.stats.get_user_attendance_count", return_value=7), \
-             patch("services.stats.get_ghost_count", return_value=1), \
-             patch("db.get_connection", return_value=conn), \
-             patch("db.db_type", "sqlite"), \
-             patch("db.release_connection"):
+        with patch("services.identity.identity_stats", return_value=folded) as ident:
             from services.stats import personal_stats
             result = personal_stats(100, 1)
+        ident.assert_called_once_with(100, user_id=1)
         self.assertEqual(result["user_id"], 1)
         self.assertEqual(result["total_rollcalls_in_chat"], 10)
         self.assertEqual(result["sessions_attended"], 7)
+        self.assertNotIn("aliases", result)
 
     def test_group_stats_returns_dict(self):
         with patch("services.stats.get_group_attendance_totals", return_value={

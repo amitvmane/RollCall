@@ -121,13 +121,15 @@ def _fmt_personal_stats(data: dict, first_name: str) -> str:
     attended = data["sessions_attended"]
     return "\n".join([
         f"*Stats for {_esc(first_name)}:*", "",
-        f"🗳 Voted in: {voted} of {total_rcs} rollcalls ({_pct_str(data['voting_rate'])})",
-        f"✅ Attended: {attended} of {total_rcs} rollcalls ({_pct_str(data['attendance_rate'])})",
-        f"👻 Ghosted: {ghost_count} session(s){ghost_warn}",
-        f"📊 Vote breakdown — IN: {data['total_in_votes']}  OUT: {data['total_out_votes']}  MAYBE: {data['total_maybe_votes']}",
+        f"✅ Played: {attended} of {total_rcs} games ({_pct_str(data['attendance_rate'])})",
+        f"🗳 Voted in: {voted} of {total_rcs} games ({_pct_str(data['voting_rate'])})",
+        f"👻 Absences on record: {ghost_count} (limit {absent_limit}){ghost_warn}",
+        f"📊 Votes cast — IN: {data['total_in_votes']}  OUT: {data['total_out_votes']}  MAYBE: {data['total_maybe_votes']}",
         f"⏫ Promoted from waitlist: {data['total_waiting_to_in']}", "",
-        f"🔥 Current streak: {data['current_streak']} session(s)",
-        f"🏆 Best streak: {data['best_streak']} session(s)",
+        f"🔥 Current streak: {data['current_streak']} game(s) in a row",
+        f"🏆 Best streak: {data['best_streak']} game(s)",
+        "",
+        "_Played = IN at close and not marked a no-show. Cancelled games don't count._",
     ])
 
 
@@ -142,19 +144,19 @@ def _fmt_proxy_stats(data: dict, display_name: str) -> str:
     attended = data["sessions_attended"]
     return "\n".join([
         f"*Stats for {_esc(display_name)} (via /sif):*", "",
-        f"🗳 Voted in: {voted} of {total_rcs} rollcalls ({_pct_str(data['voting_rate'])})",
-        f"✅ Attended: {attended} of {total_rcs} rollcalls ({_pct_str(data['attendance_rate'])})",
-        f"👻 Ghosted: {ghost_count} session(s){ghost_warn}",
-        f"📊 Per-session breakdown — IN: {data['total_in_votes']}  OUT: {data['total_out_votes']}  MAYBE: {data['total_maybe_votes']}",
+        f"✅ Played: {attended} of {total_rcs} games ({_pct_str(data['attendance_rate'])})",
+        f"🗳 Voted in: {voted} of {total_rcs} games ({_pct_str(data['voting_rate'])})",
+        f"👻 Absences on record: {ghost_count} (limit {absent_limit}){ghost_warn}",
+        f"📊 Final status per game — IN: {data['total_in_votes']}  OUT: {data['total_out_votes']}  MAYBE: {data['total_maybe_votes']}",
         "",
-        f"🔥 Current streak: {data['current_streak']} session(s)",
-        f"🏆 Best streak: {data['best_streak']} session(s)",
+        f"🔥 Current streak: {data['current_streak']} game(s) in a row",
+        f"🏆 Best streak: {data['best_streak']} game(s)",
     ])
 
 
 def _fmt_group_stats(data: dict) -> str:
     if data["total_rollcalls"] == 0:
-        return "*Group stats:*\n\nNo ended rollcalls yet."
+        return "*Group stats:*\n\nNo games played yet."
     total_rcs = data["total_rollcalls"]
     real_slots = data["real_attendance_slots"]
     proxy_slots = data["proxy_attendance_slots"]
@@ -163,11 +165,11 @@ def _fmt_group_stats(data: dict) -> str:
     proxy_pax = data["proxy_participants"]
     lines = [
         "*Group stats:*", "",
-        f"📋 Ended rollcalls: {total_rcs}",
-        f"✅ Total attendance (IN slots): {total_slots}",
+        f"📋 Games played: {total_rcs} _(cancelled games not counted)_",
+        f"✅ Total turn-outs: {total_slots}",
         f"   • Members: {real_slots}    • Proxies: {proxy_slots}",
-        f"📊 Average attendance per rollcall: {data['avg_attendance']}",
-        f"👥 Distinct attendees: {real_pax + proxy_pax}",
+        f"📊 Average turn-out per game: {data['avg_attendance']}",
+        f"👥 Different people who played: {real_pax + proxy_pax}",
         f"   • Members: {real_pax}    • Proxies: {proxy_pax}",
         "",
         "*Vote activity*",

@@ -117,7 +117,7 @@ class TestExportStatsCsv(unittest.TestCase):
              patch.object(stats_svc, "get_ghost_count", return_value=1) as mock_gc, \
              patch.object(stats_svc, "get_ghost_count_by_proxy_name", return_value=2) as mock_gcp, \
              patch.object(stats_svc, "get_user_streaks", return_value={"current_streak": 3, "best_streak": 4}), \
-             patch.object(stats_svc, "get_proxy_streaks", return_value={"current_streak": 0, "best_streak": 1}):
+             patch.object(stats_svc, "_folded_proxy_streaks", return_value={"current_streak": 0, "best_streak": 1}):
             csv_str = stats_svc.export_stats_csv(-100)
 
         lines = csv_str.strip().splitlines()

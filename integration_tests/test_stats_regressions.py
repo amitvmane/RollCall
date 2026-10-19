@@ -48,7 +48,7 @@ class TestAttendanceRateUsesRealAttendance(IntegrationBase):
         # User engaged (voted) → 100% voting. User ended OUT → 0% attendance.
         # Two separate metrics, both displayed.
         self.assertIn("Voted in: 1 of 1", text)
-        self.assertIn("Attended: 0 of 1", text)
+        self.assertIn("Played: 0 of 1 games", text)
         self.assertIn("(0%)", text)
 
     async def test_user_who_flipped_in_out_in_shows_100_percent_attended(self):
@@ -67,7 +67,7 @@ class TestAttendanceRateUsesRealAttendance(IntegrationBase):
         text = await build_user_stats_text(CHAT_ID, u["id"], u["first_name"])
         # Both voting and attendance are 100% — engaged AND attended.
         self.assertIn("Voted in: 1 of 1", text)
-        self.assertIn("Attended: 1 of 1", text)
+        self.assertIn("Played: 1 of 1 games", text)
         self.assertIn("(100%)", text)
 
     async def test_no_show_shows_voted_50_attended_50(self):
@@ -86,7 +86,7 @@ class TestAttendanceRateUsesRealAttendance(IntegrationBase):
         text = await build_user_stats_text(CHAT_ID, u["id"], u["first_name"])
         # Voted in 1/2, attended 1/2 — both metrics 50%.
         self.assertIn("Voted in: 1 of 2", text)
-        self.assertIn("Attended: 1 of 2", text)
+        self.assertIn("Played: 1 of 2 games", text)
         self.assertIn("(50%)", text)
 
 
@@ -120,40 +120,27 @@ class TestLeaderboardRanksByActualAttendance(IntegrationBase):
 
 
 class TestStreakResetsOnOutOrMaybe(IntegrationBase):
-    """BUG #3: voting OUT or MAYBE at /erc resets current_streak.
+    """Streak = consecutive COMPLETED games of the group the member PLAYED.
 
-    Previously only the ghost-mark flow reset streaks, so streaks inflated
-    between ghost-marks. After the fix, ending a session as OUT/MAYBE
-    counts as breaking the streak. No-shows (never voted) are still NOT
-    penalised — those are handled deliberately by ghost-marking.
+    Computed from history (db.get_streaks_for). Any group game without the
+    member IN breaks it — OUT, MAYBE, or simply not voting (user decision
+    2026-10-19: "5-game streak" must not span games they skipped).
     """
+
+    def _streak(self, uid):
+        return db.get_user_streaks(CHAT_ID, uid)["current_streak"]
 
     async def test_in_then_out_resets_streak(self):
         u = USERS[0]
-        # Rollcall 1 — vote IN, end. Streak should be 1.
         await self.start_rc("RC1")
         await self.vote_in(u)
         await self.end_roll_call(self.msg("/erc", ADMIN_USER))
-        # Read streak from user_stats — directly via db helper.
-        # No public reader, so query manually.
-        conn = db.get_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT current_streak FROM user_stats WHERE chat_id=? AND user_id=?",
-                    (CHAT_ID, u["id"]))
-        streak_after_rc1 = cur.fetchone()[0]
-        cur.close()
-        self.assertEqual(streak_after_rc1, 1)
+        self.assertEqual(self._streak(u["id"]), 1)
 
-        # Rollcall 2 — vote OUT, end. Streak should drop to 0.
         await self.start_rc("RC2")
         await self.vote_out(u)
         await self.end_roll_call(self.msg("/erc", ADMIN_USER))
-        cur = conn.cursor()
-        cur.execute("SELECT current_streak FROM user_stats WHERE chat_id=? AND user_id=?",
-                    (CHAT_ID, u["id"]))
-        streak_after_rc2 = cur.fetchone()[0]
-        cur.close()
-        self.assertEqual(streak_after_rc2, 0,
+        self.assertEqual(self._streak(u["id"]), 0,
                          "voting OUT at end of rollcall must reset streak")
 
     async def test_in_then_maybe_resets_streak(self):
@@ -165,42 +152,20 @@ class TestStreakResetsOnOutOrMaybe(IntegrationBase):
         await self.start_rc("RC2")
         await self.vote_maybe(u)
         await self.end_roll_call(self.msg("/erc", ADMIN_USER))
-
-        conn = db.get_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT current_streak FROM user_stats WHERE chat_id=? AND user_id=?",
-                    (CHAT_ID, u["id"]))
-        streak = cur.fetchone()[0]
-        cur.close()
-        self.assertEqual(streak, 0,
+        self.assertEqual(self._streak(u["id"]), 0,
                          "voting MAYBE at end of rollcall must reset streak")
 
-    async def test_no_show_does_NOT_reset_streak(self):
-        """A user who never voted in a session shouldn't have their streak
-        nuked — that's the ghost-marker's job for deliberate no-shows."""
+    async def test_skipped_game_resets_streak(self):
+        """Not voting at all is still a game the member didn't play."""
         u = USERS[0]
-        # Build streak of 1
         await self.start_rc("RC1")
         await self.vote_in(u)
         await self.end_roll_call(self.msg("/erc", ADMIN_USER))
 
-        # New rollcall, user never votes
         await self.start_rc("RC2")
         await self.end_roll_call(self.msg("/erc", ADMIN_USER))
-
-        conn = db.get_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT current_streak FROM user_stats WHERE chat_id=? AND user_id=?",
-                    (CHAT_ID, u["id"]))
-        streak = cur.fetchone()[0]
-        cur.close()
-        self.assertEqual(streak, 1,
-                         "no-vote (no participation) must NOT reset the streak")
-
-
-# =========================================================================
-# A.7 — Proxy users counted everywhere in /stats
-# =========================================================================
+        self.assertEqual(self._streak(u["id"]), 0)
+        self.assertEqual(db.get_user_streaks(CHAT_ID, u["id"])["best_streak"], 1)
 
 class TestProxyCountedInStats(IntegrationBase):
     """Proxies (added via /sif /sof /smf) must show up in personal,
@@ -217,7 +182,7 @@ class TestProxyCountedInStats(IntegrationBase):
         self.assertIn("via /sif", text)
         # 1 of 1 rollcalls, attended once.
         self.assertIn("Voted in: 1 of 1", text)
-        self.assertIn("Attended: 1 of 1", text)
+        self.assertIn("Played: 1 of 1 games", text)
 
     async def test_proxy_leaderboard_inclusion(self):
         await self.start_rc("RC1")
@@ -354,7 +319,7 @@ class TestGhostCountInPersonalStats(IntegrationBase):
         await self.end_roll_call(self.msg("/erc", ADMIN_USER))
         from handlers.stats import build_user_stats_text
         text = await build_user_stats_text(CHAT_ID, u["id"], u["first_name"])
-        self.assertIn("Ghosted: 0 session(s)", text)
+        self.assertIn("Absences on record: 0", text)
 
     async def test_personal_stats_shows_ghost_count_when_nonzero(self):
         u = USERS[0]
@@ -368,7 +333,7 @@ class TestGhostCountInPersonalStats(IntegrationBase):
         db.increment_ghost_count(CHAT_ID, u["id"], u["first_name"])
         from handlers.stats import build_user_stats_text
         text = await build_user_stats_text(CHAT_ID, u["id"], u["first_name"])
-        self.assertIn("Ghosted: 2 session(s)", text)
+        self.assertIn("Absences on record: 2", text)
 
     async def test_personal_stats_warns_when_at_reconf_threshold(self):
         """If ghost_count >= absent_limit, show a ⚠ marker — user is one
@@ -393,7 +358,7 @@ class TestGhostCountInPersonalStats(IntegrationBase):
         db.increment_ghost_count(CHAT_ID, -1, "Alice", proxy_name="Alice")
         from handlers.stats import build_proxy_stats_text
         text = await build_proxy_stats_text(CHAT_ID, "Alice", "Alice")
-        self.assertIn("Ghosted: 1 session(s)", text)
+        self.assertIn("Absences on record: 1", text)
 
 
 class TestProxySofPromotesCountersForRealUser(IntegrationBase):

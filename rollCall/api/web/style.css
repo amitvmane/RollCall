@@ -577,6 +577,7 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .sp-dot-out{background:var(--danger)}
 .sp-dot-maybe{background:var(--warn)}
 .sp-dot-miss{background:var(--border)}
+.sp-dot-ghost{background:var(--danger);opacity:.45}
 
 /* ── Admin toggle switch ── */
 .admin-toggle{position:relative;display:inline-block;width:44px;height:24px;flex-shrink:0}

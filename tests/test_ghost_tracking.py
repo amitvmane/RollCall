@@ -530,7 +530,6 @@ class TestGhostLateDropOut(GhostTestBase):
              patch('services.ghost.increment_ghost_count') as mock_inc, \
              patch('services.ghost.add_ghost_event') as mock_event, \
              patch('services.ghost.decrement_ghost_count') as mock_dec, \
-             patch('services.ghost.reset_user_streak'), \
              patch('services.ghost.get_ghost_count', return_value=2):
             await self.ghost_callback_handler(c)
 

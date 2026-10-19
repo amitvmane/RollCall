@@ -4,7 +4,7 @@ Inline penalty-marking panel — sent after /erc when dues is enabled.
 When dues is enabled this panel replaces the separate ghost prompt entirely.
 The ditch tier (is_ditch=True) acts as the ghost/no-show marker: applying it
 writes the ditch penalty AND records the ghost tracking side-effects
-(increment_ghost_count, add_ghost_event, reset_user_streak). Tapping Done
+(increment_ghost_count, add_ghost_event). Tapping Done
 finalises attendance tracking (decrement_attended for those who showed up).
 
 Flow:

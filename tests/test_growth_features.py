@@ -14,22 +14,30 @@ sys.path.insert(0, "rollCall")
 # ── Badges ────────────────────────────────────────────────────────────────────
 
 class TestCollectBadges:
-    def _collect(self, in_members, streaks=None, games=None,
-                 proxy_streaks=None, proxy_games=None):
+    """collect_badges reads the folded per-person numbers (identity_stats)
+    and remembers games milestones so each is announced once."""
+
+    def _collect(self, in_members, streaks=None, games=None, announced=None, stats_fn=None):
         from services import badges as badges_mod
         streaks = streaks or {}
         games = games or {}
-        proxy_streaks = proxy_streaks or {}
-        proxy_games = proxy_games or {}
-        with patch.object(badges_mod, "get_user_streaks",
-                          side_effect=lambda c, u: {"current_streak": streaks.get(u, 0), "best_streak": 0}), \
-             patch.object(badges_mod, "get_user_attendance_count",
-                          side_effect=lambda c, u: games.get(u, 0)), \
-             patch.object(badges_mod, "get_proxy_streaks",
-                          side_effect=lambda c, n: {"current_streak": proxy_streaks.get(n, 0), "best_streak": 0}), \
-             patch.object(badges_mod, "get_proxy_attendance_count",
-                          side_effect=lambda c, n: proxy_games.get(n, 0)):
-            return badges_mod.collect_badges(-100, in_members)
+        store = dict(announced or {})
+
+        def _stats(chat_id, user_id=None, proxy_name=None):
+            k = user_id if user_id is not None else proxy_name
+            return {"current_streak": streaks.get(k, 0), "sessions_attended": games.get(k, 0)}
+
+        def _canon(chat_id, user_id=None, proxy_name=None):
+            return ({"kind": "user", "user_id": user_id, "proxy_name": None} if user_id is not None
+                    else {"kind": "proxy", "user_id": None, "proxy_name": proxy_name})
+
+        with patch("services.identity.identity_stats", side_effect=stats_fn or _stats), \
+             patch("services.identity.resolve_canonical", side_effect=_canon), \
+             patch.object(badges_mod._db, "get_system_config", side_effect=store.get), \
+             patch.object(badges_mod._db, "set_system_config", side_effect=store.__setitem__):
+            lines = badges_mod.collect_badges(-100, in_members)
+        self.store = store
+        return lines
 
     def test_streak_milestone_fires_exactly_at_threshold(self):
         lines = self._collect([(1, "Amit")], streaks={1: 5})
@@ -42,29 +50,44 @@ class TestCollectBadges:
         lines = self._collect([(1, "Ravi")], games={1: 50})
         assert any("game #50" in l and "Ravi" in l for l in lines)
 
+    def test_games_milestone_announced_only_once(self):
+        """A no-show steps the count back; reaching 50 again must not repeat it."""
+        self._collect([(1, "Ravi")], games={1: 50})
+        assert self._collect([(1, "Ravi")], games={1: 50}, announced=self.store) == []
+
+    def test_streak_milestone_can_repeat(self):
+        self._collect([(1, "Amit")], streaks={1: 5})
+        assert self._collect([(1, "Amit")], streaks={1: 5}, announced=self.store)
+
     def test_both_milestones_same_session(self):
         lines = self._collect([(1, "Amit")], streaks={1: 10}, games={1: 25})
         assert len(lines) == 2
 
-    def test_proxy_uses_proxy_tables(self):
-        lines = self._collect([(None, "GuestRaj")], proxy_streaks={"GuestRaj": 5})
+    def test_proxy_member(self):
+        lines = self._collect([(None, "GuestRaj")], streaks={"GuestRaj": 5})
         assert any("GuestRaj" in l for l in lines)
+
+    def test_member_and_merged_guest_both_in_count_once(self):
+        def _canon_same(chat_id, user_id=None, proxy_name=None):
+            return {"kind": "user", "user_id": 1, "proxy_name": None}
+        from services import badges as badges_mod
+        with patch("services.identity.resolve_canonical", side_effect=_canon_same), \
+             patch("services.identity.identity_stats",
+                   return_value={"current_streak": 5, "sessions_attended": 0}), \
+             patch.object(badges_mod._db, "get_system_config", return_value=None), \
+             patch.object(badges_mod._db, "set_system_config"):
+            lines = badges_mod.collect_badges(-100, [(1, "Amit"), (None, "Amit guest")])
+        assert len(lines) == 1
 
     def test_zero_stats_no_badges(self):
         assert self._collect([(1, "Amit"), (None, "Guest")]) == []
 
     def test_helper_exception_does_not_break_others(self):
-        from services import badges as badges_mod
-
-        def _boom(c, u):
-            raise RuntimeError("db down")
-
-        with patch.object(badges_mod, "get_user_streaks", side_effect=_boom), \
-             patch.object(badges_mod, "get_user_attendance_count", side_effect=_boom), \
-             patch.object(badges_mod, "get_proxy_streaks",
-                          side_effect=lambda c, n: {"current_streak": 5, "best_streak": 0}), \
-             patch.object(badges_mod, "get_proxy_attendance_count", side_effect=lambda c, n: 0):
-            lines = badges_mod.collect_badges(-100, [(1, "Broken"), (None, "Fine")])
+        def _stats(chat_id, user_id=None, proxy_name=None):
+            if user_id is not None:
+                raise RuntimeError("db down")
+            return {"current_streak": 5, "sessions_attended": 0}
+        lines = self._collect([(1, "Broken"), (None, "Fine")], stats_fn=_stats)
         assert any("Fine" in l for l in lines)
         assert not any("Broken" in l for l in lines)
 

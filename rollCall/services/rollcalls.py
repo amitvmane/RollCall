@@ -28,10 +28,6 @@ from db import (
     get_or_create_chat,
     increment_user_stat,
     log_admin_action,
-    reset_proxy_streak,
-    reset_user_streak,
-    update_proxy_streak_on_checkin,
-    update_streak_on_checkin,
     update_rollcall as _db_update_rollcall,
 )
 
@@ -274,31 +270,15 @@ async def end_rollcall(
     in_users = rc.inList
     has_any_users = len(in_users) > 0
 
-    # Streak + stat bookkeeping (same logic as the existing /erc handler)
+    # Sessions-voted counter. Streaks are NOT kept here any more: they are
+    # computed from game history (db.get_streaks_for), so a skipped game,
+    # a cancelled one, a later no-show mark or a merge can't leave them wrong.
     participants = {
         u.user_id for u in (rc.inList + rc.outList + rc.maybeList + rc.waitList)
         if isinstance(u.user_id, int)
     }
-    in_user_ids = {u.user_id for u in in_users if isinstance(u.user_id, int)}
-    for uid in in_user_ids:
-        update_streak_on_checkin(chat_id, uid)
-    # Streak resets for participants who voted but didn't end up IN
-    # (OUT or MAYBE). No-shows are handled separately by the ghost flow.
-    for uid in participants - in_user_ids:
-        reset_user_streak(chat_id, uid)
     for uid in participants:
         increment_user_stat(chat_id, uid, "total_rollcalls")
-
-    # Same semantics for proxy participants, keyed on name.
-    proxy_participants = {
-        u.name for u in (rc.inList + rc.outList + rc.maybeList + rc.waitList)
-        if not isinstance(u.user_id, int)
-    }
-    proxy_in_names = {u.name for u in in_users if not isinstance(u.user_id, int)}
-    for name in proxy_in_names:
-        update_proxy_streak_on_checkin(chat_id, name)
-    for name in proxy_participants - proxy_in_names:
-        reset_proxy_streak(chat_id, name)
 
     # Snapshot before removal so caller can render finish lists / ghost UI.
     ended_snapshot = serialize_rollcall(rc, rc_number)
@@ -382,8 +362,8 @@ async def cancel_rollcall(
     """
     Cancel the rollcall at the given 0-based position without recording any stats.
 
-    Unlike end_rollcall, this does NOT update streaks, increment stat counters,
-    or offer ghost marking. The rollcall is persisted in history as cancelled
+    Unlike end_rollcall, this does NOT increment stat counters or offer ghost
+    marking. The rollcall is persisted in history as cancelled
     (is_cancelled=True) so it is excluded from attendance rate, streak, and
     session count calculations in the portal and stats views.
 

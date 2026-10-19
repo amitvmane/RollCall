@@ -1227,8 +1227,8 @@ function renderStats(d){
       ${(me.recent_sessions||[]).length>=3?`
       <div class="sp-spark-label">Last ${me.recent_sessions.length} sessions</div>
       <div class="sp-spark">${(me.recent_sessions).slice().reverse().map(s=>{
-        const cls=s.status==="in"?"sp-dot-in":s.status==="out"?"sp-dot-out":s.status==="maybe"?"sp-dot-maybe":"sp-dot-miss";
-        const ttl=s.status==="miss"?"Didn't vote":(s.status||"").toUpperCase();
+        const cls=s.status==="in"?"sp-dot-in":s.status==="out"?"sp-dot-out":s.status==="maybe"?"sp-dot-maybe":s.status==="ghost"?"sp-dot-ghost":"sp-dot-miss";
+        const ttl=s.status==="miss"?"Didn't vote":s.status==="ghost"?"No-show":(s.status||"").toUpperCase();
         return`<span class="sp-dot ${cls}" title="${esc(ttl)} · ${esc((s.ended_at||'').slice(0,10))}"></span>`;
       }).join('')}</div>`:""}
     </div>`;

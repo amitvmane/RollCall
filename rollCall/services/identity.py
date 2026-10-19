@@ -649,11 +649,9 @@ def identity_stats(chat_id: int, *, user_id: Optional[int] = None,
     nor .proxy_stats alone can do (those two are left untouched for
     single-identity callers).
 
-    Streak semantics: best_streak = max() across the group (a high-water
-    mark; summing would double-count non-overlapping runs). current_streak
-    = the value from whichever member was most recently active (an ongoing
-    streak can only belong to whoever is currently accruing it) — ties
-    keep the canonical member's value (it's iterated first).
+    Streaks are computed over the whole group's game history at once
+    (db.get_streaks_for): a run that alternates between the member's own
+    vote and a merged guest name is still one unbroken run.
     """
     group = get_alias_group(chat_id, user_id=user_id, proxy_name=proxy_name)
     members: list[tuple[str, object]] = []
@@ -668,26 +666,16 @@ def identity_stats(chat_id: int, *, user_id: Optional[int] = None,
     total_in = total_out = total_maybe = total_waiting = 0
     total_sessions_voted = 0
     ghost_count = 0
-    best_streak = 0
-    current_streak = 0
-    most_recent_ts = None
 
     for kind, ident in members:
         if kind == "user":
             attended = db.get_user_attendance_count(chat_id, ident)
             row = db.get_user_stats_row(chat_id, ident) or {}
-            best = int(row.get("best_streak") or 0)
-            current = int(row.get("current_streak") or 0)
             ghost = db.get_ghost_count(chat_id, ident)
-            last_activity = db.get_identity_last_activity(chat_id, user_id=ident)
         else:
             attended = db.get_proxy_attendance_count(chat_id, ident)
             row = db.get_proxy_stats(chat_id, ident) or {}
-            streaks = db.get_proxy_streaks(chat_id, ident) or {}
-            best = int(streaks.get("best_streak") or 0)
-            current = int(streaks.get("current_streak") or 0)
             ghost = db.get_ghost_count_by_proxy_name(chat_id, ident)
-            last_activity = db.get_identity_last_activity(chat_id, proxy_name=ident)
 
         sessions_attended += attended
         total_in += int(row.get("total_in") or 0)
@@ -696,10 +684,12 @@ def identity_stats(chat_id: int, *, user_id: Optional[int] = None,
         total_waiting += int(row.get("total_waiting_to_in") or 0)
         total_sessions_voted += int(row.get("total_rollcalls") or 0)
         ghost_count += ghost
-        best_streak = max(best_streak, best)
-        if last_activity and (most_recent_ts is None or last_activity > most_recent_ts):
-            most_recent_ts = last_activity
-            current_streak = current
+
+    streaks = db.get_streaks_for(
+        chat_id,
+        [ident for kind, ident in members if kind == "user"],
+        [ident for kind, ident in members if kind == "proxy"],
+    )
 
     return {
         "kind": group["kind"],
@@ -715,8 +705,8 @@ def identity_stats(chat_id: int, *, user_id: Optional[int] = None,
         "total_waiting_to_in": total_waiting,
         "total_sessions_voted": total_sessions_voted,
         "voting_rate": _pct(total_sessions_voted, total_rollcalls),
-        "best_streak": best_streak,
-        "current_streak": current_streak,
+        "best_streak": streaks["best_streak"],
+        "current_streak": streaks["current_streak"],
         "ghost_count": ghost_count,
         "absent_limit": manager.get_absent_limit(chat_id),
     }

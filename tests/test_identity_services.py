@@ -805,7 +805,8 @@ class TestIdentityStats(unittest.TestCase):
                                  "total_waiting_to_in": 0, "total_rollcalls": 6,
                                  "best_streak": 3, "current_streak": 2}), \
              patch("services.identity.db.get_ghost_count", return_value=1), \
-             patch("services.identity.db.get_identity_last_activity", return_value="2026-01-01"), \
+             patch("services.identity.db.get_streaks_for",
+                   return_value={"best_streak": 3, "current_streak": 2}), \
              patch("services.identity.manager") as mock_mgr:
             mock_mgr.get_absent_limit.return_value = 1
             s = identity.identity_stats(1, user_id=999)
@@ -828,69 +829,37 @@ class TestIdentityStats(unittest.TestCase):
              patch("services.identity.db.get_proxy_attendance_count", return_value=2), \
              patch("services.identity.db.get_proxy_stats",
                    return_value={"total_in": 2, "total_out": 0, "total_maybe": 0, "total_rollcalls": 2}), \
-             patch("services.identity.db.get_proxy_streaks",
-                   return_value={"best_streak": 5, "current_streak": 1}), \
              patch("services.identity.db.get_ghost_count_by_proxy_name", return_value=3), \
-             patch("services.identity.db.get_identity_last_activity", return_value=None), \
+             patch("services.identity.db.get_streaks_for",
+                   return_value={"best_streak": 5, "current_streak": 1}), \
              patch("services.identity.manager") as mock_mgr:
             mock_mgr.get_absent_limit.return_value = 1
             s = identity.identity_stats(1, user_id=999)
         self.assertEqual(s["sessions_attended"], 7)  # 5 + 2
         self.assertEqual(s["total_in_votes"], 7)      # 5 + 2
         self.assertEqual(s["ghost_count"], 4)          # 1 + 3
-        self.assertEqual(s["best_streak"], 5)           # max(3, 5)
+        self.assertEqual(s["best_streak"], 5)
 
-    def test_current_streak_belongs_to_most_recently_active_alias(self):
-        """The canonical (real user) is iterated first with an OLDER
-        timestamp; the proxy alias is more recently active and must win
-        current_streak — despite being listed second."""
-        def last_activity(chat_id, user_id=None, proxy_name=None):
-            return "2026-01-01" if user_id is not None else "2026-06-01"
-
+    def test_streak_is_computed_over_the_whole_alias_group(self):
+        """One run of games can alternate between the member's own vote and a
+        merged guest name — so the streak is computed over both at once, not
+        picked from whichever alias was last active."""
         with patch("services.identity.db.get_links_by_canonical",
                    return_value=[{"alias_proxy_name": "Rex"}]), \
              patch("services.identity.db.get_chat_ended_rollcall_count", return_value=10), \
              patch("services.identity.db.get_user_attendance_count", return_value=5), \
-             patch("services.identity.db.get_user_stats_row",
-                   return_value={"total_in": 5, "total_out": 0, "total_maybe": 0,
-                                 "total_waiting_to_in": 0, "total_rollcalls": 5,
-                                 "best_streak": 3, "current_streak": 2}), \
+             patch("services.identity.db.get_user_stats_row", return_value={}), \
              patch("services.identity.db.get_ghost_count", return_value=0), \
              patch("services.identity.db.get_proxy_attendance_count", return_value=1), \
-             patch("services.identity.db.get_proxy_stats",
-                   return_value={"total_in": 1, "total_out": 0, "total_maybe": 0, "total_rollcalls": 1}), \
-             patch("services.identity.db.get_proxy_streaks",
-                   return_value={"best_streak": 1, "current_streak": 9}), \
+             patch("services.identity.db.get_proxy_stats", return_value={}), \
              patch("services.identity.db.get_ghost_count_by_proxy_name", return_value=0), \
-             patch("services.identity.db.get_identity_last_activity", side_effect=last_activity), \
+             patch("services.identity.db.get_streaks_for",
+                   return_value={"best_streak": 6, "current_streak": 6}) as streaks, \
              patch("services.identity.manager") as mock_mgr:
             mock_mgr.get_absent_limit.return_value = 1
             s = identity.identity_stats(1, user_id=999)
-        self.assertEqual(s["current_streak"], 9)  # the proxy alias's value wins
-
-    def test_tie_break_prefers_canonical_iterated_first(self):
-        """Equal last-activity timestamps: the canonical member (iterated
-        first) keeps its own current_streak rather than being overwritten."""
-        with patch("services.identity.db.get_links_by_canonical",
-                   return_value=[{"alias_proxy_name": "Rex"}]), \
-             patch("services.identity.db.get_chat_ended_rollcall_count", return_value=10), \
-             patch("services.identity.db.get_user_attendance_count", return_value=5), \
-             patch("services.identity.db.get_user_stats_row",
-                   return_value={"total_in": 5, "total_out": 0, "total_maybe": 0,
-                                 "total_waiting_to_in": 0, "total_rollcalls": 5,
-                                 "best_streak": 3, "current_streak": 2}), \
-             patch("services.identity.db.get_ghost_count", return_value=0), \
-             patch("services.identity.db.get_proxy_attendance_count", return_value=1), \
-             patch("services.identity.db.get_proxy_stats",
-                   return_value={"total_in": 1, "total_out": 0, "total_maybe": 0, "total_rollcalls": 1}), \
-             patch("services.identity.db.get_proxy_streaks",
-                   return_value={"best_streak": 1, "current_streak": 9}), \
-             patch("services.identity.db.get_ghost_count_by_proxy_name", return_value=0), \
-             patch("services.identity.db.get_identity_last_activity", return_value="2026-01-01"), \
-             patch("services.identity.manager") as mock_mgr:
-            mock_mgr.get_absent_limit.return_value = 1
-            s = identity.identity_stats(1, user_id=999)
-        self.assertEqual(s["current_streak"], 2)  # canonical's own value, not the tied proxy's
+        streaks.assert_called_once_with(1, [999], ["Rex"])
+        self.assertEqual((s["current_streak"], s["best_streak"]), (6, 6))
 
 
 if __name__ == "__main__":

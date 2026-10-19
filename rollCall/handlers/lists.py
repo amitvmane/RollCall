@@ -391,6 +391,10 @@ async def _reminder_hours_command(message, field: str, label: str, usage_example
         update_chat_settings(cid, **{field: hours})
         log_admin_action(cid, message.from_user.id, message.from_user.first_name,
                          field, details=f"set to {hours}h")
+        # Rollcalls already open with no close time have no loop running;
+        # /remind_after_open must still reach them.
+        from check_reminders import ensure_reminder_loop
+        ensure_reminder_loop(cid)
         await bot.send_message(
             cid,
             f"⏰ Reminder DMs enabled — members who haven't voted will be DM'd "

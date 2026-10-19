@@ -200,6 +200,12 @@ async def start_rollcall(
         "new_rollcall", target_name=clean_title,
     )
 
+    # Auto-close / reminders / after-open DMs. Here rather than at each
+    # adapter: the web and REST start paths never kicked the loop, so a
+    # rollcall started there with a close time sat open until a restart.
+    from check_reminders import ensure_reminder_loop
+    ensure_reminder_loop(chat_id, tzname)
+
     # Fire web-push notifications to subscribers — non-blocking, best-effort
     from bot_state import _log_task_exc
     asyncio.create_task(_push_rollcall_started(chat_id, clean_title)).add_done_callback(_log_task_exc)

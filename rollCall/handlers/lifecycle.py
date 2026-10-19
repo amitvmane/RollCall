@@ -378,7 +378,9 @@ async def _apply_repeat_flag(cid: int, rc, repeat_type: str, admin_user_id: int,
             sched_kwargs["monthly_day"] = now.day
         else:
             sched_kwargs["schedule_day"] = now.strftime("%A").lower()
-        templates_svc.set_schedule(cid, slug, admin_user_id, admin_name, **sched_kwargs)
+        # The rollcall just started by hand IS today's occurrence — without
+        # fired_today the scheduler opened a second one a minute later.
+        templates_svc.set_schedule(cid, slug, admin_user_id, admin_name, fired_today=True, **sched_kwargs)
     except Exception:
         logging.exception("[repeat] failed to schedule recurring template for chat %s", cid)
         return None

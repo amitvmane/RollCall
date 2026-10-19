@@ -355,7 +355,7 @@
     },
     {
         "Version": 10.6,
-        "Description": "10.6 — Safer Actions, Better Web App 📲\n\n🎯 Ending or cancelling from the web page always hits the game you were\nlooking at — never one that moved into its slot.\n\n🗂 /schedule_once won't overwrite an existing template; a taken name is\nrefused.\n\n🗓 New: /cancel_once — cancel a one-off game before it opens (or tap 🗑 in\n/schedules).\n\n📲 Web app: notifications for waitlist promotions, vote reminders and dues.\n🔔 works per group. iPhone users get Add-to-Home-Screen steps.\n\n🔧 Libraries updated, incl. the Telegram library.\n\nType /help for all commands · /weblink for the group web page",
+        "Description": "10.6 — Safer Actions, Better Web App 📲\n\n🎯 Ending or cancelling from the web page always hits the game you were\nlooking at — never one that moved into its slot.\n\n🗂 /schedule_once won't overwrite an existing template; a taken name is\nrefused.\n\n🗓 New: /cancel_once — cancel a one-off game before it opens (or tap 🗑 in\n/schedules).\n\n📲 Web app: notifications for waitlist promotions, vote reminders and dues.\n🔔 works per group. iPhone users get Add-to-Home-Screen steps.\n\n⏰ Scheduling: no more duplicate auto-starts after /src repeat= or a\ntemplate edit; web-started games auto-close; /remind_after_open works\nwithout a close time.\n\n🔧 Libraries updated, incl. the Telegram library.\n\nType /help for all commands · /weblink for the group web page",
         "DeployedOnProd": "Y",
         "DeployedDatetime": "12-10-2026 12:00 UTC"
     }

@@ -3688,7 +3688,7 @@ function renderTemplateEditForm(t,isNew){
     </div>
     <div class="id-prompt-label" style="text-align:left;margin-bottom:0;margin-top:4px">Auto-disable after</div>
     <div style="display:flex;gap:8px">
-      <select id="tsf-expmode-${safeName}" onchange="document.getElementById('tsf-expdate-${esc(escJsAttr(t.name))}').style.display=this.value==='custom'?'':'none'" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
+      <select id="tsf-expmode-${safeName}" onchange="this.parentElement.querySelector('input[type=date]').style.display=this.value==='custom'?'':'none'" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
         <option value="12m">12 months from now</option>
         <option value="6m">6 months from now</option>
         <option value="custom" selected>Custom date</option>

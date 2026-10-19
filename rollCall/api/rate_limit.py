@@ -58,7 +58,9 @@ _MAX_BUCKETS = 10_000
 # Stale keys are swept at most once per window, not on every request: the old
 # "sweep whenever >1000 keys" re-scanned the whole dict on EVERY request once
 # 1000 clients were active inside one window — O(n) per request.
-_last_sweep = [0.0]
+# -inf, not 0.0: time.monotonic() is seconds since boot, so on a host up
+# for less than one window a 0.0 start meant no sweep at all in that window.
+_last_sweep = [float('-inf')]
 
 # Bearer hashes known to be live tokens -> monotonic time that knowledge
 # expires. Only a VALID token earns its own bucket: keying on any bearer
@@ -74,7 +76,7 @@ def reset_buckets_for_tests() -> None:
     directly from tests so we can change the implementation freely."""
     _buckets.clear()
     _valid_tokens.clear()
-    _last_sweep[0] = 0.0
+    _last_sweep[0] = float('-inf')
 
 
 def _is_valid_token(token_hash: str, now: float) -> bool:

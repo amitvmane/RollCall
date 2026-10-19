@@ -69,7 +69,58 @@ def get_public_key() -> str:
     return pub
 
 
+# push-subscribe is unauthenticated (the group's public link is enough), and
+# every stored endpoint later receives a server-side POST. Without these
+# bounds it was a blind SSRF primitive (point it at an internal URL, then wait
+# for a rollcall to start) and an unbounded table.
+MAX_ENDPOINT_LENGTH = 1024
+MAX_ACTIVE_SUBSCRIPTIONS_PER_GROUP = 500
+
+_BLOCKED_HOST_SUFFIXES = (".localhost", ".local", ".internal", ".lan", ".home.arpa")
+
+
+class PushSubscriptionRejected(ValueError):
+    """User-safe reason a subscription was refused."""
+
+
+def validate_endpoint(endpoint: str) -> None:
+    """Accept only a public https URL addressed by hostname.
+
+    Real push services (FCM, Mozilla autopush, Apple, WNS) are always https
+    on a public DNS name, so refusing IP literals, localhost and
+    private-namespace suffixes costs no real browser anything.
+    """
+    import ipaddress
+    from urllib.parse import urlsplit
+
+    if not endpoint or len(endpoint) > MAX_ENDPOINT_LENGTH:
+        raise PushSubscriptionRejected("Invalid push endpoint.")
+    try:
+        parts = urlsplit(endpoint)
+        host = (parts.hostname or "").rstrip(".").lower()
+    except ValueError:
+        raise PushSubscriptionRejected("Invalid push endpoint.")
+    if parts.scheme != "https" or not host or parts.username or parts.password:
+        raise PushSubscriptionRejected("Push endpoint must be an https URL.")
+    try:
+        ipaddress.ip_address(host)
+        is_ip = True
+    except ValueError:
+        is_ip = False
+    if is_ip or "." not in host or host == "localhost" or host.endswith(_BLOCKED_HOST_SUFFIXES):
+        raise PushSubscriptionRejected("Push endpoint must be a public push service.")
+
+
 def subscribe(group_token: str, endpoint: str, p256dh: str, auth: str, tg_user_id: Optional[int] = None) -> None:
+    """Store (or refresh) a subscription. Raises PushSubscriptionRejected."""
+    validate_endpoint(endpoint)
+    # Refreshing a subscription this group already has is always fine — the
+    # cap only stops NEW rows, so a full group can't lock out existing members.
+    if not _db.is_push_subscribed(endpoint, group_token):
+        if len(_db.get_push_subscriptions(group_token)) >= MAX_ACTIVE_SUBSCRIPTIONS_PER_GROUP:
+            raise PushSubscriptionRejected(
+                "This group has reached its notification subscriber limit."
+            )
     _db.save_push_subscription(group_token, endpoint, p256dh, auth, tg_user_id=tg_user_id)
     logging.info("[push] subscribe: group=%s tg_user_id=%s endpoint=%.40s", group_token[:12], tg_user_id, endpoint)
 

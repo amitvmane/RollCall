@@ -333,7 +333,7 @@ class AdminSessionResponse(BaseModel):
     expires_in: int
 
 
-_ADMIN_SESSION_TOKEN_TTL_SECONDS = 365 * 24 * 3600  # matches /gentoken's lifetime
+_ADMIN_SESSION_TOKEN_TTL_SECONDS = 30 * 24 * 3600  # was 365d; admin scope is also re-checked per use (api/auth.py)
 
 
 @router.get(
@@ -378,8 +378,8 @@ async def admin_groups(id_token: Optional[str] = Depends(identity_from_header)) 
 )
 async def admin_session(body: AdminSessionRequest) -> AdminSessionResponse:
     """
-    Mints exactly the kind of token /gentoken does (scopes admin,read,vote,
-    365-day expiry) — existing admin console REST calls and the bearer-token
+    Mints the same kind of token /gentoken does (scopes admin,read,vote) but
+    with a 30-day expiry — existing admin console REST calls and the bearer-token
     auth dependency need zero changes — but triggered by the Login Widget
     instead of a bot command, and gated by a LIVE re-check (not just the
     cache), so this can't be used to ride a stale grant.

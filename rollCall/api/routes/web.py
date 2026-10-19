@@ -122,7 +122,10 @@ async def push_subscribe(
     # mode for a guest with a stale token should be "no personalisation",
     # not "notifications silently stop working".
     tg_user_id = verify_identity_token(body.id_token) if body.id_token else None
-    push_svc.subscribe(group_token, body.endpoint, body.keys.p256dh, body.keys.auth, tg_user_id=tg_user_id)
+    try:
+        push_svc.subscribe(group_token, body.endpoint, body.keys.p256dh, body.keys.auth, tg_user_id=tg_user_id)
+    except push_svc.PushSubscriptionRejected as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post(
@@ -263,7 +266,7 @@ async def web_group_presence(
 )
 async def get_web_group_stats(
     group_token: str = Path(..., description="Permanent group token"),
-    name: Optional[str] = Query(None, description="Display name to personalise the response with personal stats"),
+    name: Optional[str] = Query(None, description="Guest (proxy) name for guest stats; real members need X-Identity-Token"),
     id_token: Optional[str] = Depends(identity_from_header),
 ) -> WebGroupStatsResponse:
     # Resolve the requesting identity from a signed token only — never from a
@@ -1348,6 +1351,16 @@ async def issue_weblogin(
     chat_id = int(chat["chat_id"])
     if not await check_web_admin_live(chat_id, actor_user_id):
         raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
+    # Web-admin alone is not enough: in an open group (no /set_admins) every
+    # member who ran /weblink holds a cached grant, and the link minted here
+    # redeems to a global identity valid in every group. Same bar as the
+    # /weblogin command — a live, real Telegram admin; fails closed.
+    from functions import is_telegram_chat_admin
+    if not await is_telegram_chat_admin(chat_id, actor_user_id):
+        raise HTTPException(
+            status_code=403,
+            detail="Only a Telegram admin of this group can issue login links.",
+        )
 
     # Resolve member name against chat_members
     needle = body.member_name.strip().lstrip("@").lower()

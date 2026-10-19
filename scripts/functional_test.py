@@ -195,8 +195,8 @@ def make_callback_update(data, user_id, first_name, username=None,
                 "date": int(time.time()),
                 "chat": {
                     "id": chat_id,
-                    "type": "supergroup",
-                    "title": "FunctionalTest",
+                    "type": "supergroup" if chat_id < 0 else "private",
+                    "title": "FunctionalTest" if chat_id < 0 else None,
                 },
                 "from": {
                     "id": 8324883914,
@@ -540,6 +540,37 @@ async def phase_remaining_surface():
 
     out = await feed("/weblogin Alice", ALICE)
     record("/weblogin responds for a known member", bool(out))
+
+    # With web configured, the login link goes to the issuing admin's DM and
+    # NEVER into the group — whoever opens it is signed in as that member.
+    _prev_wb = os.environ.get("WEB_BASE_URL")
+    os.environ["WEB_BASE_URL"] = "https://rollcall.test"
+    try:
+        out = await feed("/weblogin Alice", ALICE)
+    finally:
+        if _prev_wb is None:
+            os.environ.pop("WEB_BASE_URL", None)
+        else:
+            os.environ["WEB_BASE_URL"] = _prev_wb
+    _texts = [(a[0] if a else kw.get("chat_id"), str(a[1] if len(a) > 1 else kw.get("text", "")))
+              for n, a, kw in out if n == "send_message"]
+    record("/weblogin DMs the link to the admin",
+           any(c == ALICE[0] and "/auth/weblogin/" in t for c, t in _texts), str(_texts))
+    record("/weblogin never posts the link in the group",
+           not any(c == CHAT_ID and "/auth/weblogin/" in t for c, t in _texts), str(_texts))
+
+    # Deep-link verify: opening /start v_<code> only asks; the Confirm tap
+    # (in the DM) is what verifies.
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    _vcode = "f" * 32
+    _db.create_web_verify_token(_vcode, _dt.now(_tz.utc) + _td(minutes=10))
+    out = await feed(f"/start v_{_vcode}", BOB, chat_id=BOB[0])
+    _row = _db.get_web_verify_token(_vcode) or {}
+    record("/start v_<code> asks for confirmation instead of verifying",
+           has_call(out, "send_message") and not _row.get("tg_user_id"), str(_row))
+    out = await feed_cb(f"tgv_ok:{_vcode}", BOB, chat_id=BOB[0])
+    _row = _db.get_web_verify_token(_vcode) or {}
+    record("Confirm tap verifies the browser", _row.get("tg_user_id") == BOB[0], str(_row))
 
     out = await feed("/gentoken", ALICE)
     record("/gentoken responds", bool(out))

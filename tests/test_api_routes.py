@@ -1129,8 +1129,9 @@ class TestRateLimitMiddleware(unittest.TestCase):
         # Seed well past the sweep threshold with buckets whose only entry
         # is far outside any plausible window — guaranteed stale.
         stale_ts = time.monotonic() - 9999
+        from collections import deque
         for i in range(1500):
-            _buckets[f"ip:stale-{i}"].append(stale_ts)
+            _buckets[f"ip:stale-{i}"] = deque([stale_ts])
         self.assertEqual(len(_buckets), 1500)
 
         client = TestClient(create_app(), raise_server_exceptions=False)

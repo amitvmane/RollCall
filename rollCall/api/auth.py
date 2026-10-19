@@ -87,6 +87,38 @@ def _verify_token(creds: Optional[HTTPAuthorizationCredentials]) -> AuthedToken:
     )
 
 
+# A token minted for an admin carries the admin scope until it expires — but
+# the person can stop being an admin long before that. Re-check the issuer's
+# current web-admin status whenever an admin-scope token is used. Cached
+# briefly so a burst of console requests isn't one Telegram call each.
+_ADMIN_RECHECK_TTL_SECONDS = 60
+_admin_recheck_cache: dict = {}
+
+
+def reset_admin_recheck_cache_for_tests() -> None:
+    _admin_recheck_cache.clear()
+
+
+async def _issuer_still_admin(chat_id: int, user_id: int) -> bool:
+    import time
+    now = time.monotonic()
+    hit = _admin_recheck_cache.get((chat_id, user_id))
+    if hit is not None and hit[0] > now:
+        return hit[1]
+    try:
+        from api.web_admin import check_web_admin_live
+        ok = bool(await check_web_admin_live(chat_id, user_id))
+    except Exception:
+        # Fail closed: an admin-scope request we can't vouch for is refused.
+        import logging
+        logging.exception("admin-scope re-check failed chat=%s user=%s", chat_id, user_id)
+        return False
+    if len(_admin_recheck_cache) > 4096:
+        _admin_recheck_cache.clear()
+    _admin_recheck_cache[(chat_id, user_id)] = (now + _ADMIN_RECHECK_TTL_SECONDS, ok)
+    return ok
+
+
 def require_scope(scope: str):
     """
     Dependency factory: returns a FastAPI dependency that verifies a
@@ -103,6 +135,16 @@ def require_scope(scope: str):
         creds: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
     ) -> AuthedToken:
         token = _verify_token(creds)
+
+        # Admin-scope tokens only stay admin while their issuer does. Tokens
+        # with no issuer (CLI-minted) or the global chat_id=0 token have no
+        # person to re-check; non-admin scopes are untouched.
+        if ("admin" in token.scopes and token.issued_by_user_id
+                and token.chat_id != 0):
+            if not await _issuer_still_admin(token.chat_id, int(token.issued_by_user_id)):
+                raise _forbidden(
+                    "The admin who issued this token is no longer an admin of this chat"
+                )
 
         if scope not in token.scopes and "admin" not in token.scopes:
             raise _forbidden(

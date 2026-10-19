@@ -2541,6 +2541,31 @@ def get_all_chat_ids() -> List[int]:
 _VALID_STATUSES = {'in', 'out', 'maybe', 'waitlist'}
 
 
+def reorder_waitlist(rollcall_id: int, ordered_ids: list) -> None:
+    """Rewrite wait_pos 1..N for the rollcall's waitlist in `ordered_ids`
+    order (int → real member, str → proxy name).
+
+    Waitlist positions are otherwise only ever appended at the end, which is
+    right for someone joining the queue and wrong for someone pushed OFF the
+    IN list by a lowered limit — they were already ahead of every waiter.
+    """
+    ph = '%s' if db_type == 'postgresql' else '?'
+    with _cursor(commit=True) as cursor:
+        for pos, uid in enumerate(ordered_ids, start=1):
+            if isinstance(uid, int):
+                cursor.execute(
+                    f"UPDATE users SET wait_pos = {ph} WHERE rollcall_id = {ph} "
+                    f"AND user_id = {ph} AND status = 'waitlist'",
+                    (pos, rollcall_id, uid),
+                )
+            else:
+                cursor.execute(
+                    f"UPDATE proxy_users SET wait_pos = {ph} WHERE rollcall_id = {ph} "
+                    f"AND name = {ph} AND status = 'waitlist'",
+                    (pos, rollcall_id, str(uid)),
+                )
+
+
 def _next_pos_with_cursor(cursor, rollcall_id: int, status: str) -> int:
     """Return next position using the caller's cursor — avoids a second connection and eliminates
     the TOCTOU race between the MAX query and the subsequent INSERT on PostgreSQL."""

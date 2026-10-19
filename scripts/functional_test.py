@@ -1616,9 +1616,22 @@ async def run_all():
     record("/buzz with multiple rollcalls runs without error", ok, str(error_msgs()) if not ok else "")
 
     # /erc ::1 ends only RC#1
+    morning_id = manager.get_rollcall(CHAT_ID, 0).id
     out = await feed("/erc ::1", ALICE)
     ok = len(_errors) == 0
     record("/erc ::1 ends only RC#1 without error", ok, str(error_msgs()) if not ok else "")
+    record("/erc ::1 strips the ended panel's buttons",
+           has_call(out, "edit_message_reply_markup"), f"outbound: {[n for n,_,_ in out]}")
+
+    # A tap on Morning's (now dead) panel must not vote in Evening, which
+    # slid into #1. Buttons carry the rollcall db id: btn_<action>_<N>_<id>.
+    bot.answer_callback_query.reset_mock()
+    out = await feed_cb(f"btn_in_1_{morning_id}", BOB)
+    answers = " ".join(str(c.args[1]) for c in bot.answer_callback_query.call_args_list if len(c.args) > 1)
+    evening_in = [u.user_id for u in manager.get_rollcall(CHAT_ID, 0).inList]
+    record("Tap on an ended rollcall's panel is refused, not voted into the next",
+           "closed" in answers.lower() and BOB[0] not in evening_in,
+           f"answers={answers!r} evening_in={evening_in}")
 
     out = await feed("/rollcalls", ALICE)
     ok = "evening" in text_of(out).lower() and "morning" not in text_of(out).lower()

@@ -476,9 +476,10 @@ def _current_rc_index(mgr, chat_id: int, rollcall_num: int, rollcall_id: Optiona
     """
     if rollcall_id is None:
         return rollcall_num - 1
-    for idx, rc in enumerate(mgr.get_rollcalls(chat_id)):
-        if getattr(rc, "id", None) == rollcall_id:
-            return idx
+    from services.common import find_rollcall_index
+    idx = find_rollcall_index(chat_id, rollcall_id, mgr)
+    if idx is not None:
+        return idx
     raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail="That rollcall is no longer open — someone else may have ended or "
@@ -630,6 +631,10 @@ async def web_proxy_vote(
         proxy_name=body.proxy_name,
         comment=body.comment,
         rc_number=body.rollcall_num - 1,
+        # By db id when the page sent it (resolved inside the service's
+        # lock, 409 if closed) — the tab number shifts when an earlier
+        # rollcall closes. rollcall_num stays for pages cached before this.
+        rollcall_id=body.rollcall_id,
     )
     if body.vote == "in":
         proxy_result = await proxy_svc.set_in_for(**common)
@@ -637,20 +642,33 @@ async def web_proxy_vote(
         proxy_result = await proxy_svc.set_out_for(**common)
     else:
         proxy_result = await proxy_svc.set_maybe_for(**common)
+    rc_num = proxy_result.get("rc_number_1based") or body.rollcall_num
 
     await _send_vote_notification(chat_id, body.proxy_name, body.vote)
     promoted = proxy_result.get("promoted") if isinstance(proxy_result, dict) else None
     await _send_promotion_notification(
-        chat_id, [promoted] if promoted else [], body.rollcall_num
+        chat_id, [promoted] if promoted else [], rc_num
     )
-    await _mirror_panel_to_telegram(chat_id, body.rollcall_num)
+    await _mirror_panel_to_telegram(chat_id, rc_num)
 
     from rollcall_manager import manager as _mgr
     from services.web import _serialize_web_rollcall
-    rc = _mgr.get_rollcall(chat_id, body.rollcall_num - 1)
+    rc = _mgr.get_rollcall(chat_id, rc_num - 1)
     if rc is None:
         raise HTTPException(status_code=404, detail="Rollcall not found after vote")
     return WebRollcallResponse(**_serialize_web_rollcall(rc))
+
+
+def _web_target_id(body):
+    """Exact member key for a web remove/move: the Telegram id of a real
+    member, or the exact proxy name. None (old cached pages) falls back to
+    matching `name`, which can't address a display label like "Ravi (@ravi)"
+    or tell two username-less namesakes apart."""
+    if body.user_id is not None:
+        return body.user_id
+    if body.is_proxy:
+        return body.name
+    return None
 
 
 @router.post(
@@ -691,14 +709,17 @@ async def web_remove_user(
             name=body.name,
             admin_user_id=actor_user_id,
             admin_name=actor_name,
+            rollcall_id=body.rollcall_id,
+            user_id=_web_target_id(body),
         )
+    rc_num = del_result.get("rc_number_1based") or body.rollcall_num
     await _send_promotion_notification(
-        chat_id, del_result.get("promoted") or [], body.rollcall_num
+        chat_id, del_result.get("promoted") or [], rc_num
     )
-    await _mirror_panel_to_telegram(chat_id, body.rollcall_num)
+    await _mirror_panel_to_telegram(chat_id, rc_num)
 
     from services.web import _serialize_web_rollcall
-    rc = _mgr.get_rollcall(chat_id, body.rollcall_num - 1)
+    rc = _mgr.get_rollcall(chat_id, rc_num - 1)
     if rc is None:
         raise HTTPException(status_code=404, detail="Rollcall not found after removing user")
     return WebRollcallResponse(**_serialize_web_rollcall(rc))
@@ -741,14 +762,17 @@ async def web_move_user(
             new_status=body.new_status,
             admin_user_id=actor_user_id,
             admin_name=actor_name,
+            rollcall_id=body.rollcall_id,
+            user_id=_web_target_id(body),
         )
+    rc_num = move_result.get("rc_number_1based") or body.rollcall_num
     await _send_promotion_notification(
-        chat_id, move_result.get("promoted") or [], body.rollcall_num
+        chat_id, move_result.get("promoted") or [], rc_num
     )
-    await _mirror_panel_to_telegram(chat_id, body.rollcall_num)
+    await _mirror_panel_to_telegram(chat_id, rc_num)
 
     from services.web import _serialize_web_rollcall
-    rc = _mgr.get_rollcall(chat_id, body.rollcall_num - 1)
+    rc = _mgr.get_rollcall(chat_id, rc_num - 1)
     if rc is None:
         raise HTTPException(status_code=404, detail="Rollcall not found after moving user")
     return WebRollcallResponse(**_serialize_web_rollcall(rc))
@@ -1429,11 +1453,20 @@ async def vote_web(
     )
 
     promoted = data.pop("promoted", [])
+    replaced = data.pop("replaced_guest", None)
 
     # Reflect the web vote in the Telegram group — notification so the vote is
     # visible in chat history, then panel update so the list stays current.
     loc = web_svc.locate_rollcall(token)
     if loc:
+        if replaced:
+            from rollcall_manager import manager as _mgr
+            if not _mgr.get_shh_mode(loc[0]):
+                await _send_event_notification(
+                    loc[0],
+                    f"🔁 Guest entry '{replaced['name']}' removed — replaced by "
+                    "their verified Telegram vote (via 🌐 web).",
+                )
         await _send_vote_notification(loc[0], body.name, body.vote)
         await _send_promotion_notification(loc[0], promoted, loc[1])
         await _mirror_panel_to_telegram(loc[0], loc[1])

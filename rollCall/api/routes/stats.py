@@ -245,17 +245,28 @@ async def set_limit(
     # CLAUDE.md names set_limit explicitly; only the web route took it.
     from rollcall_manager import manager as _mgr
     async with _mgr.get_chat_write_lock(chat_id):
-        if body.limit == 0:
-            # Removing the cap — no rebalance needed
-            result = settings_svc.set_rollcall_limit(
-                chat_id, 0, body.admin_user_id, body.admin_name, rc_number - 1
+        # Always rebalance — including limit=0. Clearing the cap used to skip
+        # it ("no rebalance needed"), leaving every waiter stranded on a
+        # waitlist the panel no longer shows; clearing now promotes them all,
+        # exactly as /set_limit 0 does in the chat.
+        changed = settings_svc.set_wait_limit(
+            chat_id, body.limit, body.admin_user_id, body.admin_name, rc_number - 1
+        )
+
+    # Every member moved by the change is announced, same as the bot command.
+    from api.telegram_mirror import (mirror_panel_to_telegram, send_event_notification,
+                                     send_promotion_notification)
+    title = changed["rollcall"]["title"]
+    if changed["demoted"] and not _mgr.get_shh_mode(chat_id):
+        for u in changed["demoted"]:
+            await send_event_notification(
+                chat_id,
+                f"{u['name']} moved from IN to WAITING because limit was set to "
+                f"{body.limit} for '{title}' (ID: {rc_number}).",
             )
-        else:
-            # Setting a positive cap — rebalance IN↔WAIT immediately
-            result = settings_svc.set_wait_limit(
-                chat_id, body.limit, body.admin_user_id, body.admin_name, rc_number - 1
-            )["rollcall"]
-    return RollcallResponse(**result)
+    await send_promotion_notification(chat_id, changed["promoted"], rc_number)
+    await mirror_panel_to_telegram(chat_id, rc_number)
+    return RollcallResponse(**changed["rollcall"])
 
 
 @router.put(

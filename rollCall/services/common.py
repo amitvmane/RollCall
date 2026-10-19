@@ -173,10 +173,11 @@ def resolve_rollcall_by_id_or_raise(chat_id: int, rollcall_id, mgr=None):
 
     if mgr is None:
         from rollcall_manager import manager as mgr
-    idx = find_rollcall_index(chat_id, rollcall_id, mgr)
-    if idx is None:
-        raise rollCallClosed(ROLLCALL_CLOSED_MSG)
-    return idx, mgr.get_rollcall(chat_id, idx)
+    if rollcall_id is not None:
+        for idx, rc in enumerate(mgr.get_rollcalls(chat_id)):
+            if rc_db_id(rc) == rollcall_id:
+                return idx, rc
+    raise rollCallClosed(ROLLCALL_CLOSED_MSG)
 
 
 def resolve_rollcall_ref(chat_id: int, rc_number: int, rollcall_id=None):

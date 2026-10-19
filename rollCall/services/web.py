@@ -56,7 +56,8 @@ def _serialize_web_rollcall(rc) -> dict:
     def _user_dict(u):
         uid = getattr(u, "user_id", None)
         is_proxy = not (isinstance(uid, int) and uid > 0)
-        return {"name": u.name, "comment": u.comment or "", "is_proxy": is_proxy}
+        return {"name": u.name, "comment": u.comment or "", "is_proxy": is_proxy,
+                "user_id": None if is_proxy else uid}
 
     return {
         "rollcall_id": rc.id,
@@ -121,6 +122,48 @@ def _find_canonical_name(rc, name: str) -> str:
     return name
 
 
+def _drop_own_web_guest_entry(rc, chat_id: int, tg_user_id: int, canonical_name: str):
+    """Remove the guest entry a member left before verifying, if there is one.
+
+    Someone who first votes on the web page as a guest ("Priya") and later
+    verifies with Telegram would otherwise appear twice. Only an entry that is
+    unmistakably that leftover is removed:
+
+      * it is a proxy whose name equals the member's Telegram name — never the
+        raw name typed into the form, which is attacker-controlled once an
+        identity is verified and would let anyone delete any guest; and
+      * it was self-entered on the web (proxy owner 0). A guest an admin added
+        with /sif or the web proxy form belongs to that admin, is very likely
+        a DIFFERENT person who shares a first name, and is left alone.
+
+    Removed by exact id, so the guest's ghost history is untouched (the
+    name-based delete wipes ghost_records chat-wide — a vote must never do
+    that). Audited. Returns {"name", "status"} or None. Caller holds the lock.
+    """
+    wanted = (canonical_name or "").strip().lower()
+    if not wanted:
+        return None
+    for lst, status in ((rc.inList, "in"), (rc.outList, "out"),
+                        (rc.maybeList, "maybe"), (rc.waitList, "waitlist")):
+        for u in list(lst):
+            if not isinstance(u.user_id, str) or u.name.lower() != wanted:
+                continue
+            if rc.get_proxy_owner(u.user_id) != 0:
+                continue
+            if not db.delete_user_by_id(rc.id, u.user_id):
+                return None
+            rc._load_users_from_db()
+            try:
+                db.log_admin_action(
+                    chat_id, tg_user_id, canonical_name, "web_guest_replaced",
+                    target_name=u.name, rollcall_id=rc.id, details=rc.title,
+                )
+            except Exception:
+                logging.warning("web_guest_replaced audit failed", exc_info=True)
+            return {"name": u.name, "status": status}
+    return None
+
+
 async def vote_by_token(
     token: str,
     name: str,
@@ -149,7 +192,8 @@ async def vote_by_token(
     if vote_type not in ("in", "out", "maybe"):
         raise incorrectParameter("vote must be 'in', 'out', or 'maybe'")
 
-    chat_id, rc_index, rc_pre = _resolve_rc(token)
+    chat_id, _, rc_pre = _resolve_rc(token)
+    rc_id = rc_pre.id
 
     is_real_user = isinstance(tg_user_id, int) and tg_user_id > 0
 
@@ -157,59 +201,58 @@ async def vote_by_token(
         # Prefer the canonical Telegram first_name and username stored in
         # chat_members over whatever the client submitted. Falls back to the
         # submitted name/username for first-time web voters with no bot history.
-        submitted_name = name  # save original before potential override
         member_info = db.get_member_display_info(chat_id, tg_user_id)
         if member_info:
             name = member_info["first_name"] or name
             username = member_info.get("username") or username
-
-        # If the user previously voted as a proxy under their display name (e.g.
-        # they typed their name before verifying via Telegram), remove that stale
-        # proxy entry now so the real-user vote replaces it rather than appearing
-        # as a duplicate. Check both the canonical name and the originally
-        # submitted name to cover the common case.
-        async with manager.get_chat_write_lock(chat_id):
-            rc_check = manager.get_rollcall(chat_id, rc_index)
-            if rc_check is not None:
-                for check_name in {name.lower(), submitted_name.lower()}:
-                    for lst in (rc_check.inList, rc_check.outList, rc_check.maybeList, rc_check.waitList):
-                        for u in list(lst):
-                            uid = getattr(u, "user_id", None)
-                            is_proxy_entry = not (isinstance(uid, int) and uid > 0)
-                            if is_proxy_entry and u.name.lower() == check_name:
-                                rc_check.delete_user(u.name)
-                                break
     else:
         # For proxy votes, normalise to canonical casing of any existing same-name entry
         name = _find_canonical_name(rc_pre, name)
 
+    from exceptions import alreadyInList, duplicateProxy, repeatlyName
+    from services import voting as voting_svc
+    from services.common import fill_waitlist_slots, resolve_rollcall_by_id_or_raise
+
     vote_result = None
-    try:
+    replaced = None
+    extra_promoted = []
+    # One lock hold for the whole vote, and the rollcall found by its db id
+    # inside it. This used to resolve the token to a POSITION up front and
+    # vote by that position later — a vote racing /erc or the scheduler's
+    # auto-close landed in whichever rollcall slid into the old number.
+    async with manager.get_chat_write_lock(chat_id):
+        rc_index, rc = resolve_rollcall_by_id_or_raise(chat_id, rc_id, manager)
         if is_real_user:
-            # Real Telegram user identified via WebApp SDK — vote as their actual user_id
-            # so stats, ghost tracking, and is_proxy=false all work correctly.
-            from services import voting as voting_svc
-            if vote_type == "in":
-                vote_result = await voting_svc.vote_in(chat_id, tg_user_id, name, username=username, rc_number=rc_index, comment=comment)
-            elif vote_type == "out":
-                vote_result = await voting_svc.vote_out(chat_id, tg_user_id, name, username=username, rc_number=rc_index, comment=comment)
+            replaced = _drop_own_web_guest_entry(rc, chat_id, tg_user_id, name)
+        try:
+            if is_real_user:
+                # Real Telegram user identified via a signed token — vote as
+                # their actual user_id so stats, ghost tracking, and
+                # is_proxy=false all work correctly.
+                fn = {"in": voting_svc.vote_in_locked, "out": voting_svc.vote_out_locked,
+                      "maybe": voting_svc.vote_maybe_locked}[vote_type]
+                vote_result = fn(chat_id, tg_user_id, name, username, comment, rc_index, rc_id)
             else:
-                vote_result = await voting_svc.vote_maybe(chat_id, tg_user_id, name, username=username, rc_number=rc_index, comment=comment)
-        else:
-            # Guest / external user — proxy entry identified by display name
-            if vote_type == "in":
-                vote_result = await proxy_svc.set_in_for(chat_id, 0, "web", name, rc_number=rc_index, comment=comment)
-            elif vote_type == "out":
-                vote_result = await proxy_svc.set_out_for(chat_id, 0, "web", name, rc_number=rc_index, comment=comment)
-            else:
-                vote_result = await proxy_svc.set_maybe_for(chat_id, 0, "web", name, rc_number=rc_index, comment=comment)
-    except Exception as e:
-        # duplicateProxy / repeatlyName — proxy double-tap, treat as idempotent.
-        # alreadyInList is NOT caught here: a verified user who is already IN/OUT
-        # should see the same "already IN" message as they would from the bot.
-        from exceptions import duplicateProxy, repeatlyName
-        if not isinstance(e, (duplicateProxy, repeatlyName)):
-            raise
+                # Guest / external user — proxy entry identified by display name.
+                # Owner 0 marks it as self-entered on the web (see
+                # _drop_own_web_guest_entry).
+                fn = {"in": proxy_svc.set_in_for_locked, "out": proxy_svc.set_out_for_locked,
+                      "maybe": proxy_svc.set_maybe_for_locked}[vote_type]
+                vote_result = fn(chat_id, 0, "web", name, comment, rc_index, rc_id)
+        except (duplicateProxy, repeatlyName):
+            # Proxy double-tap — treat as idempotent.
+            pass
+        except alreadyInList:
+            # A verified user who is already IN/OUT sees the same "already"
+            # message as from the bot — unless this vote just replaced their
+            # own guest entry, which is a real change the caller must report.
+            if not replaced:
+                raise
+        finally:
+            if replaced:
+                # The removed guest may have held an IN slot.
+                extra_promoted = fill_waitlist_slots(rc)
+                rc.save()
 
     # Re-resolve so we return the updated state
     _, _, rc = _resolve_rc(token)
@@ -218,7 +261,11 @@ async def vote_by_token(
     # waitlist→IN promotion this vote caused. Without it a web /out frees a
     # slot and the promoted member is never told.
     promoted = vote_result.get("promoted") if isinstance(vote_result, dict) else None
-    out["promoted"] = [promoted] if promoted else []
+    out["promoted"] = ([promoted] if promoted else []) + list(extra_promoted)
+    # Also out-of-band: the stale guest entry this verified vote replaced, so
+    # the route can say so in the group (a removal nobody announces is a
+    # member silently vanishing from the list).
+    out["replaced_guest"] = replaced
     return out
 
 

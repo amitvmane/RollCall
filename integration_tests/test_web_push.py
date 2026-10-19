@@ -166,3 +166,17 @@ class TestPushSubscribeIdentity(unittest.TestCase):
         self._subscribe(ep, id_token=issue_identity_token(self.OWNER_ID),
                         tg_user_id=self.IMPERSONATED_ID)
         self.assertEqual(self._stored_uid(ep), self.OWNER_ID)
+
+
+class TestWebVersion(unittest.TestCase):
+    """The web app shows the same version as the bot's /version."""
+
+    def test_version_matches_the_deployed_changelog_entry(self):
+        import json, os
+        app = _import()["app"]
+        resp = TestClient(app).get("/api/v1/web/version")
+        self.assertEqual(resp.status_code, 200)
+        path = os.path.join(os.path.dirname(__file__), "..", "rollCall", "version.json")
+        with open(path, encoding="utf-8") as fh:
+            live = [e for e in json.load(fh) if e.get("DeployedOnProd") == "Y"][-1]
+        self.assertEqual(resp.json()["version"], str(live["Version"]))

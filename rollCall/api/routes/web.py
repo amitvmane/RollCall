@@ -97,6 +97,17 @@ router = APIRouter()
 # ── VAPID / push endpoints ────────────────────────────────────────────────────
 
 @router.get(
+    "/web/version",
+    summary="The app version /version shows, for the web app's footer",
+)
+async def web_version() -> dict:
+    # Same source as the bot's /version (the entry marked deployed), so the
+    # web app and Telegram can never report different versions.
+    from version_info import deployed_app_version
+    return {"version": deployed_app_version()}
+
+
+@router.get(
     "/web/vapid-public-key",
     response_model=VapidPublicKeyResponse,
     summary="Return the VAPID public key so browsers can subscribe to push",

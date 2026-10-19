@@ -43,6 +43,8 @@
 .acct-menu-hdr{padding:8px 10px 10px;border-bottom:1px solid var(--border);margin-bottom:6px}
 .acct-menu-name{font-size:.92rem;font-weight:700;color:var(--text);word-break:break-word}
 .acct-menu-sub{font-size:.74rem;color:var(--sub);margin-top:2px}
+/* App version at the foot of the menu — same number the bot's /version shows */
+.acct-menu-ver{padding:8px 14px 4px;font-size:.72rem;color:var(--sub);text-align:center;border-top:1px solid var(--border);margin-top:4px}
 .acct-menu-item{
   display:flex;align-items:center;gap:8px;width:100%;background:none;border:none;
   text-align:left;padding:9px 10px;border-radius:8px;font-size:.85rem;

@@ -520,8 +520,20 @@ function renderAcctMenu(){
     html+=`<button class="acct-menu-item danger" role="menuitem" onclick="signOut()">⏻ Sign out</button>`;
   }
   if(!html)html=`<div class="acct-menu-hdr"><div class="acct-menu-sub">Not signed in</div></div>`;
+  if(_appVersion)html+=`<div class="acct-menu-ver">RollCall v${esc(_appVersion)}</div>`;
   menu.innerHTML=html;
 }
+
+// App version for the account menu — the same number the bot's /version shows.
+let _appVersion=null;
+fetch("/api/v1/web/version",{signal:AbortSignal.timeout(5000)})
+  .then(r=>r.ok?r.json():null)
+  .then(d=>{
+    // Only a plain number ("10.6"); "unknown (…)" means version.json is
+    // unreadable, which a member can't act on — show nothing instead.
+    if(d&&/^\d+(\.\d+)*$/.test(String(d.version))){_appVersion=String(d.version);renderAcctMenu();}
+  })
+  .catch(()=>{});
 
 // Calls the flow directly. It must NOT click #name-change-btn any more —
 // that button now opens this very menu, so clicking it from a menu item

@@ -30,6 +30,7 @@ from exceptions import (
     insufficientPermissions,
     parameterMissing,
     rollCallAlreadyStarted,
+    rollCallClosed,
     rollCallNotStarted,
     timeError,
 )
@@ -106,6 +107,7 @@ def create_app() -> FastAPI:
     # (with traceback logged once via _USER_FACING_EXCEPTIONS check).
     _exception_map = {
         rollCallNotStarted: 404,
+        rollCallClosed: 409,
         rollCallAlreadyStarted: 409,
         alreadyInList: 409,
         amountOfRollCallsReached: 409,

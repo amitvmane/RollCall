@@ -298,16 +298,56 @@ class TestDuesHandlers(unittest.IsolatedAsyncioTestCase):
             await set_upi(_msg("/set_upi amit@upi"))
         self.assertIn("UPI", self._sent_text())
 
-    async def test_cancel_game_dues_posts_reversal(self):
+    async def test_cancel_game_dues_shows_confirm_card_without_reversing(self):
+        """The command only resolves the game; nothing is reversed until the
+        card's button (which carries the rollcall_id) is tapped."""
         from handlers.dues import cancel_game_dues
+        closure = {"rollcall_id": 77, "title": "Sunday", "in_count": 3,
+                   "per_head": 100, "ground_cost": 300}
         with _admin_ok(), \
              patch("handlers.dues.manager", self.mgr), \
-             patch("handlers.dues._db.get_nth_game_closure", return_value={"rollcall_id": 77}), \
+             patch("handlers.dues._db.get_nth_game_closure", return_value=closure), \
+             patch("handlers.dues.dues_svc.require_cancellable", return_value=closure), \
+             patch("handlers.dues.dues_svc.cancel_game_credit") as svc:
+            await cancel_game_dues(_msg("/cancel_game_dues"))
+        svc.assert_not_called()
+        self.assertIn("Cancel dues for", self._sent_text())
+
+    async def test_cancel_game_dues_confirm_posts_reversal(self):
+        from handlers.dues import cancel_game_dues_confirm_callback
+        call = MagicMock()
+        call.data = "cgd_go:77"
+        call.message.chat.id = 100
+        call.from_user.id = 1
+        call.from_user.first_name = "Admin"
+        with patch("handlers.dues.is_chat_admin", new=AsyncMock(return_value=True)), \
+             patch("handlers.dues.manager", self.mgr), \
+             patch("handlers.dues.safe_edit_markup", new=AsyncMock()), \
+             patch("handlers.dues.bot.answer_callback_query", new=AsyncMock()) as ans, \
+             patch("handlers.dues._db.get_game_closure", return_value={"rollcall_id": 77}), \
              patch("handlers.dues.dues_svc.cancel_game_credit", return_value={
                  "announcement": "🔁 Cancelled dues for 'Sunday': 3 share entries reversed."
-             }):
-            await cancel_game_dues(_msg("/cancel_game_dues"))
+             }) as svc:
+            await cancel_game_dues_confirm_callback(call)
+        self.assertEqual(svc.call_args[0][1], 77)
         self.assertIn("Cancelled", self._sent_text())
+
+    async def test_cancel_game_dues_confirm_twice_is_refused(self):
+        """Regression: a repeated cancel must not fall through to another game."""
+        from handlers.dues import cancel_game_dues_confirm_callback
+        call = MagicMock()
+        call.data = "cgd_go:77"
+        call.message.chat.id = 100
+        call.from_user.id = 1
+        with patch("handlers.dues.is_chat_admin", new=AsyncMock(return_value=True)), \
+             patch("handlers.dues.manager", self.mgr), \
+             patch("handlers.dues.safe_edit_markup", new=AsyncMock()), \
+             patch("handlers.dues.bot.answer_callback_query", new=AsyncMock()) as ans, \
+             patch("handlers.dues._db.get_game_closure", return_value=None), \
+             patch("handlers.dues.dues_svc.cancel_game_credit") as svc:
+            await cancel_game_dues_confirm_callback(call)
+        svc.assert_not_called()
+        self.assertIn("Already cancelled", ans.call_args[0][1])
 
     # ── ::N suffix parsing ────────────────────────────────────────────────────
 

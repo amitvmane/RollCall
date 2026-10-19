@@ -923,7 +923,7 @@ async def collector_upi_callback(call):
         await bot.answer_callback_query(call.id)
         async with manager.get_chat_write_lock(cid):
             result = dues_svc.set_collector(
-                cid, pending["name"], False,
+                cid, pending["name"], None,  # UPI only — keep the paid flag
                 call.from_user.id,
                 call.from_user.first_name or "Admin",
                 rc_number=pending["rc_idx"],
@@ -960,7 +960,7 @@ async def collector_upi_reply(message):
         _pending_colupi_input.pop((cid, uid), None)
         async with manager.get_chat_write_lock(cid):
             result = dues_svc.set_collector(
-                cid, pending["name"], False,
+                cid, pending["name"], None,  # UPI only — keep the paid flag
                 uid, message.from_user.first_name or "Admin",
                 rc_number=pending["rc_idx"],
                 collector_upi=vpa,
@@ -1117,6 +1117,11 @@ async def add_adhoc(message):
 
 
 # ── /cancel_game_dues ─────────────────────────────────────────────────────────
+# Two-step: the command resolves WHICH game (by position) and shows a card;
+# the button carries that game's rollcall_id, never a position. Cancelling
+# deletes the closure, which shifts every position by one — so a duplicated
+# one-step command used to reverse a second, different game. Now a repeated
+# tap (or a second card for the same game) finds the closure gone and stops.
 
 @bot.message_handler(func=lambda m: _cmd(m.text) == "/cancel_game_dues")
 async def cancel_game_dues(message):
@@ -1130,23 +1135,75 @@ async def cancel_game_dues(message):
         # No suffix (or ::1) → latest; ::2 → second most recent.
         n_idx, _ = _parse_rc_suffix(args)
 
-        async with manager.get_chat_write_lock(cid):
-            # Fetch the target closure inside the lock so a concurrent /settle_dues
-            # cannot shift ordering between fetch and reversal.
-            closure = _db.get_nth_game_closure(cid, n_idx)
-            if closure is None:
-                raise duesNothingToClose(
-                    "No closed game found to cancel."
-                    + (" Use /cancel_game_dues ::2 for an older game." if n_idx == 0 else "")
-                )
-            result = dues_svc.cancel_game_credit(
-                cid, closure["rollcall_id"],
-                message.from_user.id,
-                message.from_user.first_name or "Admin",
+        closure = _db.get_nth_game_closure(cid, n_idx)
+        if closure is None:
+            raise duesNothingToClose(
+                "No closed game found to cancel."
+                + (" Use /cancel_game_dues ::2 for an older game." if n_idx == 0 else "")
             )
-        await send_md_fallback(cid, result["announcement"])
+        rc_id = closure["rollcall_id"]
+        dues_svc.require_cancellable(cid, rc_id)  # e.g. pre-season game → refuse now
+        text = (
+            f"🔁 *Cancel dues for {_esc_md(closure['title'])}?*\n"
+            f"{closure['in_count']} player{'s' if closure['in_count'] != 1 else ''} "
+            f"× ₹{closure['per_head']} (ground ₹{closure['ground_cost']})\n\n"
+            "Every charge from this game is reversed (payments stay as credits) "
+            "and it goes back to /settle_dues to be re-closed."
+        )
+        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+        markup = InlineKeyboardMarkup(row_width=2)
+        markup.row(
+            InlineKeyboardButton("🔁 Cancel its dues", callback_data=f"cgd_go:{rc_id}"),
+            InlineKeyboardButton("❌ Keep", callback_data="cgd_keep"),
+        )
+        await bot.send_message(cid, text, parse_mode="Markdown", reply_markup=markup)
     except Exception as e:
         await reply_error(message, e)
+
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("cgd_go:"))
+async def cancel_game_dues_confirm_callback(call):
+    try:
+        cid = call.message.chat.id
+        if not await is_chat_admin(cid, call.from_user.id):
+            await bot.answer_callback_query(
+                call.id, "⛔ Only admins can cancel game dues", show_alert=True)
+            return
+        rc_id = int(call.data.split(":", 1)[1])
+        from telebot.types import InlineKeyboardMarkup
+        await safe_edit_markup(cid, call.message.message_id, InlineKeyboardMarkup())
+
+        async with manager.get_chat_write_lock(cid):
+            # Re-check inside the lock: a second tap / second card for the same
+            # game must find it already cancelled, not reverse something else.
+            if _db.get_game_closure(rc_id) is None:
+                await bot.answer_callback_query(
+                    call.id, "Already cancelled — nothing changed.", show_alert=True)
+                return
+            result = dues_svc.cancel_game_credit(
+                cid, rc_id,
+                call.from_user.id,
+                call.from_user.first_name or call.from_user.username or "Admin",
+            )
+        await bot.answer_callback_query(call.id, "Cancelled")
+        # Money post — always sends, shh or not (ledger durability rule).
+        await send_md_fallback(cid, result["announcement"])
+    except Exception as exc:
+        logging.exception("cancel_game_dues_confirm_callback error")
+        await reply_error(call.message, exc)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "cgd_keep")
+async def cancel_game_dues_keep_callback(call):
+    try:
+        cid = call.message.chat.id
+        await bot.answer_callback_query(call.id, "Kept")
+        await safe_edit_text(cid, call.message.message_id, "✅ Kept — game dues unchanged.")
+        from telebot.types import InlineKeyboardMarkup
+        await safe_edit_markup(cid, call.message.message_id, InlineKeyboardMarkup())
+    except Exception as exc:
+        logging.exception("cancel_game_dues_keep_callback error")
+        await reply_error(call.message, exc)
 
 
 # ── /my_dues (/md) — user-scoped ─────────────────────────────────────────────

@@ -87,7 +87,7 @@ class TestEventFee(IntegrationBase):
         await self.start_rc()
         await self.event_fee(self.msg("/ef nomoney", ADMIN_USER))
         texts = self.sent_texts()
-        self.assertTrue(any("correct format" in t.lower() or "integer" in t.lower() for t in texts))
+        self.assertTrue(any("couldn't read a fee amount" in t.lower() for t in texts), texts)
 
     async def test_ef_sends_confirmation(self):
         await self.start_rc()

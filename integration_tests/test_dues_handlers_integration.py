@@ -483,7 +483,7 @@ class TestCancelAndReclose(IntegrationBase):
         await self.dues_settle_dues(self.msg("/settle_dues 0"))
         get_mock_bot().send_message.reset_mock()
 
-        await self.dues_cancel_game(self.msg("/cancel_game_dues"))
+        await self.cancel_game_dues_confirmed()
 
         texts = self.sent_texts()
         self.assertTrue(
@@ -504,7 +504,7 @@ class TestCancelAndReclose(IntegrationBase):
         uid = USERS[0]["id"]
         self.assertEqual(db.get_dues_balance(CHAT_ID, str(uid)), 100)
 
-        await self.dues_cancel_game(self.msg("/cancel_game_dues"))
+        await self.cancel_game_dues_confirmed()
 
         # After cancel, balance must be 0 (original share + cancel_credit = 0)
         self.assertEqual(db.get_dues_balance(CHAT_ID, str(uid)), 0)
@@ -521,7 +521,7 @@ class TestCancelAndReclose(IntegrationBase):
         entries_before = db.get_dues_entries(CHAT_ID, limit=100)
         share_count = sum(1 for e in entries_before if e["entry_type"] == "share")
 
-        await self.dues_cancel_game(self.msg("/cancel_game_dues"))
+        await self.cancel_game_dues_confirmed()
 
         entries_after = db.get_dues_entries(CHAT_ID, limit=100)
         share_count_after = sum(1 for e in entries_after if e["entry_type"] == "share")
@@ -548,7 +548,7 @@ class TestCancelAndReclose(IntegrationBase):
         first_closure = db.get_nth_game_closure(CHAT_ID, 0)
         self.assertIsNotNone(first_closure)
 
-        await self.dues_cancel_game(self.msg("/cancel_game_dues"))
+        await self.cancel_game_dues_confirmed()
 
         # After cancel, the closure row is DELETED (metadata, not ledger).
         # The same rollcall is now re-closeable.
@@ -902,8 +902,8 @@ class TestPaymentPanel(IntegrationBase):
         await self.dues_mark_paid(self.msg("/mark_paid", ADMIN_USER))
         mid = self._panel_mid()
 
-        await self.payment_panel_callback(self.call("pay_pick:0", ADMIN_USER, message_id=mid))
-        await self.payment_panel_callback(self.call("pay_full:0", ADMIN_USER, message_id=mid))
+        await self.payment_panel_callback(self.call(f"pay_pick:0:u{USERS[0]['id']}", ADMIN_USER, message_id=mid))
+        await self.payment_panel_callback(self.call(f"pay_full:0:u{USERS[0]['id']}", ADMIN_USER, message_id=mid))
 
         self.assertEqual(db.get_dues_balance(CHAT_ID, user_id=USERS[0]["id"]), 0)
         texts = self.sent_texts()
@@ -918,8 +918,8 @@ class TestPaymentPanel(IntegrationBase):
         await self.dues_mark_paid(self.msg("/mark_paid", ADMIN_USER))
         mid = self._panel_mid()
 
-        await self.payment_panel_callback(self.call("pay_pick:0", ADMIN_USER, message_id=mid))
-        await self.payment_panel_callback(self.call("pay_partial:0", ADMIN_USER, message_id=mid))
+        await self.payment_panel_callback(self.call(f"pay_pick:0:u{USERS[0]['id']}", ADMIN_USER, message_id=mid))
+        await self.payment_panel_callback(self.call(f"pay_partial:0:u{USERS[0]['id']}", ADMIN_USER, message_id=mid))
         self.assertIn((CHAT_ID, ADMIN_ID), self.bs._pending_payment_input)
 
         await self.payment_partial_reply(self.msg("40", ADMIN_USER))
@@ -933,15 +933,15 @@ class TestPaymentPanel(IntegrationBase):
         await self.dues_mark_paid(self.msg("/mark_paid", ADMIN_USER))
         mid = self._panel_mid()
 
-        await self.payment_panel_callback(self.call("pay_pick:0", ADMIN_USER, message_id=mid))
-        await self.payment_panel_callback(self.call("pay_history:0", ADMIN_USER, message_id=mid))
+        await self.payment_panel_callback(self.call(f"pay_pick:0:u{USERS[0]['id']}", ADMIN_USER, message_id=mid))
+        await self.payment_panel_callback(self.call(f"pay_history:0:u{USERS[0]['id']}", ADMIN_USER, message_id=mid))
 
         texts = self.edited_texts()
         self.assertTrue(any("recent entries" in t.lower() and "share" in t.lower() for t in texts), texts)
 
         # Back returns to the player-action view (Full/Partial buttons), not
         # an error.
-        await self.payment_panel_callback(self.call("pay_back:0", ADMIN_USER, message_id=mid))
+        await self.payment_panel_callback(self.call(f"pay_back:0:u{USERS[0]['id']}", ADMIN_USER, message_id=mid))
         texts = self.edited_texts()
         self.assertTrue(any("owes" in t.lower() for t in texts), texts)
 
@@ -954,7 +954,7 @@ class TestPaymentPanel(IntegrationBase):
         self.mgr.set_admin_rights(CHAT_ID, True)
         get_mock_bot().get_chat_member.return_value.status = "member"
         try:
-            await self.payment_panel_callback(self.call("pay_full:0", USERS[0], message_id=mid))
+            await self.payment_panel_callback(self.call(f"pay_full:0:u{USERS[0]['id']}", USERS[0], message_id=mid))
         finally:
             get_mock_bot().get_chat_member.return_value.status = "administrator"
             self.mgr.set_admin_rights(CHAT_ID, False)

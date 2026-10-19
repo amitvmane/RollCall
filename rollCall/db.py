@@ -6128,6 +6128,16 @@ def _dues_now() -> str:
     return _utcnow_naive().strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _as_ledger_ts(ts: str) -> str:
+    """Rewrite a UTC "YYYY-MM-DD HH:MM:SS" bound into _dues_now()'s form so it
+    compares correctly, as text, against ledger created_at values. Already
+    ledger-shaped (or unrecognised) input passes through unchanged."""
+    s = str(ts)
+    if len(s) == 19 and s[10] == " ":
+        return f"{s[:10]}T{s[11:]}Z"
+    return s
+
+
 def create_game_closure(
     chat_id: int,
     rollcall_id: int,
@@ -6824,6 +6834,22 @@ def _dues_epoch_clause(chat_id: int, ph: str):
     return f" AND r.ended_at > {ph}", (epoch,)
 
 
+def rollcall_predates_dues_epoch(chat_id: int, rollcall_id: int) -> bool:
+    """True when this game falls outside the chat's current dues epoch — the
+    exact complement of _dues_epoch_clause, so "can be re-settled" and "can
+    be cancelled" can never disagree. NULL epoch (legacy) → False."""
+    ph = "%s" if db_type == "postgresql" else "?"
+    epoch_sql, epoch_params = _dues_epoch_clause(chat_id, ph)
+    if not epoch_sql:
+        return False
+    with _cursor() as cursor:
+        cursor.execute(
+            f"SELECT 1 FROM rollcalls r WHERE r.id = {ph}{epoch_sql}",
+            (rollcall_id, *epoch_params),
+        )
+        return cursor.fetchone() is None
+
+
 def get_unsettled_rollcalls(chat_id: int, limit: int = 10) -> List[Dict]:
     """All ended, not-cancelled rollcalls with no financial closure yet and
     ended after the dues epoch, newest first. Same query as
@@ -7181,7 +7207,14 @@ def get_attendance_between(chat_id: int, start_utc: str, end_utc: str) -> List[D
 
 
 def get_fund_transactions_between(chat_id: int, start_utc: str, end_utc: str) -> List[Dict]:
-    """Fund transactions in a UTC window (for the monthly statement)."""
+    """Fund transactions in a UTC window (for the monthly statement).
+
+    Ledger created_at is TEXT in _dues_now()'s "YYYY-MM-DDTHH:MM:SSZ" form and
+    compares as text, so the bounds are rewritten to that same form first —
+    a "YYYY-MM-DD HH:MM:SS" bound sorts every 'T' row of its boundary day
+    after it (' ' < 'T'), dropping a non-UTC chat's month-edge rows into the
+    wrong statement."""
+    start_utc, end_utc = _as_ledger_ts(start_utc), _as_ledger_ts(end_utc)
     try:
         with _cursor() as cursor:
             ph = "%s" if db_type == "postgresql" else "?"

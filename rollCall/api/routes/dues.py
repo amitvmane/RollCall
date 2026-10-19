@@ -359,11 +359,20 @@ async def cancel_game_dues(
         # Fetch inside the lock so a concurrent close_game cannot shift ordering
         # between the lookup and the reversal, and to prevent double-reversal
         # from two concurrent API calls on the same game.
-        closure = _db.get_nth_game_closure(chat_id, body.n_index)
-        if closure is None:
-            raise HTTPException(status_code=404, detail="No game closure found at that position.")
+        if body.rollcall_id is not None:
+            if _db.get_game_closure(body.rollcall_id) is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="That game has no dues to cancel — already cancelled or never settled.",
+                )
+            target_rc_id = body.rollcall_id
+        else:
+            closure = _db.get_nth_game_closure(chat_id, body.n_index)
+            if closure is None:
+                raise HTTPException(status_code=404, detail="No game closure found at that position.")
+            target_rc_id = closure["rollcall_id"]
         result = dues_svc.cancel_game_credit(
-            chat_id, closure["rollcall_id"], actor_uid, actor_name
+            chat_id, target_rc_id, actor_uid, actor_name
         )
     await _announce(chat_id, result.get("announcement"))
     return result

@@ -423,13 +423,14 @@ def web_group_stats(
             uid = lookup_user_id
             kind = "real"
         elif lookup_name:
+            # An unverified name only ever reaches proxy (guest) stats. A
+            # real member's personal numbers (ghost count, sessions) need
+            # their own signed id_token — ?name=@alice used to hand anyone
+            # with the group link Alice's record.
             resolved = resolve_user(chat_id, lookup_name.strip())
-            if resolved and resolved[0] not in ("ambiguous",):
-                kind = resolved[0]
-                if kind == "proxy":
-                    pname = resolved[1]
-                else:
-                    uid = resolved[1]
+            if resolved and resolved[0] == "proxy":
+                kind = "proxy"
+                pname = resolved[1]
 
         p: dict | None = None
         try:

@@ -246,12 +246,12 @@ class WebGroupStatsResponse(BaseModel):
 # ── Web push schemas ──────────────────────────────────────────────────────────
 
 class PushSubscribeKeys(BaseModel):
-    p256dh: str
-    auth: str
+    p256dh: str = Field(..., max_length=256)
+    auth: str = Field(..., max_length=256)
 
 
 class PushSubscribeRequest(BaseModel):
-    endpoint: str = Field(..., min_length=10)
+    endpoint: str = Field(..., min_length=10, max_length=1024)
     keys: PushSubscribeKeys
     id_token: Optional[str] = Field(
         None,

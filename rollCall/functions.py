@@ -71,7 +71,28 @@ async def admin_rights(message, manager):
     except Exception as e:
         logging.error(f"[{_ts()}] Error checking admin rights: {e}")
         return False
-    
+
+
+async def is_telegram_chat_admin(chat_id, user_id) -> bool:
+    """Is user_id a REAL Telegram administrator/creator of chat_id, right now?
+
+    Unlike admin_rights() this ignores the /set_admins open-mode default,
+    for actions whose blast radius is bigger than the chat: minting a login
+    link yields a global identity valid in every group the member is in, so
+    "everyone is an admin here" must not be enough. Fails closed — Telegram
+    unreachable means no.
+    """
+    if not user_id:
+        return False
+    try:
+        member = await _bot().get_chat_member(chat_id, user_id)
+    except Exception:
+        logging.warning("is_telegram_chat_admin: get_chat_member failed chat=%s user=%s",
+                        chat_id, user_id, exc_info=True)
+        return False
+    return getattr(member, "status", None) in ("administrator", "creator")
+
+
 # FUNCTION TO CHECK IF SHH/LOUDER IS ACTIVE
 def send_list(message, manager):
     """Check if bot should send detailed lists (not in shh mode)"""

@@ -897,7 +897,7 @@ function renderLists(){
   function section(label,cls,items,statusKey){
     const rows=items.length?items.map((u,i)=>{
       const isYou=currentName&&u.name.toLowerCase()===currentName.toLowerCase();
-      const av=`<span class="av" style="background:${avColor(u.name)}">${(u.name[0]||"?").toUpperCase()}</span>`;
+      const av=`<span class="av" style="background:${avColor(u.name)}">${esc((u.name[0]||"?").toUpperCase())}</span>`;
       const cm=u.comment?`<span class="li-comment">— ${esc(u.comment)}</span>`:"";
       const tgDot=u.is_proxy===false?'<span class="tg-dot" title="Telegram user"></span>':"";
       const adminActs=(_isWebAdmin&&statusKey!=="waiting")?_rowAdminActs(u.name,statusKey):"";
@@ -1001,13 +1001,13 @@ function renderUpcoming(upcoming){
       const isOnce=!!u.scheduled_at;
       const hasEvent=u.event_day&&u.event_time;
       const eventStr=hasEvent
-        ?`🏟 Event: ${u.event_day[0].toUpperCase()+u.event_day.slice(1)} ${u.event_time}`
+        ?`🏟 Event: ${esc(u.event_day[0].toUpperCase()+u.event_day.slice(1))} ${esc(u.event_time)}`
         :"";
-      const meta=[u.location?`📍 ${u.location}`:"",u.fee?`💰 ${u.fee}`:"",u.limit?`👥 Cap: ${u.limit}`:""].filter(Boolean).join(" · ");
+      const meta=[u.location?`📍 ${esc(u.location)}`:"",u.fee?`💰 ${esc(u.fee)}`:"",u.limit?`👥 Cap: ${esc(u.limit)}`:""].filter(Boolean).join(" · ");
       return `<div class="upcoming-row">
         <div class="upcoming-when" title="Opens (auto-starts)"><span class="upcoming-day">${dateStr}</span><span class="upcoming-time">${timeStr}</span></div>
         <div class="upcoming-info">
-          <div class="upcoming-title">${title}</div>
+          <div class="upcoming-title">${esc(title)}</div>
           <div class="upcoming-opens-lbl">${isOnce?"Opens for voting (one-time)":"Opens for voting"}</div>
           ${eventStr?`<div class="upcoming-event">${eventStr}</div>`:""}
           ${meta?`<div class="upcoming-meta">${meta}</div>`:""}
@@ -1429,7 +1429,7 @@ window.startTgVerify=async function(){
     // Shown whether or not the popup landed: even when it works, the tab can
     // open behind, and the user needs a way back to it.
     _showVerifyDeepLink(deep_link);
-    toast(win?"Telegram opened — tap the verify button, then return here"
+    toast(win?"Telegram opened — tap Start, then “Yes, sign me in”, and return here"
              :"Tap “Open Telegram” below to finish signing in",5000);
     if(btn){btn.textContent="⏳ Waiting for Telegram…";}
     _verifyPollTimer=setInterval(_pollVerify,2000);
@@ -3684,7 +3684,7 @@ function renderTemplateEditForm(t,isNew){
     </div>
     <div class="id-prompt-label" style="text-align:left;margin-bottom:0;margin-top:4px">Auto-disable after</div>
     <div style="display:flex;gap:8px">
-      <select id="tsf-expmode-${safeName}" onchange="document.getElementById('tsf-expdate-${safeName}').style.display=this.value==='custom'?'':'none'" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
+      <select id="tsf-expmode-${safeName}" onchange="document.getElementById('tsf-expdate-${esc(escJsAttr(t.name))}').style.display=this.value==='custom'?'':'none'" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
         <option value="12m">12 months from now</option>
         <option value="6m">6 months from now</option>
         <option value="custom" selected>Custom date</option>

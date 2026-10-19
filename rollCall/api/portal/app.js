@@ -22,7 +22,12 @@ let _filterText="";
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
 function $id(id){return document.getElementById(id);}
-function esc(s){const d=document.createElement("div");d.textContent=s||"";return d.innerHTML;}
+// Escapes quotes too: esc() output lands inside attributes (title="…",
+// href="…"), where the old textContent→innerHTML trick left " and ' raw.
+function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
+// For a value inside a single-quoted JS string in an inline handler — wrap
+// the result in esc() too, since the handler itself is an attribute.
+function escJsAttr(s){return String(s||"").replace(/\\/g,"\\\\").replace(/'/g,"\\'");}
 
 // Native confirm() is unavailable in some webviews (notably Telegram's,
 // where it returns undefined without ever asking) — see the same helper on
@@ -76,7 +81,7 @@ async function startVerify(){
     const code=res.code;
     localStorage.setItem(LS_VERIFY_CODE,code);
     window.open(res.deep_link,"_blank");
-    statusEl.textContent="Telegram opened — tap Start in the bot, then return here.";
+    statusEl.textContent="Telegram opened — tap Start, then “Yes, sign me in”, and return here.";
     btn.textContent="Waiting for verification…";
     _pollTimer=setInterval(()=>_checkVerify(code),2000);
   }catch(e){
@@ -508,7 +513,7 @@ ${bestStreak>0?`<div class="milestone-box">🏆 Best streak ever: <strong>${best
   <div style="font-weight:600;margin-bottom:4px;font-size:.82rem">📎 Permanent group link</div>
   <div style="display:flex;gap:8px;align-items:center">
     <code class="join-link-code">${esc(joinUrl)}</code>
-    <button onclick="navigator.clipboard.writeText('${joinUrl.replace(/'/g,"\\'")}').then(()=>toast('Link copied!'))" class="copy-link-btn">Copy</button>
+    <button onclick="navigator.clipboard.writeText('${esc(escJsAttr(joinUrl))}').then(()=>toast('Link copied!'))" class="copy-link-btn">Copy</button>
   </div>
 </div>`;
   }
@@ -597,7 +602,7 @@ async function _loadDuesSection(g){
   <div class="dues-hero-lbl">${heroLbl}</div>
   ${bal!==0?`<div class="dues-hero-val">₹${Math.abs(bal)}</div>`:""}
   ${(bal>0&&upi)?`<div class="dues-hero-upi">💳 Pay to <code class="dues-upi">${esc(upi)}</code>
-    <button onclick="navigator.clipboard.writeText('${upi.replace(/'/g,"\\'")}').then(()=>toast('UPI copied!'))" class="copy-link-btn">Copy</button>
+    <button onclick="navigator.clipboard.writeText('${esc(escJsAttr(upi))}').then(()=>toast('UPI copied!'))" class="copy-link-btn">Copy</button>
   </div>`:""}
 </div>`;
 

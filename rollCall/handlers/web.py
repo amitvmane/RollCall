@@ -20,7 +20,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import db as _db
 from bot_state import bot, reply_error, _esc_md
 from exceptions import incorrectParameter, insufficientPermissions, parameterMissing
-from functions import admin_rights
+from functions import admin_rights, is_telegram_chat_admin
 from rollcall_manager import manager
 from services.web import get_group_web_token
 
@@ -127,11 +127,23 @@ def _resolve_member_for_weblogin(chat_id: int, name_arg: str) -> tuple:
 
 @bot.message_handler(func=lambda m: m.text.split()[0].split("@")[0].lower() == "/weblogin")
 async def weblogin_cmd(message):
-    """Admin-only: issue a single-use login URL for a member who can't use Telegram verify."""
+    """Telegram-admin-only: issue a single-use login URL for a member who can't
+    use Telegram verify. The URL is DMed to the issuing admin, never posted.
+
+    Two things make this stricter than every other admin command. The redeemed
+    link mints a GLOBAL 30-day identity — valid in every group the member is
+    in, not just this one — so admin_rights()'s open-mode "everyone is an
+    admin until /set_admins" would let any member of any open group sign in
+    as anyone. And a link posted in the group is readable by every member, so
+    even a legitimately issued one was a takeover for whoever clicked first.
+    """
     cid = message.chat.id
     try:
-        if await admin_rights(message, manager) is False:
-            raise insufficientPermissions("Admin only: /weblogin")
+        admin = message.from_user
+        if admin is None or not await is_telegram_chat_admin(cid, admin.id):
+            raise insufficientPermissions(
+                "Only a Telegram admin of this group can issue /weblogin links."
+            )
 
         base = _web_base_url()
         if not base:
@@ -151,9 +163,8 @@ async def weblogin_cmd(message):
         token = uuid.uuid4().hex
         expires_at = datetime.now(timezone.utc) + timedelta(days=_WEBLOGIN_TTL_DAYS)
 
-        admin = message.from_user
-        admin_uid = admin.id if admin else 0
-        admin_name = (admin.first_name if admin else None) or "admin"
+        admin_uid = admin.id
+        admin_name = admin.first_name or "admin"
 
         _db.create_web_direct_login_token(
             token=token,
@@ -168,14 +179,36 @@ async def weblogin_cmd(message):
         login_url = f"{base}/api/v1/auth/weblogin/{token}"
         expiry_str = expires_at.strftime("%d %b %Y")
 
-        await bot.send_message(
-            cid,
-            f"🔐 *Web login link for {_esc_md(display_name)}*\n\n"
-            f"`{login_url}`\n\n"
-            f"Single-use · expires {expiry_str}\n"
-            f"_Share via WhatsApp or email. The link logs them in automatically._",
-            parse_mode="Markdown",
-        )
+        try:
+            await bot.send_message(
+                admin_uid,
+                f"🔐 *Web login link for {_esc_md(display_name)}*\n\n"
+                f"`{login_url}`\n\n"
+                f"Single-use · expires {expiry_str}\n"
+                f"_Send it to {_esc_md(display_name)} only (WhatsApp, email). "
+                f"Whoever opens it is signed in as them._",
+                parse_mode="Markdown",
+            )
+        except Exception:
+            # Telegram forbids a bot opening a DM. Burn the link rather than
+            # leave a live one nobody holds, and never fall back to posting
+            # it in the group.
+            _db.consume_web_direct_login_token(token)
+            await bot.send_message(
+                cid,
+                f"📪 I couldn't DM you the link, {_esc_md(admin_name)} — open a "
+                "private chat with me (tap my name → Start), then run /weblogin again.",
+                parse_mode="Markdown",
+            )
+            return
+
+        if message.chat.type != "private":
+            await bot.send_message(
+                cid,
+                f"🔐 Login link for {_esc_md(display_name)} sent to you privately, "
+                f"{_esc_md(admin_name)}.",
+                parse_mode="Markdown",
+            )
 
         logging.info(
             "[weblogin_cmd] admin=%s issued weblogin for user=%s chat=%s expires=%s",

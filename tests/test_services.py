@@ -1981,8 +1981,29 @@ class TestStatsService(unittest.TestCase):
              patch("services.stats.weekday_attendance", return_value=[]), \
              patch("services.stats._entry_badges", return_value=[]):
             from services.stats import web_group_stats
-            result = web_group_stats("tok123", lookup_name="Amit")
+            result = web_group_stats("tok123", lookup_user_id=5)
         self.assertEqual(result["personal"]["recent_sessions"][0]["ended_at"], "2026-07-05 06:30:00")
+
+    def test_web_group_stats_name_lookup_never_returns_a_real_members_stats(self):
+        """Regression: ?name=@alice handed anyone holding the group link
+        Alice's personal record. A real member needs their own id_token;
+        an unverified name only reaches guest (proxy) stats."""
+        chat = {"chat_id": 100}
+        with patch("db.get_chat_by_group_web_token", return_value=chat), \
+             patch("services.stats.group_stats", return_value={
+                 "real_participants": 0, "proxy_participants": 0, "total_rollcalls": 0,
+                 "avg_attendance": 0, "real_attendance_slots": 0, "proxy_attendance_slots": 0,
+                 "waitlist_promotions": 0, "ghost_leaderboard": []}), \
+             patch("services.stats.leaderboard", return_value={"entries": []}), \
+             patch("services.stats.history", return_value=[]), \
+             patch("services.stats.resolve_user", return_value=("real", 5, "Amit")), \
+             patch("services.stats.personal_stats", return_value={"user_id": 5, "ghost_count": 3}) as ps, \
+             patch("services.stats.weekday_attendance", return_value=[]), \
+             patch("services.stats._entry_badges", return_value=[]):
+            from services.stats import web_group_stats
+            result = web_group_stats("tok123", lookup_name="@amit")
+        self.assertIsNone(result["personal"])
+        ps.assert_not_called()
 
 
 if __name__ == "__main__":

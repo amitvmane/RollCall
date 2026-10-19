@@ -196,22 +196,70 @@ def _suggest_command(query):
     and m.text.split()[1].startswith("v_")
 ))
 async def handle_tg_verify(message):
-    """Telegram deep-link identity verification: /start v_{code}"""
+    """Telegram deep-link identity verification: /start v_{code}
+
+    Opening the link only ASKS. Codes are minted by an unauthenticated
+    endpoint, so whoever minted one can send the deep link to someone else;
+    if tapping it verified straight away, the minter's status poll would
+    receive the tapper's identity. The explicit Confirm tap (below) is what
+    marks the code, after a warning that names exactly that trick.
+    """
     import db as _db
     code = message.text.split()[1][2:]  # strip "v_" prefix
-    user = message.from_user
-    tg_name = user.first_name or (f"@{user.username}" if user.username else str(user.id))
-    success = _db.mark_web_verify_token(code, user.id, tg_name, tg_username=user.username or None)
-    if success:
-        await bot.send_message(
-            message.chat.id,
-            f"✅ *{tg_name}*, your browser has been verified.\n\nReturn to the web page — it will update automatically.",
-            parse_mode="Markdown",
-        )
-    else:
+    row = _db.get_web_verify_token(code)
+    if row is None or row.get("tg_user_id") or row.get("used_at"):
         await bot.send_message(
             message.chat.id,
             "⚠️ This verification link has expired or already been used. Go back to the web page and try again.",
+        )
+        return
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton("✅ Yes, sign me in", callback_data=f"tgv_ok:{code}"))
+    kb.add(InlineKeyboardButton("✖️ No, cancel", callback_data="tgv_no"))
+    await bot.send_message(
+        message.chat.id,
+        "🔐 A browser is asking to sign in to RollCall as you.\n\n"
+        "Only continue if you started this yourself on the RollCall web page "
+        "just now. If someone sent you this link, tap No — confirming would "
+        "sign THEM in as you.",
+        reply_markup=kb,
+    )
+
+
+@bot.callback_query_handler(func=lambda call: call.data and (
+    call.data.startswith("tgv_ok:") or call.data == "tgv_no"
+))
+async def handle_tg_verify_confirm(call):
+    """The Confirm/Cancel tap on the /start v_{code} prompt."""
+    import db as _db
+    chat = call.message.chat if call.message else None
+    try:
+        await bot.answer_callback_query(call.id)
+    except Exception:
+        logging.debug("tg verify: answer_callback_query failed", exc_info=True)
+    # Private chat only: in a DM the only person who can tap is its owner.
+    if chat is None or chat.type != "private":
+        return
+    if call.data == "tgv_no":
+        await bot.edit_message_text(
+            "✖️ Sign-in cancelled. Nothing was shared with the browser.",
+            chat.id, call.message.message_id,
+        )
+        return
+    code = call.data.split(":", 1)[1]
+    user = call.from_user
+    tg_name = user.first_name or (f"@{user.username}" if user.username else str(user.id))
+    success = _db.mark_web_verify_token(code, user.id, tg_name, tg_username=user.username or None)
+    if success:
+        await bot.edit_message_text(
+            f"✅ *{_esc_md(tg_name)}*, your browser has been verified.\n\nReturn to the web page — it will update automatically.",
+            chat.id, call.message.message_id,
+            parse_mode="Markdown",
+        )
+    else:
+        await bot.edit_message_text(
+            "⚠️ This verification link has expired or already been used. Go back to the web page and try again.",
+            chat.id, call.message.message_id,
         )
 
 

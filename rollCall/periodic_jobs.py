@@ -332,7 +332,11 @@ async def _idle_reengagement() -> None:
             actor = _db.get_last_admin_actor(chat_id)
             if not actor or not actor.get("admin_id"):
                 continue
-            templates = _db.get_templates(chat_id)
+            # Never offer a hidden one-off (__once_…) template: it isn't the
+            # group's, and starting it would hand out an internal name.
+            from services.templates import is_reserved_once_template_name
+            templates = [t for t in _db.get_templates(chat_id)
+                         if not is_reserved_once_template_name(t.get("name"))]
             if not templates:
                 continue
             tmpl_name = templates[0].get("name") or "template"

@@ -613,12 +613,12 @@ class TestFireScheduledRollcalls(unittest.TestCase):
         self.assertEqual(start_tmpl.call_args.kwargs["admin_name"], "Amit")
         add_rollcall.assert_not_called()
         mark_fired.assert_called_once_with(1)
-        # Regression: a rollcall started from a matched template with a
-        # finalizeDate must get its auto-close/reminder loop started —
-        # previously this call site never did, so such rollcalls stayed
-        # open forever past their scheduled close time.
-        start_loop.assert_called_once()
-        self.assertEqual(start_loop.call_args.args[2], -100)
+        # The auto-close/reminder loop for a template-started rollcall is now
+        # started inside services.templates.start_template (one place for
+        # every surface — see check_reminders.ensure_reminder_loop), which
+        # is mocked here; this call site must not spawn a second one.
+        # integration_tests/test_scheduling_fixes.py covers the real path.
+        start_loop.assert_not_called()
 
     def test_falls_back_to_bare_title_when_no_template_matches(self):
         import rollcall_manager as _rcm

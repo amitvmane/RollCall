@@ -180,8 +180,6 @@ async def check(rollcalls, timezone, chat_id):
         if len(rollcalls) == 0:
             break
 
-        no_reminder_rollcalls = 0
-
         # Snapshot the current list and build rc_id_map from it for this pass
         current_rollcalls = list(rollcalls)
         rc_id_map = {id(rc): i + 1 for i, rc in enumerate(current_rollcalls)}
@@ -235,7 +233,6 @@ async def check(rollcalls, timezone, chat_id):
                     logging.exception("Error in after-open reminder DM")
 
                 if rollcall.finalizeDate is None:
-                    no_reminder_rollcalls += 1
                     continue
 
                 # BUG12: ensure finalizeDate is tz-aware before any comparison
@@ -315,19 +312,15 @@ async def check(rollcalls, timezone, chat_id):
                 if rollcall.reminder is not None:
                     reminder_time = finalize_dt - timedelta(hours=int(rollcall.reminder))
                     if now_date >= reminder_time:
-                        logging.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Sending reminder for rollcall #{rc_number}: {rollcall.title}")
-                        await bot.send_message(
-                            chat_id,
-                            f"Gentle reminder! event with title - {rollcall.title} is {rollcall.reminder} hour/s away"
-                        )
+                        reminder_hours = rollcall.reminder
+                        # Clear (and persist the clear) BEFORE the send. The
+                        # auto-close below is gated on `reminder is None`, so
+                        # a send that raises (Telegram down) used to leave the
+                        # reminder set forever — retried every tick, and the
+                        # rollcall never auto-closed. A lost reminder is
+                        # cosmetic; a rollcall that never closes is not.
+                        # Persisting also stops a restart re-firing it.
                         rollcall.reminder = None
-                        # Persist the clear so a bot restart between now and
-                        # the rollcall's finalizeDate doesn't re-fire the
-                        # reminder. Before this line existed, the in-memory
-                        # clear was lost on restart and the freshly-loaded
-                        # rollcall.reminder_hours from DB still matched
-                        # "now >= reminder_time" → user got the reminder
-                        # twice.
                         rc_db_id = getattr(rollcall, "db_id", None) or getattr(rollcall, "id", None)
                         if rc_db_id is not None:
                             try:
@@ -337,7 +330,26 @@ async def check(rollcalls, timezone, chat_id):
                                     f"Failed to persist reminder clear for rollcall {rc_db_id}; "
                                     "a bot restart before close could re-fire the reminder"
                                 )
-                        continue
+                        if now_date < finalize_dt:
+                            logging.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Sending reminder for rollcall #{rc_number}: {rollcall.title}")
+                            try:
+                                await bot.send_message(
+                                    chat_id,
+                                    f"Gentle reminder! event with title - {rollcall.title} is {reminder_hours} hour/s away"
+                                )
+                            except Exception:
+                                logging.exception(
+                                    f"[reminder] Failed to send reminder for rollcall #{rc_number} in chat {chat_id} "
+                                    "(cleared anyway so auto-close still runs)"
+                                )
+                            continue
+                        # Past the event already (bot was down through the
+                        # reminder window) — "N hour/s away" would be a lie.
+                        # Drop it and fall through to auto-close this tick.
+                        logging.info(
+                            f"[reminder] Skipping stale reminder for rollcall #{rc_number} in chat {chat_id}: "
+                            "close time already passed"
+                        )
 
                 if rollcall.finalizeDate is not None and rollcall.reminder is None:
                     if now_date >= finalize_dt:
@@ -421,10 +433,78 @@ async def check(rollcalls, timezone, chat_id):
             except Exception:
                 logging.exception("Error processing rollcall reminder")
 
-        if len(rollcalls) == 0 or no_reminder_rollcalls == len(rollcalls):
+        # Same predicate ensure_reminder_loop / resume use to decide a loop is
+        # needed. No await between this check and start()'s finally clearing
+        # _active_loops, so a rollcall started concurrently can't slip
+        # between "loop decides to stop" and "loop is gone".
+        if not _loop_needed(chat_id, manager.get_rollcalls(chat_id)):
             break
 
         await asyncio.sleep(60)
+
+
+def _loop_needed(chat_id, rollcalls) -> bool:
+    """Does this chat need its per-chat reminder loop running?
+
+    Yes if any open rollcall has a close time (auto-close, /srr, auto-buzz,
+    before-close DMs), OR the chat has /remind_after_open on and some open
+    rollcall hasn't had its after-open DM yet. The second half matters for
+    rollcalls with NO close time: /remind_after_open is promised to work for
+    those, and it lives in this loop — which used to exit (or never start)
+    as soon as no rollcall had a finalizeDate, so the DM never went out.
+    """
+    if not rollcalls:
+        return False
+    if any(rc.finalizeDate is not None for rc in rollcalls):
+        return True
+    if all(getattr(rc, "reminder_after_open_sent", False) for rc in rollcalls):
+        return False
+    try:
+        return int(get_or_create_chat(chat_id).get("reminder_after_open_hours") or 0) > 0
+    except Exception:
+        logging.exception(f"[reminder-loop] could not read after-open setting for chat {chat_id}")
+        return False
+
+
+def ensure_reminder_loop(chat_id, tzname=None) -> bool:
+    """Make sure the chat's reminder/auto-close loop is running if it needs
+    to be. THE one way to kick the loop after anything that creates a
+    rollcall, sets a close time, or turns on /remind_after_open.
+
+    Called from the service layer (services.rollcalls.start_rollcall,
+    services.templates.start_template) so every surface — Telegram, web,
+    REST, scheduler — gets it. It used to be N call sites each remembering
+    to spawn start(); the web/REST start paths forgot, and a rollcall
+    started there with a close time never auto-closed until a restart.
+
+    Idempotent: a no-op when a loop is already active for the chat (start()
+    also guards on _active_loops), or when nothing needs one. Returns True
+    iff a new loop task was scheduled. Sync on purpose — callable from sync
+    service code, as long as an event loop is running.
+    """
+    from rollcall_manager import manager
+
+    if chat_id in _active_loops:
+        return False
+    rollcalls = manager.get_rollcalls(chat_id)
+    if not _loop_needed(chat_id, rollcalls):
+        return False
+    if not tzname:
+        try:
+            tzname = manager.get_chat(chat_id).get("timezone", "Asia/Kolkata")
+        except Exception:
+            tzname = "Asia/Kolkata"
+    try:
+        pytz.timezone(tzname)
+    except Exception:
+        tzname = "Asia/Kolkata"
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return False  # no loop (sync caller outside the bot) — resume_reminder_loops covers boot
+    from bot_state import _log_task_exc
+    asyncio.create_task(start(rollcalls, tzname, chat_id)).add_done_callback(_log_task_exc)
+    return True
 
 
 async def start(rollcalls, timezone, chat_id):
@@ -453,7 +533,8 @@ async def start(rollcalls, timezone, chat_id):
 
 
 async def resume_reminder_loops():
-    """On startup, restart reminder loops for all chats that have active rollcalls with a finalizeDate.
+    """On startup, restart reminder loops for all chats whose open rollcalls
+    need one (a finalizeDate, or a pending /remind_after_open DM).
     Called once from runner.py to recover state after a bot restart.
     """
     from rollcall_manager import manager
@@ -464,7 +545,7 @@ async def resume_reminder_loops():
         try:
             chat = manager.get_chat(chat_id)
             rollcalls = manager.get_rollcalls(chat_id)
-            if any(rc.finalizeDate is not None for rc in rollcalls):
+            if _loop_needed(chat_id, rollcalls):
                 tzname = chat.get("timezone", "Asia/Kolkata")
                 # Attach the done callback so any exception in the resumed
                 # reminder loop surfaces in logs. Without it, asyncio swallows
@@ -646,12 +727,7 @@ async def _auto_start_from_template(chat_id: int, tmpl: dict, stamp_date: str = 
     )
 
     # Ensure the reminder/auto-close loop is running for this new rollcall
-    if rc.finalizeDate:
-        def _log_exc(t):
-            if not t.cancelled() and t.exception():
-                logging.error(f"Reminder loop raised: {t.exception()}")
-        _t = asyncio.create_task(start(manager.get_rollcalls(chat_id), tzname, chat_id))
-        _t.add_done_callback(_log_exc)
+    ensure_reminder_loop(chat_id, tzname)
 
     return True
 
@@ -800,27 +876,62 @@ def next_occurrence_datetime(tz, schedule_time, schedule_day, recurrence_type,
 def _missed_within_days(schedule_day, schedule_time, last_date, now, max_days):
     """Return True if a weekly template missed its scheduled run within max_days.
 
-    Used for startup catch-up: if the bot was offline and the weekly run was
-    missed (e.g. yesterday or the day before), fire it now.  Biweekly and
-    monthly templates are excluded — their cadence is long enough that a
-    2-day catch-up window could legitimately double-fire.
+    Used for outage/cap catch-up: if the weekly run was missed — earlier
+    today past the 30-minute window (bot down 08:30-10:00 for a 09:00
+    slot), yesterday, or the day before — fire it now. Biweekly and monthly
+    templates are excluded — their cadence is long enough that a 2-day
+    catch-up window could legitimately double-fire.
+
+    Dedupe is `last_date >= missed date`, not equality: a catch-up fire is
+    stamped with the day it actually ran (today), which is later than the
+    occurrence it made up for. Equality never matched that stamp, so a
+    Sunday miss fired Monday 00:00 and then AGAIN Tuesday 00:00 (Sunday is
+    still in the 2-day window and "Monday" != "Sunday").
     """
-    from datetime import timedelta
     hm = _parse_hhmm(schedule_time)
     if hm is None:
         return False
     sh, sm = hm
-    for delta in range(1, max_days + 1):
+    for delta in range(0, max_days + 1):
         past = now - timedelta(days=delta)
         if past.strftime("%A").lower() != (schedule_day or "").lower():
             continue
         past_date_str = past.strftime("%Y-%m-%d")
-        if last_date == past_date_str:
-            return False  # Already fired on that day
+        if last_date and last_date >= past_date_str:
+            return False  # That occurrence (or a later one) already fired
         past_scheduled_dt = past.replace(hour=sh, minute=sm, second=0, microsecond=0)
         if now > past_scheduled_dt:
             return True
     return False
+
+
+def stale_occurrence_date(now, schedule_time, schedule_day, recurrence_type):
+    """Most recent occurrence of this schedule that the scheduler would
+    still catch up on but that is already too late to be wanted — i.e. its
+    slot passed more than SCHEDULE_CATCHUP_MINUTES ago, today or (weekly)
+    within SCHEDULE_CATCHUP_DAYS. "YYYY-MM-DD" or None.
+
+    Used when a schedule is created or changed: a newly configured slot
+    starts from now, it doesn't owe a fire for a moment that passed before
+    it existed. Only weekly has an after-the-window catch-up
+    (_missed_within_days), so only weekly can be affected; the others
+    return None and their last_scheduled_date (biweekly's 14-day anchor)
+    is left alone.
+    """
+    if recurrence_type != "weekly":
+        return None
+    hm = _parse_hhmm(schedule_time)
+    if hm is None:
+        return None
+    sh, sm = hm
+    for delta in range(0, SCHEDULE_CATCHUP_DAYS + 1):
+        past = now - timedelta(days=delta)
+        if past.strftime("%A").lower() != (schedule_day or "").lower():
+            continue
+        slot = past.replace(hour=sh, minute=sm, second=0, microsecond=0)
+        if (now - slot).total_seconds() > SCHEDULE_CATCHUP_MINUTES * 60:
+            return past.strftime("%Y-%m-%d")
+    return None
 
 
 async def _fire_scheduled_rollcalls():
@@ -841,8 +952,22 @@ async def _fire_scheduled_rollcalls():
                     "[scheduler] Cannot fire scheduled rollcall '%s' for chat %s: 3 active rollcalls",
                     title, chat_id,
                 )
-                # Mark as fired anyway so it doesn't loop forever
-                mark_scheduled_rollcall_fired(row_id)
+                # Mark as fired anyway so it doesn't loop forever — and drop
+                # the hidden __once_ template that existed only to carry this
+                # one firing's fields. It was only deleted on the success
+                # path, so a capped one-off orphaned it forever (and the idle
+                # nudge could then offer "Start '__once_…' now").
+                if mark_scheduled_rollcall_fired(row_id):
+                    from services.templates import is_reserved_once_template_name
+                    if is_reserved_once_template_name(title):
+                        from db import delete_template as _delete_template
+                        try:
+                            _delete_template(chat_id, title)
+                        except Exception:
+                            logging.exception(
+                                "[scheduler] Failed to delete one-off template %s for chat %s",
+                                title, chat_id,
+                            )
                 try:
                     await bot.send_message(
                         chat_id,
@@ -923,24 +1048,9 @@ async def _fire_scheduled_rollcalls():
                 except Exception:
                     logging.exception("[scheduler] Fallback announce also failed for '%s'", title)
 
-            # Ensure the reminder/auto-close loop is running for this
-            # rollcall. Without this, a rollcall started here with a
-            # finalizeDate (event_day/event_time or offset_* from the
-            # matched template) would sit open forever past its scheduled
-            # close time — nothing else in the process ever re-checks it.
-            # start() is idempotent per chat_id (safe to call even if a
-            # loop for this chat is already running), matching the same
-            # call after _auto_start_from_template and after the
-            # /start_template command handler.
-            if rc.finalizeDate:
-                def _log_exc(t, _title=title, _chat_id=chat_id):
-                    if not t.cancelled() and t.exception():
-                        logging.error(
-                            f"Reminder loop raised for '{_title}' chat {_chat_id}: {t.exception()}"
-                        )
-                _rc_tz = rc.timezone or "Asia/Kolkata"
-                _reminder_task = asyncio.create_task(start(manager.get_rollcalls(chat_id), _rc_tz, chat_id))
-                _reminder_task.add_done_callback(_log_exc)
+            # Template path: services.templates.start_template already did
+            # this. The bare-title fallback didn't go through a service.
+            ensure_reminder_loop(chat_id, rc.timezone or None)
 
             logging.info("[scheduler] Fired scheduled rollcall '%s' for chat %s", title, chat_id)
         except Exception:

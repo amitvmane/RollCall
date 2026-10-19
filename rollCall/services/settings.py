@@ -275,6 +275,9 @@ def set_rollcall_time(
     log_admin_action(chat_id, admin_user_id, admin_name,
                      "set_rollcall_time", details=date.strftime("%d-%m-%Y %H:%M"),
                      rollcall_id=getattr(rc, "id", None))
+    # A close time only means something if the loop that enforces it runs.
+    from check_reminders import ensure_reminder_loop
+    ensure_reminder_loop(chat_id, rc.timezone)
     return {
         "rollcall": serialize_rollcall(rc, rc_number),
         "cancelled": False,

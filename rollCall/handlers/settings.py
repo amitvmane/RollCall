@@ -71,10 +71,7 @@ async def set_rollcall_time(message):
         rc = manager.get_rollcall(cid, rc_number)
         from handlers.lifecycle import _update_panel
         await _update_panel(cid, rc_number + 1, rc)
-        if not result["cancelled"]:
-            from check_reminders import start
-            rollcalls = manager.get_rollcalls(cid)
-            asyncio.create_task(start(rollcalls, rc.timezone, cid)).add_done_callback(_log_task_exc)
+        # Auto-close loop: started by settings_svc.set_rollcall_time.
 
     except Exception as e:
         from bot_state import _USER_FACING_EXCEPTIONS

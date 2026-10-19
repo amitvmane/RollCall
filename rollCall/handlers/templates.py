@@ -501,11 +501,7 @@ async def start_template(message):
 
     from handlers.lifecycle import show_panel_for_rollcall
     await show_panel_for_rollcall(cid, result["number"])
-
-    if result.get("finalize_date"):
-        from check_reminders import start
-        rollcalls = manager.get_rollcalls(cid)
-        asyncio.create_task(start(rollcalls, result["timezone"], cid)).add_done_callback(_log_task_exc)
+    # Reminder/auto-close loop: started by templates_svc.start_template.
 
 
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/set_template")
@@ -1041,7 +1037,9 @@ async def idle_start_callback(call):
             return
 
         import db as _db
-        templates = _db.get_templates(chat_id)
+        # Same filter as the idle nudge that sent this button.
+        templates = [t for t in _db.get_templates(chat_id)
+                     if not templates_svc.is_reserved_once_template_name(t.get("name"))]
         if not templates:
             await bot.answer_callback_query(call.id, "No templates found for that group.", show_alert=True)
             return

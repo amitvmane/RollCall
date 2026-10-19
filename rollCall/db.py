@@ -2849,21 +2849,30 @@ def delete_template(chatid: int, name: str) -> bool:
         return False
 
 
-def set_template_schedule(chatid: int, name: str, schedule_day: Optional[str], schedule_time: str, recurrence_type: str = 'weekly', schedule_expires_at: Optional[str] = None) -> bool:
+def set_template_schedule(chatid: int, name: str, schedule_day: Optional[str], schedule_time: str, recurrence_type: str = 'weekly', schedule_expires_at: Optional[str] = None, last_scheduled_date: Optional[str] = None) -> bool:
     """Set schedule day/time and enable auto-start for a template.
     schedule_day is None for daily recurrence (no weekday to match).
     schedule_expires_at ("YYYY-MM-DD") is when this auto-disables itself —
-    see check_template_schedules in check_reminders.py."""
+    see check_template_schedules in check_reminders.py.
+
+    last_scheduled_date is left as-is unless a date is passed. It used to be
+    reset to NULL on every call — and every web template edit re-saves the
+    schedule — so the scheduler forgot today's fire (a second rollcall
+    inside the 30-minute window) and biweekly lost its 14-day anchor.
+    services.templates.set_schedule decides what it should be."""
     try:
         with _cursor(commit=True) as cursor:
             ph = "%s" if db_type == "postgresql" else "?"
             enabled = True if db_type == "postgresql" else 1
+            sets = (f"schedule_day = {ph}, schedule_time = {ph}, schedule_enabled = {ph}, "
+                    f"recurrence_type = {ph}, schedule_expires_at = {ph}")
+            params = [schedule_day, schedule_time, enabled, recurrence_type, schedule_expires_at]
+            if last_scheduled_date is not None:
+                sets += f", last_scheduled_date = {ph}"
+                params.append(last_scheduled_date)
             cursor.execute(
-                f"UPDATE templates SET schedule_day = {ph}, schedule_time = {ph}, "
-                f"schedule_enabled = {ph}, last_scheduled_date = NULL, recurrence_type = {ph}, "
-                f"schedule_expires_at = {ph} "
-                f"WHERE chatid = {ph} AND name = {ph}",
-                (schedule_day, schedule_time, enabled, recurrence_type, schedule_expires_at, chatid, name),
+                f"UPDATE templates SET {sets} WHERE chatid = {ph} AND name = {ph}",
+                (*params, chatid, name),
             )
             return cursor.rowcount > 0
     except Exception as e:

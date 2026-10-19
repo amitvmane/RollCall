@@ -646,6 +646,11 @@ async def start_template(
 
     rc = build_rollcall_from_template(chat_id, tmpl, title)
 
+    # Same reason as services.rollcalls.start_rollcall: one place, so the
+    # web/REST template-start paths get auto-close too.
+    from check_reminders import ensure_reminder_loop
+    ensure_reminder_loop(chat_id, rc.timezone)
+
     rc_index = len(manager.get_rollcalls(chat_id)) - 1
     log_admin_action(
         chat_id, admin_user_id, admin_name,
@@ -701,6 +706,49 @@ def get_schedule(chat_id: int, name: str) -> dict:
     }
 
 
+def _last_fired_after_schedule_edit(chat_id, existing, schedule_day, schedule_time,
+                                    recurrence_type, fired_today=False):
+    """What last_scheduled_date should be after (re)saving a schedule.
+
+    Never earlier than what's stored: that date is both "already fired on
+    this day" and biweekly's anchor. It used to be wiped on every save —
+    and the web editor re-saves the schedule on any template edit — so a
+    rollcall that had just fired (or been started by /src … repeat=) fired
+    again within the 30-minute window, and biweekly drifted.
+
+    It can move forward: to today when the caller just ran it by hand, and,
+    when the slot itself changed (or the schedule was off), past any weekly
+    occurrence that is already too late to want — a slot configured now
+    doesn't owe a catch-up fire for a moment that passed before it existed
+    (check_reminders.stale_occurrence_date). An unchanged, enabled schedule
+    keeps its pending catch-ups: an unrelated edit must not cancel them.
+    """
+    prev = existing.get("last_scheduled_date") or None
+    candidates = [prev]
+    try:
+        tzname = manager.get_chat(chat_id).get("timezone", "Asia/Kolkata")
+        try:
+            tz = pytz.timezone(tzname)
+        except Exception:
+            tz = pytz.timezone("Asia/Kolkata")
+        now = datetime.now(tz)
+        if fired_today:
+            candidates.append(now.strftime("%Y-%m-%d"))
+        unchanged = (
+            bool(existing.get("schedule_enabled"))
+            and (existing.get("schedule_day") or None) == (schedule_day or None)
+            and (existing.get("schedule_time") or "").strip() == (schedule_time or "").strip()
+            and (existing.get("recurrence_type") or "weekly") == recurrence_type
+        )
+        if not unchanged:
+            from check_reminders import stale_occurrence_date
+            candidates.append(stale_occurrence_date(now, schedule_time, schedule_day, recurrence_type))
+    except Exception:
+        logging.exception("[set_schedule] could not compute last fire for '%s' chat %s", existing.get("name"), chat_id)
+    dated = [c for c in candidates if isinstance(c, str) and c]
+    return max(dated) if dated else None
+
+
 def set_schedule(
     chat_id: int,
     name: str,
@@ -711,6 +759,7 @@ def set_schedule(
     schedule_time: Optional[str] = None,
     monthly_day: Optional[int] = None,
     expires_at: Optional[str] = None,
+    fired_today: bool = False,
 ) -> dict:
     """
     Set or update a template's auto-start schedule.
@@ -728,6 +777,14 @@ def set_schedule(
     about it — callers that genuinely want a long-lived schedule should
     pass an explicit far-future date.
 
+    fired_today — the caller just started this template's rollcall by hand
+    (/src … repeat=, /repeat … repeat=): count it as today's fire so the
+    scheduler doesn't open a second one in the same catch-up window.
+
+    last_scheduled_date (the scheduler's "already fired" record and
+    biweekly's 14-day anchor) survives every call — see
+    _last_fired_after_schedule_edit.
+
     Returns the updated schedule dict.
 
     Raises:
@@ -735,7 +792,8 @@ def set_schedule(
       incorrectParameter — invalid recurrence type / weekday / time / template not found
     """
     name = _validate_name(name)
-    if not get_template(chat_id, name):
+    existing = get_template(chat_id, name)
+    if not existing:
         raise incorrectParameter(f"Template '{name}' not found.")
 
     recurrence_type = recurrence_type.lower()
@@ -796,7 +854,11 @@ def set_schedule(
     else:
         expires_at = (datetime.now() + timedelta(days=365)).strftime("%Y-%m-%d")
 
-    ok = set_template_schedule(chat_id, name, sched_day_str, schedule_time, recurrence_type, expires_at)
+    last_fired = _last_fired_after_schedule_edit(
+        chat_id, existing, sched_day_str, schedule_time, recurrence_type, fired_today,
+    )
+    ok = set_template_schedule(chat_id, name, sched_day_str, schedule_time, recurrence_type, expires_at,
+                               last_scheduled_date=last_fired)
     if not ok:
         raise incorrectParameter("Failed to save schedule. Please try again.")
 

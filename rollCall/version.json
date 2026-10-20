@@ -356,13 +356,13 @@
     {
         "Version": 10.6,
         "Description": "10.6 — Safer & More Accurate 🛡\n\n📊 Stats count only games you actually played: cancelled games and no-shows\nno longer count. Streaks break when you miss a game, /stats matches the\nleaderboard, and each 🏅 milestone is announced once.\n\n🎯 Buttons and web actions always hit the right rollcall, even after another\none closes. Old panels' buttons are switched off when a game ends.\n\n💰 Dues: cancelling a game twice no longer gives credits; collector credits\nare correct; settling works when the fund is negative; \"1,200\" reads as 1200.\n/cancel_game_dues now asks you to confirm.\n\n🗓 Schedules: editing a schedule no longer opens a duplicate game; a missed\ngame is caught up once; web-started games close on time.\n\n🗓 New: /cancel_once — cancel a one-off game before it opens.\n\n📲 Web app: notifications for promotions, reminders and dues; 🔔 per group.\n\n🔐 Security fixes for web sign-in links and the group page.\n\nType /help for all commands · /weblink for the group web page",
-        "DeployedOnProd": "Y",
+        "DeployedOnProd": "N",
         "DeployedDatetime": "19-10-2026 11:01 UTC"
     },
     {
         "Version": 10.7,
         "Description": "10.7 — Fairer Games ⏰\n\n⏰ Late drops: dropping from IN to OUT or MAYBE within 6 hours of game time\nis now recorded and shown in /stats, the web Stats tab and the portal. It\nonly counts once the game is played; no penalty, it's just visible.\n\n💰 The end-of-game list showed a wrong per-person fee when the fee had more\nthan one number (\"600 + 200\" became 600200). It now reads the fee the\nsame way dues do.\n\n🗓 Turning a weekly schedule back on no longer opens last week's game\nstraight away.\n\n🔐 Web app notifications only go to the browsers' own push services.\n\nType /help for all commands · /weblink for the group web page",
-        "DeployedOnProd": "N",
-        "DeployedDatetime": "20-10-2026 00:00 UTC"
+        "DeployedOnProd": "Y",
+        "DeployedDatetime": "20-10-2026 09:41 UTC"
     }
 ]

@@ -83,12 +83,39 @@ class PushSubscriptionRejected(ValueError):
     """User-safe reason a subscription was refused."""
 
 
-def validate_endpoint(endpoint: str) -> None:
-    """Accept only a public https URL addressed by hostname.
+# The browsers' own push services — Chrome/Edge-on-Android/Opera/Samsung
+# (FCM), Firefox (autopush), Safari/iOS (APNs web push), Edge on Windows
+# (WNS). A push endpoint is a URL the SERVER fetches, so it is an SSRF
+# vector; checking that a hostname "looks public" is not enough, because a
+# name can resolve to a public IP when checked and to 127.0.0.1 or the LAN
+# when the push is sent (DNS rebinding). Hosts under these suffixes are
+# DNS-controlled by Google/Mozilla/Apple/Microsoft, so a caller cannot
+# re-point them.
+_PUSH_SERVICE_SUFFIXES = (
+    "fcm.googleapis.com", "android.googleapis.com",
+    "push.services.mozilla.com",
+    "push.apple.com",
+    "notify.windows.com",
+)
 
-    Real push services (FCM, Mozilla autopush, Apple, WNS) are always https
-    on a public DNS name, so refusing IP literals, localhost and
-    private-namespace suffixes costs no real browser anything.
+
+def _is_push_service(host: str) -> bool:
+    return any(host == s or host.endswith("." + s) for s in _PUSH_SERVICE_SUFFIXES)
+
+
+def is_allowed_endpoint(endpoint: str) -> bool:
+    try:
+        validate_endpoint(endpoint)
+        return True
+    except PushSubscriptionRejected:
+        return False
+
+
+def validate_endpoint(endpoint: str) -> None:
+    """Accept only an https URL on a known browser push service.
+
+    Also checked again at send time (_send_one): rows stored before the
+    allowlist existed are skipped there rather than fetched.
     """
     import ipaddress
     from urllib.parse import urlsplit
@@ -98,6 +125,7 @@ def validate_endpoint(endpoint: str) -> None:
     try:
         parts = urlsplit(endpoint)
         host = (parts.hostname or "").rstrip(".").lower()
+        port = parts.port
     except ValueError:
         raise PushSubscriptionRejected("Invalid push endpoint.")
     if parts.scheme != "https" or not host or parts.username or parts.password:
@@ -109,6 +137,10 @@ def validate_endpoint(endpoint: str) -> None:
         is_ip = False
     if is_ip or "." not in host or host == "localhost" or host.endswith(_BLOCKED_HOST_SUFFIXES):
         raise PushSubscriptionRejected("Push endpoint must be a public push service.")
+    if port not in (None, 443) or not _is_push_service(host):
+        raise PushSubscriptionRejected(
+            "This browser's notification service isn't supported. "
+            "Try Chrome, Firefox, Safari or Edge.")
 
 
 def subscribe(group_token: str, endpoint: str, p256dh: str, auth: str, tg_user_id: Optional[int] = None) -> None:
@@ -148,6 +180,9 @@ def _send_one(sub: dict, payload: str, priv_pem: str):
     only ever used from one thread.
     """
     from pywebpush import webpush, WebPushException
+    if not is_allowed_endpoint(sub["endpoint"]):
+        logging.warning("[push] skipped non-push-service endpoint %.40s", sub["endpoint"])
+        return "failed"
     try:
         webpush(
             subscription_info={

@@ -490,6 +490,7 @@ ${bestStreak>0?`<div class="milestone-box">🏆 Best streak ever: <strong>${best
 <div class="detail-meta-row">
   <span class="detail-meta-item">🗳 Voted in ${g.total_voted} of ${g.total_sessions} sessions (${esc(votingRate)})</span>
   ${g.ghost_count>0?`<span class="detail-meta-item ghost-flag">👻 ${g.ghost_count} ghost${g.ghost_count>1?"s":""}</span>`:""}
+  ${g.late_drops>0?`<span class="detail-meta-item ghost-flag" title="IN, then OUT/MAYBE close to game time">⏰ ${g.late_drops} late drop${g.late_drops>1?"s":""}</span>`:""}
 </div>`;
 
   if(g.has_active_rollcall&&g.group_web_token){

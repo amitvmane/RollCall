@@ -15,6 +15,7 @@ class PortalGroupSummary(BaseModel):
     current_streak: int = 0
     best_streak: int = 0
     ghost_count: int = 0
+    late_drops: int = 0
     rank: Optional[int] = None
     has_active_rollcall: bool = False
     is_web_admin: bool = False

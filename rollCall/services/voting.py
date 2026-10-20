@@ -45,6 +45,43 @@ def _rc_db_id(rc) -> int | None:
     return getattr(rc, "id", None) or getattr(rc, "db_id", None)
 
 
+# A member who was IN and moves OUT or MAYBE this close to game time (or
+# after it) is recorded as a late drop — by then the freed slot is hard to
+# fill. Recorded only, no penalty: /stats shows it so a group can see
+# whether it's a few repeat cases or everyone now and then.
+LATE_DROP_HOURS = 6
+
+
+def _record_if_late_drop(chat_id: int, rc, user) -> None:
+    """Called only for a real member who just left the IN list."""
+    fin = getattr(rc, "finalizeDate", None)
+    rc_db_id = _rc_db_id(rc)
+    if fin is None or rc_db_id is None or not isinstance(user.user_id, int):
+        return
+    try:
+        import pytz
+        try:  # the chat's zone — what the reminder loop reads finalizeDate in
+            tz = pytz.timezone(manager.get_chat(chat_id).get("timezone") or "Asia/Kolkata")
+        except Exception:
+            tz = pytz.timezone("Asia/Kolkata")
+        if fin.tzinfo is None:
+            try:
+                fin = tz.localize(fin, is_dst=None)
+            except Exception:
+                fin = tz.localize(fin, is_dst=True)
+        left = fin - datetime.now(tz)
+        if left.total_seconds() > LATE_DROP_HOURS * 3600:
+            return
+        from db import add_late_drop
+        if add_late_drop(rc_db_id, chat_id, user.user_id, user.name,
+                         max(0, int(left.total_seconds() // 60))):
+            logging.info(f"[{_ts()}] [RC #{rc_db_id}] late drop: user {user.user_id} "
+                         f"{max(0, int(left.total_seconds() // 60))} min before game time")
+    except Exception:
+        # Bookkeeping only — never cost the member their vote.
+        logging.exception("late-drop check failed rc=%s user=%s", rc_db_id, user.user_id)
+
+
 def check_ghost_reconfirmation_needed(
     chat_id: int,
     user_id: int,
@@ -230,6 +267,8 @@ def vote_out_locked(chat_id, user_id, first_name, username=None, comment=None,
 
     if result == "AB":
         raise alreadyInList(f"{user.name}, you're already OUT for '{rc.title}'.")
+    if was_in:
+        _record_if_late_drop(chat_id, rc, user)
 
     promoted = None
     action = "added"
@@ -305,6 +344,8 @@ def vote_maybe_locked(chat_id, user_id, first_name, username=None, comment=None,
 
     if result == "AB":
         raise alreadyInList(f"{user.name}, you're already MAYBE for '{rc.title}'.")
+    if was_in:
+        _record_if_late_drop(chat_id, rc, user)
 
     promoted = None
     action = "added"

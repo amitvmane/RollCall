@@ -1239,6 +1239,7 @@ function renderStats(d){
         <span class="sp-pill sp-out">❌ ${n(me.total_out_votes)} OUT</span>
         <span class="sp-pill sp-maybe">🤔 ${n(me.total_maybe_votes)} MAYBE</span>
         ${me.ghost_count?`<span class="sp-pill sp-ghost">👻 ${me.ghost_count} ghost</span>`:""}
+        ${me.late_drops?`<span class="sp-pill sp-ghost" title="IN → OUT/MAYBE within ${n(d.late_drop_hours)}h of game time">⏰ ${n(me.late_drops)} late drop${me.late_drops===1?"":"s"}</span>`:""}
       </div>
       ${(me.recent_sessions||[]).length>=3?`
       <div class="sp-spark-label">Last ${me.recent_sessions.length} sessions</div>
@@ -1311,6 +1312,12 @@ function renderStats(d){
     <span class="ghost-count">👻 ${n(g.ghost_count)}</span>
   </div>`).join("");
 
+  // Late drops — IN, then OUT/MAYBE close to game time (recorded only).
+  const lateRows=(d.late_drop_leaderboard||[]).map(g=>`<div class="ghost-row">
+    <span class="ghost-name">${esc(g.name||"—")}</span>
+    <span class="ghost-count">⏰ ${n(g.late_drops)}</span>
+  </div>`).join("");
+
   // Response-time leaderboard — how quickly each member typically casts
   // their first vote after a rollcall opens, fastest first.
   const fmtSecs=s=>{
@@ -1337,7 +1344,8 @@ function renderStats(d){
   ${lbRows?`<div class="stats-section-hdr">🏆 Leaderboard</div><div class="slb-list">${lbRows}</div>`:""}
   ${shistRows?`<div class="stats-section-hdr">🗓 Session History</div><div class="shist-list">${shistRows}</div>`:""}
   ${rtRows?`<div class="stats-section-hdr">⚡ Fastest Voters</div><div class="rt-list">${rtRows}</div>`:""}
-  ${ghostRows?`<div class="stats-section-hdr">👻 Ghosts</div><div class="ghost-list">${ghostRows}</div>`:""}`;
+  ${ghostRows?`<div class="stats-section-hdr">👻 Ghosts</div><div class="ghost-list">${ghostRows}</div>`:""}
+  ${lateRows?`<div class="stats-section-hdr" title="IN → OUT/MAYBE within ${n(d.late_drop_hours)}h of game time">⏰ Late drops <small>(within ${n(d.late_drop_hours)}h of game)</small></div><div class="ghost-list">${lateRows}</div>`:""}`;
 }
 
 // ── Presence / heartbeat ──────────────────────────────────────────────────

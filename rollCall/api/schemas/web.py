@@ -186,6 +186,7 @@ class WebStatsPersonal(BaseModel):
     best_streak: int = 0
     current_streak: int = 0
     ghost_count: int = 0
+    late_drops: int = 0
     total_in_votes: int = 0
     total_out_votes: int = 0
     total_maybe_votes: int = 0
@@ -225,6 +226,11 @@ class WebStatsGhostEntry(BaseModel):
     ghost_count: int = 0
 
 
+class WebStatsLateDropEntry(BaseModel):
+    name: Optional[str] = None
+    late_drops: int = 0
+
+
 class WebStatsResponseTimeEntry(BaseModel):
     user_id: int
     display_name: Optional[str] = None
@@ -245,6 +251,8 @@ class WebGroupStatsResponse(BaseModel):
     waitlist_promotions: int = 0
     leaderboard: List[WebStatsLeaderEntry] = Field(default_factory=list)
     ghost_leaderboard: List[WebStatsGhostEntry] = Field(default_factory=list)
+    late_drop_leaderboard: List[WebStatsLateDropEntry] = Field(default_factory=list)
+    late_drop_hours: int = 6
     recent_history: List[WebStatsHistoryEntry] = Field(default_factory=list)
     response_time_leaderboard: List[WebStatsResponseTimeEntry] = Field(default_factory=list)
     personal: Optional[WebStatsPersonal] = None

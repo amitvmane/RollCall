@@ -41,7 +41,7 @@ class TestWebPushSubscribe(unittest.TestCase):
         chat = self.db.get_or_create_chat(CHAT_ID)
         self.token = chat["group_web_token"]
 
-    def _sub_body(self, endpoint="https://push.example.com/abc123456789"):
+    def _sub_body(self, endpoint="https://fcm.googleapis.com/abc123456789"):
         return {
             "endpoint": endpoint,
             "keys": {"p256dh": "p256dh-key-value", "auth": "auth-key-value"},
@@ -64,12 +64,12 @@ class TestWebPushSubscribe(unittest.TestCase):
     def test_unsubscribe_with_invalid_token_returns_404(self):
         resp = self.client.post(
             "/api/v1/web/group/not-a-real-token/push-unsubscribe",
-            json={"endpoint": "https://push.example.com/abc123456789"},
+            json={"endpoint": "https://fcm.googleapis.com/abc123456789"},
         )
         self.assertEqual(resp.status_code, 404)
 
     def test_unsubscribe_with_valid_token_succeeds(self):
-        endpoint = "https://push.example.com/xyz987654321"
+        endpoint = "https://fcm.googleapis.com/xyz987654321"
         self.client.post(
             f"/api/v1/web/group/{self.token}/push-subscribe",
             json=self._sub_body(endpoint=endpoint),
@@ -138,31 +138,31 @@ class TestPushSubscribeIdentity(unittest.TestCase):
 
     def test_signed_token_links_the_subscription(self):
         from api.identity import issue_identity_token
-        ep = "https://push.example.com/linked-000001"
+        ep = "https://fcm.googleapis.com/linked-000001"
         self.assertEqual(self._subscribe(ep, id_token=issue_identity_token(self.OWNER_ID)).status_code, 204)
         self.assertEqual(self._stored_uid(ep), self.OWNER_ID)
 
     def test_raw_tg_user_id_in_body_is_ignored(self):
         """The old field must not link anything — a stale cached client that
         still sends it gets an unlinked subscription, not a forged one."""
-        ep = "https://push.example.com/rawid-000002"
+        ep = "https://fcm.googleapis.com/rawid-000002"
         self.assertEqual(self._subscribe(ep, tg_user_id=self.IMPERSONATED_ID).status_code, 204)
         self.assertIsNone(self._stored_uid(ep))
 
     def test_forged_token_does_not_link(self):
-        ep = "https://push.example.com/forged-000003"
+        ep = "https://fcm.googleapis.com/forged-000003"
         self.assertEqual(self._subscribe(ep, id_token="not.a.real.token").status_code, 204)
         self.assertIsNone(self._stored_uid(ep))
 
     def test_guest_without_any_token_still_subscribes(self):
-        ep = "https://push.example.com/guest-000004"
+        ep = "https://fcm.googleapis.com/guest-000004"
         self.assertEqual(self._subscribe(ep).status_code, 204)
         self.assertIsNone(self._stored_uid(ep))
 
     def test_cannot_claim_another_members_identity(self):
         """A token for one member never links a subscription to a different one."""
         from api.identity import issue_identity_token
-        ep = "https://push.example.com/mismatch-00005"
+        ep = "https://fcm.googleapis.com/mismatch-00005"
         self._subscribe(ep, id_token=issue_identity_token(self.OWNER_ID),
                         tg_user_id=self.IMPERSONATED_ID)
         self.assertEqual(self._stored_uid(ep), self.OWNER_ID)

@@ -709,4 +709,8 @@ def identity_stats(chat_id: int, *, user_id: Optional[int] = None,
         "current_streak": streaks["current_streak"],
         "ghost_count": ghost_count,
         "absent_limit": manager.get_absent_limit(chat_id),
+        # Self-service OUT/MAYBE only, so only the member's own rows — a
+        # guest name never votes for itself.
+        "late_drops": (db.get_late_drop_count(chat_id, group["user_id"])
+                       if group["kind"] == "user" else 0),
     }

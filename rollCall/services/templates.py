@@ -706,6 +706,12 @@ def get_schedule(chat_id: int, name: str) -> dict:
     }
 
 
+def _schedule_on(t: dict) -> bool:
+    """schedule_enabled as stored (1/"1"/True or 0/"0"/False/None). A bare
+    bool() reads SQLite's "0" as on."""
+    return str(t.get("schedule_enabled", "0")) not in ("0", "False", "false", "None", "")
+
+
 def _last_fired_after_schedule_edit(chat_id, existing, schedule_day, schedule_time,
                                     recurrence_type, fired_today=False):
     """What last_scheduled_date should be after (re)saving a schedule.
@@ -735,7 +741,7 @@ def _last_fired_after_schedule_edit(chat_id, existing, schedule_day, schedule_ti
         if fired_today:
             candidates.append(now.strftime("%Y-%m-%d"))
         unchanged = (
-            bool(existing.get("schedule_enabled"))
+            _schedule_on(existing)
             and (existing.get("schedule_day") or None) == (schedule_day or None)
             and (existing.get("schedule_time") or "").strip() == (schedule_time or "").strip()
             and (existing.get("recurrence_type") or "weekly") == recurrence_type
@@ -893,11 +899,24 @@ def enable_schedule(
     admin_user_id: int,
     admin_name: str,
 ) -> dict:
-    """Re-enable a previously disabled schedule. Returns updated schedule dict."""
+    """Re-enable a previously disabled schedule. Returns updated schedule dict.
+
+    A schedule switched back on starts from now, same as a newly saved one:
+    a weekly slot that passed while it was off (up to SCHEDULE_CATCHUP_DAYS
+    ago) is stamped as handled, or the scheduler's outage catch-up would
+    open that stale rollcall the minute it was re-enabled.
+    """
     name = _validate_name(name)
-    if not get_template(chat_id, name):
+    existing = get_template(chat_id, name)
+    if not existing:
         raise incorrectParameter(f"Template '{name}' not found.")
-    ok = enable_template_schedule(chat_id, name)
+    last_fired = None
+    if not _schedule_on(existing):
+        last_fired = _last_fired_after_schedule_edit(
+            chat_id, existing, existing.get("schedule_day"), existing.get("schedule_time"),
+            (existing.get("recurrence_type") or "weekly"),
+        )
+    ok = enable_template_schedule(chat_id, name, last_scheduled_date=last_fired)
     if not ok:
         raise incorrectParameter("Failed to enable schedule.")
     log_admin_action(chat_id, admin_user_id, admin_name, "schedule_template_on", target_name=name)

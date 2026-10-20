@@ -14,6 +14,7 @@ from db import (
     get_ghost_count,
     get_ghost_count_by_proxy_name,
     get_ghost_leaderboard,
+    get_late_drop_leaderboard,
     get_group_attendance_totals,
     get_leaderboard_by_attendance,
     get_proxy_attendance_count,
@@ -30,6 +31,7 @@ from db import (
     get_user_stats_row,
 )
 from rollcall_manager import manager
+from services.voting import LATE_DROP_HOURS
 
 
 def resolve_user(chat_id: int, arg: str) -> Optional[tuple]:
@@ -76,6 +78,7 @@ _PERSON_KEYS = (
     "total_in_votes", "total_out_votes", "total_maybe_votes",
     "total_sessions_voted", "voting_rate", "total_waiting_to_in",
     "best_streak", "current_streak", "ghost_count", "absent_limit",
+    "late_drops",
 )
 
 
@@ -146,6 +149,11 @@ def group_stats(chat_id: int) -> dict:
             }
             for row in ghost_board
         ],
+        "late_drop_leaderboard": [
+            {"name": row.get("user_name"), "late_drops": row["late_drops"]}
+            for row in get_late_drop_leaderboard(chat_id, limit=5)
+        ],
+        "late_drop_hours": LATE_DROP_HOURS,
     }
 
 
@@ -476,6 +484,8 @@ def web_group_stats(
         "waitlist_promotions": gs["waitlist_promotions"],
         "leaderboard": lb_data["entries"],
         "ghost_leaderboard": gs["ghost_leaderboard"],
+        "late_drop_leaderboard": gs.get("late_drop_leaderboard", []),
+        "late_drop_hours": gs.get("late_drop_hours", LATE_DROP_HOURS),
         "recent_history": hist,
         "response_time_leaderboard": rt_lb,
         "personal": personal,

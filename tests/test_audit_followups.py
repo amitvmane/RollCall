@@ -107,15 +107,15 @@ class TestUnsubscribeIsScopedToItsGroup(unittest.TestCase):
 
     def test_group_token_reaches_the_delete(self):
         self.db.delete_push_subscription.return_value = True
-        self.svc.unsubscribe("https://push.example/abc", "grouptokenA")
+        self.svc.unsubscribe("https://fcm.googleapis.com/abc", "grouptokenA")
         self.db.delete_push_subscription.assert_called_once_with(
-            "https://push.example/abc", group_token="grouptokenA")
+            "https://fcm.googleapis.com/abc", group_token="grouptokenA")
 
     def test_group_token_is_required_not_optional(self):
         """Optional would let a new call site silently get the old unscoped
         behaviour back, which is the bug itself."""
         with self.assertRaises(TypeError):
-            self.svc.unsubscribe("https://push.example/abc")
+            self.svc.unsubscribe("https://fcm.googleapis.com/abc")
 
     def test_expired_pruning_stays_unscoped(self):
         """When the push provider says an endpoint is gone it is gone in every

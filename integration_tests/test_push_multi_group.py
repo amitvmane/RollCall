@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 from mock_helpers import reset_db
 
 CHAT_A, CHAT_B = -1001999000910, -1001999000911
-EP = "https://push.example.com/one-browser-0001"
+EP = "https://fcm.googleapis.com/one-browser-0001"
 UID = 7101
 
 

@@ -23,8 +23,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "rollCall"))
 import services.push as push  # noqa: E402
 
 
+_FCM = "https://fcm.googleapis.com/fcm/send/"
+
+
 def _sub(endpoint):
-    return {"endpoint": endpoint, "p256dh": "p", "auth": "a"}
+    """endpoint is a short id; sends are only made to real push services."""
+    return {"endpoint": _FCM + endpoint, "p256dh": "p", "auth": "a"}
 
 
 class _Resp:
@@ -50,7 +54,7 @@ class TestSendOne(unittest.TestCase):
              patch("pywebpush.webpush", side_effect=exc):
             result = push._send_one(_sub("dead"), "{}", "pem")
         # Worker reports the expiry but must NOT delete from the DB itself.
-        self.assertEqual(result, ("expired", "dead"))
+        self.assertEqual(result, ("expired", _FCM + "dead"))
         del_mock.assert_not_called()
 
     def test_other_failure_returns_failed(self):
@@ -79,7 +83,7 @@ class TestDispatch(unittest.TestCase):
         exc.response = _Resp(410)
 
         def _webpush(*, subscription_info, **_kw):
-            if subscription_info["endpoint"] == "dead":
+            if subscription_info["endpoint"] == _FCM + "dead":
                 raise exc
             return None
 
@@ -90,7 +94,7 @@ class TestDispatch(unittest.TestCase):
             )
 
         self.assertEqual(sent, 1)  # only "live" delivered
-        self.assertEqual([ep for ep, _ in delete_threads], ["dead"])
+        self.assertEqual([ep for ep, _ in delete_threads], [_FCM + "dead"])
         # The delete must run on the event-loop (main) thread, not a worker.
         self.assertEqual(delete_threads[0][1], main_thread)
 

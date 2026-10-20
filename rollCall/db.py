@@ -755,6 +755,19 @@ def create_tables():
                     FOREIGN KEY (rollcall_id) REFERENCES rollcalls(id) ON DELETE CASCADE
                 )
             """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS late_drops (
+                    id SERIAL PRIMARY KEY,
+                    rollcall_id INTEGER NOT NULL,
+                    chat_id BIGINT NOT NULL,
+                    user_id BIGINT NOT NULL,
+                    user_name TEXT,
+                    minutes_before INTEGER,
+                    dropped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (rollcall_id) REFERENCES rollcalls(id) ON DELETE CASCADE,
+                    UNIQUE(rollcall_id, user_id)
+                )
+            """)
         else:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS ghost_records (
@@ -779,6 +792,19 @@ def create_tables():
                     user_name TEXT,
                     ghosted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (rollcall_id) REFERENCES rollcalls(id) ON DELETE CASCADE
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS late_drops (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    rollcall_id INTEGER NOT NULL,
+                    chat_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    user_name TEXT,
+                    minutes_before INTEGER,
+                    dropped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (rollcall_id) REFERENCES rollcalls(id) ON DELETE CASCADE,
+                    UNIQUE(rollcall_id, user_id)
                 )
             """)
 
@@ -1978,6 +2004,7 @@ def _run_migrations(conn, cursor):
     #       the composite serves both the filter and the sort.
     for _idx_sql in (
         "CREATE INDEX IF NOT EXISTS idx_ghost_events_rollcall ON ghost_events(rollcall_id)",
+        "CREATE INDEX IF NOT EXISTS idx_late_drops_chat ON late_drops(chat_id)",
         "CREATE INDEX IF NOT EXISTS idx_admin_actions_chat_created ON admin_actions(chat_id, created_at)",
     ):
         try:
@@ -2936,16 +2963,26 @@ def disable_template_schedule(chatid: int, name: str) -> bool:
         return False
 
 
-def enable_template_schedule(chatid: int, name: str) -> bool:
-    """Re-enable scheduling for a template using its previously saved schedule parameters."""
+def enable_template_schedule(chatid: int, name: str, last_scheduled_date: Optional[str] = None) -> bool:
+    """Re-enable scheduling for a template using its previously saved schedule parameters.
+
+    last_scheduled_date, when given, is stored too (in the same UPDATE, so the
+    scheduler can never see the schedule on without it)."""
     try:
         with _cursor(commit=True) as cursor:
             ph = "%s" if db_type == "postgresql" else "?"
             enabled = True if db_type == "postgresql" else 1
-            cursor.execute(
-                f"UPDATE templates SET schedule_enabled = {ph} WHERE chatid = {ph} AND name = {ph}",
-                (enabled, chatid, name),
-            )
+            if last_scheduled_date:
+                cursor.execute(
+                    f"UPDATE templates SET schedule_enabled = {ph}, last_scheduled_date = {ph} "
+                    f"WHERE chatid = {ph} AND name = {ph}",
+                    (enabled, last_scheduled_date, chatid, name),
+                )
+            else:
+                cursor.execute(
+                    f"UPDATE templates SET schedule_enabled = {ph} WHERE chatid = {ph} AND name = {ph}",
+                    (enabled, chatid, name),
+                )
             return cursor.rowcount > 0
     except Exception as e:
         logging.error(f"Error enabling template schedule: {e}")
@@ -4240,6 +4277,80 @@ def _proxy_played_sql(p: str = "p", r: str = "r") -> str:
     return (f"{p}.status = 'in' AND NOT EXISTS (SELECT 1 FROM ghost_events ge "
             f"WHERE ge.rollcall_id = {r}.id AND ge.user_id IS NULL "
             f"AND LOWER(ge.proxy_name) = LOWER({p}.name))")
+
+
+# ── Late drops ──────────────────────────────────────────────────────────────
+# A member who was IN and moved OUT/MAYBE close to game time (rule and window:
+# services.voting). Recorded mechanically at the vote — it is the only moment
+# that knows both "was IN" and the time; nothing after can reconstruct it.
+# Counted with the same rule as "played": only completed (not cancelled)
+# games, and not when the member ended that game IN anyway (dropped, then
+# came back). One row per member per game however often they flip.
+
+def _late_drop_counts_sql(ld: str = "ld") -> str:
+    return (f"EXISTS (SELECT 1 FROM rollcalls r WHERE r.id = {ld}.rollcall_id AND {_completed_sql('r')}) "
+            f"AND NOT EXISTS (SELECT 1 FROM users u WHERE u.rollcall_id = {ld}.rollcall_id "
+            f"AND u.user_id = {ld}.user_id AND u.status = 'in')")
+
+
+def add_late_drop(rollcall_id: int, chat_id: int, user_id: int, user_name: str,
+                  minutes_before: int) -> bool:
+    """Record a late drop. Returns True only when a new row was written."""
+    try:
+        with _cursor(commit=True) as cursor:
+            if db_type == 'postgresql':
+                cursor.execute(
+                    """INSERT INTO late_drops (rollcall_id, chat_id, user_id, user_name, minutes_before)
+                       VALUES (%s, %s, %s, %s, %s) ON CONFLICT (rollcall_id, user_id) DO NOTHING""",
+                    (rollcall_id, chat_id, user_id, user_name, minutes_before))
+            else:
+                cursor.execute(
+                    """INSERT OR IGNORE INTO late_drops (rollcall_id, chat_id, user_id, user_name, minutes_before)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (rollcall_id, chat_id, user_id, user_name, minutes_before))
+            return cursor.rowcount > 0
+    except Exception:
+        logging.exception("Error recording late drop rc=%s user=%s", rollcall_id, user_id)
+        return False
+
+
+def get_late_drop_count(chat_id: int, user_id: int) -> int:
+    ph = '%s' if db_type == 'postgresql' else '?'
+    try:
+        with _cursor() as cursor:
+            cursor.execute(
+                f"SELECT COUNT(*) AS n FROM late_drops ld "
+                f"WHERE ld.chat_id = {ph} AND ld.user_id = {ph} AND {_late_drop_counts_sql()}",
+                (chat_id, user_id))
+            row = cursor.fetchone()
+            return int((dict(row) if row else {}).get('n') or 0)
+    except Exception:
+        logging.exception("Error counting late drops chat=%s user=%s", chat_id, user_id)
+        return 0
+
+
+def get_late_drop_leaderboard(chat_id: int, limit: int = 5) -> List[Dict]:
+    """Members with the most late drops, most first: user_id, user_name, late_drops."""
+    ph = '%s' if db_type == 'postgresql' else '?'
+    try:
+        with _cursor() as cursor:
+            cursor.execute(
+                f"SELECT ld.user_id, COUNT(*) AS late_drops, MAX(ld.dropped_at) AS last_at "
+                f"FROM late_drops ld WHERE ld.chat_id = {ph} AND {_late_drop_counts_sql()} "
+                f"GROUP BY ld.user_id ORDER BY late_drops DESC, last_at DESC LIMIT {ph}",
+                (chat_id, limit))
+            rows = [dict(r) for r in cursor.fetchall()]
+            for r in rows:
+                cursor.execute(
+                    f"SELECT user_name FROM late_drops WHERE chat_id = {ph} AND user_id = {ph} "
+                    f"ORDER BY dropped_at DESC, id DESC LIMIT 1", (chat_id, r['user_id']))
+                n = cursor.fetchone()
+                r['user_name'] = (dict(n) if n else {}).get('user_name')
+                r['late_drops'] = int(r['late_drops'] or 0)
+            return rows
+    except Exception:
+        logging.exception("Error building late-drop leaderboard chat=%s", chat_id)
+        return []
 
 
 def get_chat_ended_rollcall_count(chat_id: int) -> int:

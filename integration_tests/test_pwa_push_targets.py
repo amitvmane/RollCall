@@ -32,26 +32,26 @@ class TestPerMemberPush(IntegrationBase):
         db.save_push_subscription(self.token, endpoint, "p256dh", "auth", tg_user_id=uid)
 
     async def test_resubscribe_without_identity_keeps_the_user(self):
-        self._subscribe("https://push.example/alice", ALICE)
-        self._subscribe("https://push.example/alice", None)   # bell tapped while signed out
+        self._subscribe("https://fcm.googleapis.com/alice", ALICE)
+        self._subscribe("https://fcm.googleapis.com/alice", None)   # bell tapped while signed out
         subs = db.get_push_subscriptions(self.token)
         self.assertEqual([s["tg_user_id"] for s in subs], [ALICE])
 
     async def test_notify_users_targets_only_named_members(self):
-        self._subscribe("https://push.example/alice-phone", ALICE)
-        self._subscribe("https://push.example/alice-laptop", ALICE)
-        self._subscribe("https://push.example/bob", BOB)
-        self._subscribe("https://push.example/anon", None)
+        self._subscribe("https://fcm.googleapis.com/alice-phone", ALICE)
+        self._subscribe("https://fcm.googleapis.com/alice-laptop", ALICE)
+        self._subscribe("https://fcm.googleapis.com/bob", BOB)
+        self._subscribe("https://fcm.googleapis.com/anon", None)
         with patch.object(push_svc, "_dispatch", new=AsyncMock(return_value=2)) as disp, \
              patch.object(push_svc, "_load_or_create_vapid", return_value=("pem", "pub")):
             sent = await push_svc.notify_users(CHAT_ID, [ALICE], "t", "b", tag="x")
         self.assertEqual(sent, 2)
         endpoints = sorted(s["endpoint"] for s in disp.await_args.args[0])
-        self.assertEqual(endpoints, ["https://push.example/alice-laptop",
-                                     "https://push.example/alice-phone"])
+        self.assertEqual(endpoints, ["https://fcm.googleapis.com/alice-laptop",
+                                     "https://fcm.googleapis.com/alice-phone"])
 
     async def test_notify_users_ignores_proxy_names(self):
-        self._subscribe("https://push.example/anon", None)
+        self._subscribe("https://fcm.googleapis.com/anon", None)
         with patch.object(push_svc, "_dispatch", new=AsyncMock()) as disp:
             sent = await push_svc.notify_users(CHAT_ID, ["Ravi (proxy)", None], "t", "b", tag="x")
         self.assertEqual(sent, 0)

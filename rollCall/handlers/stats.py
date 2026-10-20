@@ -13,6 +13,7 @@ from config import ADMINS
 from rollcall_manager import manager
 from services import ghost as ghost_svc
 from services import stats as stats_svc
+from services.voting import LATE_DROP_HOURS
 
 
 def _esc(text: str) -> str:
@@ -124,6 +125,7 @@ def _fmt_personal_stats(data: dict, first_name: str) -> str:
         f"✅ Played: {attended} of {total_rcs} games ({_pct_str(data['attendance_rate'])})",
         f"🗳 Voted in: {voted} of {total_rcs} games ({_pct_str(data['voting_rate'])})",
         f"👻 Absences on record: {ghost_count} (limit {absent_limit}){ghost_warn}",
+        f"⏰ Late drops: {data.get('late_drops', 0)} _(IN → OUT/MAYBE within {LATE_DROP_HOURS}h of game time)_",
         f"📊 Votes cast — IN: {data['total_in_votes']}  OUT: {data['total_out_votes']}  MAYBE: {data['total_maybe_votes']}",
         f"⏫ Promoted from waitlist: {data['total_waiting_to_in']}", "",
         f"🔥 Current streak: {data['current_streak']} game(s) in a row",
@@ -177,6 +179,10 @@ def _fmt_group_stats(data: dict) -> str:
         f"👤 Proxy sessions  — IN: {data['proxy_in']}  OUT: {data['proxy_out']}  MAYBE: {data['proxy_maybe']}",
         f"⏫ Waitlist → IN promotions: {data['waitlist_promotions']}",
     ]
+    late = data.get("late_drop_leaderboard") or []
+    if late:
+        lines += ["", f"*Late drops* _(IN → OUT/MAYBE within {data.get('late_drop_hours', LATE_DROP_HOURS)}h of game time)_"]
+        lines += [f"⏰ {_esc(r['name'] or 'Member')} — {r['late_drops']}" for r in late]
     if proxy_pax == 0:
         lines += ["", "_(No proxy members tracked in this chat yet.)_"]
     return "\n".join(lines)

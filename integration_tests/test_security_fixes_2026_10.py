@@ -270,6 +270,36 @@ class TestPushSubscribeEndpointValidation(Base):
         ):
             self.assertEqual(self._sub(ep).status_code, 400, ep)
 
+    def test_rejects_any_host_that_is_not_a_browser_push_service(self):
+        """A public-looking name is not enough: its DNS can be re-pointed at
+        127.0.0.1 between the check and the send (DNS rebinding)."""
+        for ep in (
+            "https://rebind.attacker.example/x",
+            "https://fcm.googleapis.com.attacker.example/x",
+            "https://evilfcm.googleapis.com.example/x",
+            "https://fcm.googleapis.com:8443/fcm/send/abc",
+            "https://fcm.googleapis.com:99999/x",
+        ):
+            self.assertEqual(self._sub(ep).status_code, 400, ep)
+
+    def test_accepts_every_major_browser_service(self):
+        for ep in (
+            "https://fcm.googleapis.com/fcm/send/c1",
+            "https://updates.push.services.mozilla.com/wpush/v2/c2",
+            "https://web.push.apple.com/c3",
+            "https://wns2-par02p.notify.windows.com/w/?token=c4",
+        ):
+            self.assertEqual(self._sub(ep).status_code, 204, ep)
+
+    def test_send_skips_a_stored_endpoint_off_the_allowlist(self):
+        """Rows saved before the allowlist existed are never fetched."""
+        from services import push
+        with patch("pywebpush.webpush") as wp:
+            self.assertEqual(push._send_one(
+                {"endpoint": "https://rebind.attacker.example/x", "p256dh": "k", "auth": "a"},
+                "{}", "pem"), "failed")
+            wp.assert_not_called()
+
     def test_rejects_overlong_endpoint(self):
         self.assertEqual(self._sub("https://fcm.googleapis.com/" + "a" * 1100).status_code, 422)
 

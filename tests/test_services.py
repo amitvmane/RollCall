@@ -1871,7 +1871,7 @@ class TestStatsService(unittest.TestCase):
             "total_in_votes": 7, "total_out_votes": 2, "total_maybe_votes": 1,
             "total_sessions_voted": 10, "voting_rate": 100.0, "total_waiting_to_in": 0,
             "best_streak": 5, "current_streak": 3, "ghost_count": 1, "absent_limit": 2,
-            "kind": "user", "aliases": [],
+            "late_drops": 0, "kind": "user", "aliases": [],
         }
         with patch("services.identity.identity_stats", return_value=folded) as ident:
             from services.stats import personal_stats

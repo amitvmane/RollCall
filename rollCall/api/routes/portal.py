@@ -72,6 +72,7 @@ async def portal_groups(
             current_streak=int(row.get("current_streak") or 0),
             best_streak=int(row.get("best_streak") or 0),
             ghost_count=int(row.get("ghost_count") or 0),
+            late_drops=_db.get_late_drop_count(cid, tg_user_id),
             rank=rank,
             has_active_rollcall=has_active,
             # Cache-only check (no live Telegram call) — fine for a list

@@ -21,6 +21,7 @@ class PersonalStatsResponse(BaseModel):
     best_streak: int = 0
     current_streak: int = 0
     ghost_count: int = 0
+    late_drops: int = 0
 
 
 class TopAttendee(BaseModel):
@@ -32,6 +33,11 @@ class TopAttendee(BaseModel):
 class GhostEntry(BaseModel):
     name: Optional[str]
     ghost_count: int
+
+
+class LateDropEntry(BaseModel):
+    name: Optional[str]
+    late_drops: int
 
 
 class GroupStatsResponse(BaseModel):
@@ -51,6 +57,8 @@ class GroupStatsResponse(BaseModel):
     waitlist_promotions: int = 0
     top_attendees: List[TopAttendee]
     ghost_leaderboard: List[GhostEntry]
+    late_drop_leaderboard: List[LateDropEntry] = Field(default_factory=list)
+    late_drop_hours: int = 6
 
 
 class LeaderboardEntry(BaseModel):

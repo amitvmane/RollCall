@@ -30,8 +30,8 @@ from api.identity import identity_from_header
 from pydantic import BaseModel, Field
 
 from db import (
-    _hash_token, generate_api_token, get_or_create_chat, get_member_chats,
-    get_user_voted_chats, get_web_admin_chats, insert_api_token, is_web_admin,
+    _hash_token, generate_api_token, get_or_create_chat,
+    get_web_admin_chats, insert_api_token, is_web_admin,
 )
 
 router = APIRouter()
@@ -106,17 +106,18 @@ def _validate_init_data(init_data: str, bot_token: str) -> dict:
     if not hmac.compare_digest(expected, received_hash):
         raise ValueError("initData HMAC verification failed")
 
-    # Reject stale initData (>24 h old)
+    # Reject stale initData (>24 h old). auth_date is required: Telegram
+    # always sends it, and treating "absent" as "fresh" made the age check
+    # optional for any initData that happened to lack the field.
     auth_date = pairs.get("auth_date")
-    if auth_date:
-        try:
-            age = int(time.time()) - int(auth_date)
-            if age > 86_400:
-                raise ValueError("initData is older than 24 hours")
-        except (TypeError, ValueError) as exc:
-            if "older than 24" in str(exc):
-                raise
-            raise ValueError("Invalid auth_date in initData") from exc
+    if not auth_date:
+        raise ValueError("Missing auth_date in initData")
+    try:
+        age = int(time.time()) - int(auth_date)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Invalid auth_date in initData") from exc
+    if age > 86_400:
+        raise ValueError("initData is older than 24 hours")
 
     return pairs
 
@@ -298,11 +299,8 @@ async def miniapp_group_session(body: MiniAppGroupSessionRequest) -> MiniAppAuth
     from api.identity import require_identity
     user_id = require_identity(body.id_token, detail="Verify with Telegram to switch groups.")
 
-    known = (
-        any(row["chat_id"] == body.chat_id for row in get_user_voted_chats(user_id))
-        or any(row["chat_id"] == body.chat_id for row in get_member_chats(user_id))
-    )
-    if not known and not is_web_admin(body.chat_id, user_id):
+    from api.web_admin import has_chat_standing
+    if not has_chat_standing(body.chat_id, user_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have access to that group.",
@@ -503,7 +501,7 @@ async def weblogin_redeem_post(body: _WeblogInRedeemRequest):
     id_token this mints only ever travels in a JSON response body.
     """
     import db as _db
-    from api.identity import issue_identity_token, IdentityError
+    from api.identity import issue_chat_bound_token, IdentityError
 
     payload = _db.consume_web_direct_login_token(body.token)
     if not payload:
@@ -513,7 +511,10 @@ async def weblogin_redeem_post(body: _WeblogInRedeemRequest):
     chat_id = payload["chat_id"]
 
     try:
-        id_token = issue_identity_token(tg_user_id)
+        # Bound to the issuing chat, never global: the only thing vouching
+        # for this identity is an admin of THAT chat, and anyone can be the
+        # admin of a group they just created (see issue_chat_bound_token).
+        id_token = issue_chat_bound_token(tg_user_id, chat_id)
         # Record the app-local principal for this Telegram account.
         # Best-effort and additive: nothing authorises off it yet, but
         # it means "the same person" has a stable id from the moment

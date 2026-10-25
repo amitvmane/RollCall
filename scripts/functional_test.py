@@ -1443,6 +1443,45 @@ async def run_all():
     ok = len(out) >= 1
     record("/set_admins responds", ok)
 
+    # Locked group, Bob a plain member: the /schedules buttons and /timezone
+    # used to skip the admin gate their commands (and the web) enforce.
+    _admin_member = bot.get_chat_member.return_value
+    _plain_member = MagicMock(status="member", user=MagicMock(is_bot=False))
+    bot.get_chat_member = AsyncMock(
+        side_effect=lambda cid, uid: _plain_member if uid == BOB[0] else _admin_member)
+    try:
+        tz_before = manager.get_chat(CHAT_ID).get("timezone")
+        out = await feed("/timezone America/New_York", BOB)
+        ok, d = contains(out, "admin")
+        record("Locked group: a member's /timezone change is refused", ok, d)
+        record("...and the timezone is unchanged",
+               manager.get_chat(CHAT_ID).get("timezone") == tz_before,
+               f"timezone now {manager.get_chat(CHAT_ID).get('timezone')!r}")
+
+        bot_state._sched_selection.pop(CHAT_ID, None)
+        bot.answer_callback_query.reset_mock()
+        await feed_cb("sched_selall", BOB)
+        answers = " ".join(str(c.args[1]) for c in bot.answer_callback_query.call_args_list
+                           if len(c.args) > 1)
+        record("Locked group: a member's tap on the /schedules panel is refused",
+               "only admins" in answers.lower() and CHAT_ID not in bot_state._sched_selection,
+               f"answers={answers!r}")
+        bot.answer_callback_query.reset_mock()
+        await feed_cb("sched_apply_off", BOB)
+        answers = " ".join(str(c.args[1]) for c in bot.answer_callback_query.call_args_list
+                           if len(c.args) > 1)
+        record("...including Pause, which used to pause every recurring rollcall",
+               "only admins" in answers.lower(), f"answers={answers!r}")
+
+        bot.answer_callback_query.reset_mock()
+        await feed_cb("sched_selclear", ALICE)
+        answers = " ".join(str(c.args[1]) for c in bot.answer_callback_query.call_args_list
+                           if len(c.args) > 1)
+        record("...while an admin's tap still works", "cleared" in answers.lower(),
+               f"answers={answers!r}")
+    finally:
+        bot.get_chat_member = AsyncMock(return_value=_admin_member)
+
     out = await feed("/unset_admins", ALICE)
     ok = len(out) >= 1
     record("/unset_admins responds", ok)

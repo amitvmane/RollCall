@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 import pytz
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot_state import bot, _sched_selection, _log_task_exc, _esc_md, reply_error, safe_edit_text
+from bot_state import bot, _sched_selection, _log_task_exc, _esc_md, reply_error, safe_edit_text, is_chat_admin
 from exceptions import insufficientPermissions, incorrectParameter, parameterMissing
 from functions import admin_rights, weekly_minutes, WEEKDAY_MAP
 from rollcall_manager import manager
@@ -809,6 +809,17 @@ async def schedules_toggle_callback(call):
     try:
         cid = call.message.chat.id
         data = call.data
+
+        # /schedules is admin-gated, but the panel it posts sits in the group
+        # where every member can tap it — so the buttons need the same gate,
+        # or any member could pause every recurring rollcall. Selection too:
+        # the selection set is per-chat, so a member toggling it would change
+        # what an admin's next Pause/Resume applies to.
+        if not await is_chat_admin(cid, call.from_user.id):
+            await bot.answer_callback_query(
+                call.id, "⛔ Only admins can change schedules", show_alert=True,
+            )
+            return
 
         if data.startswith("sched_sel_"):
             name = data[len("sched_sel_"):]

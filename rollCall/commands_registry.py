@@ -137,10 +137,10 @@ COMMANDS = [
         ),
     },
     {
-        "name": "timezone", "aliases": ["tz"], "scope": "user", "category": "Settings",
+        "name": "timezone", "aliases": ["tz"], "scope": "admin", "category": "Settings",
         "args": "[Region/City]", "sample": "/timezone Asia/Kolkata",
-        "summary": "Set your timezone",
-        "details": "Sets the bot's timezone for this chat — used for /when, scheduled templates, and auto-close timing. Run with no argument for a one-tap browser-based detect link (Telegram itself has no way to know your group's location).",
+        "summary": "Set the group's timezone",
+        "details": "Sets the bot's timezone for this chat — used for /when, scheduled templates, and auto-close timing. Changing it needs admin rights once the group has run /set_admins; anyone can run it with no argument to see the current timezone and get a one-tap browser-based detect link (Telegram itself has no way to know your group's location).",
     },
     {
         "name": "help", "aliases": [], "scope": "user", "category": "Settings",

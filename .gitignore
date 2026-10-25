@@ -5,6 +5,12 @@ database.json
 databaseMongo.json
 data/rollcall.db
 logs/bot.log
+# Rotated logs and SQLite's WAL sidecars: *.db alone missed these, and all
+# three ended up committed (4e327ee) — test data, but a public repo.
+logs/*.log.*
+*.db-wal
+*.db-shm
+*.db-journal
 rollcall.db
 *.db
 .DS_Store

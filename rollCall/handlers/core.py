@@ -9,7 +9,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot_state import bot, data_file_path, reply_error
 from config import ADMINS
-from exceptions import parameterMissing
+from exceptions import insufficientPermissions, parameterMissing
 from functions import admin_rights, auto_complete_timezone
 from rollcall_manager import manager
 from db import get_all_chat_ids
@@ -605,6 +605,12 @@ async def config_timezone(message):
                 ))
             await bot.send_message(cid, text, parse_mode="HTML", reply_markup=markup)
             return
+        # Viewing stays open; changing it is an admin action. The timezone
+        # shifts every scheduled start and auto-close in the group, and the
+        # web page's settings PATCH already required a web admin — the bot
+        # was the one surface where any member could move them.
+        if await admin_rights(message, manager) is False:
+            raise insufficientPermissions("Only an admin can change the group's timezone.")
         if len(msg.split(" ")[1].split("/")) < 2:
             raise parameterMissing("The correct format is: /timezone continent/country or continent/state")
 

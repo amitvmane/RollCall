@@ -252,7 +252,8 @@ class TestPortalHistory(unittest.TestCase):
             {"id": 1, "title": "Session A", "ended_at": "2026-06-01 10:00:00", "status": "in"},
             {"id": 2, "title": "Session B", "ended_at": "2026-06-08 10:00:00", "status": "miss"},
         ]
-        with patch("api.routes.portal._db.get_user_session_history", return_value=fake_sessions):
+        with patch("api.routes.portal.has_chat_standing", return_value=True), \
+             patch("api.routes.portal._db.get_user_session_history", return_value=fake_sessions):
             resp = _client().get("/api/v1/portal/groups/-100/history", headers={"X-Identity-Token": tok})
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
@@ -264,9 +265,32 @@ class TestPortalHistory(unittest.TestCase):
 
     def test_limit_param_accepted(self):
         tok = _good_token(20)
-        with patch("api.routes.portal._db.get_user_session_history", return_value=[]) as m:
+        with patch("api.routes.portal.has_chat_standing", return_value=True), \
+             patch("api.routes.portal._db.get_user_session_history", return_value=[]) as m:
             _client().get("/api/v1/portal/groups/-100/history?limit=5", headers={"X-Identity-Token": tok})
         m.assert_called_once_with(-100, 20, limit=5)
+
+    def test_history_of_unrelated_group_is_403(self):
+        """Regression: the history query LEFT JOINs every ended rollcall of
+        the chat, so any signed-in user could read any group's session
+        titles and dates by chat id. No standing → 403, query never runs."""
+        tok = _good_token(20)
+        with patch("api.web_admin._db.get_user_voted_chats", return_value=[{"chat_id": -555}]), \
+             patch("api.web_admin._db.get_member_chats", return_value=[]), \
+             patch("api.web_admin._db.is_web_admin", return_value=False), \
+             patch("api.routes.portal._db.get_user_session_history") as m:
+            resp = _client().get("/api/v1/portal/groups/-100/history", headers={"X-Identity-Token": tok})
+        self.assertEqual(resp.status_code, 403)
+        m.assert_not_called()
+
+    def test_history_allowed_via_member_chats(self):
+        tok = _good_token(20)
+        with patch("api.web_admin._db.get_user_voted_chats", return_value=[]), \
+             patch("api.web_admin._db.get_member_chats", return_value=[{"chat_id": -100}]), \
+             patch("api.web_admin._db.is_web_admin", return_value=False), \
+             patch("api.routes.portal._db.get_user_session_history", return_value=[]):
+            resp = _client().get("/api/v1/portal/groups/-100/history", headers={"X-Identity-Token": tok})
+        self.assertEqual(resp.status_code, 200)
 
     def test_limit_above_max_rejected(self):
         tok = _good_token(20)

@@ -1,0 +1,67 @@
+name: Dependency audit
+
+# The one copy of the pip-audit job. ci.yml calls it on every push/PR; the
+# schedule runs it daily with no push at all.
+#
+# Push/PR alone was not enough: advisories are published against versions
+# that are ALREADY pinned. In Oct 2026 Pillow 12.3.0 picked up 37 CVEs and
+# certifi a distrusted CA after the last push had gone green, and nothing
+# re-checked until the next unrelated commit. A failed scheduled run emails
+# the repo owner, which is the alert.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"   # daily, 06:17 UTC (off the top of the hour)
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Dependency audit (pip-audit)
+    runs-on: ubuntu-latest
+    # Scans the pinned closure in requirements.lock against the OSV / PyPI
+    # advisory databases. Gated through scripts/check_audit_baseline.py rather
+    # than failing on any finding: six pins were already vulnerable when this
+    # was switched on (2026-08-17), and a job that is red from day one gets
+    # ignored. The baseline makes NEW vulnerable dependencies fail while any
+    # deliberately deferred ones are tracked in security/audit_baseline.json.
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-audit
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Run pip-audit
+        # --no-deps: requirements.lock is a fully-pinned pip-compile closure, so
+        # audit exactly what ships rather than re-resolving it.
+        # '|| true': pip-audit exits non-zero on any finding; the baseline check
+        # below is what decides pass/fail.
+        run: |
+          pip-audit -r requirements.lock --no-deps \
+            --format json --output audit.json --progress-spinner off || true
+
+      - name: Check against baseline
+        run: python scripts/check_audit_baseline.py audit.json
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-audit-report
+          path: audit.json

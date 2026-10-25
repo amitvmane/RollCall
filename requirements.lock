@@ -24,7 +24,7 @@ anyio==4.15.1
     #   watchfiles
 attrs==26.1.0
     # via aiohttp
-certifi==2026.7.22
+certifi==2026.10.19
     # via
     #   httpcore
     #   httpx
@@ -91,7 +91,7 @@ opentelemetry-api==1.45.1
     # via fastapi
 packaging==26.3
     # via matplotlib
-pillow==12.3.0
+pillow==13.0.0
     # via
     #   -r requirements.txt
     #   matplotlib

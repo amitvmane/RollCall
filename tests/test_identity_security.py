@@ -78,6 +78,46 @@ class TestIdentityToken(unittest.TestCase):
             os.environ["TELEGRAM_TOKEN"] = orig
 
 
+@unittest.skipUnless(FASTAPI_AVAILABLE, "fastapi not installed")
+class TestChatBoundToken(unittest.TestCase):
+    """What /weblogin mints — valid in one chat, rejected everywhere else."""
+
+    def setUp(self):
+        from api import identity
+        self.identity = identity
+
+    def test_accepted_only_for_its_chat(self):
+        tok = self.identity.issue_chat_bound_token(42, -100)
+        self.assertEqual(self.identity.verify_identity_token(tok, chat_id=-100), 42)
+        self.assertIsNone(self.identity.verify_identity_token(tok, chat_id=-101))
+
+    def test_rejected_where_no_chat_is_given(self):
+        # Every cross-group endpoint calls verify without a chat_id — this is
+        # what keeps /auth/admin/* and /portal/* closed to it.
+        tok = self.identity.issue_chat_bound_token(42, -100)
+        self.assertIsNone(self.identity.verify_identity_token(tok))
+
+    def test_global_token_still_accepted_with_a_chat(self):
+        tok = self.identity.issue_identity_token(42)
+        self.assertEqual(self.identity.verify_identity_token(tok, chat_id=-100), 42)
+
+    def test_cannot_be_rebound_by_editing(self):
+        tok = self.identity.issue_chat_bound_token(42, -100)
+        _, exp, sig = tok.split(".")
+        self.assertIsNone(self.identity.verify_identity_token(f"43.{exp}.{sig}", chat_id=-100))
+
+    def test_expired_rejected(self):
+        tok = self.identity.issue_chat_bound_token(42, -100, ttl_seconds=-1)
+        self.assertIsNone(self.identity.verify_identity_token(tok, chat_id=-100))
+
+    def test_require_identity_honours_chat(self):
+        from fastapi import HTTPException
+        tok = self.identity.issue_chat_bound_token(42, -100)
+        self.assertEqual(self.identity.require_identity(tok, chat_id=-100), 42)
+        with self.assertRaises(HTTPException):
+            self.identity.require_identity(tok)
+
+
 def _good_token(user_id):
     from api import identity
     return identity.issue_identity_token(user_id)

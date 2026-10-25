@@ -73,6 +73,16 @@ class TestValidateInitData(unittest.TestCase):
         with self.assertRaises(ValueError):
             self._call(bad)
 
+    def test_missing_auth_date_raises(self):
+        """Regression: a validly signed initData with no auth_date skipped
+        the freshness check entirely instead of failing it."""
+        pairs = {"user": quote(json.dumps({"id": 1, "first_name": "A"}))}
+        data_check = "\n".join(f"{k}={v}" for k, v in sorted(pairs.items()))
+        secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
+        pairs["hash"] = hmac.new(secret_key, data_check.encode(), hashlib.sha256).hexdigest()
+        with self.assertRaises(ValueError):
+            self._call(urlencode(pairs))
+
     def test_stale_init_data_raises(self):
         data = _make_init_data(age_seconds=90_000)  # 25 h old
         with self.assertRaises(ValueError, msg="older than 24 hours"):

@@ -83,9 +83,12 @@ class TestWeblogInRedeemPost(unittest.TestCase):
         body = r.json()
         self.assertEqual(body["chat_id"], -100)
         self.assertTrue(body["id_token"])
-        # The token verifies to the same user encoded in the payload.
+        # The token verifies to the same user — but only inside the issuing
+        # chat. A global token here was a cross-group takeover.
         from api.identity import verify_identity_token
-        self.assertEqual(verify_identity_token(body["id_token"]), 42)
+        self.assertEqual(verify_identity_token(body["id_token"], chat_id=-100), 42)
+        self.assertIsNone(verify_identity_token(body["id_token"]))
+        self.assertIsNone(verify_identity_token(body["id_token"], chat_id=-200))
         consume.assert_called_once_with("rawcode123")
 
     def test_already_used_code_returns_410(self):
@@ -105,3 +108,66 @@ class TestWeblogInRedeemPost(unittest.TestCase):
     def test_missing_token_field_returns_422(self):
         r = _client().post("/api/v1/auth/weblogin/redeem", json={})
         self.assertEqual(r.status_code, 422)
+
+
+@unittest.skipUnless(FASTAPI_AVAILABLE, "fastapi not installed")
+class TestWeblogInTokenIsChatBound(unittest.TestCase):
+    """Regression for the cross-group takeover.
+
+    Anyone can be a Telegram admin of a group they create. The attacker
+    makes one, the victim says anything in it (so they're in chat_members),
+    and /weblogin <victim> passes the "Telegram admin of this group" check.
+    The redeemed link used to mint the victim's GLOBAL identity: listing
+    every group the victim administers (with their group tokens) via
+    /auth/admin/groups, admin powers there, and a 30-day admin bearer via
+    /auth/admin/session. Each of those must now refuse it.
+    """
+
+    ATTACKER_CHAT = -100
+    VICTIM_CHAT = -777
+
+    def _redeemed_token(self):
+        with patch("db.consume_web_direct_login_token", return_value=PAYLOAD):
+            r = _client().post("/api/v1/auth/weblogin/redeem", json={"token": "c"})
+        self.assertEqual(r.status_code, 200)
+        return r.json()["id_token"]
+
+    def test_cannot_list_victims_admin_groups(self):
+        tok = self._redeemed_token()
+        with patch("api.routes.auth.get_web_admin_chats",
+                   return_value=[{"chat_id": self.VICTIM_CHAT}]) as m:
+            r = _client().get("/api/v1/auth/admin/groups", headers={"X-Identity-Token": tok})
+        self.assertEqual(r.status_code, 401)
+        m.assert_not_called()
+
+    def test_cannot_mint_admin_bearer_for_victims_group(self):
+        tok = self._redeemed_token()
+        r = _client().post("/api/v1/auth/admin/session",
+                           json={"id_token": tok, "chat_id": self.VICTIM_CHAT})
+        self.assertEqual(r.status_code, 401)
+
+    def test_cannot_read_portal(self):
+        tok = self._redeemed_token()
+        r = _client().get("/api/v1/portal/groups", headers={"X-Identity-Token": tok})
+        self.assertEqual(r.status_code, 401)
+
+    def test_not_admin_in_victims_group(self):
+        tok = self._redeemed_token()
+        victim_chat = {"chat_id": self.VICTIM_CHAT, "group_web_token": "victim"}
+        with patch("api.routes.web._db.get_chat_by_group_web_token", return_value=victim_chat), \
+             patch("api.routes.web.check_web_admin_live", return_value=True) as live:
+            r = _client().get("/api/v1/web/group/victim/admin-status",
+                              headers={"X-Identity-Token": tok})
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(r.json()["is_admin"])
+        live.assert_not_called()
+
+    def test_still_works_in_the_issuing_group(self):
+        tok = self._redeemed_token()
+        own_chat = {"chat_id": self.ATTACKER_CHAT, "group_web_token": "grp123"}
+        with patch("api.routes.web._db.get_chat_by_group_web_token", return_value=own_chat), \
+             patch("api.routes.web.check_web_admin_live", return_value=True) as live:
+            r = _client().get("/api/v1/web/group/grp123/admin-status",
+                              headers={"X-Identity-Token": tok})
+        self.assertTrue(r.json()["is_admin"])
+        live.assert_called_once_with(self.ATTACKER_CHAT, 42)

@@ -70,14 +70,17 @@ def _resolve_chat(group_token: str) -> dict:
     return chat
 
 
-def _require_identity(id_token: str) -> int:
+def _require_identity(id_token: str, chat_id: int) -> int:
+    # chat_id is required, not optional: every dues route is one group's, and
+    # a /weblogin identity is only valid inside the group that issued it.
     return require_identity(
-        id_token, detail="Verify with Telegram to use dues features."
+        id_token, detail="Verify with Telegram to use dues features.",
+        chat_id=chat_id,
     )
 
 
 async def _require_admin(chat_id: int, id_token: str) -> int:
-    user_id = _require_identity(id_token)
+    user_id = _require_identity(id_token, chat_id)
     if not await check_web_admin_live(chat_id, user_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -138,8 +141,8 @@ async def get_my_dues(
 ) -> DuesMyResponse:
     chat = _resolve_chat(group_token)
     _require_dues(chat)
-    user_id = _require_identity(id_token)
     chat_id = int(chat["chat_id"])
+    user_id = _require_identity(id_token, chat_id)
 
     result = dues_svc.my_dues(chat_id, user_id)
     settings = dues_svc.get_dues_settings(chat_id)
@@ -187,8 +190,8 @@ async def get_fund(
 ) -> DuesFundResponse:
     chat = _resolve_chat(group_token)
     _require_dues(chat)
-    _require_identity(id_token)
     chat_id = int(chat["chat_id"])
+    _require_identity(id_token, chat_id)
 
     result = dues_svc.fund_summary(chat_id)
     return DuesFundResponse(fund_balance=result["fund_balance"])
@@ -413,7 +416,7 @@ async def mark_paid(
     chat = _resolve_chat(group_token)
     _require_dues(chat)
     chat_id = int(chat["chat_id"])
-    actor_uid = _require_identity(body.id_token)
+    actor_uid = _require_identity(body.id_token, chat_id)
     actor_name = _actor_name(chat_id, actor_uid)
     is_admin = bool(await check_web_admin_live(chat_id, actor_uid))
 
@@ -638,7 +641,7 @@ async def self_paid(
     chat = _resolve_chat(group_token)
     _require_dues(chat)
     chat_id = int(chat["chat_id"])
-    actor_uid = _require_identity(body.id_token)
+    actor_uid = _require_identity(body.id_token, chat_id)
 
     settings = dues_svc.get_dues_settings(chat_id)
     if (settings.get("dues_self_paid_mode") or "auto") == "off":
@@ -720,7 +723,7 @@ async def dues_qr_token(
 ) -> dict:
     chat = _resolve_chat(group_token)
     _require_dues(chat)
-    user_id = _require_identity(id_token)
+    user_id = _require_identity(id_token, int(chat["chat_id"]))
     from api.identity import issue_scoped_token
     # Scoped, not a generic identity token — this token is embedded in the
     # <img src> URL (browser history / access logs), so it must only be

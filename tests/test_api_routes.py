@@ -1002,8 +1002,9 @@ class TestMiniAppGroupSessionRoute(unittest.TestCase):
              patch("api.routes.auth.generate_api_token", return_value="rawtoken456"), \
              patch("api.routes.auth._hash_token", return_value="hashedtoken"), \
              patch("api.routes.auth.insert_api_token") as mock_insert, \
-             patch("api.routes.auth.get_user_voted_chats", return_value=[{"chat_id": -500}]), \
+             patch("api.web_admin._db.get_user_voted_chats", return_value=[{"chat_id": -500}]), \
              patch("api.routes.auth.is_web_admin", return_value=False), \
+             patch("api.web_admin._db.is_web_admin", return_value=False), \
              patch("api.routes.auth.get_or_create_chat",
                    return_value={"group_web_token": "grp999", "timezone": "Asia/Kolkata"}):
             client = TestClient(self._app(), raise_server_exceptions=False)
@@ -1028,8 +1029,9 @@ class TestMiniAppGroupSessionRoute(unittest.TestCase):
              patch("api.routes.auth.generate_api_token", return_value="rawtoken789"), \
              patch("api.routes.auth._hash_token", return_value="hashedtoken"), \
              patch("api.routes.auth.insert_api_token"), \
-             patch("api.routes.auth.get_user_voted_chats", return_value=[]), \
+             patch("api.web_admin._db.get_user_voted_chats", return_value=[]), \
              patch("api.routes.auth.is_web_admin", return_value=True), \
+             patch("api.web_admin._db.is_web_admin", return_value=True), \
              patch("api.routes.auth.get_or_create_chat",
                    return_value={"group_web_token": "grp1", "timezone": "Asia/Kolkata"}):
             client = TestClient(self._app(), raise_server_exceptions=False)
@@ -1049,9 +1051,10 @@ class TestMiniAppGroupSessionRoute(unittest.TestCase):
              patch("api.routes.auth.generate_api_token", return_value="rawtoken111"), \
              patch("api.routes.auth._hash_token", return_value="hashedtoken"), \
              patch("api.routes.auth.insert_api_token"), \
-             patch("api.routes.auth.get_user_voted_chats", return_value=[]), \
-             patch("api.routes.auth.get_member_chats", return_value=[{"chat_id": -600}]), \
+             patch("api.web_admin._db.get_user_voted_chats", return_value=[]), \
+             patch("api.web_admin._db.get_member_chats", return_value=[{"chat_id": -600}]), \
              patch("api.routes.auth.is_web_admin", return_value=False), \
+             patch("api.web_admin._db.is_web_admin", return_value=False), \
              patch("api.routes.auth.get_or_create_chat",
                    return_value={"group_web_token": "grp600", "timezone": "Asia/Kolkata"}):
             client = TestClient(self._app(), raise_server_exceptions=False)
@@ -1064,9 +1067,10 @@ class TestMiniAppGroupSessionRoute(unittest.TestCase):
     def test_switch_to_unrelated_group_returns_403(self):
         tok = self._id_token(42)
         with patch.dict(os.environ, {"TELEGRAM_TOKEN": "123:TEST"}), \
-             patch("api.routes.auth.get_user_voted_chats", return_value=[{"chat_id": -500}]), \
-             patch("api.routes.auth.get_member_chats", return_value=[]), \
-             patch("api.routes.auth.is_web_admin", return_value=False):
+             patch("api.web_admin._db.get_user_voted_chats", return_value=[{"chat_id": -500}]), \
+             patch("api.web_admin._db.get_member_chats", return_value=[]), \
+             patch("api.routes.auth.is_web_admin", return_value=False), \
+             patch("api.web_admin._db.is_web_admin", return_value=False):
             client = TestClient(self._app(), raise_server_exceptions=False)
             resp = client.post(
                 "/api/v1/auth/telegram/miniapp/group",

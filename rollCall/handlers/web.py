@@ -131,11 +131,16 @@ async def weblogin_cmd(message):
     use Telegram verify. The URL is DMed to the issuing admin, never posted.
 
     Two things make this stricter than every other admin command. The redeemed
-    link mints a GLOBAL 30-day identity — valid in every group the member is
-    in, not just this one — so admin_rights()'s open-mode "everyone is an
-    admin until /set_admins" would let any member of any open group sign in
-    as anyone. And a link posted in the group is readable by every member, so
+    link signs the holder in AS that member, so admin_rights()'s open-mode
+    "everyone is an admin until /set_admins" would let any member impersonate
+    any other. And a link posted in the group is readable by every member, so
     even a legitimately issued one was a takeover for whoever clicked first.
+
+    The identity it mints is bound to THIS chat (api.identity.
+    issue_chat_bound_token). It used to be global, and the Telegram-admin
+    check didn't contain that: anyone is the admin of a group they create,
+    so a stranger could /weblogin a victim who'd spoken once in their group
+    and inherit the victim's admin rights in every other group.
     """
     cid = message.chat.id
     try:

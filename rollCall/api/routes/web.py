@@ -132,7 +132,10 @@ async def push_subscribe(
     # is treated as an anonymous subscriber rather than rejected: the failure
     # mode for a guest with a stale token should be "no personalisation",
     # not "notifications silently stop working".
-    tg_user_id = verify_identity_token(body.id_token) if body.id_token else None
+    tg_user_id = (
+        verify_identity_token(body.id_token, chat_id=int(chat["chat_id"]))
+        if body.id_token else None
+    )
     try:
         push_svc.subscribe(group_token, body.endpoint, body.keys.p256dh, body.keys.auth, tg_user_id=tg_user_id)
     except push_svc.PushSubscriptionRejected as e:
@@ -283,7 +286,11 @@ async def get_web_group_stats(
     # Resolve the requesting identity from a signed token only — never from a
     # raw user_id so callers cannot supply an arbitrary Telegram id and read
     # another member's personal stats (IDOR).
-    user_id = verify_identity_token(id_token) if id_token else None
+    chat = _db.get_chat_by_group_web_token(group_token)
+    user_id = (
+        verify_identity_token(id_token, chat_id=int(chat["chat_id"]) if chat else None)
+        if id_token else None
+    )
     data = stats_svc.web_group_stats(group_token, lookup_name=name, lookup_user_id=user_id)
     return WebGroupStatsResponse(**data)
 
@@ -313,8 +320,8 @@ async def web_admin_status(
 ) -> WebAdminStatusResponse:
     # Identity must be proven by a signed token; a raw user id can't grant
     # admin status because the server never trusts it.
-    tg_user_id = verify_identity_token(id_token)
     chat = _db.get_chat_by_group_web_token(group_token)
+    tg_user_id = verify_identity_token(id_token, chat_id=int(chat["chat_id"]) if chat else None)
     if not chat or not tg_user_id:
         # Both of these used to return a bare False, indistinguishable in the
         # logs from a legitimate "you are not an admin" — so an expired token
@@ -341,8 +348,8 @@ async def update_group_settings(
     chat = _db.get_chat_by_group_web_token(group_token)
     if not chat:
         raise HTTPException(status_code=404, detail="Invalid group token")
-    actor_user_id = require_identity(body.id_token, detail="Verify with Telegram first.")
     chat_id = int(chat["chat_id"])
+    actor_user_id = require_identity(body.id_token, detail="Verify with Telegram first.", chat_id=chat_id)
     if not await check_web_admin_live(chat_id, actor_user_id):
         raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
     if body.shh_mode is not None:
@@ -405,7 +412,7 @@ async def web_start_rollcall(
     # Resolve the actor from the signed identity token — never from a
     # client-supplied user id — before checking web-admin rights.
     actor_user_id = require_identity(
-        body.id_token, detail="Verify with Telegram before starting a rollcall."
+        body.id_token, detail="Verify with Telegram before starting a rollcall.", chat_id=int(chat["chat_id"])
     )
 
     chat_id = int(chat["chat_id"])
@@ -516,7 +523,7 @@ async def web_end_rollcall(
         raise HTTPException(status_code=404, detail="Invalid group token")
 
     actor_user_id = require_identity(
-        body.id_token, detail="Verify with Telegram before ending a rollcall."
+        body.id_token, detail="Verify with Telegram before ending a rollcall.", chat_id=int(chat["chat_id"])
     )
 
     chat_id = int(chat["chat_id"])
@@ -567,7 +574,7 @@ async def web_cancel_rollcall(
         raise HTTPException(status_code=404, detail="Invalid group token")
 
     actor_user_id = require_identity(
-        body.id_token, detail="Verify with Telegram before cancelling a rollcall."
+        body.id_token, detail="Verify with Telegram before cancelling a rollcall.", chat_id=int(chat["chat_id"])
     )
 
     chat_id = int(chat["chat_id"])
@@ -619,7 +626,7 @@ async def web_proxy_vote(
         raise HTTPException(status_code=404, detail="Invalid group token")
 
     actor_user_id = require_identity(
-        body.id_token, detail="Verify with Telegram before casting proxy votes."
+        body.id_token, detail="Verify with Telegram before casting proxy votes.", chat_id=int(chat["chat_id"])
     )
 
     chat_id = int(chat["chat_id"])
@@ -702,7 +709,7 @@ async def web_remove_user(
         raise HTTPException(status_code=404, detail="Invalid group token")
 
     actor_user_id = require_identity(
-        body.id_token, detail="Verify with Telegram before managing voters."
+        body.id_token, detail="Verify with Telegram before managing voters.", chat_id=int(chat["chat_id"])
     )
 
     chat_id = int(chat["chat_id"])
@@ -754,7 +761,7 @@ async def web_move_user(
         raise HTTPException(status_code=404, detail="Invalid group token")
 
     actor_user_id = require_identity(
-        body.id_token, detail="Verify with Telegram before managing voters."
+        body.id_token, detail="Verify with Telegram before managing voters.", chat_id=int(chat["chat_id"])
     )
 
     chat_id = int(chat["chat_id"])
@@ -807,8 +814,8 @@ async def _require_web_admin(group_token: str, id_token: str) -> tuple[int, int]
     chat = _db.get_chat_by_group_web_token(group_token)
     if not chat:
         raise HTTPException(status_code=404, detail="Invalid group token")
-    actor_user_id = require_identity(id_token, detail="Verify with Telegram first.")
     chat_id = int(chat["chat_id"])
+    actor_user_id = require_identity(id_token, detail="Verify with Telegram first.", chat_id=chat_id)
     if not await check_web_admin_live(chat_id, actor_user_id):
         raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
     return chat_id, actor_user_id
@@ -1222,8 +1229,8 @@ async def create_scheduled_rollcall(
     chat = _db.get_chat_by_group_web_token(group_token)
     if not chat:
         raise HTTPException(status_code=404, detail="Invalid group token")
-    actor_user_id = require_identity(body.id_token, detail="Verify with Telegram first.")
     chat_id = int(chat["chat_id"])
+    actor_user_id = require_identity(body.id_token, detail="Verify with Telegram first.", chat_id=chat_id)
     if not await check_web_admin_live(chat_id, actor_user_id):
         raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
 
@@ -1288,8 +1295,8 @@ async def list_scheduled_rollcalls(
     chat = _db.get_chat_by_group_web_token(group_token)
     if not chat:
         raise HTTPException(status_code=404, detail="Invalid group token")
-    actor_user_id = require_identity(id_token, detail="Verify with Telegram first.")
     chat_id = int(chat["chat_id"])
+    actor_user_id = require_identity(id_token, detail="Verify with Telegram first.", chat_id=chat_id)
     if not await check_web_admin_live(chat_id, actor_user_id):
         raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
     from services import templates as tmpl_svc
@@ -1310,8 +1317,8 @@ async def delete_scheduled_rollcall(
     chat = _db.get_chat_by_group_web_token(group_token)
     if not chat:
         raise HTTPException(status_code=404, detail="Invalid group token")
-    actor_user_id = require_identity(id_token, detail="Verify with Telegram first.")
     chat_id = int(chat["chat_id"])
+    actor_user_id = require_identity(id_token, detail="Verify with Telegram first.", chat_id=chat_id)
     if not await check_web_admin_live(chat_id, actor_user_id):
         raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
 
@@ -1381,14 +1388,13 @@ async def issue_weblogin(
     if not chat:
         raise HTTPException(status_code=404, detail="Invalid group token")
 
-    actor_user_id = require_identity(body.id_token, detail="Verify with Telegram first.")
-
     chat_id = int(chat["chat_id"])
+    actor_user_id = require_identity(body.id_token, detail="Verify with Telegram first.", chat_id=chat_id)
     if not await check_web_admin_live(chat_id, actor_user_id):
         raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
     # Web-admin alone is not enough: in an open group (no /set_admins) every
     # member who ran /weblink holds a cached grant, and the link minted here
-    # redeems to a global identity valid in every group. Same bar as the
+    # signs someone in as another member of this group. Same bar as the
     # /weblogin command — a live, real Telegram admin; fails closed.
     from functions import is_telegram_chat_admin
     if not await is_telegram_chat_admin(chat_id, actor_user_id):
@@ -1469,7 +1475,8 @@ async def vote_web(
     # Only attribute a vote to a real Telegram account when the caller proves
     # that identity with a signed token. Otherwise it's a name-only proxy entry,
     # so nobody can forge another member's attendance via the magic link.
-    verified_user_id = verify_identity_token(body.id_token)
+    loc = web_svc.locate_rollcall(token)
+    verified_user_id = verify_identity_token(body.id_token, chat_id=loc[0] if loc else None)
     data = await web_svc.vote_by_token(
         token, body.name, body.vote,
         tg_user_id=verified_user_id, comment=body.comment,

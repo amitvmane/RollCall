@@ -5,7 +5,7 @@ pytz==2026.5
 Levenshtein==0.27.5
 matplotlib==3.11.2
 fonttools==4.66.1
-pillow==12.3.0
+pillow==13.0.0
 urllib3==2.8.0
 python-dotenv==1.2.4
 aiohttp==3.14.5

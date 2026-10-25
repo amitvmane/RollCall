@@ -99,3 +99,21 @@ async def check_web_admin_live(chat_id: int, tg_user_id: int) -> bool:
         from services import admin as _admin_svc
         _admin_svc.revoke_admin(chat_id, tg_user_id)
     return is_admin_now
+
+
+def has_chat_standing(chat_id: int, tg_user_id: int) -> bool:
+    """Whether this identity has any business seeing a group's data: voting
+    history there, tracked chat activity, or a web-admin grant.
+
+    The exact set /portal/groups unions to decide what to list, so a group
+    visible in the picker is always reachable — and one only, so the Mini App
+    group switch and the portal history view can't drift into answering
+    "may this user see that chat?" differently. A client-supplied chat_id is
+    never trusted on its own; history previously took any chat id at all.
+    """
+    chat_id = int(chat_id)
+    return (
+        any(int(r["chat_id"]) == chat_id for r in _db.get_user_voted_chats(tg_user_id))
+        or any(int(r["chat_id"]) == chat_id for r in _db.get_member_chats(tg_user_id))
+        or bool(_db.is_web_admin(chat_id, tg_user_id))
+    )

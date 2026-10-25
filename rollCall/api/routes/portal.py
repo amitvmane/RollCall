@@ -10,11 +10,12 @@ Rate-limited by the shared middleware.
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
 import db as _db
 from rollcall_manager import manager
 from api.identity import identity_from_header, require_identity
+from api.web_admin import has_chat_standing
 from services.stats import session_display_date
 from api.schemas.portal import (
     PortalGroupHistoryResponse,
@@ -151,6 +152,11 @@ async def portal_group_history(
     limit: int = Query(20, ge=1, le=50),
 ) -> PortalGroupHistoryResponse:
     tg_user_id = _require_identity(id_token)
+    # The query LEFT JOINs every ended rollcall of the chat (missed ones come
+    # back as status "miss"), so without this any signed-in user could list
+    # the titles and dates of any group's sessions by guessing its chat id.
+    if not has_chat_standing(chat_id, tg_user_id):
+        raise HTTPException(status_code=403, detail="You don't have access to that group.")
 
     sessions = _db.get_user_session_history(chat_id, tg_user_id, limit=limit)
     return PortalGroupHistoryResponse(

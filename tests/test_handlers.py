@@ -388,6 +388,25 @@ class TestConfigTimezone(HandlerTestBase):
         markup = self.bot_state.bot.send_message.call_args_list[0].kwargs.get("reply_markup")
         self.assertIsNone(markup)
 
+    async def test_non_admin_cannot_change_timezone(self):
+        """Regression: /timezone shifts every scheduled start and auto-close,
+        and the web settings PATCH already required an admin — any member
+        could change it from Telegram."""
+        msg = self._make_message("/timezone Asia/Kolkata")
+        with self._patch_manager(), self._admin_denied(), \
+             patch('handlers.core.settings_svc.set_timezone') as set_tz:
+            await self.config_timezone(msg)
+        set_tz.assert_not_called()
+        self.assertIn("admin", self._sent_text().lower())
+
+    async def test_non_admin_can_still_view_timezone(self):
+        msg = self._make_message("/timezone")
+        self.manager.get_chat.return_value = {"timezone": "Asia/Kolkata"}
+        with self._patch_manager(), self._admin_denied(), \
+             patch.dict('os.environ', {'WEB_BASE_URL': ''}):
+            await self.config_timezone(msg)
+        self.assertIn("Asia/Kolkata", self._sent_text())
+
     async def test_invalid_timezone_sends_link(self):
         msg = self._make_message("/timezone Fake/Place")
         with self._patch_manager(), \

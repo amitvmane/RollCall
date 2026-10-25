@@ -126,12 +126,43 @@ def issue_identity_token(user_id: int, ttl_seconds: int = IDENTITY_TOKEN_TTL_SEC
     return f"{payload}.{_sign(payload)}"
 
 
-def verify_identity_token(token: Optional[str]) -> Optional[int]:
+def verify_identity_token(token: Optional[str], chat_id: Optional[int] = None) -> Optional[int]:
     """Return the verified user id if the token is valid and unexpired, else None.
+
+    A global token is accepted everywhere. A chat-bound token (see
+    issue_chat_bound_token) is accepted ONLY when the caller passes the chat
+    it was issued for — so an endpoint that passes no chat_id (cross-group
+    ones like /auth/admin/groups or /portal/*) rejects it by construction.
 
     Never raises on malformed input — a bad token is simply unauthenticated.
     """
-    return _verify(token, scope=None)
+    user_id = _verify(token, scope=None)
+    if user_id is None and chat_id is not None:
+        user_id = _verify(token, scope=_chat_scope(chat_id))
+    return user_id
+
+
+def _chat_scope(chat_id: int) -> str:
+    return f"chat:{int(chat_id)}"
+
+
+def issue_chat_bound_token(
+    user_id: int, chat_id: int, ttl_seconds: int = IDENTITY_TOKEN_TTL_SECONDS,
+) -> str:
+    """An identity valid in ONE chat only — what an admin-issued /weblogin
+    link mints.
+
+    A Telegram admin of chat A vouching for a member proves nothing about
+    that member in chat B, and anyone can be the admin of a group they just
+    created. Minting a global identity here let a stranger make their own
+    group, wait for the victim to say anything in it, /weblogin them, and
+    walk into every group the victim administers. Bound to the issuing chat,
+    the link grants nothing the issuer couldn't already do there.
+
+    Fails closed on old code: it is a scoped token, so any verifier that
+    doesn't pass this chat_id simply sees a bad signature.
+    """
+    return issue_scoped_token(user_id, _chat_scope(chat_id), ttl_seconds)
 
 
 def issue_scoped_token(user_id: int, scope: str, ttl_seconds: int) -> str:
@@ -198,15 +229,18 @@ def _verify(token: Optional[str], scope: Optional[str]) -> Optional[int]:
 def require_identity(
     id_token: Optional[str],
     detail: str = "Verify with Telegram to use this feature.",
+    chat_id: Optional[int] = None,
 ) -> int:
     """verify_identity_token, raising HTTP 401 instead of returning None.
+    Pass chat_id on any route acting within one chat, so a chat-bound
+    (/weblogin) token is accepted there and nowhere else.
 
     Was duplicated identically (module-local _require_identity) in
     api/routes/dues.py and api/routes/portal.py; each site's own 401
     message is preserved via the detail param.
     """
     from fastapi import HTTPException, status
-    user_id = verify_identity_token(id_token)
+    user_id = verify_identity_token(id_token, chat_id=chat_id)
     if not user_id or user_id <= 0:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail)
     return user_id

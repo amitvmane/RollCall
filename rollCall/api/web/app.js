@@ -199,18 +199,9 @@ function _relTime(ts){
   return`${Math.floor(months/12)}y ago`;
 }
 
-// ── Theme toggle ───────────────────────────────────────────────────────────
-function updateThemeBtn(){
-  const btn=$("theme-btn");if(!btn)return;
-  btn.textContent=document.documentElement.classList.contains("dark")?"☀":"🌙";
-}
-window.toggleTheme=function(){
-  const isDark=document.documentElement.classList.contains("dark");
-  document.documentElement.classList.toggle("dark",!isDark);
-  localStorage.setItem("rc_dark",isDark?"0":"1");
-  updateThemeBtn();
-};
-document.addEventListener("DOMContentLoaded",updateThemeBtn);
+// ── Theme ─────────────────────────────────────────────────────────────────
+// Theme (Light / Dark / Auto) lives in /shared/theme-init.js — one copy for
+// every surface; the header buttons call its window.toggleTheme.
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 function toast(msg,ms=2800){
@@ -520,6 +511,8 @@ function renderAcctMenu(){
     html+=`<button class="acct-menu-item danger" role="menuitem" onclick="signOut()">⏻ Sign out</button>`;
   }
   if(!html)html=`<div class="acct-menu-hdr"><div class="acct-menu-sub">Not signed in</div></div>`;
+  // Light / Dark / Auto — shared with the portal menu (/shared/theme-init.js).
+  if(window.rcTheme)html+=rcTheme.menuHtml();
   if(_appVersion)html+=`<div class="acct-menu-ver">RollCall v${esc(_appVersion)}</div>`;
   menu.innerHTML=html;
 }

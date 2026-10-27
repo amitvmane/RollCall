@@ -59,15 +59,8 @@ async function apiFetch(path,opts={}){
   return res.json();
 }
 
-function _updateThemeBtn(){
-  const dark=document.documentElement.classList.contains("dark");
-  document.querySelectorAll(".btn-theme").forEach(b=>b.textContent=dark?"☀️":"🌙");
-}
-window.toggleTheme=function(){
-  const on=document.documentElement.classList.toggle("dark");
-  localStorage.setItem("rc_dark",on?"1":"0");
-  _updateThemeBtn();
-};
+// Theme (Light / Dark / Auto) lives in /shared/theme-init.js — one copy for
+// every surface; the header buttons call its window.toggleTheme.
 
 // ── Verify flow ───────────────────────────────────────────────────────────────
 
@@ -241,6 +234,8 @@ async function _portalSignOut(){
 // nothing stored to remove, cleared nothing and changed nothing on screen.
 // That is the "sign out does nothing" report: the button worked, there was
 // simply never anything for it to do.
+// Light / Dark / Auto — the same row the group page's menu shows.
+function _themeRow(){return window.rcTheme?rcTheme.menuHtml():"";}
 function renderAcctMenu(){
   const menu=$id("acct-menu");
   if(!menu)return;
@@ -248,7 +243,8 @@ function renderAcctMenu(){
   if(!signedIn){
     menu.innerHTML=
       `<div class="acct-menu-hdr"><div class="acct-menu-sub">Not signed in</div></div>`+
-      `<button class="acct-menu-item" role="menuitem" id="acct-signin-item">✈ Sign in</button>`;
+      `<button class="acct-menu-item" role="menuitem" id="acct-signin-item">✈ Sign in</button>`+
+      _themeRow();
     const i=$id("acct-signin-item");
     if(i)i.addEventListener("click",()=>{closeAcctMenu();showVerifyScreen();});
     return;
@@ -259,7 +255,8 @@ function renderAcctMenu(){
        <div class="acct-menu-sub">✅ Telegram verified</div>
      </div>`:"")+
     `<button class="acct-menu-item" role="menuitem" id="acct-groups-item">🗓 My groups</button>`+
-    `<button class="acct-menu-item danger" role="menuitem" id="acct-signout-item">⏻ Sign out</button>`;
+    `<button class="acct-menu-item danger" role="menuitem" id="acct-signout-item">⏻ Sign out</button>`+
+    _themeRow();
   const g=$id("acct-groups-item");if(g)g.addEventListener("click",()=>{closeAcctMenu();window.scrollTo({top:0,behavior:"smooth"});});
   const s=$id("acct-signout-item");if(s)s.addEventListener("click",_portalSignOut);
 }
@@ -666,7 +663,6 @@ document.addEventListener("keydown",e=>{if(e.key==="Escape")closeDetail();});
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
-_updateThemeBtn();
 if(_userId&&_idToken){
   showApp();
 }else{

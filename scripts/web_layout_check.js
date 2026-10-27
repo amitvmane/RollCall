@@ -100,6 +100,8 @@ const ROUTES = [
   [/\/web\/group\/emptytoken$/, GROUP_EMPTY],
   [/\/web\/group\/[^/]+$/, GROUP],
   [/admin-status/, { is_admin: true }],
+  // /help — the theme check loads it; an empty {} throws in its renderer.
+  [/\/commands$/, { commands: [], user_category_order: [], admin_category_order: [], category_emoji: {} }],
   [/\/auth\/admin\/groups/, ADMIN_GROUPS],
   [/\/portal\/groups/, { groups: ADMIN_GROUPS.groups.map(g => ({ ...g, has_active_rollcall: false })) }],
   [/\/members$/, { members: [{ user_id: 1, first_name: "Amit", username: "amit" }] }],
@@ -895,6 +897,92 @@ const WIDTHS = [
     if (errs.length) failures.push(`nrc: JS error — ${errs[0]}`);
 
     console.log(`  new-rollcall: Once tab's template field is optional, toggles correctly`);
+    await page.close();
+  }
+
+  // ── Theme (Light / Dark / Auto) ─────────────────────────────────────────
+  // One shared implementation (/shared/theme-init.js) behind every surface.
+  // It replaced a two-way toggle with no way back to following the device,
+  // copied three times. Assert the modes, the live device follow, the old
+  // rc_dark migration, and that no page still carries its own copy.
+  {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1280, height: 900 });
+    await page.setRequestInterception(true);
+    page.on("request", req =>
+      req.url().startsWith(BASE) ? req.continue()
+                                 : req.respond({ status: 200, contentType: "text/plain", body: "" }));
+    const errs = [];
+    page.on("pageerror", e => errs.push(`${page.url().replace(BASE, "")}: ${e.message}`));
+    const state = () => page.evaluate(() => {
+      let stored = null, old = null;
+      try { stored = localStorage.getItem("rc_theme"); old = localStorage.getItem("rc_dark"); } catch (e) {}
+      return { dark: document.documentElement.classList.contains("dark"),
+               mode: window.rcTheme && rcTheme.get(), stored, old,
+               icons: [...document.querySelectorAll("[data-theme-toggle]")].map(b => b.textContent) };
+    });
+    const GROUP = `${BASE}/web/group/testtoken123`;
+
+    // Existing users: a saved rc_dark carries over instead of resetting.
+    await page.goto(GROUP, { waitUntil: "load" });
+    await page.evaluate(() => { localStorage.clear(); localStorage.setItem("rc_dark", "1"); });
+    await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
+    await page.reload({ waitUntil: "load" });
+    let s = await state();
+    if (!s.dark || s.mode !== "dark") failures.push(`theme: rc_dark=1 did not carry over as Dark (mode=${s.mode}, dark=${s.dark})`);
+    if (s.stored !== "dark" || s.old !== null) failures.push(`theme: rc_dark not migrated to rc_theme (rc_theme=${s.stored}, rc_dark=${s.old})`);
+
+    // Auto, and it follows the device live — no reload.
+    await page.evaluate(() => { localStorage.clear(); });
+    await page.reload({ waitUntil: "load" });
+    s = await state();
+    if (s.mode !== "auto" || s.dark) failures.push(`theme: fresh visitor on a light device should be Auto/light (mode=${s.mode}, dark=${s.dark})`);
+    await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "dark" }]);
+    await new Promise(r => setTimeout(r, 100));
+    s = await state();
+    if (!s.dark) failures.push("theme: Auto did not follow the device switching to dark");
+
+    // Header button cycles Auto → Light → Dark → Auto, with real clicks.
+    const seen = [];
+    for (let i = 0; i < 3; i++) {
+      await page.click("#theme-btn");
+      s = await state();
+      seen.push(`${s.mode}/${s.dark ? "dark" : "light"}`);
+    }
+    if (seen.join(",") !== "light/light,dark/dark,auto/dark")
+      failures.push(`theme: header button cycle wrong — got ${seen.join(", ")}`);
+    if (new Set(s.icons).size !== 1) failures.push(`theme: header toggles disagree on the mode: ${s.icons.join(" ")}`);
+
+    // Account menu: segmented row, real click, menu stays open.
+    await page.click("#acct-btn");
+    await new Promise(r => setTimeout(r, 100));
+    const opts = await page.$$eval("#acct-menu [data-theme-opt]", els => els.map(e => e.dataset.themeOpt));
+    if (opts.join(",") !== "light,dark,auto") failures.push(`theme: account menu theme row wrong — ${JSON.stringify(opts)}`);
+    else {
+      await page.click('#acct-menu [data-theme-opt="light"]');
+      s = await state();
+      const m = await page.evaluate(() => ({
+        open: !document.getElementById("acct-menu").classList.contains("hidden"),
+        on: [...document.querySelectorAll("#acct-menu [data-theme-opt].on")].map(e => e.dataset.themeOpt) }));
+      if (s.mode !== "light" || s.dark) failures.push(`theme: menu Light did not apply (mode=${s.mode}, dark=${s.dark})`);
+      if (!m.open) failures.push("theme: picking a theme closed the account menu");
+      if (m.on.join() !== "light") failures.push(`theme: menu highlights ${JSON.stringify(m.on)}, expected light`);
+    }
+
+    // Every other surface runs the same code, not a leftover copy.
+    for (const p of ["/web/", "/portal/index.html", "/help/index.html", "/index/index.html"]) {
+      await page.goto(`${BASE}${p}`, { waitUntil: "load" });
+      const r = await page.evaluate(() => ({
+        shared: !!window.rcTheme && window.toggleTheme === window.rcTheme.cycle,
+        buttons: document.querySelectorAll("[data-theme-toggle]").length,
+        dark: document.documentElement.classList.contains("dark") }));
+      if (!r.shared) failures.push(`theme: ${p} overrides the shared toggleTheme`);
+      if (!r.buttons) failures.push(`theme: ${p} has no theme button`);
+      if (r.dark) failures.push(`theme: ${p} ignored the saved Light choice`);
+    }
+    if (errs.length) failures.push(`theme: JS error — ${errs[0]}`);
+
+    console.log("  theme: Light/Dark/Auto cycle, live device follow, rc_dark migration, all 4 surfaces");
     await page.close();
   }
 

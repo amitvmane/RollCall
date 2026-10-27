@@ -53,6 +53,16 @@
 .acct-menu-item:hover{background:var(--border)}
 .acct-menu-item.danger{color:var(--out,#dc2626)}
 
+/* Theme row: Light / Dark / Auto as a segmented control (markup from
+   rcTheme.menuHtml() in /shared/theme-init.js). Picking one does not close
+   the menu, so you can see the result and change your mind in place. */
+.acct-theme{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-top:1px solid var(--border);margin-top:4px}
+.acct-theme-lbl{font-size:.85rem;font-weight:600;color:var(--text)}
+.acct-theme-seg{display:flex;background:var(--hover,rgba(0,0,0,.06));border-radius:8px;padding:2px;gap:2px}
+.acct-theme-seg button{background:none;border:none;border-radius:6px;padding:5px 7px;font-size:.74rem;font-weight:600;color:var(--sub);cursor:pointer;font-family:inherit;white-space:nowrap}
+.acct-theme-seg button.on{background:var(--card);color:var(--text);box-shadow:var(--shadow,0 1px 2px rgba(0,0,0,.12))}
+@media (pointer:coarse){.acct-theme-seg button{min-height:36px}}
+
 /* Tap-anywhere-to-close backdrop. Transparent, sits under the menu. */
 .acct-backdrop{position:fixed;inset:0;z-index:299;background:transparent}
 

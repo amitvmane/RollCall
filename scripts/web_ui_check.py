@@ -58,6 +58,22 @@ def _inline_scripts(html):
     return "\n".join(out)
 
 
+def _linked_scripts(html, own_js):
+    """Contents of every same-origin <script src="/..."> the page loads, other
+    than its own app.js. Shared code (e.g. /shared/theme-init.js, which
+    defines toggleTheme for every surface) is as real to the browser as
+    app.js, so a handler defined there must resolve too."""
+    out = []
+    for m in re.finditer(r'<script[^>]*\bsrc="/([^"?#]+)"', html, re.I):
+        rel = m.group(1)
+        if rel.endswith(own_js):
+            continue
+        src = _read(rel)
+        if src is not None:
+            out.append(src)
+    return "\n".join(out)
+
+
 def check_onclick_handlers(html, js, label, errors):
     """Every inline on*= handler must resolve to something defined in the JS.
 
@@ -183,6 +199,7 @@ def main():
         html, js = _read(html_rel), _read(js_rel)
         if html is None or js is None:
             continue
+        js = js + "\n" + _linked_scripts(html, js_rel)
         checked += 1
         label = html_rel.split("/")[0]
         check_html_balance(html, label, errors)

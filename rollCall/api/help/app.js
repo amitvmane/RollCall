@@ -5,15 +5,8 @@
 
 function esc(s){const d=document.createElement("div");d.textContent=s||"";return d.innerHTML;}
 
-function _updateThemeBtn(){
-  const dark=document.documentElement.classList.contains("dark");
-  document.querySelectorAll(".btn-theme").forEach(b=>{if(b.textContent==="🌙"||b.textContent==="☀️")b.textContent=dark?"☀️":"🌙";});
-}
-window.toggleTheme=function(){
-  const on=document.documentElement.classList.toggle("dark");
-  localStorage.setItem("rc_dark",on?"1":"0");
-  _updateThemeBtn();
-};
+// Theme (Light / Dark / Auto) lives in /shared/theme-init.js — one copy for
+// every surface; the header buttons call its window.toggleTheme.
 
 let _data=null;          // raw API response
 let _scope="all";        // "all" | "user" | "admin"
@@ -140,6 +133,5 @@ function cmdCard(c){
 }
 
 document.addEventListener("DOMContentLoaded",()=>{
-  _updateThemeBtn();
   loadCommands();
 });

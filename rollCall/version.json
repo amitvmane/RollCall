@@ -362,13 +362,13 @@
     {
         "Version": 10.7,
         "Description": "10.7 — Fairer Games ⏰\n\n⏰ Late drops: dropping from IN to OUT or MAYBE within 6 hours of game time\nis now recorded and shown in /stats, the web Stats tab and the portal. It\nonly counts once the game is played; no penalty, it's just visible.\n\n💰 The end-of-game list showed a wrong per-person fee when the fee had more\nthan one number (\"600 + 200\" became 600200). It now reads the fee the\nsame way dues do.\n\n🗓 Turning a weekly schedule back on no longer opens last week's game\nstraight away.\n\n🔐 Web app notifications only go to the browsers' own push services.\n\nType /help for all commands · /weblink for the group web page",
-        "DeployedOnProd": "Y",
+        "DeployedOnProd": "N",
         "DeployedDatetime": "20-10-2026 09:41 UTC"
     },
     {
         "Version": 10.8,
         "Description": "10.8 — Security Update 🔐\n\n🔐 Web login links from /weblogin now only work in the group that created them.\nBefore, a link from one group could be used to act as that member in their\nother groups.\n\n🗓 Only admins can use the Pause / Resume buttons under /schedules. Before,\nany member could tap them.\n\n🕐 Changing the timezone with /timezone needs admin rights once a group has\nrun /set_admins, the same as on the web. Anyone can still view it.\n\n👤 The portal shows a group's game history only to people in that group.\n\n📦 Updated image and certificate libraries with the latest security fixes.\n\n🌓 The web pages now have a Light / Dark / Auto theme. Auto follows your\nphone or computer, even while the page is open. Tap the theme button or use\nthe Theme row in your account menu.\n\nType /help for all commands · /weblink for the group web page",
-        "DeployedOnProd": "N",
-        "DeployedDatetime": "25-10-2026 00:00 UTC"
+        "DeployedOnProd": "Y",
+        "DeployedDatetime": "27-10-2026 12:18 UTC"
     }
 ]

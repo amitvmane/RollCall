@@ -62,6 +62,10 @@ services:
     image: rollcall-bot:local
     container_name: rollcall-bot
     restart: unless-stopped
+    # Non-root switch. Defaults to root (0:0) = unchanged behaviour. Set
+    # APP_UID/APP_GID in .env after `make fix-perms`; the Makefile refuses to
+    # start if the data dir isn't owned by that user.
+    user: "${APP_UID:-0}:${APP_GID:-0}"
 
     # Privilege hardening: the bot is a plain Python process — it needs no
     # Linux capabilities and must never gain new privileges (setuid etc.).
@@ -197,6 +201,10 @@ services:
     image: rollcall-bot:local
     container_name: rollcall-db-backup
     restart: unless-stopped
+    # Non-root switch. Defaults to root (0:0) = unchanged behaviour. Set
+    # APP_UID/APP_GID in .env after `make fix-perms`; the Makefile refuses to
+    # start if the data dir isn't owned by that user.
+    user: "${APP_UID:-0}:${APP_GID:-0}"
     depends_on:
       - rollcall-bot
     environment:
@@ -242,6 +250,10 @@ services:
     image: rollcall-bot:local
     container_name: rollcall-watchdog
     restart: unless-stopped
+    # Non-root switch. Defaults to root (0:0) = unchanged behaviour. Set
+    # APP_UID/APP_GID in .env after `make fix-perms`; the Makefile refuses to
+    # start if the data dir isn't owned by that user.
+    user: "${APP_UID:-0}:${APP_GID:-0}"
     depends_on:
       - rollcall-bot
     security_opt:

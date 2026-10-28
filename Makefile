@@ -55,6 +55,12 @@ DATA_DIR := $(or $(call _env,DATA_DIR),../rollcall-data)
 # Host dir holding rclone.conf, mounted read-only into the sync sidecar.
 RCLONE_CONFIG_PATH := $(or $(call _env,RCLONE_CONFIG_PATH),$(HOME)/.config/rclone)
 DB       := $(DATA_DIR)/rollcall.db
+# Which user the containers run as (docker-compose.yml `user:`). 0 = root,
+# today's behaviour. Set APP_UID/APP_GID in .env only AFTER `make fix-perms`
+# — check-data-dir refuses to start otherwise, because a bot that can't
+# write its own database is an outage that looks like a healthy container.
+APP_UID := $(or $(call _env,APP_UID),0)
+APP_GID := $(or $(call _env,APP_GID),0)
 
 # Postgres deployments have no SQLite file, so the snapshot sidecar no-ops and
 # the local-backup targets have nothing to check. Detect it once here so those
@@ -155,6 +161,27 @@ check-data-dir:
 	  echo "    Run: make migrate-data"; \
 	  exit 1; \
 	fi
+	@if [ "$(APP_UID)" != "0" ]; then \
+	  bad=$$(find "$(DATA_DIR)" ./logs ! -uid "$(APP_UID)" -print -quit 2>/dev/null); \
+	  if [ -n "$$bad" ]; then \
+	    echo "❌  APP_UID=$(APP_UID) is set, but $$bad is not owned by it."; \
+	    echo "    The bot would start and fail to write its database."; \
+	    echo "    Run: make fix-perms   (or remove APP_UID/APP_GID from .env)"; \
+	    exit 1; \
+	  fi; \
+	fi
+
+fix-perms: ## Hand DATA_DIR + ./logs to APP_UID:APP_GID so the containers can run as non-root
+	@if [ "$(APP_UID)" = "0" ]; then \
+	  echo "APP_UID is not set (containers run as root) — nothing to do."; \
+	  echo "To switch: add APP_UID=10001 and APP_GID=10001 to .env, then re-run this."; \
+	  exit 0; \
+	fi
+	@echo "Stopping containers so nothing writes mid-chown..."
+	@$(COMPOSE) down
+	@mkdir -p ./logs
+	sudo chown -R $(APP_UID):$(APP_GID) "$(DATA_DIR)" ./logs
+	@echo "✅  Owned by $(APP_UID):$(APP_GID). Now run: make build"
 
 migrate-data: ## Move the database out of the git tree into DATA_DIR (idempotent)
 	@echo "DATA_DIR = $(DATA_DIR)"

@@ -41,3 +41,9 @@ docker-compose.yml
 README.md
 *.md
 .env
+
+# Dev/CI-only browser tooling (package.json is for scripts/web_*_check.js).
+# A developer's local node_modules must never be baked into the bot image.
+node_modules/
+package.json
+package-lock.json

@@ -1,0 +1,8 @@
+{
+  "name": "rollcall-browser-checks",
+  "private": true,
+  "description": "Dev/CI only: headless browser checks (scripts/web_layout_check.js, scripts/web_device_matrix.js). Not part of the bot image.",
+  "devDependencies": {
+    "puppeteer": "25.16.0"
+  }
+}

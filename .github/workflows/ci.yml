@@ -19,15 +19,14 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
-
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - name: Set up Python 3.12
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
 
       - name: Cache pip dependencies
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('requirements.lock') }}
@@ -35,7 +34,7 @@ jobs:
             ${{ runner.os }}-pip-
 
       - name: Install dependencies (locked)
-        run: pip install -r requirements.lock pytest
+        run: pip install --require-hashes -r requirements.lock && pip install pytest
 
       - name: Run unit tests
         run: python -m pytest tests/ -v --tb=short
@@ -49,15 +48,14 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
-
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - name: Set up Python 3.12
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
 
       - name: Cache pip dependencies
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-lint-flake8
@@ -81,21 +79,20 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
-
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - name: Set up Python 3.12
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
 
       - name: Cache pip dependencies
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-smoke-${{ hashFiles('requirements.lock') }}
 
       - name: Install runtime dependencies (locked)
-        run: pip install -r requirements.lock
+        run: pip install --require-hashes -r requirements.lock
 
       - name: Run smoke test
         env:
@@ -112,10 +109,9 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
-
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - name: Set up Python 3.12
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
 
@@ -124,9 +120,9 @@ jobs:
         run: python scripts/web_ui_check.py
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: "20"
+          node-version: "22"   # puppeteer 25 needs >=22.12; 20 is EOL
 
       - name: Check JS parses
         run: |
@@ -134,8 +130,11 @@ jobs:
           node --check rollCall/api/web/sw.js
           node --check rollCall/api/portal/app.js
 
+      # npm ci, not `npm i puppeteer@N`: installs exactly package-lock.json,
+      # integrity-checked, so a compromised transitive release can't slip into
+      # CI between two runs of the same commit.
       - name: Install puppeteer
-        run: npm i --no-save puppeteer@23
+        run: npm ci
 
       # Real Chromium, real layout, 5 viewports from 320 to 1680.
       - name: Check web layout
@@ -167,21 +166,20 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
-
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - name: Set up Python 3.12
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
 
       - name: Cache pip dependencies
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-functional-${{ hashFiles('requirements.lock') }}
 
       - name: Install runtime dependencies (locked)
-        run: pip install -r requirements.lock
+        run: pip install --require-hashes -r requirements.lock
 
       - name: Run functional test
         run: python scripts/functional_test.py
@@ -198,21 +196,20 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
-
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - name: Set up Python 3.12
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
 
       - name: Cache pip dependencies
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-loadtest-${{ hashFiles('requirements.lock') }}
 
       - name: Install runtime dependencies (locked)
-        run: pip install -r requirements.lock
+        run: pip install --require-hashes -r requirements.lock
 
       - name: Run load test
         run: python scripts/load_test_50_users.py
@@ -253,21 +250,20 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
-
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - name: Set up Python 3.12
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
 
       - name: Cache pip dependencies
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-postgres-${{ hashFiles('requirements.lock') }}
 
       - name: Install dependencies (locked)
-        run: pip install -r requirements.lock pytest
+        run: pip install --require-hashes -r requirements.lock && pip install pytest
 
       # Booting the app builds the schema, so this is what proves the
       # postgresql arm of db.py — every CREATE TABLE / ALTER TABLE / partial
@@ -304,7 +300,6 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
-
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - name: Build Docker image
         run: docker build -t rollcall-bot:ci .

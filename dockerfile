@@ -15,7 +15,12 @@ COPY . .
 
 # Install Python dependencies from the fully pinned lock file
 # (requirements.lock pins all transitive deps; requirements.txt only pins direct deps)
-RUN pip3 install --no-cache-dir -r requirements.lock
+# --require-hashes: every wheel must match the sha256 recorded in the lock, so
+# a package re-uploaded or swapped on the index under the same version number
+# fails the build instead of shipping. Regenerate with
+#   pip-compile --generate-hashes --allow-unsafe --strip-extras \
+#     --output-file=requirements.lock requirements.txt
+RUN pip3 install --no-cache-dir --require-hashes -r requirements.lock
 
 # Create directories for database and logs
 RUN mkdir -p /app/data /app/logs && \

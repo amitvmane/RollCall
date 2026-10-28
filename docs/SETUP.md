@@ -403,7 +403,7 @@ Wrong Python. The suite targets 3.12; older interpreters produce a flood of
 unrelated failures.
 ```bash
 python3.12 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.lock
+pip install --require-hashes -r requirements.lock && pip install pytest
 pytest
 ```
 

@@ -2,8 +2,10 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:recommended",
-    ":dependencyDashboard"
+    ":dependencyDashboard",
+    "helpers:pinGitHubActionDigests"
   ],
+  "_comment_actions": "Workflows pin every action to a commit SHA with the version as a trailing comment (a moved tag can't inject code into CI). This helper keeps those digests current instead of letting them rot.",
   "timezone": "Asia/Kolkata",
   "schedule": ["before 6am on the first day of the month"],
   "prConcurrentLimit": 3,

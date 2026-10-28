@@ -89,10 +89,77 @@ logging.getLogger().addHandler(_ErrorCapture())
 
 # ─── Patch outbound network ──────────────────────────────────────────────────
 _outbound = []  # list of (method, args, kwargs)
+# Messages real Telegram would refuse ("message is too long"). The mock
+# accepts anything, so without this a reply past the limit passes here and
+# sends nothing in production — /help admin did, at 6.7k characters.
+_too_long = []  # (method, length, first line)
+_TG_TEXT_LIMIT = 4096
+
+
+def _telegram_length(text, parse_mode):
+    """Length as Telegram counts it: UTF-16 units of the text after its
+    formatting markup is parsed away (the limit applies to what's shown)."""
+    import html as _html
+    import re as _re
+    if parse_mode and parse_mode.lower() == "html":
+        text = _html.unescape(_re.sub(r"<[^>]+>", "", text))
+    elif parse_mode:
+        text = _re.sub(r"\\(.)", r"\1", _re.sub(r"(?<!\\)[*_`]", "", text))
+    return len(text.encode("utf-16-le")) // 2
+
+
+_bad_buttons = []  # (method, callback_data) Telegram refuses: BUTTON_DATA_INVALID
+_TG_CALLBACK_LIMIT = 64  # bytes, not characters — a Devanagari letter is 3
+
+
+def _check_buttons(name, kwargs):
+    markup = kwargs.get("reply_markup")
+    for row in getattr(markup, "keyboard", None) or []:
+        for btn in row:
+            data = getattr(btn, "callback_data", None)
+            if isinstance(data, str) and not 1 <= len(data.encode("utf-8")) <= _TG_CALLBACK_LIMIT:
+                _bad_buttons.append((name, data))
+
+
+_bad_markdown = []  # (method, first line) Telegram refuses: "can't parse entities"
+
+
+def _markdown_unbalanced(text):
+    """True when legacy-Markdown entities can't all close — what makes
+    Telegram refuse the message. An unescaped "_" in a title or name does
+    it: "Sunday_Game" opens italics that never end."""
+    import re as _re
+    t = _re.sub(r"\\.", "", text)                  # escaped characters
+    t = _re.sub(r"```.*?```", "", t, flags=_re.S)  # pre blocks
+    if t.count("`") % 2:
+        return True
+    t = _re.sub(r"`[^`]*`", "", t)                 # code spans
+    t = _re.sub(r"\]\([^)]*\)", "]", t)            # link targets
+    return t.count("*") % 2 == 1 or t.count("_") % 2 == 1
+
+
+def _check_length(name, args, kwargs):
+    _check_buttons(name, kwargs)
+    if (kwargs.get("parse_mode") or "").lower() == "markdown":
+        text = (args[1] if name == "send_message" and len(args) >= 2 else
+                args[0] if name == "edit_message_text" and args else kwargs.get("text"))
+        if isinstance(text, str) and _markdown_unbalanced(text):
+            _bad_markdown.append((name, text.split("\n", 1)[0][:80]))
+    if name == "send_message":
+        text = args[1] if len(args) >= 2 else kwargs.get("text")
+    elif name == "edit_message_text":
+        text = args[0] if args else kwargs.get("text")
+    else:
+        return
+    if isinstance(text, str):
+        n = _telegram_length(text, kwargs.get("parse_mode"))
+        if n > _TG_TEXT_LIMIT:
+            _too_long.append((name, n, text.split("\n", 1)[0][:60]))
 
 
 def _record(name):
     async def _impl(*args, **kwargs):
+        _check_length(name, args, kwargs)
         _outbound.append((name, args, kwargs))
         # Return a minimal Message-like object so callers can use .message_id
         m = MagicMock()
@@ -282,6 +349,21 @@ def record(name, passed, detail=""):
     results.append((name, passed, detail))
     mark = "✅" if passed else "❌"
     print(f"  {mark} {name}{(' — ' + detail) if detail and not passed else ''}")
+
+
+def button_labels(outbound):
+    """{callback_data: label} for every inline button in the outbound calls."""
+    found = {}
+    for _, _, kwargs in outbound:
+        for row in getattr(kwargs.get("reply_markup"), "keyboard", None) or []:
+            for btn in row:
+                if getattr(btn, "callback_data", None):
+                    found[btn.callback_data] = btn.text
+    return found
+
+
+def buttons_of(outbound):
+    return list(button_labels(outbound))
 
 
 def text_of(outbound):
@@ -918,9 +1000,47 @@ async def run_all():
     ok, d = contains(out, "command")
     record("/help renders", ok, d)
 
+    _long_before = len(_too_long)
     out = await feed("/help admin", ALICE)
-    ok = len(out) >= 1
-    record("/help admin renders", ok)
+    _admin_help = text_of(out)
+    # 6.7k characters — over Telegram's limit, so it must arrive in parts,
+    # header through the closing hint, with no part refused.
+    ok = ("Admin Commands" in _admin_help and "shows details" in _admin_help
+          and len(_too_long) == _long_before and len(out) >= 2)
+    record("/help admin arrives whole, split under Telegram's limit", ok,
+           f"{len(out)} message(s), too long: {_too_long[_long_before:]}")
+
+    # A member's comment is printed on the panel for everyone. Uncapped, the
+    # longest /in Telegram itself delivers pushed the panel past the limit,
+    # so every panel edit after it failed for the whole group.
+    await feed("/src Long comment", ALICE)
+    _long_before = len(_too_long)
+    bot_state._rate_limits.clear()
+    out = await feed("/in " + "x" * 4000, BOB)
+    ok = len(_too_long) == _long_before and "x" * 100 in text_of(out) and "x" * 101 not in text_of(out)
+    record("/in with a 4,000-character comment: capped at 100, panel stays sendable", ok,
+           f"too long: {_too_long[_long_before:]}")
+    await feed("/erc", ALICE)
+
+    # Titles went into Markdown unescaped in a few messages. "Sunday_Game"
+    # opens italics that never close, so Telegram refused the message: the
+    # vote-reminder DM never arrived, and /ef on an ended game errored after
+    # saving the fee.
+    import check_reminders as _cr
+    _md_before = len(_bad_markdown)
+    await feed("/src Sunday_Game", ALICE)
+    await feed("/in", ALICE)
+    _outbound.clear()
+    await _cr._dm_non_responders(CHAT_ID, 1, "Sunday_Game", "closes in 2h")
+    _dms = [a for n, a, _ in _outbound if n == "send_message" and a and a[0] != CHAT_ID]
+    record("Vote-reminder DM for an underscore title parses as Markdown",
+           bool(_dms) and len(_bad_markdown) == _md_before,
+           f"{len(_dms)} DM(s), refused: {_bad_markdown[_md_before:]}")
+    await feed("/erc", ALICE)
+    out = await feed("/ef 500", ALICE)
+    ok, d = contains(out, "Event Fee set to 500", "Sunday")
+    record("/ef on an ended underscore-titled game confirms, Markdown parses",
+           ok and len(_bad_markdown) == _md_before, f"{d} refused: {_bad_markdown[_md_before:]}")
 
     out = await feed("/help in", ALICE)
     ok, d = contains(out, "in")
@@ -987,7 +1107,43 @@ async def run_all():
     ok, d = contains(out, "kedar", "gutti")
     record("Both Kedar and Gutti show IN together", ok, d)
 
-    await feed("/erc", ALICE)
+    # Callback data is capped at 64 BYTES, and proxy names went into it raw.
+    # Over the cap Telegram refuses the whole message: no ghost warning, and
+    # no absence-review card for that game. /sif names are one word (a
+    # 21-letter Devanagari one is 63 bytes); web guests type their full name
+    # with spaces, up to 64 characters. Taps use the buttons as rendered.
+    _word = "सुब्रमण्यमवेंकटेश्वरन"
+    _guest = "सुब्रमण्यम वेंकटेश्वर रामकृष्ण नारायण"
+    _db.increment_ghost_count(CHAT_ID, -1, _word, proxy_name=_word)
+    _bad_before = len(_bad_buttons)
+    out = await feed(f"/sif {_word}", ALICE)
+    _yes = next((d for d in buttons_of(out) if d.startswith("proxy_add_")), None)
+    record("/sif warning for a long non-ASCII name: buttons within 64 bytes",
+           _yes is not None and len(_bad_buttons) == _bad_before,
+           f"buttons: {buttons_of(out)}")
+    if _yes:
+        await feed_cb(_yes, ALICE)
+    from services import web as _web_svc
+    await _web_svc.vote_by_token(manager.get_rollcall(CHAT_ID, 0).web_token, _guest, "in")
+    out = await feed("/whos_in", ALICE)
+    ok, d = contains(out, _word, _guest)
+    record("...tapping 'Yes, add anyway' adds them; a long-named web guest is IN too", ok, d)
+
+    out = await feed("/erc", ALICE)
+    _ask = next((d for d in buttons_of(out) if d.startswith("ghost_yes_")), None)
+    out = await feed_cb(_ask, ALICE) if _ask else []
+    _togs = {lbl: d for d, lbl in button_labels(out).items() if d.startswith("ghost_togp_")}
+    record("Absence review lists both long names, buttons within 64 bytes",
+           _word in _togs and _guest in _togs and len(_bad_buttons) == _bad_before,
+           f"buttons: {_togs}")
+    for _name in (_word, _guest):
+        if _name in _togs:
+            out = await feed_cb(_togs[_name], ALICE)
+            record(f"...tapping {_name[:10]}… marks exactly them",
+                   [lbl for lbl in button_labels(out).values() if "👻" in lbl] == [f"👻 {_name}"]
+                   if _name == _word else f"👻 {_name}" in button_labels(out).values(),
+                   f"labels: {list(button_labels(out).values())}")
+
     record("Phase 7a -- no ERROR-level logs emitted", len(_errors) == 0,
            str(error_msgs()) if _errors else "")
 
@@ -1785,6 +1941,12 @@ async def run_all():
     # Final global error check — no ERROR-level logs leaked across entire run
     record("FINAL: no ERROR-level logs from any phase", len(_errors) == 0,
            f"{len(_errors)} errors: {error_msgs()[:5]}" if _errors else "")
+    record(f"FINAL: no message over Telegram's {_TG_TEXT_LIMIT}-character limit",
+           not _too_long, f"{len(_too_long)} too long: {_too_long[:5]}")
+    record("FINAL: every Markdown message parses (no unbalanced * _ `)",
+           not _bad_markdown, f"{len(_bad_markdown)} refused: {_bad_markdown[:5]}")
+    record(f"FINAL: every button's callback_data is 1-{_TG_CALLBACK_LIMIT} bytes",
+           not _bad_buttons, f"{len(_bad_buttons)} refused: {_bad_buttons[:5]}")
 
 
 def main():

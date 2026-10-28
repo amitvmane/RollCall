@@ -15,6 +15,7 @@ from exceptions import insufficientPermissions, incorrectParameter, parameterMis
 from functions import admin_rights, weekly_minutes, WEEKDAY_MAP
 from rollcall_manager import manager
 from services import templates as templates_svc
+from utils.text import callback_key, match_callback_name
 
 
 def _ts() -> str:
@@ -42,6 +43,13 @@ def _extract_expiry_token(parts: list[str]):
                 return parts, None, f"'{date_str}' is not a valid date. Use until=YYYY-MM-DD."
             return parts[:i] + parts[i + 1:], date_str, None
     return parts, None, None
+
+
+def _template_from_token(cid: int, token: str):
+    """Template a button stands for. Buttons carry a short key, not the name
+    (Telegram caps callback_data at 64 bytes; a 50-character name in a
+    3-byte script is 150), resolved against this chat's templates."""
+    return match_callback_name(token, [t["name"] for t in templates_svc.list_templates(cid)])
 
 
 @bot.message_handler(func=lambda message: message.text.split(" ")[0].split("@")[0].lower() == "/templates")
@@ -82,7 +90,7 @@ async def list_templates(message):
     markup = InlineKeyboardMarkup(row_width=1)
     for t in templates:
         name = t.get("name", "")
-        markup.add(InlineKeyboardButton(f"🗑 Delete {name}", callback_data=f"tmpldel_ask_{name}"))
+        markup.add(InlineKeyboardButton(f"🗑 Delete {name}", callback_data=f"tmpldel_ask_{callback_key(name)}"))
 
     await bot.send_message(cid, "Templates:\n" + "\n".join(lines), reply_markup=markup)
 
@@ -142,7 +150,7 @@ def _build_schedules_keyboard(templates: list, cid: int) -> InlineKeyboardMarkup
         check = "☑️" if name in selected else "⬜"
         markup.add(InlineKeyboardButton(
             f"{check} {status}  {title}",
-            callback_data=f"sched_sel_{name}"
+            callback_data=f"sched_sel_{callback_key(name)}"
         ))
 
     if selected:
@@ -769,7 +777,7 @@ async def schedule_once_command(message):
             lines.append(f"Auto-closes: {event_day.capitalize()} {event_time}.")
         if result["persistent"]:
             lines.append(f"Saved as reusable template *{_esc_md(result['template_name'])}* "
-                         f"— /start_template {_esc_md(result['template_name'])} to reuse it later.")
+                         f"— /start\\_template {_esc_md(result['template_name'])} to reuse it later.")
         else:
             lines.append("This is a one-off — nothing left in /templates once it fires.")
         await bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
@@ -822,7 +830,11 @@ async def schedules_toggle_callback(call):
             return
 
         if data.startswith("sched_sel_"):
-            name = data[len("sched_sel_"):]
+            name = _template_from_token(cid, data[len("sched_sel_"):])
+            if name is None:
+                await bot.answer_callback_query(call.id, "That template no longer exists.")
+                await _send_schedules(cid, edit_msg_id=call.message.message_id)
+                return
             sel = _sched_selection.setdefault(cid, set())
             if name in sel:
                 sel.discard(name)
@@ -988,11 +1000,14 @@ async def template_delete_callback(call):
                 return
 
         if data.startswith("tmpldel_ask_"):
-            name = data[len("tmpldel_ask_"):]
+            name = _template_from_token(cid, data[len("tmpldel_ask_"):])
+            if name is None:
+                await bot.answer_callback_query(call.id, "That template no longer exists.", show_alert=True)
+                return
             confirm_markup = InlineKeyboardMarkup(row_width=2)
             confirm_markup.add(
-                InlineKeyboardButton("✅ Yes, delete", callback_data=f"tmpldel_yes_{name}"),
-                InlineKeyboardButton("❌ Cancel", callback_data=f"tmpldel_no_{name}"),
+                InlineKeyboardButton("✅ Yes, delete", callback_data=f"tmpldel_yes_{callback_key(name)}"),
+                InlineKeyboardButton("❌ Cancel", callback_data=f"tmpldel_no_{callback_key(name)}"),
             )
             await bot.answer_callback_query(call.id)
             await bot.send_message(
@@ -1008,7 +1023,10 @@ async def template_delete_callback(call):
             return
 
         if data.startswith("tmpldel_yes_"):
-            name = data[len("tmpldel_yes_"):]
+            name = _template_from_token(cid, data[len("tmpldel_yes_"):])
+            if name is None:
+                await bot.answer_callback_query(call.id, "That template no longer exists.", show_alert=True)
+                return
             try:
                 templates_svc.delete_one_template(cid, name, call.from_user.id, call.from_user.first_name)
                 await bot.answer_callback_query(call.id, f"🗑 Deleted {name}")

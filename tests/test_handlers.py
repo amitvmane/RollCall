@@ -484,7 +484,9 @@ class TestListTemplates(HandlerTestBase):
              patch('handlers.templates.InlineKeyboardButton') as mock_btn:
             await self.list_templates(msg)
         callback_datas = [c.kwargs.get("callback_data") for c in mock_btn.call_args_list]
-        self.assertIn("tmpldel_ask_t1", callback_datas)
+        # Keyed, not the raw name: callback_data is capped at 64 bytes.
+        from utils.text import callback_key
+        self.assertIn(f"tmpldel_ask_{callback_key('t1')}", callback_datas)
 
 
 # ===========================================================================

@@ -25,6 +25,7 @@ from handlers.promotion import announce_one
 from rollcall_manager import manager
 from services import proxy as proxy_svc
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from utils.text import callback_key
 
 
 def _parse_proxy_args(text: str) -> tuple[int, str, str]:
@@ -70,8 +71,8 @@ async def set_in_for(message):
             rc_title = rc.title if rc else ""
             markup = InlineKeyboardMarkup(row_width=2)
             markup.add(
-                InlineKeyboardButton("✅ Yes, add anyway", callback_data=f"proxy_add_{rc_number}_{proxy_name}"),
-                InlineKeyboardButton("❌ Cancel", callback_data=f"proxy_cancel_{rc_number}_{proxy_name}"),
+                InlineKeyboardButton("✅ Yes, add anyway", callback_data=f"proxy_add_{rc_number}_{callback_key(proxy_name)}"),
+                InlineKeyboardButton("❌ Cancel", callback_data=f"proxy_cancel_{rc_number}_{callback_key(proxy_name)}"),
             )
             await bot.send_message(
                 cid,

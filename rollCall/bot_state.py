@@ -25,6 +25,7 @@ from rollcall_manager import manager
 # utils/text.py (dependency-free) so the services layer can use it without
 # importing bot_state (which constructs AsyncTeleBot on import).
 from utils.text import esc_md as _esc_md
+from utils.text import callback_key, split_for_telegram
 
 # Exceptions whose str(e) is a curated user-facing message — safe to expose
 # directly. Anything outside this set is treated as an internal error.
@@ -262,6 +263,21 @@ async def safe_edit_markup(cid: int, msg_id: int, reply_markup=None) -> bool:
         return False
 
 
+async def send_long(cid: int, text: str, **kwargs):
+    """bot.send_message for text that can outgrow Telegram's 4096-character
+    limit (help lists, anything rendered from a growing list). Telegram
+    refuses an over-long message outright, so it is split at blank lines /
+    line breaks and sent in order; reply_markup rides on the last piece, so
+    buttons stay under the text they belong to. Returns the last Message."""
+    pieces = split_for_telegram(text)
+    markup = kwargs.pop("reply_markup", None)
+    sent = None
+    for i, piece in enumerate(pieces):
+        extra = {"reply_markup": markup} if markup is not None and i == len(pieces) - 1 else {}
+        sent = await bot.send_message(cid, piece, **kwargs, **extra)
+    return sent
+
+
 async def send_md_fallback(cid: int, text: str, **kwargs):
     """Send with Markdown, retrying as plain text if Telegram rejects parsing.
 
@@ -276,7 +292,18 @@ async def send_md_fallback(cid: int, text: str, **kwargs):
     make an otherwise-successful DB write's confirmation vanish silently —
     seen in production as a "no ack" report even though the write logged
     fine). A final failure is always logged loudly rather than swallowed.
+
+    Text past Telegram's length limit goes out in several messages (see
+    send_long) — retrying a too-long message can only fail again.
     """
+    pieces = split_for_telegram(text)
+    if len(pieces) > 1:
+        markup = kwargs.pop("reply_markup", None)
+        sent = None
+        for i, piece in enumerate(pieces):
+            extra = {"reply_markup": markup} if markup is not None and i == len(pieces) - 1 else {}
+            sent = await send_md_fallback(cid, piece, **kwargs, **extra)
+        return sent
     try:
         return await bot.send_message(cid, text, parse_mode="Markdown", **kwargs)
     except Exception as e:
@@ -628,7 +655,7 @@ def _ghost_row(rc_db_id: int, u: dict, selected_ids: set, suffix: str = "") -> I
         tick = "👻 " if proxy_name in selected_ids else ""
         return InlineKeyboardButton(
             f"{tick}{proxy_name}{suffix}",
-            callback_data=f"ghost_togp_{rc_db_id}_{proxy_name}"
+            callback_data=f"ghost_togp_{rc_db_id}_{callback_key(proxy_name)}"
         )
     uid = u['user_id']
     name = u.get('first_name') or u.get('username') or str(uid)

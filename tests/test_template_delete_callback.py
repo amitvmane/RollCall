@@ -32,7 +32,8 @@ class TestTemplateDeleteCallback(unittest.IsolatedAsyncioTestCase):
         mgr.get_admin_rights.return_value = False
         with patch.object(tmpl_mod, "manager", mgr), \
              patch.object(tmpl_mod, "bot") as mock_bot, \
-             patch.object(tmpl_mod, "InlineKeyboardButton") as mock_btn:
+             patch.object(tmpl_mod, "InlineKeyboardButton") as mock_btn, \
+             patch.object(tmpl_mod.templates_svc, "list_templates", return_value=[{"name": "sunday"}]):
             mock_bot.answer_callback_query = AsyncMock()
             mock_bot.send_message = AsyncMock()
             await tmpl_mod.template_delete_callback(_make_call("tmpldel_ask_sunday"))
@@ -40,8 +41,10 @@ class TestTemplateDeleteCallback(unittest.IsolatedAsyncioTestCase):
         text = mock_bot.send_message.await_args.args[1]
         self.assertIn("sunday", text)
         callback_datas = [c.kwargs.get("callback_data") for c in mock_btn.call_args_list]
-        self.assertIn("tmpldel_yes_sunday", callback_datas)
-        self.assertIn("tmpldel_no_sunday", callback_datas)
+        # Keyed, not the raw name: callback_data is capped at 64 bytes.
+        from utils.text import callback_key
+        self.assertIn(f"tmpldel_yes_{callback_key('sunday')}", callback_datas)
+        self.assertIn(f"tmpldel_no_{callback_key('sunday')}", callback_datas)
 
     async def test_no_cancels(self):
         import handlers.templates as tmpl_mod
@@ -62,7 +65,8 @@ class TestTemplateDeleteCallback(unittest.IsolatedAsyncioTestCase):
         with patch.object(tmpl_mod, "manager", mgr), \
              patch.object(tmpl_mod, "bot") as mock_bot, \
              patch.object(tmpl_mod, "safe_edit_text", new=AsyncMock()) as edit, \
-             patch.object(tmpl_mod.templates_svc, "delete_one_template") as mock_delete:
+             patch.object(tmpl_mod.templates_svc, "delete_one_template") as mock_delete, \
+             patch.object(tmpl_mod.templates_svc, "list_templates", return_value=[{"name": "sunday"}]):
             mock_bot.answer_callback_query = AsyncMock()
             await tmpl_mod.template_delete_callback(_make_call("tmpldel_yes_sunday"))
         mock_delete.assert_called_once_with(100, "sunday", 1, "Admin")

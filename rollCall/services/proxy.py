@@ -25,7 +25,7 @@ from db import (
     log_admin_action,
 )
 
-from .common import (record_promotion_stats, resolve_rollcall_ref,
+from .common import (clean_comment, record_promotion_stats, resolve_rollcall_ref,
                      serialize_rollcall, serialize_user)
 
 
@@ -116,7 +116,7 @@ def set_in_for_locked(chat_id, admin_user_id, admin_name, proxy_name, comment=No
         )
 
     user = User(proxy_name, None, proxy_name, rc.allNames)
-    user.comment = comment or ""
+    user.comment = clean_comment(comment)
     rc.set_proxy_owner(user.user_id, admin_user_id)
 
     result = rc.addIn(user)
@@ -173,7 +173,7 @@ def set_out_for_locked(chat_id, admin_user_id, admin_name, proxy_name, comment=N
     proxy_name = _validate_proxy_name(proxy_name)
     rc_number, rc = resolve_rollcall_ref(chat_id, rc_number, rollcall_id)
     user = User(proxy_name, None, proxy_name, rc.allNames)
-    user.comment = comment or ""
+    user.comment = clean_comment(comment)
 
     was_in = any(
         (u.user_id == user.user_id or u.name == user.name) for u in rc.inList
@@ -237,7 +237,7 @@ def set_maybe_for_locked(chat_id, admin_user_id, admin_name, proxy_name, comment
     proxy_name = _validate_proxy_name(proxy_name)
     rc_number, rc = resolve_rollcall_ref(chat_id, rc_number, rollcall_id)
     user = User(proxy_name, None, proxy_name, rc.allNames)
-    user.comment = comment or ""
+    user.comment = clean_comment(comment)
 
     was_in = any(
         (u.user_id == user.user_id or u.name == user.name) for u in rc.inList

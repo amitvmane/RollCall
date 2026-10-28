@@ -87,7 +87,8 @@ class TestHelpDetail(IntegrationBase):
 
     async def test_help_admin_renders_admin_list(self):
         await self.help_commands(self.msg("/help admin", ADMIN_USER))
-        text = self._last_text()
+        # Over Telegram's 4096 limit, so it arrives in parts — read them all.
+        text = "\n".join(self.sent_texts())
         # Admin-only commands appear
         self.assertIn("/start", text)
         self.assertIn("/erc", text)
@@ -115,7 +116,7 @@ class TestCommandRegistryParity(IntegrationBase):
     async def test_every_admin_command_appears_in_admin_help(self):
         from commands_registry import COMMANDS
         await self.help_commands(self.msg("/help admin", ADMIN_USER))
-        text = self.sent_texts()[-1].replace('\\', '')
+        text = "\n".join(self.sent_texts()).replace('\\', '')
         missing = [
             f"/{c['name']}" for c in COMMANDS
             if c['scope'] in ('user', 'admin', 'super_admin') and f"/{c['name']}" not in text

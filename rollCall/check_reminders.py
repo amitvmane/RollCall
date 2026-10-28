@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 import pytz
 
-from bot_state import bot
+from bot_state import bot, _esc_md
 from db import (
     get_all_scheduled_templates,
     update_template_last_scheduled_date, get_all_chat_ids,
@@ -153,7 +153,7 @@ async def _dm_non_responders(chat_id: int, rc_number: int, title: str, when_phra
         try:
             await bot.send_message(
                 uid,
-                f"⏰ You haven't voted yet for *{title}* — it {when_phrase}. /in, /out, or /maybe?",
+                f"⏰ You haven't voted yet for *{_esc_md(title)}* — it {when_phrase}. /in, /out, or /maybe?",
                 parse_mode="Markdown",
             )
             sent += 1
@@ -271,7 +271,7 @@ async def check(rollcalls, timezone, chat_id):
                                     await bot.send_message(
                                         chat_id,
                                         f"⏰ Hey {mentions}\n\n"
-                                        f"*{rollcall.title}* closes in ~{buzz_hours}h — have you voted?",
+                                        f"*{_esc_md(rollcall.title)}* closes in ~{buzz_hours}h — have you voted?",
                                         parse_mode="Markdown",
                                     )
                                     logging.info(
@@ -1042,7 +1042,7 @@ async def _fire_scheduled_rollcalls():
                 try:
                     await bot.send_message(
                         chat_id,
-                        f"📋 *{title}* rollcall is now open! Vote with /in or /out.",
+                        f"📋 *{_esc_md(title)}* rollcall is now open! Vote with /in or /out.",
                         parse_mode="Markdown",
                     )
                 except Exception:

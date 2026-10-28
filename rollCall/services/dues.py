@@ -909,7 +909,7 @@ def list_penalty_tiers(chat_id: int) -> dict:
         for t in tiers:
             desc = f" — {_esc_md(t['description'])}" if t.get("description") else ""
             lines.append(f"  • *{_esc_md(t['name'])}*: ₹{t['amount']}{desc}")
-        lines.append("\nUse: /mark_penalty <tier> <name>")
+        lines.append("\nUse: /mark\\_penalty <tier> <name>")
     return {"tiers": tiers, "announcement": "\n".join(lines)}
 
 

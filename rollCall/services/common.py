@@ -14,6 +14,18 @@ from models import RollCall, User
 MAX_ROLLCALLS_PER_CHAT = 3
 
 
+# A vote comment is shown on the panel next to the name, for everyone. The
+# web/REST schemas always capped it at 100; the chat commands didn't, so one
+# "/in <4,000 characters>" pushed the panel past Telegram's message limit and
+# every later panel edit failed for the whole group. Capped here, where every
+# surface's vote passes through.
+MAX_COMMENT_LEN = 100
+
+
+def clean_comment(comment) -> str:
+    return (comment or "")[:MAX_COMMENT_LEN]
+
+
 def serialize_user(u: User) -> dict:
     """Convert a User into a plain dict adapters can format or JSON-encode."""
     return {

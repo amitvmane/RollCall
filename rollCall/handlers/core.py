@@ -7,7 +7,7 @@ import os
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot_state import bot, data_file_path, reply_error
+from bot_state import bot, data_file_path, reply_error, send_long
 from config import ADMINS
 from exceptions import insufficientPermissions, parameterMissing
 from functions import admin_rights, auto_complete_timezone
@@ -340,7 +340,7 @@ async def help_commands(message):
     Everything renders from the COMMANDS registry in commands_registry.py."""
     parts = message.text.strip().split()
     if len(parts) <= 1:
-        await bot.send_message(
+        await send_long(
             message.chat.id,
             _render_quick_start() + "\n" + _render_command_list({"user"}, USER_CATEGORY_ORDER, "🎯 *RollCall — User Commands*"),
             parse_mode='Markdown',
@@ -349,7 +349,7 @@ async def help_commands(message):
 
     arg = parts[1].lower().lstrip('/')
     if arg == "admin":
-        await bot.send_message(
+        await send_long(
             message.chat.id,
             _render_command_list({"user", "admin", "super_admin"}, ADMIN_CATEGORY_ORDER, "⚙️ *RollCall — Admin Commands*"),
             parse_mode='Markdown',
@@ -358,7 +358,7 @@ async def help_commands(message):
 
     cmd = lookup_command(arg)
     if cmd is not None:
-        await bot.send_message(message.chat.id, _render_command_detail(cmd), parse_mode='Markdown')
+        await send_long(message.chat.id, _render_command_detail(cmd), parse_mode='Markdown')
         return
 
     # No exact command match — try category, then keyword, before giving up
@@ -367,7 +367,7 @@ async def help_commands(message):
     # command would type.
     by_category = _search_by_category(arg)
     if by_category:
-        await bot.send_message(
+        await send_long(
             message.chat.id,
             _render_search_results(by_category, f"🔎 *{_esc_md(arg.title())} commands*"),
             parse_mode='Markdown',
@@ -376,7 +376,7 @@ async def help_commands(message):
 
     by_keyword = _search_by_keyword(arg)
     if by_keyword:
-        await bot.send_message(
+        await send_long(
             message.chat.id,
             _render_search_results(by_keyword, f"🔎 *Commands matching \"{_esc_md(arg)}\"*"),
             parse_mode='Markdown',
@@ -386,7 +386,7 @@ async def help_commands(message):
     # Unknown command — offer a suggestion if one is close.
     suggestion = _suggest_command(arg)
     if suggestion:
-        await bot.send_message(
+        await send_long(
             message.chat.id,
             f"No command `/{_esc_md(arg)}` — did you mean `/{_esc_md(suggestion)}`? Try `/help {suggestion}`.",
             parse_mode='Markdown',
@@ -394,7 +394,7 @@ async def help_commands(message):
     else:
         web_url = _help_web_url()
         web_hint = f" Or browse/search the full list: {web_url}" if web_url else ""
-        await bot.send_message(
+        await send_long(
             message.chat.id,
             f"No command `/{_esc_md(arg)}`. Use /help or /help admin to see the list.{web_hint}",
             parse_mode='Markdown',

@@ -196,7 +196,7 @@ async def event_fee(message):
             title = closeable.get("title") or f"game #{closeable['id']}"
             await bot.send_message(
                 cid,
-                f"Event Fee set to {event_price} for *{title}*\n\nRun `/settle_dues` to financially close this game.",
+                f"Event Fee set to {_esc_md(event_price)} for *{_esc_md(title)}*\n\nRun `/settle_dues` to financially close this game.",
                 parse_mode="Markdown",
             )
 

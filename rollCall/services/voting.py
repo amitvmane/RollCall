@@ -31,7 +31,7 @@ from db import (
     upsert_chat_member,
 )
 
-from .common import (record_promotion_stats, resolve_rollcall_ref,
+from .common import (clean_comment, record_promotion_stats, resolve_rollcall_ref,
                      serialize_rollcall, serialize_user)
 
 
@@ -180,7 +180,7 @@ def vote_in_locked(chat_id, user_id, first_name, username=None, comment=None,
     the web vote replacing a stale guest entry with the verified member."""
     rc_number, rc = resolve_rollcall_ref(chat_id, rc_number, rollcall_id)
     user = User(first_name, username, user_id, rc.allNames)
-    user.comment = comment or ""
+    user.comment = clean_comment(comment)
 
     if isinstance(user.user_id, int):
         upsert_chat_member(chat_id, user.user_id, first_name, username)
@@ -251,7 +251,7 @@ def vote_out_locked(chat_id, user_id, first_name, username=None, comment=None,
     """vote_out's body for a caller already holding the write lock."""
     rc_number, rc = resolve_rollcall_ref(chat_id, rc_number, rollcall_id)
     user = User(first_name, username, user_id, rc.allNames)
-    user.comment = comment or ""
+    user.comment = clean_comment(comment)
 
     if isinstance(user.user_id, int):
         upsert_chat_member(chat_id, user.user_id, first_name, username)
@@ -328,7 +328,7 @@ def vote_maybe_locked(chat_id, user_id, first_name, username=None, comment=None,
     """vote_maybe's body for a caller already holding the write lock."""
     rc_number, rc = resolve_rollcall_ref(chat_id, rc_number, rollcall_id)
     user = User(first_name, username, user_id, rc.allNames)
-    user.comment = comment or ""
+    user.comment = clean_comment(comment)
 
     if isinstance(user.user_id, int):
         upsert_chat_member(chat_id, user.user_id, first_name, username)

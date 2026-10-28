@@ -16,7 +16,7 @@ Flow:
   5. Tap "Done" → attendance tracking finalised, panel dismissed.
 
 Callback data prefixes (all ≤ 64 bytes):
-  pen_t:{rc_id}:{tier}   — select a tier
+  pen_t:{rc_id}:{key}    — select a tier (key = utils.text.callback_key(name))
   pen_g:{rc_id}:{idx}    — toggle player at list index
   pen_a:{rc_id}          — apply current selections
   pen_b:{rc_id}          — back to tier list
@@ -38,6 +38,7 @@ from bot_state import (
 )
 from rollcall_manager import manager
 from services import dues as dues_svc
+from utils.text import callback_key, match_callback_name
 
 # Cap on concurrently tracked panels; oldest evicted first. A panel that was
 # never dismissed just expires — tapping it says "run /erc again".
@@ -114,7 +115,7 @@ def _tier_view(session: "_PenaltySession", tiers: list) -> Tuple[str, InlineKeyb
         else:
             ghost_tag = ""
         label    = f"{'🔴' if is_ditch else '🟡'} {name} ₹{amt}{ghost_tag}{badge}"
-        kb.add(InlineKeyboardButton(label, callback_data=f"pen_t:{rc}:{name}"))
+        kb.add(InlineKeyboardButton(label, callback_data=f"pen_t:{rc}:{callback_key(name)}"))
     kb.add(InlineKeyboardButton("✅ Done", callback_data=f"pen_d:{rc}"))
     return text, kb
 
@@ -257,8 +258,9 @@ async def penalty_panel_callback(call):
 
         # ── Select tier ──────────────────────────────────────────────────────
         if data.startswith(f"pen_t:{rc}:"):
-            tier_name = data[len(f"pen_t:{rc}:"):]
-            if tier_name not in tier_map:
+            # Short key, not the name: callback_data is capped at 64 bytes.
+            tier_name = match_callback_name(data[len(f"pen_t:{rc}:"):], tier_map)
+            if tier_name is None:
                 await bot.answer_callback_query(call.id, "Tier no longer exists.")
                 return
             session.active_tier = tier_name

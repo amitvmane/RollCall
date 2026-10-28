@@ -32,6 +32,14 @@ from services import admin as admin_svc
 from services import ghost as ghost_svc
 from services import voting as voting_svc
 from services.common import find_rollcall_index
+from utils.text import match_callback_name
+
+
+def _pending_proxy_name(cid: int, uid: int, token: str):
+    """The proxy name a confirm button stands for: the button carries a short
+    key (64-byte callback cap), resolved among THIS admin's pending /sif
+    confirmations only."""
+    return match_callback_name(token, (k[2] for k in list(_pending_proxy_add) if k[0] == cid and k[1] == uid))
 
 
 def _ts() -> str:
@@ -265,7 +273,16 @@ async def ghost_callback_handler(call):
         if data.startswith("ghost_togp_"):
             parts = data.split("_", 3)
             rc_db_id = int(parts[2])
-            proxy_name = parts[3]
+            # The button carries a short key, not the name (64-byte cap).
+            # Only a proxy actually on this session's card can be toggled.
+            proxy_name = match_callback_name(parts[3], (
+                u["proxy_name"]
+                for u in get_rollcall_in_users(rc_db_id) + get_rollcall_out_users(rc_db_id)
+                if u.get("proxy_name") is not None))
+            if proxy_name is None:
+                await bot.answer_callback_query(
+                    call.id, "That name isn't on this game's list any more.", show_alert=True)
+                return
             key = (cid, rc_db_id)
             if key not in _ghost_selections:
                 saved = load_ghost_selections(cid, rc_db_id)
@@ -393,13 +410,13 @@ async def ghost_callback_handler(call):
         if data.startswith("proxy_add_"):
             parts = data.split("_", 3)
             rc_number = int(parts[2])
-            proxy_name = parts[3]
 
             # Only the admin who ran /sif can confirm it: the pending entry is
             # keyed on them. This used to fall back to an empty entry, so in
             # an admin-locked group ANY member could tap "Yes, add anyway" and
             # become the proxy's owner.
             proxy_owner_id = call.from_user.id
+            proxy_name = _pending_proxy_name(cid, proxy_owner_id, parts[3])
             pending = _pending_proxy_add.pop((cid, proxy_owner_id, proxy_name), None)
             if pending is None:
                 await bot.answer_callback_query(
@@ -458,7 +475,7 @@ async def ghost_callback_handler(call):
         # ── proxy_cancel ─────────────────────────────────────────────────────
         if data.startswith("proxy_cancel_"):
             parts = data.split("_", 3)
-            proxy_name = parts[3] if len(parts) > 3 else ""
+            proxy_name = _pending_proxy_name(cid, call.from_user.id, parts[3] if len(parts) > 3 else "")
             if _pending_proxy_add.pop((cid, call.from_user.id, proxy_name), None) is None:
                 await bot.answer_callback_query(call.id, "This confirmation is not for you.", show_alert=True)
                 return

@@ -872,7 +872,7 @@ async def _offer_collector_upi(cid: int, rc_idx: int, uid: int, target_name: str
     )
     sent = await bot.send_message(
         cid,
-        f"💳 Route this game's fees to {target_name}'s usual UPI `{_esc_md(last_upi)}`?",
+        f"💳 Route this game's fees to {_esc_md(target_name)}'s usual UPI `{_esc_md(last_upi)}`?",
         parse_mode="Markdown", reply_markup=markup,
     )
     _prune_pending(_pending_colupi)
@@ -914,7 +914,7 @@ async def collector_upi_callback(call):
             await bot.answer_callback_query(call.id)
             await safe_edit_text(
                 cid, call.message.message_id,
-                f"✏️ Reply with {pending['name']}'s new UPI (e.g. `name@okbank`).",
+                f"✏️ Reply with {_esc_md(pending['name'])}'s new UPI (e.g. `name@okbank`).",
                 parse_mode="Markdown")
             await safe_edit_markup(cid, call.message.message_id, InlineKeyboardMarkup())
             return

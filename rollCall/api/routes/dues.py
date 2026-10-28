@@ -713,6 +713,13 @@ async def close_preview(
 _QR_TOKEN_SCOPE = "dues_qr"
 
 
+def _qr_scope(chat_id: int) -> str:
+    # Bound to the group as well as the purpose. A bare "dues_qr" scope let a
+    # token minted in group A fetch group B's QR, i.e. B's UPI address —
+    # the same "proof in one chat is proof everywhere" shape as /weblogin.
+    return f"{_QR_TOKEN_SCOPE}:{int(chat_id)}"
+
+
 @router.get(
     "/web/group/{group_token}/dues/qr-token",
     summary="Mint a short-lived token for the QR image URL (any verified member)",
@@ -729,7 +736,7 @@ async def dues_qr_token(
     # <img src> URL (browser history / access logs), so it must only be
     # usable for this one image fetch, not as a bearer credential for any
     # other identity-gated endpoint during its 5-minute life.
-    return {"token": issue_scoped_token(user_id, _QR_TOKEN_SCOPE, ttl_seconds=300)}
+    return {"token": issue_scoped_token(user_id, _qr_scope(chat["chat_id"]), ttl_seconds=300)}
 
 
 @router.get(
@@ -755,8 +762,8 @@ async def dues_qr(
     from fastapi.responses import Response as _Resp
     chat = _resolve_chat(group_token)
     _require_dues(chat)
-    require_scoped_identity(id_token, _QR_TOKEN_SCOPE)
     chat_id = int(chat["chat_id"])
+    require_scoped_identity(id_token, _qr_scope(chat_id))
 
     settings = dues_svc.get_dues_settings(chat_id)
     vpa = settings.get("upi_vpa")

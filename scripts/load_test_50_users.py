@@ -128,6 +128,26 @@ bot.answer_callback_query = AsyncMock(return_value=None)
 # the handler's own try/except, but pollutes the error-log check below).
 bot.send_photo = _record("send_photo")
 bot.pin_chat_message = AsyncMock(return_value=None)
+bot.unpin_chat_message = AsyncMock(return_value=None)
+
+# Backstop for the next stub someone forgets. An unstubbed call used to reach
+# the real network with the dummy token, and whether the run failed depended
+# on the network: unpin_chat_message leaked for weeks and only tripped the
+# error-log check on a machine whose connection happened to be refusing.
+# Refuse every real request and RECORD it — the bot's own callers often catch
+# and log below ERROR, so raising alone would be swallowed. The final checks
+# fail on any entry, by method name, on every run.
+import telebot.asyncio_helper as _tg_http  # noqa: E402
+
+_network_leaks = []
+
+
+async def _no_network(token, url, method="get", params=None, files=None, **kw):
+    _network_leaks.append(url)
+    raise RuntimeError(f"load test made a REAL Telegram call: {url} — stub bot.{url} above")
+
+
+_tg_http._process_request = _no_network
 
 _fake_member = MagicMock()
 _fake_member.status = "administrator"
@@ -471,6 +491,8 @@ async def main():
     print(f"  /stats bot wall time at {N_GROUPS}-group scale: {t_bs1 - t_bs0:.3f}s")
 
     print("\n=== Error-log check ===")
+    record("no real Telegram network calls (every bot method stubbed)", not _network_leaks,
+           f"unstubbed: {sorted(set(_network_leaks))}")
     record("no ERROR-level log lines across whole run", len(_errors) == 0,
            f"{len(_errors)} errors: {[e.getMessage()[:150] for e in _errors[:5]]}")
 

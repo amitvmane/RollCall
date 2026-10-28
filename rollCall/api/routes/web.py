@@ -254,6 +254,14 @@ async def web_group_heartbeat(
     #
     # uvicorn runs with proxy_headers=True, so request.client is the real
     # visitor rather than the proxy (see TRUSTED_PROXY_IPS).
+    #
+    # Real groups only. The presence dicts are keyed on group_token and the
+    # view gate holds each (token, visitor) for 12 h, so accepting any string
+    # let an unauthenticated caller grow server memory with made-up tokens —
+    # rate-limited per IP, but not bounded by it. One indexed lookup bounds
+    # the keys to groups that exist.
+    if not _db.get_chat_by_group_web_token(group_token):
+        raise HTTPException(404, "Invalid group token")
     viewer_key = request.client.host if request.client else None
     if presence_svc.heartbeat(group_token, body.session_id, viewer_key=viewer_key):
         _db.increment_group_view_count(group_token)

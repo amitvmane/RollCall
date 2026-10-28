@@ -77,10 +77,10 @@ async def is_telegram_chat_admin(chat_id, user_id) -> bool:
     """Is user_id a REAL Telegram administrator/creator of chat_id, right now?
 
     Unlike admin_rights() this ignores the /set_admins open-mode default,
-    for actions whose blast radius is bigger than the chat: minting a login
-    link yields a global identity valid in every group the member is in, so
-    "everyone is an admin here" must not be enough. Fails closed — Telegram
-    unreachable means no.
+    for actions that act AS another member: minting a /weblogin link signs
+    someone in as them (bound to this chat since 10.8 — see
+    api.identity.issue_chat_bound_token), so "everyone is an admin here"
+    must not be enough. Fails closed — Telegram unreachable means no.
     """
     if not user_id:
         return False

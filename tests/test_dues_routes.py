@@ -183,7 +183,8 @@ class TestDuesGetRoutesRequireHeaderIdentity(unittest.TestCase):
         self.assertNotEqual(short_token, self.token)
         # The minted token verifies to the same user id under its own scope...
         from api.identity import verify_scoped_token, verify_identity_token
-        self.assertEqual(verify_scoped_token(short_token, "dues_qr"), 42)
+        from api.routes.dues import _qr_scope
+        self.assertEqual(verify_scoped_token(short_token, _qr_scope(CHAT["chat_id"])), 42)
         # ...but must NOT work as a general-purpose identity token — it's
         # scoped to this one purpose so a leak (it's embedded in a URL)
         # can't be replayed against other identity-gated endpoints.
@@ -209,9 +210,10 @@ class TestDuesGetRoutesRequireHeaderIdentity(unittest.TestCase):
     # qr_png() returns a BytesIO and Response only renders str/bytes, so
     # starlette raised "'_io.BytesIO' object has no attribute 'encode'".
     # Assert real PNG bytes come back, not just a 200.
-    def _qr_token(self):
+    def _qr_token(self, chat_id=None):
         from api.identity import issue_scoped_token
-        return issue_scoped_token(42, "dues_qr", ttl_seconds=300)
+        from api.routes.dues import _qr_scope
+        return issue_scoped_token(42, _qr_scope(CHAT["chat_id"] if chat_id is None else chat_id), ttl_seconds=300)
 
     def test_qr_returns_real_png_bytes(self):
         with patch("api.routes.dues._db.get_chat_by_group_web_token", return_value=CHAT), \
@@ -236,6 +238,25 @@ class TestDuesGetRoutesRequireHeaderIdentity(unittest.TestCase):
         with patch("api.routes.dues._db.get_chat_by_group_web_token", return_value=CHAT), \
              patch("api.routes.dues.dues_svc.get_dues_settings", return_value={"upi_vpa": "someone@upi"}):
             r = _client().get(f"/api/v1/web/group/grp123/dues/qr?id_token={self.token}")
+        self.assertEqual(r.status_code, 401)
+
+    def test_qr_token_from_another_group_is_refused(self):
+        """A QR token is proof of membership in ONE group. Minted in group A
+        it must not open group B's QR, which would reveal B's UPI address."""
+        other = int(CHAT["chat_id"]) + 1
+        with patch("api.routes.dues._db.get_chat_by_group_web_token", return_value=CHAT), \
+             patch("api.routes.dues.dues_svc.get_dues_settings", return_value={"upi_vpa": "someone@upi"}):
+            r = _client().get(f"/api/v1/web/group/grp123/dues/qr?id_token={self._qr_token(chat_id=other)}")
+        self.assertEqual(r.status_code, 401)
+
+    def test_old_unbound_qr_token_is_refused(self):
+        """Tokens minted before the scope carried the chat (5-minute life,
+        so none are still live after a deploy) must not verify either."""
+        from api.identity import issue_scoped_token
+        tok = issue_scoped_token(42, "dues_qr", ttl_seconds=300)
+        with patch("api.routes.dues._db.get_chat_by_group_web_token", return_value=CHAT), \
+             patch("api.routes.dues.dues_svc.get_dues_settings", return_value={"upi_vpa": "someone@upi"}):
+            r = _client().get(f"/api/v1/web/group/grp123/dues/qr?id_token={tok}")
         self.assertEqual(r.status_code, 401)
 
     # ── Sanity: an invalid (garbage, not just missing) header is also 401 ─

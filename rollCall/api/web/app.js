@@ -1237,8 +1237,8 @@ function renderStats(d){
       ${(me.recent_sessions||[]).length>=3?`
       <div class="sp-spark-label">Last ${me.recent_sessions.length} sessions</div>
       <div class="sp-spark">${(me.recent_sessions).slice().reverse().map(s=>{
-        const cls=s.status==="in"?"sp-dot-in":s.status==="out"?"sp-dot-out":s.status==="maybe"?"sp-dot-maybe":s.status==="ghost"?"sp-dot-ghost":"sp-dot-miss";
-        const ttl=s.status==="miss"?"Didn't vote":s.status==="ghost"?"No-show":(s.status||"").toUpperCase();
+        const cls=s.status==="in"?"sp-dot-in":s.status==="out"?"sp-dot-out":s.status==="maybe"?"sp-dot-maybe":s.status==="ghost"?"sp-dot-ghost":s.status==="cancelled"?"sp-dot-cancelled":"sp-dot-miss";
+        const ttl=s.status==="miss"?"Didn't vote":s.status==="ghost"?"No-show":s.status==="cancelled"?"Cancelled":(s.status||"").toUpperCase();
         return`<span class="sp-dot ${cls}" title="${esc(ttl)} · ${esc((s.ended_at||'').slice(0,10))}"></span>`;
       }).join('')}</div>`:""}
     </div>`;
@@ -1263,21 +1263,31 @@ function renderStats(d){
   // count per recent session (oldest→newest) — NOT personal data, so it's
   // labeled and placed under Group Stats, distinct from the "You" block's
   // own per-session sparkline below.
+  // A cancelled game keeps its slot (so the dates read as a timeline) but
+  // shows no bar: the IN votes on it are not turnout — nobody played — and
+  // counting them would also skew the scale for the real games.
   const histArr=(d.recent_history||[]).slice().reverse();
-  const maxIn=histArr.length?Math.max(...histArr.map(h=>h.in_count||0),1):1;
-  const trendHtml=histArr.length>=2?`
+  const played=histArr.filter(h=>!h.is_cancelled);
+  const maxIn=Math.max(...played.map(h=>h.in_count||0),1);
+  const trendHtml=played.length>=2?`
   <div class="sp-trend-label">📈 Recent group turnout</div>
   <div class="sp-trend">
     ${histArr.map(h=>{
-      const barH=Math.round((h.in_count||0)/maxIn*70)+10;
       const label=(h.ended_at||'').slice(5,10)||'';
+      if(h.is_cancelled)return`<div class="sp-tbar-wrap sp-tbar-cancelled" title="${esc(h.title||'')} · cancelled">
+        <div class="sp-tbar-val">✕</div>
+        <div class="sp-tbar"></div>
+        <div class="sp-tbar-lbl">${esc(label)}</div>
+      </div>`;
+      const barH=Math.round((h.in_count||0)/maxIn*64)+6;   // px, 6–70
       return`<div class="sp-tbar-wrap" title="${esc(h.title||'')} · ${h.in_count} total IN">
         <div class="sp-tbar-val">${h.in_count}</div>
-        <div class="sp-tbar" style="height:${barH}%"></div>
+        <div class="sp-tbar" style="height:${barH}px"></div>
         <div class="sp-tbar-lbl">${esc(label)}</div>
       </div>`;
     }).join('')}
-  </div>`:'';
+  </div>
+  ${histArr.length>played.length?`<div class="sp-trend-note">✕ = cancelled</div>`:""}`:'';
 
   // Session history — full list (title, date, in/out/maybe), web parity for
   // the admin console's Stats tab. Newest-first, same order the backend
@@ -1285,6 +1295,11 @@ function renderStats(d){
   // bars; this list intentionally doesn't).
   const shistRows=(d.recent_history||[]).map(h=>{
     const date=(h.ended_at||"").slice(0,10);
+    if(h.is_cancelled)return `<div class="shist-row shist-cancelled">
+      <span class="shist-title" title="${esc(h.title||"Untitled")}">${esc(h.title||"Untitled")}</span>
+      <span class="shist-date">${esc(date)}</span>
+      <span class="shist-pills"><span class="sp-pill sp-cancelled">Cancelled</span></span>
+    </div>`;
     return `<div class="shist-row">
       <span class="shist-title" title="${esc(h.title||"Untitled")}">${esc(h.title||"Untitled")}</span>
       <span class="shist-date">${esc(date)}</span>
@@ -1311,19 +1326,32 @@ function renderStats(d){
     <span class="ghost-count">⏰ ${n(g.late_drops)}</span>
   </div>`).join("");
 
-  // Response-time leaderboard — how quickly each member typically casts
-  // their first vote after a rollcall opens, fastest first.
+  // Response-time leaderboard — how quickly each member TYPICALLY casts
+  // their first vote (median, see services.stats.response_time_board).
+  // The single quickest vote is shown on its own line above the list.
   const fmtSecs=s=>{
     s=n(s);
     if(s<60)return `${s}s`;
     const m=Math.floor(s/60),r=s%60;
     return r?`${m}m ${r}s`:`${m}m`;
   };
-  const rtRows=(d.response_time_leaderboard||[]).map(r=>`<div class="rt-row">
-    <span class="rt-name">${esc(r.display_name||r.username||"—")}</span>
-    <span class="rt-avg">${fmtSecs(r.avg_response_seconds)} avg</span>
+  // Two members can share a first name; the @username tells them apart.
+  const rtList=d.response_time_leaderboard||[];
+  const rtNameCount={};
+  rtList.forEach(r=>{const k=(r.display_name||"").toLowerCase();rtNameCount[k]=(rtNameCount[k]||0)+1;});
+  const rtName=r=>{
+    const nm=r.display_name||r.username||"—";
+    return rtNameCount[(r.display_name||"").toLowerCase()]>1&&r.username?`${nm} (@${r.username})`:nm;
+  };
+  const rtRows=rtList.map((r,i)=>`<div class="rt-row">
+    <span class="rt-rank">#${i+1}</span>
+    <span class="rt-name">${esc(rtName(r))}</span>
+    <span class="rt-avg" title="Typical (median) time to first vote over ${r.rollcall_count} rollcall${r.rollcall_count===1?"":"s"}">${fmtSecs(r.median_response_seconds??r.avg_response_seconds)}</span>
     <span class="rt-best">best ${fmtSecs(r.best_response_seconds)}</span>
   </div>`).join("");
+  const rec=d.response_time_record;
+  const rtRecord=rec?`<div class="rt-record">🏅 Quickest vote ever: <strong>${esc(rec.display_name||rec.username||"—")}</strong> in ${fmtSecs(rec.seconds)}</div>`:"";
+  const rtNote=d.response_time_min_votes>1?`<div class="rt-note">Typical time to first vote · members with ${d.response_time_min_votes}+ votes</div>`:`<div class="rt-note">Typical time to first vote</div>`;
 
   sc.innerHTML=`
   <div class="stats-section-hdr">📊 Group Stats</div>
@@ -1336,7 +1364,7 @@ function renderStats(d){
   ${personalHtml}
   ${lbRows?`<div class="stats-section-hdr">🏆 Leaderboard</div><div class="slb-list">${lbRows}</div>`:""}
   ${shistRows?`<div class="stats-section-hdr">🗓 Session History</div><div class="shist-list">${shistRows}</div>`:""}
-  ${rtRows?`<div class="stats-section-hdr">⚡ Fastest Voters</div><div class="rt-list">${rtRows}</div>`:""}
+  ${rtRows?`<div class="stats-section-hdr">⚡ Fastest Voters</div>${rtRecord}${rtNote}<div class="rt-list">${rtRows}</div>`:""}
   ${ghostRows?`<div class="stats-section-hdr">👻 Ghosts</div><div class="ghost-list">${ghostRows}</div>`:""}
   ${lateRows?`<div class="stats-section-hdr" title="IN → OUT/MAYBE within ${n(d.late_drop_hours)}h of game time">⏰ Late drops <small>(within ${n(d.late_drop_hours)}h of game)</small></div><div class="ghost-list">${lateRows}</div>`:""}`;
 }

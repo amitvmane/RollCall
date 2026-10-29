@@ -135,7 +135,18 @@ h1,h2,h3,.rc-title,.brand-name{font-family:var(--font-display)}
   margin:0 -14px 12px;position:sticky;top:0;z-index:100;
   border-bottom:2px solid var(--accent);
 }
-html.dark .brand-bar{background:linear-gradient(180deg,#0D1712 0%,#000 220%)}
+html.dark .brand-bar{background:linear-gradient(180deg,#0b1222 0%,#000 220%)}
+/* Desktop: #app stops at 1180px, so the bar did too, leaving page-colour
+   strips either side of a dark header. border-image's outset paints it to the
+   screen edges as ink overflow — no extra scroll width, no sideways scroll.
+   The accent rule is part of the image because border-image replaces the
+   border. Kept after the base rule so its border-bottom doesn't win. */
+@media(min-width:1024px){
+  #brand-bar{border-bottom:0;
+    border-image:linear-gradient(180deg,var(--text) 0%,#020617 calc(100% - 2px),var(--accent) calc(100% - 2px)) fill 0//0 100vmax}
+  html.dark #brand-bar{
+    border-image:linear-gradient(180deg,#0b1222 0%,#020617 calc(100% - 2px),var(--accent) calc(100% - 2px)) fill 0//0 100vmax}
+}
 .brand-inner{display:flex;align-items:center;gap:9px}
 .brand-logo{border-radius:6px;flex-shrink:0}
 .brand-name{font-size:1.15rem;font-weight:800;color:#fff;letter-spacing:.01em;text-transform:uppercase}
@@ -392,7 +403,7 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .vote-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
 .vote-btn{padding:16px 6px;border:2px solid var(--border);border-radius:10px;font-size:1rem;font-weight:800;cursor:pointer;transition:transform .12s,background .12s,border-color .12s;background:var(--card);color:var(--text);display:flex;flex-direction:column;align-items:center;gap:5px;-webkit-tap-highlight-color:transparent}
 .vote-btn .vb-icon{font-size:1.4rem}
-.vote-btn .vb-label{font-size:.78rem;font-weight:800;letter-spacing:.06em;font-family:var(--font-display)}
+.vote-btn .vb-label{font-size:.8rem;font-weight:700;letter-spacing:.08em;font-family:var(--font-body)}
 .vote-btn:active{transform:scale(.94)}
 .vote-btn.in   {border-color:var(--in);   color:var(--in)}
 .vote-btn.out  {border-color:var(--out);  color:var(--out)}
@@ -434,7 +445,7 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
   #lists-container>.list-sect:not(:first-child){grid-column:2}
   #lists-container>.list-sect:last-child{margin-bottom:14px}
 }
-.list-lbl{font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:.07em;margin-bottom:7px;display:flex;align-items:center;gap:6px;font-family:var(--font-display)}
+.list-lbl{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin-bottom:7px;display:flex;align-items:center;gap:6px;font-family:var(--font-body)}
 .list-lbl.in{color:var(--in)}.list-lbl.out{color:var(--out)}.list-lbl.maybe{color:var(--maybe)}.list-lbl.wait{color:var(--sub)}
 .list-cnt{font-weight:400;opacity:.7;font-family:var(--font-mono)}
 .list-items{list-style:none}
@@ -478,7 +489,7 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
    card in index.html — this styling makes that demotion visible: compact
    rows, no card-level heading weight competing with the live game). ── */
 #upcoming-card{padding-top:12px;padding-bottom:10px}
-.upcoming-header{font-size:0.72rem;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:var(--sub);padding:0 0 8px;font-family:var(--font-display)}
+.upcoming-header{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--sub);padding:0 0 8px;font-family:var(--font-body)}
 .upcoming-row{display:flex;gap:12px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--border)}
 .upcoming-row:last-child{border-bottom:none;padding-bottom:0}
 .upcoming-when{display:flex;flex-direction:column;align-items:center;min-width:50px;gap:2px}
@@ -511,14 +522,16 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .tg-offline-close:hover{opacity:1}
 
 /* ── Stats card ── */
-.stats-section-hdr{font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:var(--sub);padding:0 0 10px;font-family:var(--font-display)}
+.stats-section-hdr{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--sub);padding:0 0 8px;margin-top:22px;font-family:var(--font-body)}
+.stats-section-hdr:first-child{margin-top:0}
+.stats-section-hdr small{font-size:inherit;font-weight:500;text-transform:none;letter-spacing:0}
 .sp-group-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}
 .sp-g{text-align:center;padding:12px 6px;background:var(--bg);border-radius:8px}
 .sp-g-val{font-size:1.5rem;font-weight:800;color:var(--accent);font-family:var(--font-display)}
-.sp-g-lbl{font-size:.72rem;color:var(--sub);margin-top:2px;font-weight:600}
+.sp-g-lbl{font-size:.75rem;color:var(--sub);margin-top:2px;font-weight:600}
 .sp-personal{background:var(--bg);border-radius:8px;padding:14px;margin-bottom:14px}
 .sp-you-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
-.sp-you-label{font-weight:800;font-size:.9rem;font-family:var(--font-display);text-transform:uppercase;letter-spacing:.03em}
+.sp-you-label{font-weight:700;font-size:.8rem;font-family:var(--font-body);text-transform:uppercase;letter-spacing:.08em}
 .sp-rank{font-size:.8rem;color:var(--accent);font-weight:700;background:var(--accent-dim);padding:2px 8px;border-radius:6px;font-family:var(--font-mono)}
 .sp-mini-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
 .sp-mini{text-align:center}
@@ -533,7 +546,8 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .sp-in{background:var(--success-bg);color:var(--success-fg)}
 .sp-out{background:var(--danger-bg);color:var(--danger-fg)}
 .sp-maybe{background:var(--warn-bg);color:var(--warn-fg)}
-.sp-ghost{background:var(--hover);color:var(--sub)}
+.sp-ghost{background:var(--card);color:var(--sub);box-shadow:inset 0 0 0 1px var(--border)}
+.sp-cancelled{background:transparent;color:var(--sub);box-shadow:inset 0 0 0 1px var(--border);font-weight:600}
 .slb-list{display:flex;flex-direction:column;gap:0}
 .slb-row{display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--border);font-size:.85rem}
 .slb-row:last-child{border-bottom:none}
@@ -554,20 +568,28 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .shist-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
 .shist-date{color:var(--sub);font-size:.76rem;white-space:nowrap;font-family:var(--font-mono)}
 .shist-pills{display:flex;gap:4px;flex-shrink:0}
+.shist-cancelled .shist-title{color:var(--sub);font-weight:500;text-decoration:line-through;text-decoration-color:var(--border)}
 .ghost-row,.rt-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);font-size:.85rem}
 .ghost-row:last-child,.rt-row:last-child{border-bottom:none}
 .ghost-name,.rt-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
 .ghost-count{color:var(--out);font-weight:700;font-size:.82rem;flex-shrink:0}
 .rt-avg{font-weight:700;color:var(--success);font-size:.82rem;flex-shrink:0;font-family:var(--font-mono)}
-.rt-best{color:var(--sub);font-size:.76rem;flex-shrink:0;font-family:var(--font-mono)}
+.rt-best{color:var(--sub);font-size:.76rem;flex-shrink:0;font-family:var(--font-mono);min-width:5.5em;text-align:right}
+.rt-rank{width:30px;font-weight:700;color:var(--sub);flex-shrink:0;font-size:.8rem;font-family:var(--font-mono)}
+.rt-record{background:var(--warn-bg);color:var(--text);border-radius:8px;padding:9px 12px;font-size:.85rem;margin-bottom:8px}
+.rt-note{font-size:.75rem;color:var(--sub);margin-bottom:2px}
 
 /* ── Attendance trend chart ── */
-.sp-trend-label{font-size:.78rem;font-weight:700;color:var(--sub);margin:12px 0 6px}
-.sp-trend{display:flex;align-items:flex-end;gap:5px;height:80px}
-.sp-tbar-wrap{display:flex;flex-direction:column;align-items:center;flex:1;min-width:20px;height:100%}
-.sp-tbar-val{font-size:0.72rem;font-weight:700;color:var(--text);margin-bottom:2px;line-height:1;font-family:var(--font-mono)}
-.sp-tbar{width:100%;background:var(--accent);border-radius:3px 3px 0 0;transition:height .3s;min-height:3px}
-.sp-tbar-lbl{font-size:0.72rem;color:var(--sub);margin-top:3px;white-space:nowrap}
+.sp-trend-label{font-size:.8rem;font-weight:700;color:var(--sub);margin:4px 0 8px}
+.sp-trend{display:flex;align-items:flex-end;gap:6px}
+.sp-tbar-wrap{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;flex:1;min-width:0}
+.sp-tbar-val{font-size:.75rem;font-weight:700;color:var(--text);margin-bottom:3px;line-height:1;font-family:var(--font-mono)}
+.sp-tbar{width:100%;max-width:44px;background:var(--accent);border-radius:4px 4px 0 0;transition:height .3s;min-height:3px}
+.sp-tbar-lbl{font-size:.7rem;color:var(--sub);margin-top:4px;padding-top:3px;white-space:nowrap;border-top:1px solid var(--border);width:100%;text-align:center;font-family:var(--font-mono)}
+.sp-tbar-cancelled .sp-tbar-val{color:var(--sub);font-family:var(--font-body)}
+.sp-tbar-cancelled .sp-tbar{height:8px;background:repeating-linear-gradient(135deg,var(--border) 0 3px,transparent 3px 6px)}
+.sp-trend-note{font-size:.72rem;color:var(--sub);margin:6px 0 14px}
+.sp-trend+.sp-personal,.sp-trend+.stats-section-hdr{margin-top:14px}
 
 /* ── Personal session sparkline ── */
 .sp-spark-label{font-size:.72rem;color:var(--sub);margin:8px 0 4px;font-weight:600}
@@ -578,6 +600,7 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .sp-dot-maybe{background:var(--warn)}
 .sp-dot-miss{background:var(--border)}
 .sp-dot-ghost{background:var(--danger);opacity:.45}
+.sp-dot-cancelled{background:transparent;box-shadow:inset 0 0 0 1.5px var(--sub);opacity:.6}
 
 /* ── Admin toggle switch ── */
 .admin-toggle{position:relative;display:inline-block;width:44px;height:24px;flex-shrink:0}
@@ -604,7 +627,7 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 
 /* ── Dues cards ── */
 .dues-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
-.dues-hdr-title{font-size:.88rem;font-weight:800;color:var(--sub);font-family:var(--font-display);text-transform:uppercase;letter-spacing:.03em}
+.dues-hdr-title{font-size:.8rem;font-weight:700;color:var(--sub);font-family:var(--font-body);text-transform:uppercase;letter-spacing:.08em}
 .dues-hdr-toggle{background:none;border:none;color:var(--sub);font-size:.85rem;cursor:pointer;padding:2px 6px}
 .dues-balance-row{text-align:center;padding:16px 0 10px}
 .dues-balance-amount{font-size:2.2rem;font-weight:800;line-height:1.1;font-family:var(--font-display)}
@@ -662,7 +685,7 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 
 #dues-confirm-modal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:300;display:flex;align-items:flex-end;justify-content:center}
 .dues-modal-sheet{background:var(--card);border-radius:18px 18px 0 0;padding:20px 16px 32px;width:100%;max-width:480px}
-.dues-modal-title{font-size:1rem;font-weight:800;margin-bottom:6px;font-family:var(--font-display)}
+.dues-modal-title{font-size:1.25rem;font-weight:800;margin-bottom:6px;font-family:var(--font-display);letter-spacing:.01em}
 .dues-modal-sub{font-size:.82rem;color:var(--sub);margin-bottom:16px}
 .dues-modal-input{width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:.95rem;background:var(--card);color:var(--text);margin-bottom:14px}
 .dues-modal-btns{display:flex;gap:10px}
@@ -729,7 +752,8 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 }
 @media(max-width:400px){
   .sp-mini-stats{grid-template-columns:repeat(2,1fr)}
-  .sp-group-row{grid-template-columns:repeat(2,1fr)}
+  .sp-group-row{gap:6px}
+  .sp-g-val{font-size:1.3rem}
 }
 @media(max-width:360px){
   .dues-tbl,.dues-ledger-table{font-size:.75rem}

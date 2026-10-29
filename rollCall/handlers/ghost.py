@@ -22,7 +22,7 @@ from rollcall_manager import manager
 from db import (
     get_ghost_count, increment_ghost_count, reset_ghost_count, decrement_ghost_count,
     get_ghost_leaderboard, get_ghost_count_by_proxy_name,
-    mark_rollcall_absent_done, get_unprocessed_rollcalls,
+    mark_rollcall_absent_done, get_unprocessed_rollcalls, get_rollcall,
     add_ghost_event, get_rollcall_in_users, get_rollcall_out_users,
     save_ghost_selections, load_ghost_selections,
     log_admin_action, upsert_chat_member,
@@ -221,6 +221,18 @@ async def ghost_callback_handler(call):
                 await bot.answer_callback_query(
                     call.id, "⛔ Only admins can mark ghosts", show_alert=True
                 )
+                return
+
+        # A cancelled game has no no-shows. /mark_absent no longer lists one,
+        # but a prompt posted before the cancel keeps its buttons — and
+        # "No, all showed up" would forgive absences for a game nobody played.
+        if data.startswith("ghost_") or data.startswith("mabs_sel_"):
+            rc_row = get_rollcall(int(data.split("_")[2]))
+            if rc_row and rc_row.get("is_cancelled"):
+                mark_rollcall_absent_done(rc_row["id"])
+                await bot.answer_callback_query(call.id, "That game was cancelled — nothing to review.")
+                await safe_edit_text(cid, call.message.message_id,
+                                     "🚫 This game was cancelled — no no-shows to review.")
                 return
 
         # ── ghost_no ─────────────────────────────────────────────────────────

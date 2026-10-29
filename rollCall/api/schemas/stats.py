@@ -80,12 +80,14 @@ class HistoryEntry(BaseModel):
     in_count: int
     out_count: int
     maybe_count: int
+    is_cancelled: bool = False
 
 
 class ResponseTimeEntry(BaseModel):
     user_id: int
     display_name: Optional[str] = None
     username: Optional[str] = None
+    median_response_seconds: int = 0
     avg_response_seconds: int
     best_response_seconds: int
     rollcall_count: int

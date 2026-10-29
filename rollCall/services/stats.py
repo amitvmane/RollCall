@@ -20,7 +20,7 @@ from db import (
     get_proxy_attendance_count,
     get_proxy_stats,
     get_proxy_streaks,
-    get_response_time_leaderboard,
+    get_response_times,
     get_rollcall_history,
     get_user_attendance_count,
     get_user_session_history,
@@ -265,17 +265,73 @@ def history(chat_id: int, limit: int = 10, offset: int = 0) -> list:
             "in_count": int(row.get("in_count") or 0),
             "out_count": int(row.get("out_count") or 0),
             "maybe_count": int(row.get("maybe_count") or 0),
+            # Cancelled games stay in history (people voted on them) but are
+            # not turnout — callers render them apart instead of as a game.
+            "is_cancelled": bool(row.get("is_cancelled")),
         }
         for row in rows
     ]
 
 
+# A member needs this many first votes before they can rank: one lucky 3s
+# vote shouldn't outrank someone who reliably answers in 30s. Lowered to
+# whatever the busiest voter has, so a brand-new group still sees a board.
+RESPONSE_TIME_MIN_VOTES = 3
+
+
+def _median(values: list) -> int:
+    v = sorted(values)
+    mid = len(v) // 2
+    return v[mid] if len(v) % 2 else (v[mid - 1] + v[mid]) // 2
+
+
+def response_time_board(chat_id: int, limit: int = 10) -> dict:
+    """Who votes fastest after a rollcall opens, plus the quickest vote ever.
+
+    Ranked by each member's MEDIAN first-vote delay. The average it used
+    to sort by is ruled by outliers — one rollcall opened at midnight and
+    answered at 8am adds hours — so a member who usually votes in seconds
+    could sit outside the top 10 behind someone who voted once, in 9s.
+    Grouped by user_id (same name ≠ same person), showing their latest name.
+
+    `record` is the single fastest vote, reported separately: it is the
+    number people remember ("I voted in 1 second!") and it is a different
+    question from who is reliably quick.
+    """
+    by_user: dict = {}
+    record = None
+    for v in get_response_times(chat_id):
+        e = by_user.setdefault(v["user_id"], {"secs": []})
+        e["secs"].append(v["seconds"])
+        e["display_name"], e["username"] = v["first_name"], v["username"]
+        if record is None or v["seconds"] < record["seconds"]:
+            record = {"user_id": v["user_id"], "display_name": v["first_name"],
+                      "username": v["username"], "seconds": v["seconds"]}
+    if record:
+        # The name as it is now, not as it was on the day.
+        latest = by_user[record["user_id"]]
+        record["display_name"], record["username"] = latest["display_name"], latest["username"]
+
+    floor = min(RESPONSE_TIME_MIN_VOTES, max((len(e["secs"]) for e in by_user.values()), default=0))
+    entries = [
+        {
+            "user_id": uid,
+            "display_name": e["display_name"],
+            "username": e["username"],
+            "median_response_seconds": _median(e["secs"]),
+            "avg_response_seconds": sum(e["secs"]) // len(e["secs"]),
+            "best_response_seconds": min(e["secs"]),
+            "rollcall_count": len(e["secs"]),
+        }
+        for uid, e in by_user.items() if len(e["secs"]) >= floor
+    ]
+    entries.sort(key=lambda x: (x["median_response_seconds"], x["best_response_seconds"], -x["rollcall_count"]))
+    return {"entries": entries[:limit], "record": record, "min_votes": floor}
+
+
 def response_time_stats(chat_id: int, limit: int = 10) -> list:
-    """
-    Return response-time leaderboard: how quickly each user typically casts
-    their first vote after a rollcall opens.  Ordered fastest-first.
-    """
-    return get_response_time_leaderboard(chat_id, limit)
+    """Response-time leaderboard entries, fastest typical voter first."""
+    return response_time_board(chat_id, limit)["entries"]
 
 
 def period_summary(chat_id: int, days: int = 7) -> dict:
@@ -413,7 +469,7 @@ def web_group_stats(
     gs = group_stats(chat_id)               # same data as /stats group in Telegram
     lb_data = leaderboard(chat_id, limit=10)  # same as /stats top (top 10)
     hist = history(chat_id, limit=10)  # 10 to match the admin console's own default
-    rt_lb = response_time_stats(chat_id, limit=10)
+    rt_board = response_time_board(chat_id, limit=10)
 
     # Badge chips per leaderboard entry (streak fire + games tier)
     for entry in lb_data["entries"]:
@@ -487,7 +543,9 @@ def web_group_stats(
         "late_drop_leaderboard": gs.get("late_drop_leaderboard", []),
         "late_drop_hours": gs.get("late_drop_hours", LATE_DROP_HOURS),
         "recent_history": hist,
-        "response_time_leaderboard": rt_lb,
+        "response_time_leaderboard": rt_board["entries"],
+        "response_time_record": rt_board["record"],
+        "response_time_min_votes": rt_board["min_votes"],
         "personal": personal,
         "weekday_stats": weekday_attendance(chat_id),
     }

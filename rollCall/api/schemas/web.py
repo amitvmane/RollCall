@@ -219,6 +219,7 @@ class WebStatsHistoryEntry(BaseModel):
     in_count: int = 0
     out_count: int = 0
     maybe_count: int = 0
+    is_cancelled: bool = False
 
 
 class WebStatsGhostEntry(BaseModel):
@@ -235,9 +236,18 @@ class WebStatsResponseTimeEntry(BaseModel):
     user_id: int
     display_name: Optional[str] = None
     username: Optional[str] = None
+    median_response_seconds: int = 0
     avg_response_seconds: int = 0
     best_response_seconds: int = 0
     rollcall_count: int = 0
+
+
+class WebStatsResponseTimeRecord(BaseModel):
+    """The single fastest first vote in the group's history."""
+    user_id: int
+    display_name: Optional[str] = None
+    username: Optional[str] = None
+    seconds: int = 0
 
 
 class WebGroupStatsResponse(BaseModel):
@@ -255,6 +265,8 @@ class WebGroupStatsResponse(BaseModel):
     late_drop_hours: int = 6
     recent_history: List[WebStatsHistoryEntry] = Field(default_factory=list)
     response_time_leaderboard: List[WebStatsResponseTimeEntry] = Field(default_factory=list)
+    response_time_record: Optional[WebStatsResponseTimeRecord] = None
+    response_time_min_votes: int = 0
     personal: Optional[WebStatsPersonal] = None
     weekday_stats: List[WebStatsWeekday] = Field(default_factory=list)
 

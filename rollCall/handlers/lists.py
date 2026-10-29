@@ -145,6 +145,10 @@ async def history_command(message):
             title = r.get("title") or "Untitled"
             in_count = r.get("in_count", 0)
             ghost_count = r.get("ghost_count", 0)
+            if r.get("is_cancelled"):
+                # Votes on a cancelled game aren't turnout — nobody played.
+                lines.append(f"{i}. _{_esc_md(title)}_ — {ended}  🚫 cancelled")
+                continue
             ghost_str = f"  👻 {ghost_count}" if ghost_count else ""
             lines.append(f"{i}. *{_esc_md(title)}* — {ended}  ✅ {in_count}{ghost_str}")
 

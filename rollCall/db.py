@@ -3973,6 +3973,10 @@ def get_unprocessed_rollcalls(chat_id: int, days: int = 30) -> List[Dict]:
     """
     Return ended roll calls that still need absent marking:
       - is_active = FALSE (ended)
+      - not cancelled — a game that never happened has no no-shows, and
+        auto-forgive treating it as "everyone attended" would wipe real
+        absences. Excluded here so /mark_absent, the web review panel and
+        auto-forgive all agree, including for sessions cancelled long ago.
       - absent_marked = FALSE (not yet processed)
       - ended_at within the last `days` days
       - had at least one user with status='in'
@@ -3986,6 +3990,7 @@ def get_unprocessed_rollcalls(chat_id: int, days: int = 30) -> List[Dict]:
                        WHERE r.chat_id = %s
                          AND r.is_active = FALSE
                          AND r.absent_marked = FALSE
+                         AND COALESCE(r.is_cancelled, FALSE) = FALSE
                          AND r.ended_at >= NOW() - (%s * INTERVAL '1 day')
                          AND EXISTS (
                              SELECT 1 FROM users u
@@ -4001,6 +4006,7 @@ def get_unprocessed_rollcalls(chat_id: int, days: int = 30) -> List[Dict]:
                        WHERE r.chat_id = ?
                          AND r.is_active = 0
                          AND r.absent_marked = 0
+                         AND COALESCE(r.is_cancelled, 0) = 0
                          AND r.ended_at >= datetime('now', ? || ' days')
                          AND EXISTS (
                              SELECT 1 FROM users u
@@ -4904,7 +4910,7 @@ def get_rollcall_history(chat_id: int, limit: int = 10, offset: int = 0) -> List
             ph = '%s' if db_type == 'postgresql' else '?'
             if db_type == 'postgresql':
                 cursor.execute(f"""
-                    SELECT r.id, r.title, r.ended_at, r.finalize_date, r.created_at,
+                    SELECT r.id, r.title, r.ended_at, r.finalize_date, r.created_at, r.is_cancelled,
                         (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'in') +
                         (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND p.status = 'in') AS in_count,
                         (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'out') +
@@ -4919,7 +4925,7 @@ def get_rollcall_history(chat_id: int, limit: int = 10, offset: int = 0) -> List
                 """, (chat_id, limit, offset))
             else:
                 cursor.execute(f"""
-                    SELECT r.id, r.title, r.ended_at, r.finalize_date, r.created_at,
+                    SELECT r.id, r.title, r.ended_at, r.finalize_date, r.created_at, r.is_cancelled,
                         (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'in') +
                         (SELECT COUNT(*) FROM proxy_users p WHERE p.rollcall_id = r.id AND p.status = 'in') AS in_count,
                         (SELECT COUNT(*) FROM users u WHERE u.rollcall_id = r.id AND u.status = 'out') +
@@ -6067,77 +6073,48 @@ def revoke_web_admin(chat_id: int, tg_user_id: int) -> None:
         logging.exception("revoke_web_admin failed")
 
 
-def get_response_time_leaderboard(chat_id: int, limit: int = 10) -> List[Dict]:
-    """
-    Return per-user average and best response time (seconds from rollcall start
-    to first vote) across ended rollcalls in this chat.
+def get_response_times(chat_id: int) -> List[Dict]:
+    """Every member's first-vote delay, one row per (member, rollcall).
 
-    Uses users.created_at (insert time = first vote) minus rollcalls.created_at.
-    Only ended rollcalls with positive response times are included.
-    Ordered fastest-first.
+    users.created_at is set once, on a member's first vote, and survives
+    every later vote change (the upsert only touches updated_at), so
+    created_at minus the rollcall's own created_at is how long they took.
+    Open rollcalls count too — a first vote never changes once cast, and
+    leaving them out hid this week's fastest vote until the game closed.
+    Oldest rollcall first, so callers can take the latest display name.
     """
     try:
         with _cursor() as cursor:
             ph = '%s' if db_type == 'postgresql' else '?'
             if db_type == 'postgresql':
-                cursor.execute(f"""
-                    SELECT
-                        u.user_id,
-                        u.first_name AS display_name,
-                        u.username,
-                        AVG(EXTRACT(EPOCH FROM (u.created_at - r.created_at)))::bigint AS avg_seconds,
-                        MIN(EXTRACT(EPOCH FROM (u.created_at - r.created_at)))::bigint AS best_seconds,
-                        COUNT(*)::int AS rollcall_count
-                    FROM users u
-                    JOIN rollcalls r ON u.rollcall_id = r.id
-                    WHERE r.chat_id = {ph}
-                      AND r.ended_at IS NOT NULL
-                      AND u.created_at > r.created_at
-                    GROUP BY u.user_id, u.first_name, u.username
-                    HAVING COUNT(*) >= 1
-                    ORDER BY avg_seconds ASC
-                    LIMIT {ph}
-                """, (chat_id, limit))
+                secs = "EXTRACT(EPOCH FROM (u.created_at - r.created_at))::bigint"
             else:
-                cursor.execute(f"""
-                    SELECT
-                        u.user_id,
-                        u.first_name AS display_name,
-                        u.username,
-                        CAST(AVG((julianday(u.created_at) - julianday(r.created_at)) * 86400) AS INTEGER) AS avg_seconds,
-                        CAST(MIN((julianday(u.created_at) - julianday(r.created_at)) * 86400) AS INTEGER) AS best_seconds,
-                        COUNT(*) AS rollcall_count
-                    FROM users u
-                    JOIN rollcalls r ON u.rollcall_id = r.id
-                    WHERE r.chat_id = {ph}
-                      AND r.ended_at IS NOT NULL
-                      AND u.created_at > r.created_at
-                    GROUP BY u.user_id, u.first_name, u.username
-                    HAVING COUNT(*) >= 1
-                    ORDER BY avg_seconds ASC
-                    LIMIT {ph}
-                """, (chat_id, limit))
-            rows = cursor.fetchall()
-            result = []
-            for row in rows:
-                if isinstance(row, dict):
-                    r = row
-                else:
-                    r = {
-                        'user_id': row[0], 'display_name': row[1], 'username': row[2],
-                        'avg_seconds': row[3], 'best_seconds': row[4], 'rollcall_count': row[5],
-                    }
-                result.append({
+                # ROUND, not a bare CAST: julianday is a float, so a 1s gap
+                # comes out as 0.99999… and truncating it read as 0s.
+                secs = "CAST(ROUND((julianday(u.created_at) - julianday(r.created_at)) * 86400) AS INTEGER)"
+            cursor.execute(f"""
+                SELECT u.user_id, u.first_name, u.username, {secs} AS seconds
+                FROM users u
+                JOIN rollcalls r ON u.rollcall_id = r.id
+                WHERE r.chat_id = {ph}
+                  AND u.created_at >= r.created_at
+                ORDER BY r.created_at ASC, r.id ASC
+            """, (chat_id,))
+            out = []
+            for row in cursor.fetchall():
+                r = row if isinstance(row, dict) else {
+                    'user_id': row[0], 'first_name': row[1], 'username': row[2], 'seconds': row[3]}
+                if r['seconds'] is None:
+                    continue
+                out.append({
                     'user_id': int(r['user_id']),
-                    'display_name': r['display_name'] or '',
+                    'first_name': r['first_name'] or '',
                     'username': r['username'] or '',
-                    'avg_response_seconds': int(r['avg_seconds'] or 0),
-                    'best_response_seconds': int(r['best_seconds'] or 0),
-                    'rollcall_count': int(r['rollcall_count'] or 0),
+                    'seconds': max(0, int(r['seconds'])),
                 })
-            return result
+            return out
     except Exception:
-        logging.exception("get_response_time_leaderboard failed")
+        logging.exception("get_response_times failed")
         return []
 
 

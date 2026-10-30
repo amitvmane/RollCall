@@ -91,6 +91,20 @@ def main() -> int:
             )
     check("_MemberTrackingMiddleware registered", middleware_installed)
 
+    def request_pacing_installed():
+        # Every chat-posting call must pass through chat_outbox's pacing, or a
+        # burst of commands loses messages again. Checked against the REAL
+        # telebot: if a version bump renames _process_request, this fails.
+        import telebot.asyncio_helper as h
+        import chat_outbox
+        assert getattr(h._process_request, "_rc_paced", False), "pacing not installed"
+        assert chat_outbox._orig_process_request is not None
+        for name in ("send_message", "edit_message_text", "edit_message_reply_markup"):
+            src = __import__("inspect").getsource(getattr(h, name))
+            assert "_process_request(" in src, f"{name} no longer calls _process_request"
+
+    check("Telegram request pacing installed on the real telebot", request_pacing_installed)
+
     # ── 4. Handler modules register without error ───────────────────────
     def import_handlers():
         # Importing handlers triggers @bot.message_handler / @bot.callback_query_handler

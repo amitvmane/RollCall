@@ -6,6 +6,11 @@ one message a second, ~20 a minute). Every vote makes the bot post twice —
 at 9:01 ask for ~20 messages in one second, and Telegram answers most of
 them with 429 "Too Many Requests: retry after N". Those messages were lost.
 
+It applies to EVERY message the bot posts, whatever command, background job
+or web action caused it: install_request_pacing() wraps telebot's single
+request function, so the limit is respected at the one place all of them
+pass through. (Telegram counts every message to a chat, not per command.)
+
 Two mechanisms, both invisible in normal use:
 
 1. ``deliver(cid, factory)`` — sends now. Only after Telegram has refused a
@@ -81,7 +86,7 @@ def _note_refused(cid, e) -> None:
         _blocked_until[cid] = until
 
 
-async def deliver(cid, factory, max_wait: float = MAX_WAIT):
+async def deliver(cid, factory, max_wait: float = MAX_WAIT, retry: bool = True):
     """Await ``factory()`` — a zero-arg callable that makes ONE fresh Telegram
     call — for chat ``cid``, waiting out Telegram's rate limit if needed.
 
@@ -90,7 +95,9 @@ async def deliver(cid, factory, max_wait: float = MAX_WAIT):
     raises GaveUp (error_code 429), and the caller logs it.
 
     The factory is only re-invoked after a 429, i.e. after Telegram said it
-    did NOT post the message — so a retry can't duplicate one.
+    did NOT post the message — so a retry can't duplicate one. retry=False
+    (file uploads, whose stream the first attempt consumed) still waits its
+    turn in the queue but makes a single attempt.
     """
     deadline = _clock() + max_wait
     if not _recovering(cid):
@@ -101,6 +108,8 @@ async def deliver(cid, factory, max_wait: float = MAX_WAIT):
             if not is_rate_limited(e):
                 raise
             _note_refused(cid, e)
+            if not retry:
+                raise
 
     # Recovery: queue in arrival order behind earlier sends to this chat.
     _queued[cid] = _queued.get(cid, 0) + 1
@@ -119,6 +128,8 @@ async def deliver(cid, factory, max_wait: float = MAX_WAIT):
                     if not is_rate_limited(e):
                         raise
                     _note_refused(cid, e)
+                    if not retry:
+                        raise
                     continue
                 # Posted. Space the next queued send ~1s behind this one.
                 _blocked_until[cid] = max(_blocked_until.get(cid, 0.0),
@@ -132,6 +143,52 @@ async def deliver(cid, factory, max_wait: float = MAX_WAIT):
             _queued.pop(cid, None)
             _chat_locks.pop(cid, None)
             _blocked_until.pop(cid, None)
+
+
+# Telegram methods that post into a chat, i.e. count toward its flood limit.
+# Reads (getChatMember…) and answerCallbackQuery (no chat_id) are untouched.
+PACED_METHODS = frozenset({
+    "sendMessage", "editMessageText", "editMessageReplyMarkup", "editMessageCaption",
+    "editMessageMedia", "sendPhoto", "sendDocument", "sendAnimation", "sendVideo",
+    "sendAudio", "sendVoice", "sendSticker", "sendMediaGroup", "sendLocation",
+    "sendPoll", "sendDice", "sendContact", "sendVenue", "copyMessage",
+    "forwardMessage", "pinChatMessage", "unpinChatMessage", "unpinAllChatMessages",
+    "deleteMessage",
+})
+
+_orig_process_request = None    # telebot's real request function (tests swap in a fake)
+
+
+def install_request_pacing(helper) -> bool:
+    """Route every chat-posting Telegram call through deliver().
+
+    ``helper`` is ``telebot.asyncio_helper``; every API method calls its
+    module-level ``_process_request``, so wrapping that one function covers
+    every command, background job and web action — present and future.
+    Idempotent. Returns False (and changes nothing) when telebot is mocked,
+    as in the unit tests.
+    """
+    global _orig_process_request
+    current = getattr(helper, "_process_request", None)
+    if getattr(current, "_rc_paced", False) is True:   # `is`: a mock's attribute is truthy
+        return True
+    if not asyncio.iscoroutinefunction(current):
+        return False
+    _orig_process_request = current
+
+    async def _paced(token, url, method='get', params=None, files=None, **kwargs):
+        chat = (params or {}).get("chat_id") if url in PACED_METHODS else None
+        if chat is None:
+            return await _orig_process_request(token, url, method, params, files, **kwargs)
+        return await deliver(
+            str(chat),
+            lambda: _orig_process_request(token, url, method, params, files, **kwargs),
+            retry=not files,
+        )
+
+    _paced._rc_paced = True
+    helper._process_request = _paced
+    return True
 
 
 async def coalesce(key, leading, trailing) -> None:

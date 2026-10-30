@@ -46,6 +46,16 @@ logging.basicConfig(
 # ── Bot instance & paths ──────────────────────────────────────────────────────
 
 bot = AsyncTeleBot(token=TELEGRAM_TOKEN)
+
+# Every message the bot posts — any command, background job or web action —
+# goes through one telebot function; pace it there so a burst (ten scheduled
+# commands firing in the same second) is waited out in order, not lost.
+try:
+    import telebot.asyncio_helper as _tg_helper
+    import chat_outbox as _chat_outbox
+    _chat_outbox.install_request_pacing(_tg_helper)
+except Exception:
+    logging.exception("Could not install Telegram request pacing — continuing without it")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -193,17 +203,12 @@ async def best_effort(call, what: str, cid: int) -> bool:
     "something went wrong". The vote is the state; a message about it is
     logged if it can't be delivered, and each later step still runs.
 
-    ``call`` is either a zero-arg callable making ONE Telegram call — then a
-    429 is waited out and retried in order (chat_outbox.deliver) — or an
-    awaitable, for compound steps that pace their own sends (the panel,
-    promotion notices). Returns True if it went out.
+    ``call`` is a zero-arg callable or an awaitable. Pacing itself (waiting
+    out a 429 in order) happens below, for every send the bot makes — see
+    chat_outbox.install_request_pacing. Returns True if it went out.
     """
     try:
-        if callable(call):
-            import chat_outbox
-            await chat_outbox.deliver(cid, call)
-        else:
-            await call
+        await (call() if callable(call) else call)
         return True
     except Exception as e:
         logging.warning("Vote saved; %s not delivered (chat=%s): %s", what, cid, e)
@@ -222,6 +227,13 @@ async def reply_error(target, e):
     leak into the chat."""
     cid = target if isinstance(target, int) else _handler_chat_id(target)
     if cid is None:
+        return
+    if getattr(e, "error_code", None) == 429:
+        # Telegram throttled a reply after the command had already done its
+        # work (every change is saved before it's announced). Telling the
+        # user "something went wrong" would be false — and would itself be
+        # refused. Pacing already waited up to chat_outbox.MAX_WAIT.
+        logging.warning("Reply not delivered — Telegram rate limit (chat=%s): %s", cid, e)
         return
     if isinstance(e, _USER_FACING_EXCEPTIONS):
         msg = str(e)

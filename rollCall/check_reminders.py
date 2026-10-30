@@ -375,16 +375,6 @@ async def check(rollcalls, timezone, chat_id):
                                 finish_text = rollcall.finishList().replace('__RCID__', str(rc_number))
                                 finish_text = f"{finish_text}\n\n🕐 Auto-closed at scheduled time"
 
-                            # Non-destructive lookup — the pop+renumber of _panel_msg_ids is
-                            # done by _post_end_cleanup below (same as /erc). We only need the
-                            # id here to strip the vote-button keyboard immediately.
-                            panel_msg_id = None
-                            try:
-                                from bot_state import _panel_msg_ids
-                                panel_msg_id = _panel_msg_ids.get((chat_id, rc_number))
-                            except Exception:
-                                pass
-
                             # ── Commit DB close and in-memory teardown FIRST, via the same
                             # service /erc uses — streaks, stats, badges, and panel-id
                             # renumber are no longer reimplemented here. If the Telegram
@@ -404,29 +394,36 @@ async def check(rollcalls, timezone, chat_id):
 
                             rollcall.finalizeDate = None
 
-                            # ── Telegram messages are best-effort after DB is committed ───
-                            # Remove vote buttons from the existing panel message.
-                            if panel_msg_id:
-                                try:
-                                    await bot.edit_message_reply_markup(chat_id, panel_msg_id, reply_markup=None)
-                                except Exception:
-                                    pass  # Message may have been deleted; non-fatal
+                            # Panel bookkeeping (pop + renumber) under the lock, like /erc.
+                            from handlers.lifecycle import _close_panel_bookkeeping, _post_end_cleanup
+                            panel_msg_id = _close_panel_bookkeeping(chat_id, rc_number, result, rc_db_id)
 
-                            if finish_text:
-                                try:
-                                    await bot.send_message(chat_id, finish_text)
-                                except Exception:
-                                    logging.exception(
-                                        f"[auto-close] Failed to send close message for rollcall #{rc_number} "
-                                        "(rollcall is ended in DB — message will not be retried)"
-                                    )
+                        # ── Telegram messages after releasing the lock ─────────────
+                        # Best-effort (the DB close is committed), and outside the lock
+                        # so no vote in this chat waits while a send rides out a rate limit.
+                        # Remove vote buttons from the existing panel message.
+                        if panel_msg_id:
+                            try:
+                                await bot.edit_message_reply_markup(chat_id, panel_msg_id, reply_markup=None)
+                            except Exception:
+                                pass  # Message may have been deleted; non-fatal
 
-                            # Badges, dues-aware penalty panel / classic ghost prompt, and
-                            # renumbered-rollcall announcements — same path /erc uses, so a
-                            # dues-enabled group gets the settlement panel here too instead
-                            # of the old ghost-only prompt it used to silently miss.
-                            from handlers.lifecycle import _post_end_cleanup
-                            await _post_end_cleanup(chat_id, rc_number, result, rc_title=rollcall.title)
+                        if finish_text:
+                            try:
+                                await bot.send_message(chat_id, finish_text)
+                            except Exception:
+                                logging.exception(
+                                    f"[auto-close] Failed to send close message for rollcall #{rc_number} "
+                                    "(rollcall is ended in DB — message will not be retried)"
+                                )
+
+                        # Badges, dues-aware penalty panel / classic ghost prompt, and
+                        # renumbered-rollcall announcements — same path /erc uses, so a
+                        # dues-enabled group gets the settlement panel here too instead
+                        # of the old ghost-only prompt it used to silently miss.
+                        # retired=None: buttons were stripped just above.
+                        await _post_end_cleanup(chat_id, rc_number, result, rc_title=rollcall.title,
+                                                retired=None)
 
                         continue
 

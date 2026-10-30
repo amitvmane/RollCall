@@ -271,3 +271,90 @@ class TestDrain(OutboxTestBase):
             await asyncio.wait_for(chat_outbox.drain(), 2)
         asyncio.run(run())
         self.assertEqual(chat_outbox._trailing_tasks, set())
+
+
+class TestRequestPacing(OutboxTestBase):
+    """install_request_pacing wraps telebot's one request function, so every
+    command, background job and web action is paced — not just votes."""
+
+    def _helper(self, tg):
+        import types
+        calls = []
+
+        async def _process_request(token, url, method='get', params=None, files=None, **kw):
+            calls.append((url, (params or {}).get("chat_id")))
+            if url == "sendMessage":
+                return await tg.send(params["chat_id"], params["text"])()
+            return {"ok": True}
+        return types.SimpleNamespace(_process_request=_process_request), calls
+
+    def setUp(self):
+        super().setUp()
+        self._saved_orig = chat_outbox._orig_process_request
+
+    def tearDown(self):
+        chat_outbox._orig_process_request = self._saved_orig
+        super().tearDown()
+
+    def test_any_command_burst_is_paced_in_order(self):
+        tg = FakeTelegram(self.clock)
+        helper, _ = self._helper(tg)
+        self.assertTrue(chat_outbox.install_request_pacing(helper))
+
+        async def run():
+            # Ten different commands' replies, all in the same instant.
+            await asyncio.gather(*(helper._process_request(
+                "t", "sendMessage", "post", {"chat_id": "-100", "text": f"reply{i}"}) for i in range(10)))
+        asyncio.run(run())
+        self.assertEqual([t for _, t in tg.posted], [f"reply{i}" for i in range(10)])
+        self.assertTablesEmpty()
+
+    def test_reads_and_callback_answers_are_not_paced(self):
+        tg = FakeTelegram(self.clock)
+        helper, calls = self._helper(tg)
+        chat_outbox.install_request_pacing(helper)
+        chat_outbox._blocked_until["-100"] = self.clock.now + 30   # chat is throttled
+
+        async def run():
+            await helper._process_request("t", "getChatMember", "get", {"chat_id": "-100", "user_id": 1})
+            await helper._process_request("t", "answerCallbackQuery", "post", {"callback_query_id": "x"})
+        asyncio.run(run())
+        self.assertEqual(self.clock.slept, 0.0, "a read waited on the chat's send limit")
+        self.assertEqual([u for u, _ in calls], ["getChatMember", "answerCallbackQuery"])
+
+    def test_install_is_idempotent_and_skips_mocked_telebot(self):
+        from unittest.mock import MagicMock
+        tg = FakeTelegram(self.clock)
+        helper, _ = self._helper(tg)
+        chat_outbox.install_request_pacing(helper)
+        first = helper._process_request
+        chat_outbox.install_request_pacing(helper)
+        self.assertIs(helper._process_request, first, "wrapped twice")
+        mocked = MagicMock()
+        self.assertFalse(chat_outbox.install_request_pacing(mocked))
+
+    def test_file_uploads_wait_their_turn_but_are_not_resent(self):
+        attempts = []
+
+        async def _process_request(token, url, method='get', params=None, files=None, **kw):
+            attempts.append(url)
+            raise _Refused(2)
+        import types
+        helper = types.SimpleNamespace(_process_request=_process_request)
+        chat_outbox.install_request_pacing(helper)
+        with self.assertRaises(Exception):
+            asyncio.run(helper._process_request("t", "sendDocument", "post",
+                                                {"chat_id": "-100"}, files={"document": object()}))
+        self.assertEqual(attempts, ["sendDocument"], "a consumed upload stream must not be re-sent")
+
+
+class TestReplyErrorOnRateLimit(unittest.TestCase):
+
+    def test_throttled_reply_is_logged_not_sent(self):
+        """The command already did its work; 'something went wrong' would be false."""
+        import bot_state
+        from unittest.mock import AsyncMock, patch
+        e = _Refused(5)
+        with patch.object(bot_state.bot, "send_message", new=AsyncMock()) as send:
+            asyncio.run(bot_state.reply_error(-100, e))
+        send.assert_not_called()

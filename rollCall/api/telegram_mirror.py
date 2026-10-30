@@ -72,10 +72,7 @@ async def send_vote_notification(
         label = {"in": "IN", "out": "OUT", "maybe": "MAYBE"}.get(vote_type, vote_type.upper())
         text = f"{name} → {label} (via 🌐 web)"
         logging.info("[mirror] sending vote notification chat=%s name=%s vote=%s", chat_id, name, vote_type)
-        # Paced like the bot's own vote confirmations: web votes during a
-        # burst queue behind them in order instead of being refused.
-        import chat_outbox
-        await chat_outbox.deliver(chat_id, lambda: bot.send_message(chat_id, text))
+        await bot.send_message(chat_id, text)   # paced below (chat_outbox)
         logging.info("[mirror] vote notification sent ok chat=%s", chat_id)
     except Exception:
         logging.warning(

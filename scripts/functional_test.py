@@ -843,15 +843,24 @@ class _FakeClock:
 
 
 class _ThrottlingTelegram:
-    """Telegram's per-chat flood limit, modelled as a token bucket on the fake
-    clock: `burst` messages at once, then `rate` per second. Anything over is
-    refused with a real ApiTelegramException 429 + retry_after — exactly what
-    the live API returns when ten scheduled /in fire in the same second."""
+    """Telegram's per-chat flood limit at the HTTP layer, on the fake clock:
+    `burst` messages at once, then `rate` per second; anything over is
+    refused with a real ApiTelegramException 429 + retry_after.
+
+    It replaces chat_outbox._orig_process_request — the network call BELOW
+    the pacing layer — and swaps the recorder stubs for the real AsyncTeleBot
+    send/edit methods, so a reply travels exactly the production path:
+    handler → telebot method → chat_outbox pacing → (fake) Telegram.
+    Accepted calls are appended to _outbound in the recorder's shape.
+    """
+
+    REAL = ("send_message", "edit_message_text", "edit_message_reply_markup")
 
     def __init__(self, clock, burst=3, rate=1.0):
         self.clock, self.burst, self.rate = clock, burst, rate
         self.tokens, self.stamp = {}, {}
         self.attempted, self.refused = [], 0
+        self._next_id = 90000
 
     def _take(self, chat, method):
         from telebot.apihelper import ApiTelegramException
@@ -869,31 +878,48 @@ class _ThrottlingTelegram:
                 "parameters": {"retry_after": wait}})
         self.tokens[chat] = t - 1
 
+    @staticmethod
+    def _markup(params):
+        import json as _json
+        from types import SimpleNamespace
+        raw = (params or {}).get("reply_markup")
+        if not raw:
+            return None
+        rows = (_json.loads(raw) if isinstance(raw, str) else raw).get("inline_keyboard") or []
+        return SimpleNamespace(keyboard=[[SimpleNamespace(**b) for b in row] for row in rows])
+
+    async def _http(self, token, url, method="get", params=None, files=None, **kw):
+        params = params or {}
+        chat = int(params["chat_id"])
+        text = str(params.get("text", ""))
+        self.attempted.append((url, chat, text))
+        self._take(chat, url)
+        self._next_id += 1
+        msg = {"message_id": self._next_id, "date": 0, "text": text,
+               "chat": {"id": chat, "type": "supergroup" if chat < 0 else "private"}}
+        markup = {"reply_markup": self._markup(params)}
+        if url == "sendMessage":
+            _outbound.append(("send_message", (chat, text), markup))
+        elif url == "editMessageText":
+            _outbound.append(("edit_message_text", (text, chat, int(params["message_id"])), markup))
+        elif url == "editMessageReplyMarkup":
+            _outbound.append(("edit_message_reply_markup", (chat, int(params["message_id"])), markup))
+        return msg
+
     def install(self):
         import chat_outbox
-        self._saved = (bot.send_message, bot.edit_message_text,
+        self._saved = ({n: getattr(bot, n) for n in self.REAL}, chat_outbox._orig_process_request,
                        chat_outbox._clock, chat_outbox._sleep)
-        real_send, real_edit = bot.send_message, bot.edit_message_text
-
-        async def send(*a, **kw):
-            chat = a[0] if a else kw.get("chat_id")
-            self.attempted.append(("send", chat, str(a[1] if len(a) > 1 else kw.get("text", ""))))
-            self._take(chat, "sendMessage")
-            return await real_send(*a, **kw)
-
-        async def edit(*a, **kw):
-            chat = a[1] if len(a) > 1 else kw.get("chat_id")
-            self.attempted.append(("edit", chat, str(a[0] if a else kw.get("text", ""))))
-            self._take(chat, "editMessageText")
-            return await real_edit(*a, **kw)
-
-        bot.send_message, bot.edit_message_text = send, edit
+        for n in self.REAL:
+            setattr(bot, n, getattr(type(bot), n).__get__(bot, type(bot)))
+        chat_outbox._orig_process_request = self._http
         chat_outbox._clock, chat_outbox._sleep = self.clock, self.clock.sleep
 
     def uninstall(self):
         import chat_outbox
-        (bot.send_message, bot.edit_message_text,
-         chat_outbox._clock, chat_outbox._sleep) = self._saved
+        stubs, chat_outbox._orig_process_request, chat_outbox._clock, chat_outbox._sleep = self._saved
+        for n, f in stubs.items():
+            setattr(bot, n, f)
 
 
 _VOTERS = [(7001 + i, f"Voter{chr(65 + i)}", f"voter{chr(97 + i)}") for i in range(10)]
@@ -1014,8 +1040,9 @@ async def phase_vote_burst():
         per_voter = [sum("is now IN" in t and n in t for t in sends) for n in names]
         record("Burst /in: every voter's confirmation delivered exactly once",
                per_voter == [1] * 10, f"per voter {per_voter}")
-        confirm_order = [next(i for i, t in enumerate(sends) if n in t) for n in names]
-        record("Burst /in: confirmations posted in vote order", confirm_order == sorted(confirm_order))
+        confirm_order = [next((i for i, t in enumerate(sends) if n in t), -1) for n in names]
+        record("Burst /in: confirmations posted in vote order",
+               -1 not in confirm_order and confirm_order == sorted(confirm_order), f"{confirm_order}")
         edits = [t for t, _ in _accepted(out, "edit_message_text")]
         record("Burst /in: final panel lists all 10 in order",
                bool(edits) and _panel_order_ok(edits[-1], names), f"{len(edits)} edits")
@@ -1113,6 +1140,74 @@ async def phase_vote_burst():
         record("Burst /out: no errors logged", not _errors, str(error_msgs()[:2]))
         record("Burst /out: delivery state cleared afterwards", _outbox_empty())
         await feed("/erc", ALICE)
+    finally:
+        tg.uninstall()
+
+
+def _undelivered(tg, outbound):
+    """Messages Telegram refused at some point and that never went out
+    afterwards — i.e. lost. Must be empty: pacing retries every refusal."""
+    accepted = set()
+    for name, args, _ in outbound:
+        if name == "send_message":
+            accepted.add(("sendMessage", args[0], str(args[1])))
+        elif name == "edit_message_text":
+            accepted.add(("editMessageText", args[1], str(args[0])))
+        elif name == "edit_message_reply_markup":
+            accepted.add(("editMessageReplyMarkup", args[0], ""))
+    return [a for a in dict.fromkeys(tg.attempted) if a not in accepted]
+
+
+async def phase_mixed_command_burst():
+    """Telegram counts EVERY message to a group, whatever command sent it,
+    and scheduled messages can fire any command. So: ten different commands
+    in the same second, then /erc while Telegram is still throttling."""
+    print("\n=== Phase: mixed-command burst + /erc under throttling ===\n")
+    import chat_outbox
+    clock = _FakeClock()
+    tg = _ThrottlingTelegram(clock)
+    tg.install()
+    try:
+        await feed("/src Mixed Game", ALICE)
+        V = _VOTERS
+        batch = [("/in", V[0]), ("/in", V[1]), ("/sif GuestOne", ALICE), ("/in", V[2]),
+                 ("/whos_in", BOB), ("/maybe", V[3]), ("/set_limit 20", ALICE),
+                 ("/in", V[4]), ("/out", V[5]), ("/in", V[6])]
+        bot_state._rate_limits.clear()
+        _outbound.clear(); _errors.clear(); tg.attempted.clear()
+        await bot.process_new_updates([make_message_update(t, *u) for t, u in batch])
+        await chat_outbox.drain()
+        out = list(_outbound)
+        rc = manager.get_rollcall(CHAT_ID, 0)
+        in_names = [u.name for u in rc.inList] if rc else []
+        record("Mixed burst: IN list in arrival order, guest included where it arrived",
+               in_names == ["VoterA", "VoterB", "GuestOne", "VoterC", "VoterE", "VoterG"], f"{in_names}")
+        record("Mixed burst: MAYBE and OUT recorded",
+               [u.name for u in rc.maybeList] == ["VoterD"] and [u.name for u in rc.outList] == ["VoterF"])
+        record("Mixed burst: Telegram throttled it", tg.refused >= 1, f"refused {tg.refused}")
+        lost = _undelivered(tg, out)
+        record("Mixed burst: every refused message was delivered later (none lost)",
+               not lost, f"{len(lost)} lost: {lost[:2]}")
+        texts = " ".join(t for _, _, t in tg.attempted)
+        record("Mixed burst: /sif, /whos_in and /set_limit all replied",
+               "GuestOne" in texts and "20" in texts and len(tg.attempted) >= 12)
+        record("Mixed burst: nobody told it failed", not _no_false_failure(tg))
+        record("Mixed burst: no errors logged", not _errors, str(error_msgs()[:2]))
+
+        # /erc in the same second — Telegram is still refusing this chat.
+        tg.attempted.clear()
+        out = await feed("/erc", ALICE)
+        await chat_outbox.drain()
+        out = list(_outbound)
+        record("/erc under throttling: the rollcall is ended", not manager.get_rollcalls(CHAT_ID))
+        record("/erc under throttling: the final summary is delivered",
+               any("Ended by" in t for n, a, _ in out if n == "send_message" for t in [str(a[1])]))
+        lost = _undelivered(tg, out)
+        record("/erc under throttling: nothing lost", not lost, f"{lost[:2]}")
+        record("/erc under throttling: admin not told it failed", not _no_false_failure(tg))
+        record("/erc under throttling: no errors logged", not _errors, str(error_msgs()[:2]))
+        clock.now += 60
+        record("Mixed burst: delivery state cleared afterwards", _outbox_empty())
     finally:
         tg.uninstall()
 
@@ -2219,6 +2314,7 @@ async def run_all():
     await phase_dues()
     await phase_remaining_surface()
     await phase_vote_burst()
+    await phase_mixed_command_burst()
 
     print("\n=== Phase 16: Lifecycle close (final) ===\n")
 

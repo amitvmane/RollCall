@@ -47,15 +47,20 @@ def _build_panel_text(rc, rc_number: int) -> str:
     return rc.allList().replace("__RCID__", str(rc_number))
 
 
-async def _retire_panel(cid: int, ended_number: int, rc_id) -> None:
-    """Forget the closed rollcall's panel and take its buttons away.
+_NOT_DONE = object()
 
-    A panel left with live buttons after /erc or /xrc kept addressing
-    "rollcall #N" — and once the next rollcall slid into #N, tapping IN on the
-    dead panel voted in the wrong one. The scheduler's auto-close already
-    stripped them; this is the same step for the manual paths. Best-effort:
-    the rollcall is closed either way, and a message someone deleted must not
-    turn into an error.
+
+def _close_panel_bookkeeping(cid: int, ended_number: int, result: dict, rc_id):
+    """The STATE half of closing a rollcall — call it under the chat write
+    lock, right after the service closed it.
+
+    Forgets the closed rollcall's panel and moves every later rollcall's
+    panel id down to its new number, so whatever runs once the lock is
+    released (a vote on the renumbered rollcall) edits the right message.
+    Returns the closed panel's message id (or None) for _strip_panel.
+
+    Announcing is deliberately NOT done here: a Telegram send under the lock
+    can wait out a rate limit, and every vote in the chat would wait with it.
     """
     msg_id = _panel_msg_ids.pop((cid, ended_number), None)
     if msg_id is None and rc_id:
@@ -63,24 +68,42 @@ async def _retire_panel(cid: int, ended_number: int, rc_id) -> None:
             msg_id = (db.get_rollcall(rc_id) or {}).get("panel_msg_id")
         except Exception:
             msg_id = None
+    for entry in sorted(result["renumbered"], key=lambda x: x["old"]):
+        old_key = (cid, entry["old"])
+        if old_key in _panel_msg_ids:
+            _panel_msg_ids[(cid, entry["new"])] = _panel_msg_ids.pop(old_key)
+    return msg_id
+
+
+async def _strip_panel(cid: int, msg_id) -> None:
+    """Take the closed panel's buttons away.
+
+    A panel left with live buttons after /erc or /xrc kept addressing
+    "rollcall #N" — and once the next rollcall slid into #N, tapping IN on the
+    dead panel voted in the wrong one. Best-effort: the rollcall is closed
+    either way, and a message someone deleted must not turn into an error.
+    """
     if msg_id:
         await safe_edit_markup(cid, msg_id, reply_markup=None)
 
 
 async def _post_end_cleanup(cid: int, ended_number: int, result: dict, rc_title: str = "",
-                            settle_nudge: bool = True) -> None:
+                            settle_nudge: bool = True, retired=_NOT_DONE) -> None:
     """Panel-ID cleanup, ghost prompt, and renumber announcements after a rollcall ends.
 
     Called by /erc and /settle_dues (whenever /settle_dues ends an active rollcall).
     `ended_number` is 1-based. `result` is the dict from rollcalls_svc.end_rollcall.
     `settle_nudge=False` skips the pinned settle reminder — used by the
     /settle_dues paths, where settlement is already in progress or done.
+
+    `retired` — callers that closed the rollcall under the chat write lock
+    pass what _close_panel_bookkeeping returned there, and call this AFTER
+    releasing the lock. Left out, the bookkeeping happens here (callers that
+    don't hold the lock).
     """
-    await _retire_panel(cid, ended_number, result.get("rc_db_id"))
-    for entry in sorted(result["renumbered"], key=lambda x: x["old"]):
-        old_key = (cid, entry["old"])
-        if old_key in _panel_msg_ids:
-            _panel_msg_ids[(cid, entry["new"])] = _panel_msg_ids.pop(old_key)
+    if retired is _NOT_DONE:
+        retired = _close_panel_bookkeeping(cid, ended_number, result, result.get("rc_db_id"))
+    await _strip_panel(cid, retired)
 
     # Achievement badges — celebratory, so they respect shh mode.
     badges = result.get("badges") or []
@@ -136,19 +159,19 @@ async def _post_end_cleanup(cid: int, ended_number: int, result: dict, rc_title:
                 await bot.send_message(cid, text)
 
 
-async def _post_cancel_cleanup(cid: int, ended_number: int, result: dict) -> None:
+async def _post_cancel_cleanup(cid: int, ended_number: int, result: dict, retired=_NOT_DONE) -> None:
     """Panel-ID cleanup and renumber announcements after a rollcall is cancelled.
 
     Mirrors _post_end_cleanup's renumber-announcement shape exactly (same
     plain-text repost, no badges/ghost/settle-nudge step — a cancelled
     session recorded no stats, so there is nothing to settle or ghost-check).
     Shared by /xrc and the panel's Cancel button so the two paths can't drift.
+    `retired` as in _post_end_cleanup.
     """
-    await _retire_panel(cid, ended_number, (result.get("cancelled") or {}).get("id"))
-    for entry in sorted(result["renumbered"], key=lambda x: x["old"]):
-        old_key = (cid, entry["old"])
-        if old_key in _panel_msg_ids:
-            _panel_msg_ids[(cid, entry["new"])] = _panel_msg_ids.pop(old_key)
+    if retired is _NOT_DONE:
+        retired = _close_panel_bookkeeping(cid, ended_number, result,
+                                           (result.get("cancelled") or {}).get("id"))
+    await _strip_panel(cid, retired)
 
     updated_rollcalls = manager.get_rollcalls(cid)
     if updated_rollcalls:
@@ -312,8 +335,8 @@ async def _update_panel(cid: int, rc_number: int, rc, force_new: bool = False) -
 
 
 async def _render_panel(cid: int, rc_number: int, rc, force_new: bool = False) -> None:
-    """Draw the panel from `rc` as it is now. Sends are paced through
-    chat_outbox.deliver, so a 429 is waited out instead of lost."""
+    """Draw the panel from `rc` as it is now (sends are paced below — see
+    chat_outbox.install_request_pacing)."""
     key = (cid, rc_number)
 
     if key not in _panel_msg_ids and getattr(rc, 'panel_msg_id', None):
@@ -326,8 +349,7 @@ async def _render_panel(cid: int, rc_number: int, rc, force_new: bool = False) -
         existing_msg_id = _panel_msg_ids.get(key)
         if existing_msg_id:
             try:
-                await chat_outbox.deliver(cid, lambda: bot.edit_message_text(
-                    text, cid, existing_msg_id, reply_markup=markup))
+                await bot.edit_message_text(text, cid, existing_msg_id, reply_markup=markup)
                 return
             except Exception as e:
                 err = str(e).lower()
@@ -340,7 +362,7 @@ async def _render_panel(cid: int, rc_number: int, rc, force_new: bool = False) -
                     raise
                 logging.debug(f"Panel edit failed for ({cid}, {rc_number}): {e}")
 
-    sent = await chat_outbox.deliver(cid, lambda: bot.send_message(cid, text, reply_markup=markup))
+    sent = await bot.send_message(cid, text, reply_markup=markup)
     _panel_msg_ids[key] = sent.message_id
     _persist_panel_msg_id(rc, sent.message_id)
 
@@ -640,9 +662,11 @@ async def end_roll_call(message):
                 message.from_user.id, message.from_user.first_name,
                 message.from_user.username,
             )
+            retired = _close_panel_bookkeeping(cid, ended_number, result, result.get("rc_db_id"))
 
-            await bot.send_message(cid, finish_text)
-            await _post_end_cleanup(cid, ended_number, result, rc_title=rc.title)
+        # Announce after releasing the lock — see _close_panel_bookkeeping.
+        await bot.send_message(cid, finish_text)
+        await _post_end_cleanup(cid, ended_number, result, rc_title=rc.title, retired=retired)
     except Exception as e:
         await reply_error(message, e)
 
@@ -680,16 +704,18 @@ async def cancel_roll_call(message):
                 message.from_user.username,
                 reason=reason,
             )
+            retired = _close_panel_bookkeeping(cid, ended_number, result,
+                                               (result.get("cancelled") or {}).get("id"))
 
-            reason_part = f" — {_esc_md(reason)}" if reason else ""
-            await bot.send_message(
-                cid,
-                f"❌ *{_esc_md(rc.title)}* has been cancelled by {_esc_md(cancelled_by)}{reason_part}.\n"
-                "No attendance was recorded.",
-                parse_mode="Markdown",
-            )
-
-            await _post_cancel_cleanup(cid, ended_number, result)
+        # Announce after releasing the lock — see _close_panel_bookkeeping.
+        reason_part = f" — {_esc_md(reason)}" if reason else ""
+        await bot.send_message(
+            cid,
+            f"❌ *{_esc_md(rc.title)}* has been cancelled by {_esc_md(cancelled_by)}{reason_part}.\n"
+            "No attendance was recorded.",
+            parse_mode="Markdown",
+        )
+        await _post_cancel_cleanup(cid, ended_number, result, retired=retired)
     except Exception as e:
         await reply_error(message, e)
 
@@ -1054,77 +1080,79 @@ async def _cb_end_confirm(call, cid: int, rc_number: int, rc) -> None:
     # #N while the "are you sure?" prompt sat there — the one action here
     # with no undo.
     rc_id = _rc_db_id(rc)
+    # Close it under the lock; announce once the lock is released, so no vote
+    # in this chat waits on a Telegram send (see _close_panel_bookkeeping).
     async with manager.get_chat_write_lock(cid):
         idx = find_rollcall_index(cid, rc_id, manager) if rc_id else rc_number - 1
         rc = manager.get_rollcall(cid, idx) if idx is not None else None
-        if rc is None:
-            await bot.answer_callback_query(call.id, "Rollcall already ended.")
-            await safe_edit_markup(cid, call.message.message_id, reply_markup=None)
-            return
-        rc_number = idx + 1
+        if rc is not None:
+            rc_number = idx + 1
+            ended_by = call.from_user.first_name or call.from_user.username or "someone"
+            ended_number = rc_number
 
-        ended_by = call.from_user.first_name or call.from_user.username or "someone"
-        ended_number = rc_number
+            # Capture finish text before the service removes the rollcall.
+            try:
+                final_text = rc.finishList().replace("__RCID__", str(rc_number))
+                final_text = f"{final_text}\n\n🎉 Ended by {ended_by}"
+            except Exception:
+                logging.exception(f"Failed to build finish list for rollcall #{rc_number}")
+                final_text = f"Rollcall #{rc_number} ended by {ended_by}."
 
-        # Capture finish text before the service removes the rollcall.
-        try:
-            final_text = rc.finishList().replace("__RCID__", str(rc_number))
-            final_text = f"{final_text}\n\n🎉 Ended by {ended_by}"
-        except Exception:
-            logging.exception(f"Failed to build finish list for rollcall #{rc_number}")
-            final_text = f"Rollcall #{rc_number} ended by {ended_by}."
+            result = await rollcalls_svc.end_rollcall(
+                cid, rc_number - 1,
+                call.from_user.id, ended_by,
+                getattr(call.from_user, "username", None),
+            )
+            retired = _close_panel_bookkeeping(cid, ended_number, result, result.get("rc_db_id"))
 
-        result = await rollcalls_svc.end_rollcall(
-            cid, rc_number - 1,
-            call.from_user.id, ended_by,
-            getattr(call.from_user, "username", None),
+    if rc is None:
+        await bot.answer_callback_query(call.id, "Rollcall already ended.")
+        await safe_edit_markup(cid, call.message.message_id, reply_markup=None)
+        return
+
+    await bot.answer_callback_query(call.id, "Rollcall ended")
+
+    # Replace the "Are you sure?" prompt in-place with the finish list.
+    try:
+        await bot.edit_message_text(
+            final_text, cid, call.message.message_id, reply_markup=None,
         )
-
-        await bot.answer_callback_query(call.id, "Rollcall ended")
-
-        # Replace the "Are you sure?" prompt in-place with the finish list.
+    except Exception:
+        logging.exception(f"Failed to edit end-confirm message for chat {cid}")
         try:
-            await bot.edit_message_text(
-                final_text, cid, call.message.message_id, reply_markup=None,
-            )
+            await bot.edit_message_reply_markup(cid, call.message.message_id, reply_markup=None)
         except Exception:
-            logging.exception(f"Failed to edit end-confirm message for chat {cid}")
-            try:
-                await bot.edit_message_reply_markup(cid, call.message.message_id, reply_markup=None)
-            except Exception:
-                pass  # cosmetic (clear stale buttons); already logged above, and the real finish-list content is sent unconditionally next
-            try:
-                await bot.send_message(cid, final_text)
-            except Exception:
-                logging.exception(f"Failed to send finish list for chat {cid}")
+            pass  # cosmetic (clear stale buttons); already logged above, and the real finish-list content is sent unconditionally next
+        try:
+            await bot.send_message(cid, final_text)
+        except Exception:
+            logging.exception(f"Failed to send finish list for chat {cid}")
 
-        # Update panel IDs. This message (the panel itself) was just
-        # stripped above; any other copy of the panel goes too.
-        await _retire_panel(cid, ended_number, result.get("rc_db_id"))
-        for entry in sorted(result["renumbered"], key=lambda x: x["old"]):
-            old_key = (cid, entry["old"])
-            if old_key in _panel_msg_ids:
-                _panel_msg_ids[(cid, entry["new"])] = _panel_msg_ids.pop(old_key)
+    # This message (the panel itself) was just stripped above; any other
+    # copy of the panel goes too.
+    if retired != call.message.message_id:
+        await _strip_panel(cid, retired)
 
-        if result["ghost_eligible"]:
-            ghost_markup = InlineKeyboardMarkup(row_width=2)
-            ghost_markup.add(
-                InlineKeyboardButton("👻 Yes, select ghosts", callback_data=f"ghost_yes_{result['ghost_rc_db_id']}"),
-                InlineKeyboardButton("✅ No, all showed up", callback_data=f"ghost_no_{result['ghost_rc_db_id']}")
-            )
-            await bot.send_message(cid, f"👻 Did anyone ghost '{rc.title}'?", reply_markup=ghost_markup)
+    if result["ghost_eligible"]:
+        ghost_markup = InlineKeyboardMarkup(row_width=2)
+        ghost_markup.add(
+            InlineKeyboardButton("👻 Yes, select ghosts", callback_data=f"ghost_yes_{result['ghost_rc_db_id']}"),
+            InlineKeyboardButton("✅ No, all showed up", callback_data=f"ghost_no_{result['ghost_rc_db_id']}")
+        )
+        await bot.send_message(cid, f"👻 Did anyone ghost '{rc.title}'?", reply_markup=ghost_markup)
 
-        updated_rollcalls = manager.get_rollcalls(cid)
-        if updated_rollcalls and not manager.get_shh_mode(cid):
-            lines = [f"⚠️ Rollcall #{ended_number} ended. IDs updated:"]
-            for entry in result["renumbered"]:
-                lines.append(f"  #{entry['old']} '{entry['title']}' → #{entry['new']}")
-            await bot.send_message(cid, "\n".join(lines))
-            for idx, rollcall in enumerate(updated_rollcalls):
-                new_id = idx + 1
-                text = _build_panel_text(rollcall, new_id)
-                panel_markup = await get_status_keyboard(new_id, cid)
-                sent = await bot.send_message(cid, text, reply_markup=panel_markup)
+    updated_rollcalls = manager.get_rollcalls(cid)
+    if updated_rollcalls and not manager.get_shh_mode(cid):
+        lines = [f"⚠️ Rollcall #{ended_number} ended. IDs updated:"]
+        for entry in result["renumbered"]:
+            lines.append(f"  #{entry['old']} '{entry['title']}' → #{entry['new']}")
+        await bot.send_message(cid, "\n".join(lines))
+        for idx, rollcall in enumerate(updated_rollcalls):
+            new_id = idx + 1
+            text = _build_panel_text(rollcall, new_id)
+            panel_markup = await get_status_keyboard(new_id, cid)
+            sent = await bot.send_message(cid, text, reply_markup=panel_markup)
+            if sent is not None:
                 _panel_msg_ids[(cid, new_id)] = sent.message_id
                 _persist_panel_msg_id(rollcall, sent.message_id)
 
@@ -1220,6 +1248,8 @@ async def _execute_cancel(cid: int, actor, pending: dict, message_id: int, reaso
     rc_db_id = pending.get("rc_db_id")
     actor_name = actor.first_name or actor.username or "someone"
 
+    # Cancel under the lock; announce after releasing it (see
+    # _close_panel_bookkeeping) so no vote waits on a Telegram send.
     async with manager.get_chat_write_lock(cid):
         rollcalls = manager.get_rollcalls(cid)
         idx = next(
@@ -1227,37 +1257,40 @@ async def _execute_cancel(cid: int, actor, pending: dict, message_id: int, reaso
              if (getattr(r, "db_id", None) or getattr(r, "id", None)) == rc_db_id),
             None,
         )
-        if idx is None:
-            try:
-                await bot.edit_message_text(
-                    "That rollcall is no longer open — nothing to cancel.",
-                    cid, message_id, reply_markup=None,
-                )
-            except Exception:
-                pass
-            return
+        if idx is not None:
+            ended_number = idx + 1
+            result = await rollcalls_svc.cancel_rollcall(
+                cid, idx, actor.id, actor_name, getattr(actor, "username", None),
+                reason=reason,
+            )
+            retired = _close_panel_bookkeeping(cid, ended_number, result,
+                                               (result.get("cancelled") or {}).get("id"))
 
-        ended_number = idx + 1
-        result = await rollcalls_svc.cancel_rollcall(
-            cid, idx, actor.id, actor_name, getattr(actor, "username", None),
-            reason=reason,
-        )
-
-        reason_part = f" — {_esc_md(reason)}" if reason else ""
-        final_text = (
-            f"❌ *{_esc_md(pending.get('title') or 'Rollcall')}* has been cancelled "
-            f"by {_esc_md(actor_name)}{reason_part}.\nNo attendance was recorded."
-        )
+    if idx is None:
         try:
-            await bot.edit_message_text(final_text, cid, message_id, reply_markup=None, parse_mode="Markdown")
+            await bot.edit_message_text(
+                "That rollcall is no longer open — nothing to cancel.",
+                cid, message_id, reply_markup=None,
+            )
         except Exception:
-            logging.exception(f"Failed to edit cancel-confirm message for chat {cid}")
-            try:
-                await bot.send_message(cid, final_text, parse_mode="Markdown")
-            except Exception:
-                logging.exception(f"Failed to send cancel result for chat {cid}")
+            pass
+        return
 
-        await _post_cancel_cleanup(cid, ended_number, result)
+    reason_part = f" — {_esc_md(reason)}" if reason else ""
+    final_text = (
+        f"❌ *{_esc_md(pending.get('title') or 'Rollcall')}* has been cancelled "
+        f"by {_esc_md(actor_name)}{reason_part}.\nNo attendance was recorded."
+    )
+    try:
+        await bot.edit_message_text(final_text, cid, message_id, reply_markup=None, parse_mode="Markdown")
+    except Exception:
+        logging.exception(f"Failed to edit cancel-confirm message for chat {cid}")
+        try:
+            await bot.send_message(cid, final_text, parse_mode="Markdown")
+        except Exception:
+            logging.exception(f"Failed to send cancel result for chat {cid}")
+
+    await _post_cancel_cleanup(cid, ended_number, result, retired=retired)
 
 
 async def _cb_cancelrc_skip(call, cid: int) -> None:

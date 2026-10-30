@@ -826,6 +826,80 @@ async def phase_remaining_surface():
            f"{len(_errors)} errors: {error_msgs()[:5]}" if _errors else "")
 
 
+async def phase_vote_burst():
+    """Ten members' scheduled /in messages all fire at 9:01.
+
+    Polling hands them to the bot as ONE batch, and telebot runs the
+    handlers concurrently. Telegram then refuses some of the ~20 replies
+    with 429 Too Many Requests. Every vote must still be saved, and nobody
+    whose vote was saved may be told "something went wrong" (which is what
+    a refused reply used to turn into).
+    """
+    print("\n=== Phase: 10 simultaneous /in (scheduled messages) ===\n")
+    from telebot.apihelper import ApiTelegramException
+
+    await feed("/src Burst Game", ALICE)
+    voters = [(7001 + i, f"Burst{i + 1}", f"burst{i + 1}") for i in range(10)]
+
+    # Fake Telegram rate limiting: every other send_message is refused 429.
+    real_send = bot.send_message
+    sends = {"n": 0, "refused": 0}
+
+    attempted = []          # every text the bot TRIED to send, refused or not
+
+    async def throttled_send(*args, **kwargs):
+        sends["n"] += 1
+        attempted.append(str(args[1] if len(args) > 1 else kwargs.get("text", "")))
+        if sends["n"] % 2 == 0:
+            sends["refused"] += 1
+            raise ApiTelegramException("sendMessage", MagicMock(status_code=429), {
+                "ok": False, "error_code": 429,
+                "description": "Too Many Requests: retry after 5",
+                "parameters": {"retry_after": 5}})
+        return await real_send(*args, **kwargs)
+
+    _outbound.clear()
+    _errors.clear()
+    bot.send_message = throttled_send
+    try:
+        await bot.process_new_updates([
+            make_message_update("/in", uid, fname, uname) for uid, fname, uname in voters])
+    finally:
+        bot.send_message = real_send
+    burst_out = list(_outbound)
+
+    rc = manager.get_rollcall(CHAT_ID, 0)
+    in_ids = {getattr(u, "user_id", None) for u in rc.inList} if rc else set()
+    missing = [f for uid, f, _ in voters if uid not in in_ids]
+    record("Burst: all 10 simultaneous /in votes are on the IN list",
+           not missing, f"missing {missing}")
+
+    db_in = 0
+    if rc is not None:
+        with _db._cursor() as cur:
+            ph = '%s' if _db.db_type == 'postgresql' else '?'
+            cur.execute(f"SELECT COUNT(*) FROM users WHERE rollcall_id = {ph} AND status = 'in' "
+                        f"AND user_id >= 7001 AND user_id <= 7010", (rc.db_id,))
+            row = cur.fetchone()
+            db_in = int(row[0] if not isinstance(row, dict) else list(row.values())[0])
+    record("Burst: all 10 votes persisted to the database", db_in == 10, f"db has {db_in}/10")
+
+    record("Burst: Telegram really refused replies during the burst",
+           sends["refused"] >= 3, f"only {sends['refused']} refused")
+    told_failed = [t for t in attempted + [text_of([o]) for o in burst_out]
+                   if "something went wrong" in t.lower() or "too many requests" in t.lower()]
+    record("Burst: no voter whose vote saved is told 'something went wrong'",
+           not told_failed, f"{len(told_failed)} error replies")
+    record("Burst: refused replies are not logged as errors",
+           not _errors, str(error_msgs()[:3]))
+
+    out = await feed("/whos_in", ALICE)
+    missing = [f for _, f, _ in voters if f.lower() not in text_of(out).lower()]
+    record("Burst: /whos_in afterwards lists all 10", not missing, f"missing {missing}")
+
+    await feed("/erc", ALICE)
+
+
 async def run_all():
     print("\n=== Phase 1: Lifecycle & basic voting ===\n")
 
@@ -1927,6 +2001,7 @@ async def run_all():
 
     await phase_dues()
     await phase_remaining_surface()
+    await phase_vote_burst()
 
     print("\n=== Phase 16: Lifecycle close (final) ===\n")
 

@@ -117,7 +117,7 @@ function cmdCard(c){
   // User/Admin tabs are already scope-pure, so a badge there is just noise.
   const scopeBadge=(_scope==="all"&&c.scope!=="user")
     ?`<span class="cmd-scope-badge">${c.scope==="super_admin"?"owner":"admin"}</span>`:"";
-  return `<div class="cmd-card${expanded?" expanded":""}" onclick="toggleDetail('${esc(c.name)}')">
+  return `<div class="cmd-card${expanded?" expanded":""}" data-on-click="toggleDetail" data-args="${rcArgs(c.name)}">
     <div class="cmd-card-head">
       <span class="cmd-name">/${esc(c.name)}</span>
       ${scopeBadge}

@@ -32,6 +32,17 @@ python scripts/smoke_test.py
 
 CI runs the same script as the `Smoke (real-import boot check)` job. Unit tests can't catch signature mismatches (telebot is mocked in `conftest.py`), so this layer is the one that surfaces issues like the v7.8 `use_class_middlewares=True` crash.
 
+## Web front-end wiring (CSP)
+
+The CSP refuses inline script (`api/security_headers.py`). Never write an
+inline `onclick=`/`onchange=` attribute or an inline `<script>` block — it
+renders and then silently does nothing. Declare handlers instead:
+`data-on-click="fnName" data-args="${rcArgs(a, b)}"` (static HTML: a literal
+JSON array). `/shared/actions.js` dispatches them; the function must be a
+top-level `function` or `window.x =` (a `const` is not on `window`), and
+built-ins are refused. `scripts/web_ui_check.py` and `web_layout_check.js`
+(which serves the real CSP) fail on violations.
+
 ## Logging
 
 Prefer `logging.exception("context")` inside `except` blocks — it captures the traceback automatically. Do not use `traceback.format_exc()` interpolation. The bot supports `STRUCTURED_LOGS=true` to emit one-line JSON to stdout for log aggregators, and `SENTRY_DSN=...` (with `sentry-sdk` installed as an optional dep) for error reporting.
@@ -114,7 +125,7 @@ which deletes and re-inserts the row — that silently reset `role` on every
 | `TRUSTED_PROXY_IPS` | `*` | direct peers trusted to set `X-Forwarded-For` (so `request.client`/rate-limit buckets see the real visitor IP, not the proxy's). With `*` uvicorn reads the **left-most** entry, which the visitor controls whenever a proxy appends (`$proxy_add_x_forwarded_for`) — so `*` is safe only because blobsystems' nginx **replaces** the header with `$http_cf_connecting_ip`. Keeping `REST_API_PORT` off the host is necessary but not sufficient; tighten to the proxy's IP/CIDR too if that ever changes |
 | `MINIAPP_URL` | unset | public URL of `/miniapp/` — sets Telegram menu button on startup |
 | `WEB_BASE_URL` | unset | public base URL (e.g. `https://yourdomain.com`) — enables magic-link web voting; if unset `/weblink` shows a config warning and no link is appended to panels |
-| `TG_LOGIN_WIDGET` | unset | `true`/`1` → offer Telegram's Login Widget as a sign-in option on the group page. Set this **only after** running `/setdomain` in BotFather for this deployment's domain: without that registration Telegram renders its own error ("Username invalid" / "Bot domain invalid") inside a cross-origin iframe the page cannot read, so the visitor sees a broken third sign-in option. Off by default; the deep link and guest voting are unaffected |
+| `TG_LOGIN_WIDGET` | unset | `true`/`1` → offer Telegram's Login Widget as a sign-in option on the group page. Set this **only after** running `/setdomain` in BotFather for this deployment's domain: without that registration Telegram renders its own error ("Username invalid" / "Bot domain invalid") inside a cross-origin iframe the page cannot read, so the visitor sees a broken third sign-in option. Off by default; the deep link and guest voting are unaffected. Turning it on also adds `'unsafe-eval'` to the CSP's script-src — the widget `eval()`s its `data-onauth` string; nothing of ours evals |
 | `IDENTITY_SECRET` | unset (falls back to the bot token) | signing key for web/portal identity tokens. Unset keeps today's behaviour exactly — the key is derived from `TELEGRAM_TOKEN`, which means identity can't work without Telegram. Setting it decouples the two. **Verification accepts every configured key**, so setting this on a running deployment does NOT sign anyone out: existing tokens stay valid for the rest of their 30-day life while new ones are minted under the new key. Once that window passes the bot token can be rotated or removed with no user impact |
 | `APP_UID` / `APP_GID` | unset (`0` = root) | user the bot, db-backup and watchdog containers run as (compose `user:`). Switch order matters: set both, `make fix-perms` (stops containers, `chown`s `DATA_DIR` + `./logs`), then `make build`. `check-data-dir` refuses to start while anything in those dirs isn't owned by `APP_UID` — a bot that can't write its DB looks like a healthy container |
 | `MEMORY_MODE` | unset | `true`/`1` → in-memory SQLite, all data lost on restart (original v1 behaviour); overrides `DATABASE_URL` |

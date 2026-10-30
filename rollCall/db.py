@@ -3463,6 +3463,59 @@ def decrement_ghost_count(chat_id: int, user_id: int, proxy_name: str = None) ->
         return False
 
 
+def reverse_ghosts_on_cancelled_rollcalls() -> List[Dict]:
+    """Undo ghost marks recorded against games that were cancelled.
+
+    Until 2026-10-29 a cancelled game was still offered for no-show review,
+    so an admin could mark someone a no-show for a game nobody played. That
+    put +1 on their ghost_records count (the 👻 leaderboard and the
+    reconfirm prompt); "games played" was never affected, because it already
+    excludes cancelled games.
+
+    Each event is reversed once: its claim row in system_config and the
+    decrement commit in ONE transaction, so a crash can neither double-count
+    nor lose the claim. The ghost_events row itself is kept — per-game
+    history is never deleted, and cancelled games are excluded wherever it is
+    read. Returns the events reversed this call (empty on every later boot).
+    """
+    reversed_rows: List[Dict] = []
+    try:
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            t = 'TRUE' if db_type == 'postgresql' else '1'
+            cursor.execute(f"""
+                SELECT ge.id, ge.chat_id, ge.user_id, ge.proxy_name, ge.user_name, ge.rollcall_id
+                FROM ghost_events ge JOIN rollcalls r ON r.id = ge.rollcall_id
+                WHERE COALESCE(r.is_cancelled, {'FALSE' if db_type == 'postgresql' else '0'}) = {t}
+                ORDER BY ge.id
+            """)
+            events = [dict(row) for row in cursor.fetchall()]
+            for ev in events:
+                key = f"ghost_cancel_reversed:{ev['id']}"
+                if db_type == 'postgresql':
+                    cursor.execute(
+                        f"INSERT INTO system_config (key, value) VALUES ({ph}, {ph}) "
+                        f"ON CONFLICT (key) DO NOTHING", (key, str(ev['rollcall_id'])))
+                else:
+                    cursor.execute(
+                        f"INSERT OR IGNORE INTO system_config (key, value) VALUES ({ph}, {ph})",
+                        (key, str(ev['rollcall_id'])))
+                if cursor.rowcount != 1:
+                    continue        # already reversed on an earlier boot
+                where = (f"proxy_name = {ph}", ev['proxy_name']) if ev['proxy_name'] \
+                    else (f"user_id = {ph}", ev['user_id'])
+                cursor.execute(
+                    "UPDATE ghost_records SET "
+                    "ghost_count = CASE WHEN ghost_count > 0 THEN ghost_count - 1 ELSE 0 END, "
+                    "last_ghosted_at = CASE WHEN ghost_count > 1 THEN last_ghosted_at ELSE NULL END "
+                    f"WHERE chat_id = {ph} AND {where[0]}", (ev['chat_id'], where[1]))
+                reversed_rows.append(ev)
+    except Exception:
+        logging.exception("reverse_ghosts_on_cancelled_rollcalls failed")
+        return []
+    return reversed_rows
+
+
 def get_ghost_leaderboard(chat_id: int) -> List[Dict]:
     """Return all users with ghost_count > 0 for a chat, combined across
     any merged identity aliases (ghost_count summed, last_ghosted_at is the
@@ -6071,6 +6124,27 @@ def revoke_web_admin(chat_id: int, tg_user_id: int) -> None:
             )
     except Exception:
         logging.exception("revoke_web_admin failed")
+
+
+def get_vote_times(chat_id: int, since: str) -> List[Dict]:
+    """When members voted: each member's first vote per rollcall since
+    `since` (UTC 'YYYY-MM-DD HH:MM:SS'), with the rollcall's timezone so the
+    caller can bucket in local time. Proxies are excluded — someone else
+    typed those, so their time says nothing about when members vote."""
+    try:
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(f"""
+                SELECT u.created_at, r.timezone
+                FROM users u JOIN rollcalls r ON r.id = u.rollcall_id
+                WHERE r.chat_id = {ph} AND u.created_at >= {ph}
+            """, (chat_id, since))
+            return [{'at': (row['created_at'] if isinstance(row, dict) else row[0]),
+                     'tz': (row['timezone'] if isinstance(row, dict) else row[1])}
+                    for row in cursor.fetchall()]
+    except Exception:
+        logging.exception("get_vote_times failed")
+        return []
 
 
 def get_response_times(chat_id: int) -> List[Dict]:

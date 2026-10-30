@@ -8,6 +8,7 @@
 <link rel="icon" href="/web/logo.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" sizes="180x180" href="/web/apple-touch-icon.png">
 <script src="/shared/theme-init.js"></script>
+<script src="/shared/actions.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -117,7 +118,7 @@
     <nav class="topnav">
       <a href="/help">Commands</a>
       <a href="/portal">Sign in</a>
-      <button class="theme-btn" title="Theme" aria-label="Theme" data-theme-toggle onclick="toggleTheme()">🌓</button>
+      <button class="theme-btn" title="Theme" aria-label="Theme" data-theme-toggle data-on-click="toggleTheme">🌓</button>
     </nav>
     <div class="logo">📋</div>
     <h1>RollCall</h1>

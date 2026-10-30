@@ -150,8 +150,12 @@ except ImportError as e:
 try:
     import telebot.asyncio_helper as _asyncio_helper
     _asyncio_helper.SESSION_TIME_TO_LIVE = 300
-    _asyncio_helper.RETRY_ON_ERROR = True   # auto-retry on 429 / transient errors
-    logger.info("aiohttp session TTL set to 300s, retry-on-error enabled")
+    # Retries a dropped CONNECTION only. Telegram's 429 "Too Many Requests"
+    # is raised straight to the caller in the async helper — nothing here
+    # waits and retries it. A burst of votes therefore can lose a reply or a
+    # panel edit (never the vote: that is saved first, see handlers/voting).
+    _asyncio_helper.RETRY_ON_ERROR = True
+    logger.info("aiohttp session TTL set to 300s, connection retry enabled")
 except Exception:
     pass
 
@@ -953,6 +957,17 @@ async def main():
             logger.info(f"✅ Created {_created} app-local principal(s) for existing users")
     except Exception:
         logger.exception("⚠️  Principal backfill failed — continuing without it")
+
+    # Undo no-show marks on cancelled games (they were reviewable before
+    # 10.9). Idempotent — each event is claimed once — and best-effort.
+    try:
+        import db as _db_repair
+        for _ev in await asyncio.to_thread(_db_repair.reverse_ghosts_on_cancelled_rollcalls):
+            logger.info(
+                "👻 Reversed no-show on cancelled game: chat=%s rollcall=%s %s",
+                _ev["chat_id"], _ev["rollcall_id"], _ev.get("proxy_name") or _ev.get("user_name"))
+    except Exception:
+        logger.exception("⚠️  Cancelled-game ghost repair failed — continuing")
 
     # Start health check server early so the container is always observable.
     try:

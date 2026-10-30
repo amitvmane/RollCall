@@ -1,6 +1,6 @@
 """Pydantic response models for stats, ghost, and settings routes."""
 
-from typing import List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -55,6 +55,8 @@ class GroupStatsResponse(BaseModel):
     proxy_out: int = 0
     proxy_maybe: int = 0
     waitlist_promotions: int = 0
+    # Busiest weekday/hour members vote (services.stats.voting_peak_times).
+    vote_peak: Optional[Dict[str, Any]] = None
     top_attendees: List[TopAttendee]
     ghost_leaderboard: List[GhostEntry]
     late_drop_leaderboard: List[LateDropEntry] = Field(default_factory=list)

@@ -85,7 +85,7 @@
       var h='<div class="acct-theme" role="group" aria-label="Theme"><span class="acct-theme-lbl">Theme</span><div class="acct-theme-seg">';
       for(var i=0;i<MODES.length;i++){
         var m=MODES[i];
-        h+='<button type="button" data-theme-opt="'+m+'" class="'+(m===mode?"on":"")+'" aria-pressed="'+(m===mode)+'" onclick="rcTheme.set(\''+m+'\')">'+ICON[m]+' '+LABEL[m]+'</button>';
+        h+='<button type="button" data-theme-opt="'+m+'" class="'+(m===mode?"on":"")+'" aria-pressed="'+(m===mode)+'" data-on-click="rcTheme.set" data-args=\'["'+m+'"]\'>'+ICON[m]+' '+LABEL[m]+'</button>';
       }
       return h+'</div></div>';
     }

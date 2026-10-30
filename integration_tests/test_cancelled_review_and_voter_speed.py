@@ -156,3 +156,72 @@ class TestFastestVoters(IntegrationBase):
         entries = stats_svc.response_time_board(CHAT_ID)["entries"]
         self.assertEqual(len(entries), 2, "two people named Abhi are two rows")
         self.assertEqual({e["display_name"] for e in entries}, {"Abhi"})
+
+
+class TestVotePeakTimes(IntegrationBase):
+    """'When people vote' — busiest weekday/hour, in the game's timezone."""
+
+    def _vote_at(self, rc_id, user, utc):
+        db.add_or_update_user(rc_id, user["id"], user["first_name"], user.get("username"), "in")
+        _exec("UPDATE users SET created_at = ? WHERE rollcall_id = ? AND user_id = ?",
+              (utc, rc_id, user["id"]))
+
+    def _recent(self, days_ago, hh_mm_ss):
+        from datetime import datetime, timedelta, timezone
+        d = (datetime.now(timezone.utc) - timedelta(days=days_ago)).strftime("%Y-%m-%d")
+        return f"{d} {hh_mm_ss}"
+
+    def test_peak_is_in_the_games_timezone(self):
+        rc = db.create_rollcall(CHAT_ID, "Game")      # Asia/Kolkata, UTC+5:30
+        # 03:40 UTC = 09:10 IST → the 9 AM bucket, not 3 AM.
+        for i, u in enumerate(USERS[:3]):
+            self._vote_at(rc, u, self._recent(2, f"03:4{i}:00"))
+        rc2 = db.create_rollcall(CHAT_ID, "Game 2")
+        self._vote_at(rc2, USERS[0], self._recent(2, "14:00:00"))   # 19:30 IST
+        peak = stats_svc.voting_peak_times(CHAT_ID)
+        self.assertEqual(peak["total_votes"], 4)
+        self.assertEqual(peak["busiest_hour"], 9)
+        self.assertEqual(peak["busiest_hour_label"], "9 AM")
+        self.assertEqual(peak["top_slots"][0]["votes"], 3)
+        self.assertEqual(peak["top_slots"][0]["share"], 75)
+        self.assertEqual(sum(peak["by_hour"]), 4)
+
+    def test_window_excludes_old_votes(self):
+        rc = db.create_rollcall(CHAT_ID, "Old")
+        self._vote_at(rc, USERS[0], self._recent(200, "03:40:00"))
+        self.assertEqual(stats_svc.voting_peak_times(CHAT_ID)["total_votes"], 0)
+
+    async def test_stats_group_shows_busiest_time(self):
+        from handlers.stats import build_group_stats_text
+        await self.start_rc("Game")
+        for u in USERS[:2]:
+            await self.vote_in(u)
+        await self.end_roll_call(self.msg("/erc", ADMIN_USER))
+        text = await build_group_stats_text(CHAT_ID)
+        self.assertIn("When people vote", text)
+        self.assertIn("Busiest day", text)
+
+
+class TestRepairGhostsOnCancelled(_Base):
+    """Boot repair: no-shows marked on games later cancelled are undone once."""
+
+    async def test_reverses_once_and_only_cancelled(self):
+        ghost = USERS[0]
+        played = None
+        await self._played_session("Played")
+        played = db.get_unprocessed_rollcalls(CHAT_ID, days=30)[0]["id"]
+        cancelled = await self._cancelled_session("Rained off")
+
+        # A real no-show on the played game, and one wrongly recorded on the
+        # cancelled game (possible before 10.9, when it was still reviewable).
+        for rc_id in (played, cancelled):
+            db.increment_ghost_count(CHAT_ID, ghost["id"], ghost["first_name"])
+            db.add_ghost_event(rc_id, CHAT_ID, ghost["id"], ghost["first_name"])
+        self.assertEqual(db.get_ghost_count(CHAT_ID, ghost["id"]), 2)
+
+        done = db.reverse_ghosts_on_cancelled_rollcalls()
+        self.assertEqual([e["rollcall_id"] for e in done], [cancelled])
+        self.assertEqual(db.get_ghost_count(CHAT_ID, ghost["id"]), 1, "the real no-show stays")
+
+        self.assertEqual(db.reverse_ghosts_on_cancelled_rollcalls(), [], "second boot is a no-op")
+        self.assertEqual(db.get_ghost_count(CHAT_ID, ghost["id"]), 1)

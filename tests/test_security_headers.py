@@ -60,14 +60,31 @@ class TestSecurityHeaders(unittest.TestCase):
         self.assertNotIn("frame-ancestors *", csp)
         self.assertNotIn("'self'", csp.split("frame-ancestors")[1])
 
-    def test_csp_keeps_inline_handlers_working(self):
-        """The whole front-end uses inline onclick= handlers and has no build
-        step. A CSP without 'unsafe-inline' in script-src would silently kill
-        every button on every page."""
-        csp = _client().get("/api/v1/health").headers["Content-Security-Policy"]
-        self.assertIn("script-src 'self' 'unsafe-inline'", csp)
-        self.assertIn("object-src 'none'", csp)
-        self.assertIn("base-uri 'self'", csp)
+    def _script_src(self, path="/web/"):
+        csp = _client().get(path).headers["Content-Security-Policy"]
+        return {d.strip().split(" ")[0]: d.strip() for d in csp.split(";") if d.strip()}
+
+    def test_csp_refuses_inline_script(self):
+        """Since 10.9 no page has an inline handler or <script> block — every
+        button is data-on-* wired by /shared/actions.js. So inline script is
+        refused, and markup that slips past escaping can't run code. If this
+        fails because something needs inline JS again, fix that code instead
+        (scripts/web_ui_check.py and web_layout_check.js will point at it)."""
+        d = self._script_src()
+        self.assertNotIn("'unsafe-inline'", d["script-src"])
+        self.assertEqual(d["script-src-attr"], "script-src-attr 'none'")
+        self.assertIn("object-src 'none'", d["object-src"])
+        self.assertIn("base-uri 'self'", d["base-uri"])
+
+    def test_unsafe_eval_only_with_login_widget(self):
+        """Telegram's Login Widget eval()s its data-onauth attribute; our own
+        code never evals. So 'unsafe-eval' appears only when the widget is on."""
+        with patch.dict(os.environ, {"TG_LOGIN_WIDGET": ""}):
+            self.assertNotIn("'unsafe-eval'", self._script_src()["script-src"])
+        with patch.dict(os.environ, {"TG_LOGIN_WIDGET": "true"}):
+            d = self._script_src()
+            self.assertIn("'unsafe-eval'", d["script-src"])
+            self.assertNotIn("'unsafe-inline'", d["script-src"])
 
     def test_csp_allows_the_origins_the_pages_actually_load(self):
         """A CSP violation is a console message in the visitor's browser and
@@ -96,13 +113,13 @@ class TestSecurityHeaders(unittest.TestCase):
     def test_csp_did_not_become_a_free_for_all(self):
         """Allowing the four origins above must not turn into allowing any."""
         csp = _client().get("/web/").headers["Content-Security-Policy"]
-        self.assertNotIn("script-src 'self' 'unsafe-inline' *", csp)
+        self.assertNotIn(" * ", csp)
         self.assertIn("default-src 'self'", csp)
         self.assertIn("object-src 'none'", csp)
         self.assertIn("connect-src 'self'", csp)
         # Nothing may post a form off-origin, and no data: script sources.
         self.assertIn("form-action 'self'", csp)
-        self.assertNotIn("script-src 'self' 'unsafe-inline' data:", csp)
+        self.assertNotIn("data:", csp.split("script-src")[1].split(";")[0])
 
     def test_hsts_only_when_https_base_url(self):
         with patch.dict(os.environ, {"WEB_BASE_URL": "https://roll.example.com"}):

@@ -48,10 +48,25 @@ class TestPortalEscEscapesQuotes(unittest.TestCase):
         self.assertIn("&quot;", body)
         self.assertIn("&#39;", body)
 
-    def test_inline_handlers_do_not_hand_roll_quote_escaping(self):
+    def test_handler_args_go_through_rcargs(self):
+        # Copy buttons pass the UPI id / link as data, never as JS source.
         self.assertNotIn("upi.replace(", self.src)
         self.assertNotIn("joinUrl.replace(", self.src)
-        self.assertIn("esc(escJsAttr(upi))", self.src)
+        self.assertIn("rcArgs(upi,", self.src)
+        self.assertIn("rcArgs(joinUrl,", self.src)
+
+
+class TestNoEscJsAttrOutsideJsSource(unittest.TestCase):
+    """escJsAttr escapes for a JS string literal. With no inline handlers left
+    there is no JS source in markup, so using it anywhere now corrupts data:
+    a checkbox value of O'Brien came back as O\\'Brien and matched nothing."""
+
+    def test_unused_in_templates(self):
+        for rel in ("web/app.js", "portal/app.js", "help/app.js"):
+            uses = [l for l in _read(rel).splitlines()
+                    if "escJsAttr(" in l and "function escJsAttr" not in l
+                    and not l.strip().startswith("//")]
+            self.assertEqual(uses, [], f"{rel}: {uses[:2]}")
 
 
 if __name__ == "__main__":

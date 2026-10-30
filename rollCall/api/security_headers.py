@@ -10,13 +10,17 @@ the obvious "just set a strict CSP and DENY framing" answer wrong for this app:
    everywhere EXCEPT the Mini App surfaces (/web and the retired /miniapp),
    which allow Telegram origins only.
 
-2. Every web surface uses inline `onclick="..."` handlers (the app has no build
-   step). A CSP without `'unsafe-inline'` in script-src would kill every button.
+2. Script: since 10.9 there is no inline script anywhere — handlers are
+   declared as data-on-click="fn" and wired by /shared/actions.js — so
+   script-src refuses 'unsafe-inline'. Markup that slips past escaping can no
+   longer run code; at most it can name one of the page's own functions.
+   (Until 10.9 every button was an inline onclick, 'unsafe-inline' was
+   load-bearing, and this CSP was no XSS defence at all.)
 
-Consequence worth being honest about: because of (2) this CSP is NOT an XSS
-defense. Its value here is `frame-ancestors` (clickjacking), `object-src 'none'`,
-`base-uri 'self'` (base-tag injection), and blocking off-origin form posts. XSS
-defense still rests on the esc()/escJsAttr() discipline in the front-end JS.
+   'unsafe-eval' is added ONLY when TG_LOGIN_WIDGET is on: Telegram's login
+   widget eval()s its data-onauth attribute. Our own code never evals.
+   style-src keeps 'unsafe-inline' — templates set style="" everywhere, and
+   CSS injection can't execute script.
 
 Why clickjacking matters for this app specifically: the group page carries
 one-click destructive admin actions (end a rollcall, delete a template), and it
@@ -64,19 +68,30 @@ _TELEGRAM_FRAMES = "https://oauth.telegram.org"
 _GOOGLE_FONTS_CSS = "https://fonts.googleapis.com"
 _GOOGLE_FONTS_FILES = "https://fonts.gstatic.com"
 
-_CSP_COMMON = (
-    "default-src 'self'; "
-    "img-src 'self' data: blob:; "
-    # 'unsafe-inline' is load-bearing — see module docstring.
-    f"script-src 'self' 'unsafe-inline' {_TELEGRAM_SCRIPTS}; "
-    f"style-src 'self' 'unsafe-inline' {_GOOGLE_FONTS_CSS}; "
-    f"font-src 'self' data: {_GOOGLE_FONTS_FILES}; "
-    f"frame-src {_TELEGRAM_FRAMES}; "
-    "connect-src 'self'; "
-    "object-src 'none'; "
-    "base-uri 'self'; "
-    "form-action 'self'"
-)
+def _login_widget_enabled() -> bool:
+    return os.environ.get("TG_LOGIN_WIDGET", "").strip().lower() in ("1", "true", "yes")
+
+
+def _csp_common() -> str:
+    # Read per request, not at import: tests and a changed env must see it.
+    evaluate = " 'unsafe-eval'" if _login_widget_enabled() else ""
+    return (
+        "default-src 'self'; "
+        "img-src 'self' data: blob:; "
+        # No 'unsafe-inline' — see module docstring.
+        f"script-src 'self'{evaluate} {_TELEGRAM_SCRIPTS}; "
+        # Inline <script> blocks are refused by the line above; this one
+        # also refuses inline on*= attributes explicitly, for browsers that
+        # honour the -attr directive separately.
+        "script-src-attr 'none'; "
+        f"style-src 'self' 'unsafe-inline' {_GOOGLE_FONTS_CSS}; "
+        f"font-src 'self' data: {_GOOGLE_FONTS_FILES}; "
+        f"frame-src {_TELEGRAM_FRAMES}; "
+        "connect-src 'self'; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'"
+    )
 
 
 # Assets whose staleness desyncs the client from the server. Served through
@@ -131,9 +146,9 @@ async def security_headers_middleware(request, call_next):
         # variant is dead in every current browser. frame-ancestors is the
         # mechanism that actually works, and it supersedes XFO where both
         # are understood.
-        csp = f"{_CSP_COMMON}; frame-ancestors {_TELEGRAM_FRAME_ANCESTORS}"
+        csp = f"{_csp_common()}; frame-ancestors {_TELEGRAM_FRAME_ANCESTORS}"
     else:
-        csp = f"{_CSP_COMMON}; frame-ancestors 'none'"
+        csp = f"{_csp_common()}; frame-ancestors 'none'"
         response.headers.setdefault("X-Frame-Options", "DENY")
 
     response.headers.setdefault("Content-Security-Policy", csp)

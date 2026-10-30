@@ -179,6 +179,14 @@ def _fmt_group_stats(data: dict) -> str:
         f"👤 Proxy sessions  — IN: {data['proxy_in']}  OUT: {data['proxy_out']}  MAYBE: {data['proxy_maybe']}",
         f"⏫ Waitlist → IN promotions: {data['waitlist_promotions']}",
     ]
+    peak = data.get("vote_peak") or {}
+    if peak.get("total_votes"):
+        top = peak["top_slots"][0]
+        lines += [
+            "", f"*When people vote* _(last {peak['days']} days, game's timezone)_",
+            f"🕘 Busiest: {top['label']} — {top['votes']} votes ({top['share']}%)",
+            f"📅 Busiest day: {peak['busiest_day']}  ·  ⏰ Busiest hour: {peak['busiest_hour_label']}",
+        ]
     late = data.get("late_drop_leaderboard") or []
     if late:
         lines += ["", f"*Late drops* _(IN → OUT/MAYBE within {data.get('late_drop_hours', LATE_DROP_HOURS)}h of game time)_"]

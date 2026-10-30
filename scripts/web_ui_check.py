@@ -28,6 +28,7 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "rollCall"
 APPS = [
     ("web/index.html", "web/app.js"),
     ("portal/index.html", "portal/app.js"),
+    ("help/index.html", "help/app.js"),
 ]
 
 # Handlers the browser provides, or that come from a <script> we don't parse.
@@ -74,27 +75,44 @@ def _linked_scripts(html, own_js):
     return "\n".join(out)
 
 
-def check_onclick_handlers(html, js, label, errors):
-    """Every inline on*= handler must resolve to something defined in the JS.
+_INLINE_HANDLER = re.compile(r'\son(?:click|change|input|submit|keydown|keyup|load|error|focus|blur|mouse\w+)\s*=\s*["\']', re.I)
 
-    Definitions can live in the external app.js OR in an inline <script> in the
-    page itself — the portal defines its help-overlay handlers that way.
-    """
-    js = js + "\n" + _inline_scripts(html)
+
+def check_no_inline_script(html, js, label, errors):
+    """The CSP refuses inline script (security_headers.py). An inline on*=
+    handler or <script> block would render fine and then do NOTHING — a
+    console message in the visitor's browser, silence on the server."""
+    for src, where in ((html, "html"), (js, "js")):
+        for m in _INLINE_HANDLER.finditer(src):
+            line = src.count("\n", 0, m.start()) + 1
+            text = src[src.rfind("\n", 0, m.start()) + 1:src.find("\n", m.start())]
+            if text.lstrip().startswith(("//", "*", "/*")):
+                continue            # prose mentioning the old pattern
+            errors.append(f"{label} ({where}:{line}): inline handler {m.group(0).strip()} — "
+                          f"refused by the CSP; use data-on-* (shared/actions.js)")
+    if _inline_scripts(html).strip():
+        errors.append(f"{label}: inline <script> block — refused by the CSP; move it to a .js file")
+
+
+def check_onclick_handlers(html, js, label, errors):
+    """Every data-on-* handler name must be a function the page defines ON
+    window — shared/actions.js resolves names through window, and refuses
+    built-ins. Top-level `function f` and `window.f =` qualify; a top-level
+    const/let does NOT become a window property, so it would silently fail."""
     calls = set()
-    for m in re.finditer(r'on(?:click|change|input|submit)="([^"]+)"', html):
-        # (?<![.\w$]) so `this.classList.add(...)` is read as a method call on an
-        # object, not as a bare global named `add`.
-        for fn in re.finditer(r'(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(', m.group(1)):
-            calls.add(fn.group(1))
+    for src in (html, js):
+        for m in re.finditer(r'data-on-[a-z]+="([^"]+)"', src):
+            for name in m.group(1).split():
+                if name != "$stop":
+                    calls.add(name.split(".")[0])
 
     defined = set()
     defined |= set(re.findall(r'window\.([A-Za-z_$][\w$]*)\s*=', js))
-    defined |= set(re.findall(r'function\s+([A-Za-z_$][\w$]*)\s*\(', js))
-    defined |= set(re.findall(r'(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:function|\()', js))
+    defined |= set(re.findall(r'(?<![.\w$])function\s+([A-Za-z_$][\w$]*)\s*\(', js))
+    defined |= set(re.findall(r'(?<![\w$])var\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:function|\()', js))
 
-    for fn in sorted(calls - defined - BUILTIN_CALLS):
-        errors.append(f"{label}: inline handler calls {fn}() which is not defined in the JS")
+    for fn in sorted(calls - defined):
+        errors.append(f"{label}: data-on-* calls {fn}() which is not a window-level function")
 
 
 def check_element_ids(html, js, label, errors):
@@ -205,6 +223,7 @@ def main():
         check_html_balance(html, label, errors)
         check_telegram_sdk_not_async(html, label, errors)
         check_duplicate_ids(html, label, errors)
+        check_no_inline_script(html, js, label, errors)
         check_onclick_handlers(html, js, label, errors)
         check_element_ids(html, js, label, errors)
 

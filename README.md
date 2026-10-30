@@ -162,6 +162,7 @@ variables:
 | `REST_API_PORT` | No | FastAPI port (default: `8081`) |
 | `WEB_BASE_URL` | No | Your public HTTPS base URL — enables web voting links in panels and `/weblink` |
 | `MINIAPP_URL` | No | Public URL the Telegram menu button opens — point it at `<WEB_BASE_URL>/web/`. The old standalone `/miniapp/` app is retired and redirects there |
+| `TG_LOGIN_WIDGET` | No | `true` offers Telegram's Login Widget on the group page. Run `/setdomain` in BotFather first. Also adds `'unsafe-eval'` to the page CSP, because the widget `eval()`s its callback |
 | `IDENTITY_SECRET` | No | Signing key for web/portal identity tokens. Unset = derived from the bot token (today's behaviour). Set it to decouple identity from Telegram; safe to set on a running deployment, nobody is signed out |
 | `GHOST_AUTOFORGIVE_DAYS` | No | Days before an unreviewed session counts as "everyone attended" (default: `7`, `0` disables) |
 | `WATCHDOG_CHAT_ID` | No | Where the watchdog sidecar DMs alerts (default: `ADMIN1`); that account must have DMed the bot once |

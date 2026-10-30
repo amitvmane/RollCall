@@ -13,7 +13,7 @@ import logging
 from datetime import datetime
 
 from bot_state import (
-    bot, _log_task_exc, _pending_reconf, _is_rate_limited, _get_display_name,
+    bot, _log_task_exc, _pending_reconf, _is_rate_limited, _get_display_name, best_effort,
     format_mention_with_name_md, _esc_md,
     warn_no_username, _dm_promoted_real_user, reply_error,
 )
@@ -101,24 +101,28 @@ async def in_user(message):
         result = await vote_svc.vote_in(cid, user_id, display_name, username, comment, rc_number)
 
         # Format response
+        # Saved. From here on every Telegram call is best_effort: a refused
+        # reply must not be reported to the voter as a failed vote.
         if result["action"] == "waitlisted":
             if not manager.get_shh_mode(cid):
-                await bot.send_message(cid, f"Event max limit is reached, {display_name} was added in waitlist")
+                await best_effort(bot.send_message(
+                    cid, f"Event max limit is reached, {display_name} was added in waitlist"),
+                    "waitlist notice", cid)
         elif result["action"] == "added":
             if not manager.get_shh_mode(cid):
                 from models import User
                 u = User(display_name, username, user_id, [])
-                await bot.send_message(
+                await best_effort(bot.send_message(
                     cid,
                     f"{format_mention_with_name_md(u)} is now IN!",
                     parse_mode="Markdown",
-                )
+                ), "IN announcement", cid)
 
         from handlers.lifecycle import _update_panel
         rc_number_1based = result["rc_number_1based"]
         rc = manager.get_rollcall(cid, rc_number)
         if rc:
-            await _update_panel(cid, rc_number_1based, rc)
+            await best_effort(_update_panel(cid, rc_number_1based, rc), "panel refresh", cid)
 
     except Exception as e:
         await reply_error(message, e)
@@ -157,26 +161,27 @@ async def out_user(message):
             from models import User
             u = User(display_name, username, user_id, [])
             if result["was_in"]:
-                await bot.send_message(
+                await best_effort(bot.send_message(
                     cid,
                     f"{format_mention_with_name_md(u)} → OUT for '{_esc_md(rc_title)}' (#{rc_number_1based})",
                     parse_mode="Markdown",
-                )
+                ), "OUT announcement", cid)
             else:
-                await bot.send_message(
+                await best_effort(bot.send_message(
                     cid,
                     f"{format_mention_with_name_md(u)} is now OUT!",
                     parse_mode="Markdown",
-                )
+                ), "OUT announcement", cid)
 
         if result["promoted"]:
-            await announce_one(cid, result["promoted"], rc_title, rc_number_1based,
-                               manager.get_rollcall(cid, rc_number))
+            await best_effort(announce_one(cid, result["promoted"], rc_title, rc_number_1based,
+                                           manager.get_rollcall(cid, rc_number)),
+                              "promotion notice", cid)
 
         from handlers.lifecycle import _update_panel
         rc = manager.get_rollcall(cid, rc_number)
         if rc:
-            await _update_panel(cid, rc_number_1based, rc)
+            await best_effort(_update_panel(cid, rc_number_1based, rc), "panel refresh", cid)
 
     except Exception as e:
         await reply_error(message, e)
@@ -213,20 +218,21 @@ async def maybe_user(message):
         if not manager.get_shh_mode(cid):
             from models import User
             u = User(display_name, username, user_id, [])
-            await bot.send_message(
+            await best_effort(bot.send_message(
                 cid,
                 f"{format_mention_with_name_md(u)} is now MAYBE!",
                 parse_mode="Markdown",
-            )
+            ), "MAYBE announcement", cid)
 
         if result["promoted"]:
-            await announce_one(cid, result["promoted"], rc_title, rc_number_1based,
-                               manager.get_rollcall(cid, rc_number))
+            await best_effort(announce_one(cid, result["promoted"], rc_title, rc_number_1based,
+                                           manager.get_rollcall(cid, rc_number)),
+                              "promotion notice", cid)
 
         from handlers.lifecycle import _update_panel
         rc = manager.get_rollcall(cid, rc_number)
         if rc:
-            await _update_panel(cid, rc_number_1based, rc)
+            await best_effort(_update_panel(cid, rc_number_1based, rc), "panel refresh", cid)
 
     except Exception as e:
         await reply_error(message, e)

@@ -9,6 +9,7 @@
   <title>RollCall — My Groups</title>
   <link rel="icon" href="/web/logo.svg" type="image/svg+xml"/>
   <script src="/shared/theme-init.js"></script>
+  <script src="/shared/actions.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800;900&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet"/>
@@ -46,7 +47,7 @@
     <p class="sub" style="font-size:.8rem;text-align:center">Have a login code from the bot? (Get one anytime with <b>/mytoken</b> — works even when Telegram is down.)</p>
     <div style="display:flex;gap:8px;margin-top:8px">
       <input id="member-code-input" type="password" autocomplete="off" placeholder="Login code" style="flex:1;min-width:0;padding:10px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg);color:var(--text);font-size:.9rem"/>
-      <button class="btn btn-primary" id="member-code-btn" style="padding:10px 16px;white-space:nowrap" onclick="doMemberCodeLogin()">Login</button>
+      <button class="btn btn-primary" id="member-code-btn" style="padding:10px 16px;white-space:nowrap" data-on-click="doMemberCodeLogin">Login</button>
     </div>
   </div>
 </div>
@@ -58,8 +59,8 @@
       <span class="logo">My Groups</span>
     </div>
     <div class="topbar-right">
-      <button class="rc-help-btn" title="Help" aria-label="Help" onclick="rcOpenHelp()">❓</button>
-      <button class="btn-theme" title="Theme" aria-label="Theme" data-theme-toggle onclick="toggleTheme()">🌙</button>
+      <button class="rc-help-btn" title="Help" aria-label="Help" data-on-click="rcOpenHelp">❓</button>
+      <button class="btn-theme" title="Theme" aria-label="Theme" data-theme-toggle data-on-click="toggleTheme">🌙</button>
       <!-- Same account control as the group page (/shared/account.css). This
            was a bare name label plus a "Logout" button — functional, but a
            different shape from the group page's chip-and-menu, so the two
@@ -92,10 +93,10 @@
     <!-- Sort/filter bar (hidden until 3+ groups) -->
     <div id="filter-bar" style="display:none">
       <div class="filter-row">
-        <input id="group-search" type="text" class="filter-input" placeholder="Search groups…" oninput="applyFilter()"/>
+        <input id="group-search" type="text" class="filter-input" placeholder="Search groups…" data-on-input="applyFilter"/>
         <div class="sort-tabs">
-          <button class="sort-tab active" id="sort-active" onclick="setSort('active')">Active first</button>
-          <button class="sort-tab" id="sort-alpha" onclick="setSort('alpha')">A–Z</button>
+          <button class="sort-tab active" id="sort-active" data-on-click="setSort" data-args='["active"]'>Active first</button>
+          <button class="sort-tab" id="sort-alpha" data-on-click="setSort" data-args='["alpha"]'>A–Z</button>
         </div>
       </div>
     </div>
@@ -105,11 +106,11 @@
 </div>
 
 <!-- Group detail drawer -->
-<div id="detail-overlay" class="detail-overlay" onclick="closeDetail()"></div>
+<div id="detail-overlay" class="detail-overlay" data-on-click="closeDetail"></div>
 <div id="detail-panel" class="detail-panel">
   <div class="detail-header">
     <h2 id="detail-title">Group</h2>
-    <button class="detail-close" aria-label="Close details" onclick="closeDetail()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg></button>
+    <button class="detail-close" aria-label="Close details" data-on-click="closeDetail"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg></button>
   </div>
   <div id="detail-body" style="padding:16px;overflow-y:auto;flex:1"></div>
 </div>
@@ -117,11 +118,11 @@
 <div class="toast" id="toast" role="alert" aria-live="assertive" aria-atomic="true"></div>
 
 <!-- Help / About modal -->
-<div class="rc-help-ov" id="rc-help-ov" onclick="rcCloseHelp()"></div>
+<div class="rc-help-ov" id="rc-help-ov" data-on-click="rcCloseHelp"></div>
 <div class="rc-help-card" id="rc-help-card" role="dialog" aria-modal="true" aria-labelledby="rc-help-title">
   <div class="rc-help-head">
     <h2 id="rc-help-title">📋 My Groups — help</h2>
-    <button class="rc-help-close" aria-label="Close" onclick="rcCloseHelp()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg></button>
+    <button class="rc-help-close" aria-label="Close" data-on-click="rcCloseHelp"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg></button>
   </div>
   <div class="rc-help-body">
     <p>This portal shows your attendance across every RollCall group you've voted in — no separate login, just your verified Telegram identity.</p>
@@ -137,11 +138,6 @@
     <p style="margin-top:14px">Need the full bot command reference? See <a href="/help" target="_blank" rel="noopener">/help</a>, or run <code>/help</code> in any group.</p>
   </div>
 </div>
-<script>
-  function rcOpenHelp(){document.getElementById('rc-help-ov').classList.add('open');document.getElementById('rc-help-card').classList.add('open');}
-  function rcCloseHelp(){document.getElementById('rc-help-ov').classList.remove('open');document.getElementById('rc-help-card').classList.remove('open');}
-  document.addEventListener('keydown',function(e){if(e.key==='Escape')rcCloseHelp();});
-</script>
 <script src="/portal/app.js"></script>
 </body>
 </html>

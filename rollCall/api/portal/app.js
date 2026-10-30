@@ -1,3 +1,9 @@
+// Help sheet (was an inline <script> in index.html — inline script is
+// refused by the CSP now that every handler is wired via shared/actions.js).
+function rcOpenHelp(){document.getElementById('rc-help-ov').classList.add('open');document.getElementById('rc-help-card').classList.add('open');}
+function rcCloseHelp(){document.getElementById('rc-help-ov').classList.remove('open');document.getElementById('rc-help-card').classList.remove('open');}
+document.addEventListener('keydown',function(e){if(e.key==='Escape')rcCloseHelp();});
+
 (function(){
 "use strict";
 
@@ -25,9 +31,6 @@ function $id(id){return document.getElementById(id);}
 // Escapes quotes too: esc() output lands inside attributes (title="…",
 // href="…"), where the old textContent→innerHTML trick left " and ' raw.
 function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
-// For a value inside a single-quoted JS string in an inline handler — wrap
-// the result in esc() too, since the handler itself is an attribute.
-function escJsAttr(s){return String(s||"").replace(/\\/g,"\\\\").replace(/'/g,"\\'");}
 
 // Native confirm() is unavailable in some webviews (notably Telegram's,
 // where it returns undefined without ever asking) — see the same helper on
@@ -432,8 +435,8 @@ function groupCardHTML(g,i){
   // active, leaving idle groups with no link at all.
   const voteBtn=g.group_web_token
     ?(g.has_active_rollcall
-      ?`<a class="vote-btn" href="/web/group/${esc(g.group_web_token)}" target="_blank" onclick="event.stopPropagation()">Vote Now →</a>`
-      :`<a class="vote-btn vote-btn-secondary" href="/web/group/${esc(g.group_web_token)}" target="_blank" onclick="event.stopPropagation()">Open group page →</a>`)
+      ?`<a class="vote-btn" href="/web/group/${esc(g.group_web_token)}" target="_blank" data-on-click="$stop">Vote Now →</a>`
+      :`<a class="vote-btn vote-btn-secondary" href="/web/group/${esc(g.group_web_token)}" target="_blank" data-on-click="$stop">Open group page →</a>`)
     :"";
 
   const rank=g.rank!=null?`#${g.rank}`:"—";
@@ -442,7 +445,7 @@ function groupCardHTML(g,i){
   const streakDisplay=streak>=3?`${streak}🔥`:String(streak);
 
   return `
-<div class="group-card" onclick="openDetail(${i})">
+<div class="group-card" data-on-click="openDetail" data-args="${rcArgs(i)}">
   <div class="group-card-header">
     <span class="group-name">${esc(name)}</span>
     ${badge}
@@ -511,7 +514,7 @@ ${bestStreak>0?`<div class="milestone-box">🏆 Best streak ever: <strong>${best
   <div style="font-weight:600;margin-bottom:4px;font-size:.82rem">📎 Permanent group link</div>
   <div style="display:flex;gap:8px;align-items:center">
     <code class="join-link-code">${esc(joinUrl)}</code>
-    <button onclick="navigator.clipboard.writeText('${esc(escJsAttr(joinUrl))}').then(()=>toast('Link copied!'))" class="copy-link-btn">Copy</button>
+    <button data-on-click="copyText" data-args="${rcArgs(joinUrl,'Link copied!')}" class="copy-link-btn">Copy</button>
   </div>
 </div>`;
   }
@@ -523,7 +526,7 @@ ${bestStreak>0?`<div class="milestone-box">🏆 Best streak ever: <strong>${best
 
   const tabs=["Overview","History","Dues"];
   html=`<div class="tab-bar detail-tabs" id="detail-tabs">
-  ${tabs.map((t,i)=>`<button class="tab${i===0?" active":""}" onclick="switchDetailTab(${i})">${t}</button>`).join("")}
+  ${tabs.map((t,i)=>`<button class="tab${i===0?" active":""}" data-on-click="switchDetailTab" data-args="${rcArgs(i)}">${t}</button>`).join("")}
 </div>
 <div id="detail-pane-0">${html}</div>
 <div id="detail-pane-1" style="display:none">${historyPane}</div>
@@ -600,7 +603,7 @@ async function _loadDuesSection(g){
   <div class="dues-hero-lbl">${heroLbl}</div>
   ${bal!==0?`<div class="dues-hero-val">₹${Math.abs(bal)}</div>`:""}
   ${(bal>0&&upi)?`<div class="dues-hero-upi">💳 Pay to <code class="dues-upi">${esc(upi)}</code>
-    <button onclick="navigator.clipboard.writeText('${esc(escJsAttr(upi))}').then(()=>toast('UPI copied!'))" class="copy-link-btn">Copy</button>
+    <button data-on-click="copyText" data-args="${rcArgs(upi,'UPI copied!')}" class="copy-link-btn">Copy</button>
   </div>`:""}
 </div>`;
 

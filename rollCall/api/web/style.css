@@ -591,6 +591,14 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .sp-trend-note{font-size:.72rem;color:var(--sub);margin:6px 0 14px}
 .sp-trend+.sp-personal,.sp-trend+.stats-section-hdr{margin-top:14px}
 
+/* ── When people vote: 24 hourly columns ── */
+.vp-summary{font-size:.85rem;margin-bottom:8px}
+.vp-chart{display:flex;align-items:flex-end;gap:2px;height:48px;border-bottom:1px solid var(--border)}
+.vp-col{flex:1;min-width:0;display:flex;align-items:flex-end;height:100%}
+.vp-bar{width:100%;background:var(--accent);opacity:.45;border-radius:2px 2px 0 0}
+.vp-peak .vp-bar{opacity:1}
+.vp-axis{display:flex;justify-content:space-between;font-size:.7rem;color:var(--sub);font-family:var(--font-mono);margin:3px 0 8px}
+
 /* ── Personal session sparkline ── */
 .sp-spark-label{font-size:.72rem;color:var(--sub);margin:8px 0 4px;font-weight:600}
 .sp-spark{display:flex;flex-wrap:wrap;gap:3px}

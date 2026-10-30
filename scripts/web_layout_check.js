@@ -29,6 +29,21 @@ const WEB = path.join(API, "web");
 const MIME = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript",
                ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json" };
 
+// The production Content-Security-Policy, read from the one place it is
+// defined. Served on every page here so a handler the CSP refuses fails THIS
+// check — in a real browser a refused handler is just a dead button and a
+// console line nobody sees. Falls back to no header (and says so) only if
+// python3 is missing, so the layout checks still run.
+let CSP = null;
+try {
+  CSP = require("child_process").execFileSync("python3", ["-c",
+    "import sys; sys.path.insert(0, sys.argv[1]); import security_headers as s; print(s._csp_common())",
+    API], { encoding: "utf8" }).trim();
+} catch (e) {
+  console.log("  (CSP not applied: could not read it from security_headers.py — " + e.message.split("\n")[0] + ")");
+}
+const cspViolations = [];
+
 function startServer() {
   const server = http.createServer((req, res) => {
     const url = req.url.split("?")[0];
@@ -46,7 +61,9 @@ function startServer() {
     if (!file.startsWith(API) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
       res.writeHead(404); return res.end("nope");
     }
-    res.writeHead(200, { "Content-Type": MIME[path.extname(file)] || "text/plain" });
+    const headers = { "Content-Type": MIME[path.extname(file)] || "text/plain" };
+    if (CSP && path.extname(file) === ".html") headers["Content-Security-Policy"] = CSP;
+    res.writeHead(200, headers);
     fs.createReadStream(file).pipe(res);
   });
   return new Promise(r => server.listen(0, "127.0.0.1", () => r(server)));
@@ -138,6 +155,15 @@ const WIDTHS = [
     args: ["--no-sandbox", "--disable-dev-shm-usage"],
     ...(EXEC ? { executablePath: EXEC } : {}),
   });
+  // Every page this script opens reports CSP refusals.
+  const _newPage = browser.newPage.bind(browser);
+  browser.newPage = async () => {
+    const p = await _newPage();
+    p.on("console", m => {
+      if (/Content Security Policy/i.test(m.text())) cspViolations.push(`${p.url().replace(BASE, "")}: ${m.text().slice(0, 160)}`);
+    });
+    return p;
+  };
 
   for (const vp of WIDTHS) {
     const page = await browser.newPage();
@@ -986,8 +1012,55 @@ const WIDTHS = [
     await page.close();
   }
 
+  // shared/actions.js — the one listener every button now goes through.
+  {
+    const page = await browser.newPage();
+    const errs = [], logged = [];
+    page.on("pageerror", e => errs.push(String(e.message)));
+    page.on("console", m => logged.push(m.text()));
+    await page.goto(`${BASE}/web/`, { waitUntil: "load" });
+    const r = await page.evaluate(() => {
+      const out = {};
+      const nasty = `O'Brien "x" <img src=x> & \\ \u2603`;
+      window.__probe = function (a, b, el) { out.args = [a, b]; out.el = el && el.id; };
+      window.__outer = function () { out.outer = (out.outer || 0) + 1; };
+      window.__stopper = function (ev) { ev.stopPropagation(); out.stopped = true; };
+      document.body.insertAdjacentHTML("beforeend", `
+        <div id="t-outer" data-on-click="__outer">
+          <button id="t-btn" data-on-click="__probe" data-args="${rcArgs(nasty, 7, RC_THIS)}"><span id="t-inner">x</span></button>
+          <a id="t-stop" data-on-click="$stop">link</a>
+          <button id="t-sp" data-on-click="__stopper" data-args="${rcArgs(RC_EVENT)}">s</button>
+          <button id="t-native" data-on-click="fetch" data-args="${rcArgs("/api/x")}">n</button>
+        </div>`);
+      let docSaw = 0;
+      document.addEventListener("click", () => { docSaw++; });
+      document.getElementById("t-inner").click();      // bubbles to button, then outer
+      out.argsOk = JSON.stringify(out.args) === JSON.stringify([nasty, 7]) && out.el === "t-btn";
+      out.outerAfterBtn = out.outer;
+      document.getElementById("t-stop").click();        // $stop: outer must NOT run
+      out.outerAfterStop = out.outer;
+      const before = docSaw;
+      document.getElementById("t-sp").click();          // stopPropagation keeps it from document
+      out.docAfterStop = docSaw - before;
+      document.getElementById("t-native").click();      // built-in: must be refused
+      return out;
+    });
+    if (!r.argsOk) failures.push(`actions: data-args did not round-trip (${JSON.stringify(r.args)})`);
+    if (r.outerAfterBtn !== 1) failures.push("actions: handler did not bubble to the ancestor once");
+    if (r.outerAfterStop !== 1) failures.push("actions: $stop let the click reach the ancestor's handler");
+    if (r.docAfterStop !== 0 || !r.stopped) failures.push("actions: stopPropagation() in a handler did not stop the click");
+    if (!logged.some(t => t.includes("no such page function fetch")))
+      failures.push("actions: a built-in (fetch) was callable from data-on-click");
+    if (errs.length) failures.push(`actions: JS error — ${errs[0]}`);
+    console.log("  actions: args round-trip, bubbling, $stop, stopPropagation, built-ins refused");
+    await page.close();
+  }
+
   await browser.close();
   server.close();
+
+  if (!CSP) failures.push("CSP: could not load the production policy, so inline-script regressions went unchecked");
+  for (const v of new Set(cspViolations)) failures.push(`CSP refused: ${v}`);
 
   if (failures.length) {
     console.log(`\nFAILED: ${failures.length} layout problem(s)\n`);

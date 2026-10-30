@@ -183,6 +183,25 @@ def _handler_chat_id(arg):
     return None
 
 
+async def best_effort(awaitable, what: str, cid: int) -> bool:
+    """Await a Telegram call made AFTER a vote was saved; never raise.
+
+    When ten members vote in the same second (scheduled messages all firing
+    at 9:01) the bot sends ~20 messages to one group and Telegram starts
+    answering 429 "Too Many Requests". Those replies used to propagate to
+    reply_error, which told a member whose vote had just been saved that
+    "something went wrong" — so they voted again, or assumed they weren't in.
+    The vote is the state; a refused announcement is logged, and each later
+    step (promotion notice, panel refresh) still runs. Returns True on success.
+    """
+    try:
+        await awaitable
+        return True
+    except Exception as e:
+        logging.warning("Vote saved; %s not delivered (chat=%s): %s", what, cid, e)
+        return False
+
+
 async def reply_error(target, e):
     """Reply with an error message that's safe to expose to users.
 

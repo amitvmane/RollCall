@@ -3,12 +3,13 @@
 
 // Bump on any change to the caching strategy below. Note this is NOT the only
 // thing that ships new code any more — see the fetch handler.
-const CACHE = "rc-v5";
+const CACHE = "rc-v6";
 // /shared/ is outside this worker's scope, but a controlled page's
 // subresources still pass through it — and without these the offline shell
 // renders with no theme tokens at all.
 const PRECACHE = ["/web/", "/web/app.js", "/web/style.css", "/web/logo.svg", "/web/icon-192.png", "/web/manifest.json",
-                  "/shared/tokens.css", "/shared/account.css", "/shared/theme-init.js"];
+                  "/shared/tokens.css", "/shared/account.css", "/shared/theme-init.js",
+                  "/shared/actions.js"];
 
 // ── Install: precache shell ───────────────────────────────────────────────────
 self.addEventListener("install", e => {

@@ -9,6 +9,7 @@
   <title>RollCall — Command Reference</title>
   <link rel="icon" href="/web/logo.svg" type="image/svg+xml"/>
   <script src="/shared/theme-init.js"></script>
+  <script src="/shared/actions.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800;900&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet"/>
@@ -26,7 +27,7 @@
   <div class="topbar-right">
     <a href="https://github.com/amitvmane/RollCall" target="_blank" rel="noopener" class="btn-theme" title="View source, open an issue, or send a PR on GitHub" style="text-decoration:none;display:flex;align-items:center;justify-content:center">🐙</a>
     <a href="/" class="btn-theme" title="Back to RollCall" style="text-decoration:none;display:flex;align-items:center;justify-content:center">🏠</a>
-    <button class="btn-theme" title="Theme" aria-label="Theme" data-theme-toggle onclick="toggleTheme()">🌙</button>
+    <button class="btn-theme" title="Theme" aria-label="Theme" data-theme-toggle data-on-click="toggleTheme">🌙</button>
   </div>
 </div>
 
@@ -37,11 +38,11 @@
   </div>
 
   <div class="controls-bar">
-    <input id="search-input" type="search" placeholder="Search commands — try &quot;dues&quot;, &quot;ghost&quot;, or &quot;streak&quot;" autocomplete="off" oninput="onSearchInput()"/>
+    <input id="search-input" type="search" placeholder="Search commands — try &quot;dues&quot;, &quot;ghost&quot;, or &quot;streak&quot;" autocomplete="off" data-on-input="onSearchInput"/>
     <div class="scope-toggle" role="tablist">
-      <button id="scope-all" class="scope-btn active" onclick="setScope('all')">All commands</button>
-      <button id="scope-user" class="scope-btn" onclick="setScope('user')">User</button>
-      <button id="scope-admin" class="scope-btn" onclick="setScope('admin')">Admin</button>
+      <button id="scope-all" class="scope-btn active" data-on-click="setScope" data-args='["all"]'>All commands</button>
+      <button id="scope-user" class="scope-btn" data-on-click="setScope" data-args='["user"]'>User</button>
+      <button id="scope-admin" class="scope-btn" data-on-click="setScope" data-args='["admin"]'>Admin</button>
     </div>
   </div>
 

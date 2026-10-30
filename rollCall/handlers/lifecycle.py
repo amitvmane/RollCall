@@ -12,7 +12,7 @@ import pytz
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot_state import (
-    bot, _panel_msg_ids, _pending_deletes, _pending_overrides,
+    bot, best_effort, _panel_msg_ids, _pending_deletes, _pending_overrides,
     _pending_cancel_reason, _prune_pending,
     _log_task_exc,
     _is_rate_limited, _get_display_name, format_mention_with_name,
@@ -879,36 +879,41 @@ async def _cb_vote(call, cid: int, rc_number: int, rc, action: str) -> None:
     user_name_v = user_d["name"]
     user_uname_v = user_d.get("username")
 
+    # The vote is saved: every Telegram call below is best_effort, so a 429
+    # during a burst is logged instead of surfacing as a failed vote.
     if svc_result["action"] == "waitlisted":
-        await bot.answer_callback_query(call.id, "Event max limit reached, added to waitlist")
+        await best_effort(bot.answer_callback_query(call.id, "Event max limit reached, added to waitlist"),
+                          "tap answer", cid)
         if not manager.get_shh_mode(cid):
             if isinstance(user_id_v, int):
                 _u = User(user_name_v, user_uname_v, user_id_v, [])
-                await bot.send_message(
+                await best_effort(bot.send_message(
                     cid,
                     f"{format_mention_with_name_md(_u)} → WAITING for '{_esc_md(rc.title)}' (#{rc_number})",
                     parse_mode="Markdown",
-                )
+                ), "waitlist announcement", cid)
             else:
-                await bot.send_message(cid, f"{user_name_v} → WAITING for '{rc.title}' (#{rc_number})")
+                await best_effort(bot.send_message(cid, f"{user_name_v} → WAITING for '{rc.title}' (#{rc_number})"),
+                                  "waitlist announcement", cid)
     else:
-        await bot.answer_callback_query(call.id, "Status updated")
+        await best_effort(bot.answer_callback_query(call.id, "Status updated"), "tap answer", cid)
         if not manager.get_shh_mode(cid):
             label = {"in": "IN", "out": "OUT", "maybe": "MAYBE"}[action]
             if isinstance(user_id_v, int):
                 _u = User(user_name_v, user_uname_v, user_id_v, [])
-                await bot.send_message(
+                await best_effort(bot.send_message(
                     cid,
                     f"{format_mention_with_name_md(_u)} → {label} for '{_esc_md(rc.title)}' (#{rc_number})",
                     parse_mode="Markdown",
-                )
+                ), "vote announcement", cid)
             else:
-                await bot.send_message(cid, f"{user_name_v} → {label} for '{rc.title}' (#{rc_number})")
+                await best_effort(bot.send_message(cid, f"{user_name_v} → {label} for '{rc.title}' (#{rc_number})"),
+                                  "vote announcement", cid)
 
     promoted = svc_result.get("promoted")
     if promoted and action in ("out", "maybe"):
         from handlers.promotion import announce_one
-        await announce_one(cid, promoted, rc.title, rc_number, rc)
+        await best_effort(announce_one(cid, promoted, rc.title, rc_number, rc), "promotion notice", cid)
 
     text = _build_panel_text(rc, rc_number)
     markup = await get_status_keyboard(rc_number, cid)

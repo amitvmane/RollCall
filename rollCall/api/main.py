@@ -169,8 +169,9 @@ def create_app() -> FastAPI:
 
     # Security headers on every response, including static files and the
     # 429s the rate limiter returns above. Registered last so it wraps
-    # outermost — see api/security_headers.py for why the CSP allows
-    # 'unsafe-inline' and why /miniapp/ is framing-exempt.
+    # outermost — see api/security_headers.py for why the CSP refuses inline
+    # script (handlers are wired by /shared/actions.js) and why the Mini App
+    # surfaces are framing-exempt.
     app.middleware("http")(security_headers_middleware)
 
     # Route mounting

@@ -174,15 +174,9 @@ function _confirmAction(msg){
 }
 
 function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
-// For interpolating free-text (e.g. a template name) inside a single-quoted
-// JS string literal that itself sits inside an inline onclick="..." HTML
-// attribute. esc() alone only protects the HTML-attribute layer (&<>") —
-// it leaves ' and \ untouched, so a name containing an apostrophe breaks
-// out of the JS string once the browser HTML-decodes the attribute and
-// hands the result to the JS parser. Apply this FIRST, then esc() the
-// result: escJsAttr(name) escapes \ and ' for the JS-string layer, then
-// esc() escapes &<>" for the HTML-attribute layer around it.
-function escJsAttr(s){return String(s||"").replace(/\\/g,"\\\\").replace(/'/g,"\\'")}
+// Handler arguments are passed as data (data-args="${rcArgs(...)}", see
+// shared/actions.js), never spliced into JS source — so there is no JS-string
+// escaping layer any more, and esc() is the only escaping templates need.
 // Relative-time label for a sqlite "YYYY-MM-DD HH:MM:SS" timestamp (as
 // returned by db.get_proxy_name_activity) — used by the merge-identities
 // review list's recency badge.
@@ -492,23 +486,23 @@ function renderAcctMenu(){
     // forgot them — they HAVE signed in, as a guest. What they can still do
     // is prove it's them, which is an upgrade, not a login.
     html+=who
-      ? `<button class="acct-menu-item" role="menuitem" onclick="closeAcctMenu();openSignIn()">✈ Verify with Telegram</button>`
-      : `<button class="acct-menu-item" role="menuitem" onclick="closeAcctMenu();openSignIn()">✈ Sign in</button>`;
+      ? `<button class="acct-menu-item" role="menuitem" data-on-click="closeAcctMenu openSignIn">✈ Verify with Telegram</button>`
+      : `<button class="acct-menu-item" role="menuitem" data-on-click="closeAcctMenu openSignIn">✈ Sign in</button>`;
   }
   if(who&&!TG_NAME){
-    html+=`<button class="acct-menu-item" role="menuitem" onclick="closeAcctMenu();acctChangeName()">✎ Change name</button>`;
+    html+=`<button class="acct-menu-item" role="menuitem" data-on-click="closeAcctMenu acctChangeName">✎ Change name</button>`;
   }
   if(_isWebAdmin){
-    html+=`<button class="acct-menu-item" role="menuitem" onclick="closeAcctMenu();toggleAdminPanel()">⚙ Admin controls</button>`;
+    html+=`<button class="acct-menu-item" role="menuitem" data-on-click="closeAcctMenu toggleAdminPanel">⚙ Admin controls</button>`;
   }
   // On a phone the header hides Help and Home to leave room for 44px touch
   // targets, so the menu has to carry them — otherwise they are simply gone.
   if(window.matchMedia&&window.matchMedia("(pointer:coarse)").matches){
-    html+=`<button class="acct-menu-item" role="menuitem" onclick="closeAcctMenu();window.location.href='/web/'">🏠 All your groups</button>`;
-    html+=`<button class="acct-menu-item" role="menuitem" onclick="closeAcctMenu();window.location.href='/help'">❓ Command reference</button>`;
+    html+=`<button class="acct-menu-item" role="menuitem" data-on-click="closeAcctMenu navTo" data-args='["/web/"]'>🏠 All your groups</button>`;
+    html+=`<button class="acct-menu-item" role="menuitem" data-on-click="closeAcctMenu navTo" data-args='["/help"]'>❓ Command reference</button>`;
   }
   if(who||_idToken){
-    html+=`<button class="acct-menu-item danger" role="menuitem" onclick="signOut()">⏻ Sign out</button>`;
+    html+=`<button class="acct-menu-item danger" role="menuitem" data-on-click="signOut">⏻ Sign out</button>`;
   }
   if(!html)html=`<div class="acct-menu-hdr"><div class="acct-menu-sub">Not signed in</div></div>`;
   // Light / Dark / Auto — shared with the portal menu (/shared/theme-init.js).
@@ -1353,6 +1347,22 @@ function renderStats(d){
   const rtRecord=rec?`<div class="rt-record">🏅 Quickest vote ever: <strong>${esc(rec.display_name||rec.username||"—")}</strong> in ${fmtSecs(rec.seconds)}</div>`:"";
   const rtNote=d.response_time_min_votes>1?`<div class="rt-note">Typical time to first vote · members with ${d.response_time_min_votes}+ votes</div>`:`<div class="rt-note">Typical time to first vote</div>`;
 
+  // When the group votes — busiest weekday/hour in the game's timezone
+  // (services.stats.voting_peak_times). Same numbers as /stats group.
+  const pk=d.vote_peak;
+  let peakHtml="";
+  if(pk&&pk.total_votes){
+    const maxH=Math.max(...pk.by_hour,1);
+    const hl=h=>`${(h%12)||12}${h<12?"a":"p"}`;
+    const bars=pk.by_hour.map((c,h)=>`<div class="vp-col${h===pk.busiest_hour?" vp-peak":""}" title="${hl(h)} · ${c} vote${c===1?"":"s"}"><div class="vp-bar" style="height:${c?Math.round(c/maxH*44)+4:0}px"></div></div>`).join("");
+    const top=pk.top_slots.map((t,i)=>`<div class="ghost-row"><span class="rt-rank">#${i+1}</span><span class="ghost-name">${esc(t.label)}</span><span class="rt-best">${t.votes} · ${t.share}%</span></div>`).join("");
+    peakHtml=`<div class="stats-section-hdr">🕘 When people vote <small>(last ${n(pk.days)} days)</small></div>
+    <div class="vp-summary">Busiest day <strong>${esc(pk.busiest_day||"—")}</strong> · busiest hour <strong>${esc(pk.busiest_hour_label||"—")}</strong></div>
+    <div class="vp-chart" aria-label="Votes by hour of day">${bars}</div>
+    <div class="vp-axis"><span>12a</span><span>6a</span><span>12p</span><span>6p</span><span>11p</span></div>
+    <div class="ghost-list">${top}</div>`;
+  }
+
   sc.innerHTML=`
   <div class="stats-section-hdr">📊 Group Stats</div>
   <div class="sp-group-row">
@@ -1365,6 +1375,7 @@ function renderStats(d){
   ${lbRows?`<div class="stats-section-hdr">🏆 Leaderboard</div><div class="slb-list">${lbRows}</div>`:""}
   ${shistRows?`<div class="stats-section-hdr">🗓 Session History</div><div class="shist-list">${shistRows}</div>`:""}
   ${rtRows?`<div class="stats-section-hdr">⚡ Fastest Voters</div>${rtRecord}${rtNote}<div class="rt-list">${rtRows}</div>`:""}
+  ${peakHtml}
   ${ghostRows?`<div class="stats-section-hdr">👻 Ghosts</div><div class="ghost-list">${ghostRows}</div>`:""}
   ${lateRows?`<div class="stats-section-hdr" title="IN → OUT/MAYBE within ${n(d.late_drop_hours)}h of game time">⏰ Late drops <small>(within ${n(d.late_drop_hours)}h of game)</small></div><div class="ghost-list">${lateRows}</div>`:""}`;
 }
@@ -1854,6 +1865,8 @@ function _saveGroup(token,name){
   groups.unshift({token,name:name||"Group",last_visit:Date.now()});
   localStorage.setItem(LS_GROUPS,JSON.stringify(groups.slice(0,10)));
 }
+// Home screen ✕: forget the group, then redraw the list.
+function removeGroupAndRender(token){_removeGroup(token);renderHomeScreen();}
 function _removeGroup(token){
   localStorage.setItem(LS_GROUPS,JSON.stringify(_loadGroups().filter(g=>g.token!==token)));
 }
@@ -1919,8 +1932,8 @@ function renderHomeScreen(){
         <div style="font-size:.75rem;color:var(--sub)">${sub}</div>
       </div>
       <div style="display:flex;gap:8px;flex-shrink:0">
-        <button class="btn btn-primary" style="padding:8px 14px;font-size:.85rem" onclick="window.location.href='/web/group/${esc(g.token)}'">Open</button>
-        ${g.server?"":`<button class="btn" style="padding:8px 10px;font-size:.85rem;background:var(--border);color:var(--sub);border-radius:8px" onclick="_removeGroup('${esc(g.token)}');renderHomeScreen()">✕</button>`}
+        <button class="btn btn-primary" style="padding:8px 14px;font-size:.85rem" data-on-click="navTo" data-args="${rcArgs('/web/group/'+g.token)}">Open</button>
+        ${g.server?"":`<button class="btn" style="padding:8px 10px;font-size:.85rem;background:var(--border);color:var(--sub);border-radius:8px" data-on-click="removeGroupAndRender" data-args="${rcArgs(g.token)}">✕</button>`}
       </div>
     </div>`;
   }).join("");
@@ -2125,10 +2138,10 @@ function renderEmptyState(){
 
   let html="";
   if(_isWebAdmin){
-    html+=`<button class="btn btn-primary" onclick="openNewRollcallModal()">＋ New Rollcall</button>`;
-    html+=`<button class="btn btn-secondary" onclick="showView('admin')">⚙ Admin controls</button>`;
+    html+=`<button class="btn btn-primary" data-on-click="openNewRollcallModal">＋ New Rollcall</button>`;
+    html+=`<button class="btn btn-secondary" data-on-click="showView" data-args="${rcArgs("admin")}">⚙ Admin controls</button>`;
   }else if(_pushSupported()){
-    html+=`<button class="btn btn-primary" onclick="toggleNotifications()">🔔 Notify me when one opens</button>`;
+    html+=`<button class="btn btn-primary" data-on-click="toggleNotifications">🔔 Notify me when one opens</button>`;
   }
   acts.innerHTML=html;
 }
@@ -2482,7 +2495,7 @@ function renderNewRollcallModalBody(){
   body.innerHTML=`
     <div id="nrc-template-row" style="margin-bottom:14px">
       <label style="font-size:.8rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">Start from a template (optional)</label>
-      <select id="nrc-template-select" onchange="_nrcOnTemplateSelect(this.value)" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem">
+      <select id="nrc-template-select" data-on-change="_nrcOnTemplateSelect" data-args="${rcArgs(RC_VALUE)}" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem">
         <option value="">— Start blank —</option>
       </select>
     </div>
@@ -2495,8 +2508,8 @@ function renderNewRollcallModalBody(){
     <input id="nrc-limit" type="number" min="1" max="1000" placeholder="Capacity (max attendees)" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem;margin-bottom:16px"/>
     <label style="font-size:.8rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">When should it start?</label>
     <div class="nrc-seg" style="margin-bottom:12px">
-      <button type="button" class="nrc-seg-btn active" id="nrc-seg-now" onclick="_nrcSetTiming('now')">Now</button>
-      <button type="button" class="nrc-seg-btn" id="nrc-seg-schedule" onclick="_nrcSetTiming('schedule')">Schedule</button>
+      <button type="button" class="nrc-seg-btn active" id="nrc-seg-now" data-on-click="_nrcSetTiming" data-args="${rcArgs("now")}">Now</button>
+      <button type="button" class="nrc-seg-btn" id="nrc-seg-schedule" data-on-click="_nrcSetTiming" data-args="${rcArgs("schedule")}">Schedule</button>
     </div>
     <div id="nrc-timing-body"></div>
   `;
@@ -2537,11 +2550,11 @@ function _nrcRenderTimingBody(){
       <input id="nrc-close-at" type="datetime-local" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:.95rem;background:var(--card);color:var(--text);margin-bottom:4px"/>
       <div style="font-size:.72rem;color:var(--sub);margin-bottom:14px">Leave blank to auto-close at 11:59 PM today.</div>
       <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer">
-        <input type="checkbox" id="nrc-save-template-check" onchange="document.getElementById('nrc-save-template-row').classList.toggle('hidden',!this.checked)"/>
+        <input type="checkbox" id="nrc-save-template-check" data-on-change="uiShowIfChecked" data-args="${rcArgs('nrc-save-template-row',RC_THIS)}"/>
         <span style="font-size:.85rem;font-weight:600">💾 Also save as a reusable template</span>
       </label>
       <div id="nrc-save-template-row" class="hidden" style="margin-bottom:4px">
-        <input id="nrc-template-name" type="text" placeholder="Template name (for reuse — not shown to voters)" maxlength="50" value="${esc(_nrcState.templateName||"")}" oninput="_nrcSetTemplateName(this.value)" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem"/>
+        <input id="nrc-template-name" type="text" placeholder="Template name (for reuse — not shown to voters)" maxlength="50" value="${esc(_nrcState.templateName||"")}" data-on-input="_nrcSetTemplateName" data-args="${rcArgs(RC_VALUE)}" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem"/>
       </div>
     `;
     return;
@@ -2551,7 +2564,7 @@ function _nrcRenderTimingBody(){
   el.innerHTML=`
     <div style="font-size:.75rem;color:var(--sub);margin-bottom:10px">Scheduling always saves these details as a template first, so it can repeat (or fire once) later.</div>
     <label style="font-size:.78rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">Repeat</label>
-    <select id="nrc-recurrence" onchange="_nrcOnRecurrenceChange(this.value)" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem;margin-bottom:12px">
+    <select id="nrc-recurrence" data-on-change="_nrcOnRecurrenceChange" data-args="${rcArgs(RC_VALUE)}" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem;margin-bottom:12px">
       <option value="once" ${_nrcState.recurrence==="once"?"selected":""}>Just once</option>
       <option value="daily" ${_nrcState.recurrence==="daily"?"selected":""}>Daily</option>
       <option value="weekly" ${_nrcState.recurrence==="weekly"?"selected":""}>Weekly</option>
@@ -2585,7 +2598,7 @@ function _nrcRenderTimingBody(){
     </div>
     <div id="nrc-rec-expiry" style="display:none;margin-bottom:12px">
       <label style="font-size:.78rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">Auto-disable this schedule after</label>
-      <select id="nrc-expiry-mode" onchange="document.getElementById('nrc-expiry-date-row').classList.toggle('hidden',this.value!=='custom')" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem;margin-bottom:8px">
+      <select id="nrc-expiry-mode" data-on-change="uiShowIfValue" data-args="${rcArgs('nrc-expiry-date-row',RC_THIS,'custom')}" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem;margin-bottom:8px">
         <option value="12m">12 months</option>
         <option value="6m">6 months</option>
         <option value="custom">Custom date…</option>
@@ -2597,15 +2610,15 @@ function _nrcRenderTimingBody(){
     </div>
     <div id="nrc-tmplname-required">
       <label style="font-size:.8rem;font-weight:600;color:var(--sub);display:block;margin-bottom:6px">Template name</label>
-      <input id="nrc-template-name" type="text" placeholder="e.g. sunday-cricket" maxlength="50" value="${esc(_nrcState.templateName||"")}" oninput="_nrcSetTemplateName(this.value)" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem"/>
+      <input id="nrc-template-name" type="text" placeholder="e.g. sunday-cricket" maxlength="50" value="${esc(_nrcState.templateName||"")}" data-on-input="_nrcSetTemplateName" data-args="${rcArgs(RC_VALUE)}" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem"/>
     </div>
     <div id="nrc-tmplname-optional" style="display:none">
       <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer">
-        <input type="checkbox" id="nrc-once-save-template-check" ${_nrcState.templateName?"checked":""} onchange="document.getElementById('nrc-once-template-row').classList.toggle('hidden',!this.checked)"/>
+        <input type="checkbox" id="nrc-once-save-template-check" ${_nrcState.templateName?"checked":""} data-on-change="uiShowIfChecked" data-args="${rcArgs('nrc-once-template-row',RC_THIS)}"/>
         <span style="font-size:.85rem;font-weight:600">💾 Also save as a reusable template</span>
       </label>
       <div id="nrc-once-template-row" class="${_nrcState.templateName?"":"hidden"}">
-        <input id="nrc-once-template-name" type="text" placeholder="Template name (for reuse — not shown to voters)" maxlength="50" value="${esc(_nrcState.templateName||"")}" oninput="_nrcSetTemplateName(this.value)" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem"/>
+        <input id="nrc-once-template-name" type="text" placeholder="Template name (for reuse — not shown to voters)" maxlength="50" value="${esc(_nrcState.templateName||"")}" data-on-input="_nrcSetTemplateName" data-args="${rcArgs(RC_VALUE)}" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.88rem"/>
       </div>
       <div style="font-size:.72rem;color:var(--sub);margin-top:4px">Leave unchecked and nothing is kept once this fires — no entry in your templates list.</div>
     </div>
@@ -3026,7 +3039,7 @@ function _renderScheduledOnceList(){
         <div class="sched-item-time">📅 ${esc(label)}</div>
         ${meta?`<div class="upcoming-meta">${esc(meta)}</div>`:""}
       </div>
-      <button class="sched-cancel-btn" onclick="cancelScheduledOnce(${item.id})">Cancel</button>
+      <button class="sched-cancel-btn" data-on-click="cancelScheduledOnce" data-args="${rcArgs(item.id)}">Cancel</button>
     </div>`;
   }).join("");
 }
@@ -3344,9 +3357,9 @@ function renderCloseGame(){
     </div>
     <div class="dues-subsidy-row">
       <label for="close-subsidy">Subsidy (₹)</label>
-      <input id="close-subsidy" type="number" min="0" max="${Math.max(0,Number(p.fund_balance)||0)}" value="0" oninput="updateClosePreview()"/>
+      <input id="close-subsidy" type="number" min="0" max="${Math.max(0,Number(p.fund_balance)||0)}" value="0" data-on-input="updateClosePreview"/>
     </div>
-    <button class="btn btn-primary" style="width:100%;padding:12px" onclick="doCloseGame()">Close Game →</button>
+    <button class="btn btn-primary" style="width:100%;padding:12px" data-on-click="doCloseGame">Close Game →</button>
     <div style="font-size:.75rem;color:var(--sub);margin-top:6px;text-align:center">Fund balance: ₹${p.fund_balance}${p.has_active?" · Ends active rollcall":""}</div>
   `;
 }
@@ -3416,13 +3429,13 @@ function renderFundAdmin(){
     <div class="dues-fund-form">
       <input id="fund-exp-amount" type="number" min="1" placeholder="Amount (₹)"/>
       <input id="fund-exp-desc" type="text" placeholder="Description (e.g. Shuttlecocks)"/>
-      <button class="btn btn-secondary" style="width:100%;padding:10px;border-radius:10px" onclick="doLogExpense()">Log Expense →</button>
+      <button class="btn btn-secondary" style="width:100%;padding:10px;border-radius:10px" data-on-click="doLogExpense">Log Expense →</button>
     </div>
     <div style="font-size:.82rem;font-weight:600;color:var(--sub);margin:12px 0 6px">Add top-up</div>
     <div class="dues-fund-form">
       <input id="fund-top-amount" type="number" min="1" placeholder="Amount (₹)"/>
       <input id="fund-top-desc" type="text" placeholder="Note (optional)"/>
-      <button class="btn btn-primary" style="width:100%;padding:10px;border-radius:10px" onclick="doFundTopup()">Add to Fund →</button>
+      <button class="btn btn-primary" style="width:100%;padding:10px;border-radius:10px" data-on-click="doFundTopup">Add to Fund →</button>
     </div>`;
 }
 
@@ -3471,11 +3484,11 @@ function renderSettingsAdmin(){
     <div class="dues-settings-row">
       <div><div class="dues-settings-label">Self-paid</div><div class="dues-settings-sub">Members can self-report payments</div></div>
       <label class="admin-toggle">
-        <input type="checkbox" id="settings-self-paid" ${mode==="auto"?"checked":""} onchange="toggleSelfPaidMode(this.checked)"/>
+        <input type="checkbox" id="settings-self-paid" ${mode==="auto"?"checked":""} data-on-change="toggleSelfPaidMode" data-args="${rcArgs(RC_CHECKED)}"/>
         <span class="admin-toggle-slider"></span>
       </label>
     </div>
-    <button class="btn btn-primary" style="width:100%;padding:10px;border-radius:10px;margin-top:12px" onclick="saveSettings()">Save Settings</button>`;
+    <button class="btn btn-primary" style="width:100%;padding:10px;border-radius:10px;margin-top:12px" data-on-click="saveSettings">Save Settings</button>`;
 }
 
 window.saveSettings=async function(){
@@ -3613,7 +3626,7 @@ function renderTemplatesSchedule(){
   const body=document.getElementById("templates-schedule-body");
   if(!body)return;
   const newBtnRow=`<div style="margin-bottom:10px">
-    <button class="id-change" style="width:100%;padding:8px;text-align:center;border:1.5px dashed var(--border);border-radius:8px" onclick="toggleNewTemplateForm()">${_templatesCreatingNew?"✕ Cancel":"➕ New Template"}</button>
+    <button class="id-change" style="width:100%;padding:8px;text-align:center;border:1.5px dashed var(--border);border-radius:8px" data-on-click="toggleNewTemplateForm">${_templatesCreatingNew?"✕ Cancel":"➕ New Template"}</button>
     ${_templatesCreatingNew?renderTemplateEditForm(_blankNewTemplate(),true):""}
   </div>`;
   if(!_templatesCache||!_templatesCache.length){
@@ -3655,13 +3668,13 @@ function renderTemplatesSchedule(){
           ${meta?`<div class="upcoming-meta">${esc(meta)}</div>`:""}
         </div>
         <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
-          <button class="id-change" title="Start a rollcall from this template now" onclick="startTemplateNow('${esc(escJsAttr(t.name))}')">▶️</button>
+          <button class="id-change" title="Start a rollcall from this template now" data-on-click="startTemplateNow" data-args="${rcArgs(t.name)}">▶️</button>
           <label class="admin-toggle" title="${enabled?'Disable':'Enable'} schedule">
-            <input type="checkbox" ${enabled?"checked":""} onchange="toggleTemplateSchedule('${esc(escJsAttr(t.name))}',this.checked)"/>
+            <input type="checkbox" ${enabled?"checked":""} data-on-change="toggleTemplateSchedule" data-args="${rcArgs(t.name,RC_CHECKED)}"/>
             <span class="admin-toggle-slider"></span>
           </label>
-          <button class="id-change" onclick="toggleTemplateEditForm('${esc(escJsAttr(t.name))}')">${editing?"✕":"✏️"}</button>
-          <button class="id-change" title="Delete this template" onclick="deleteTemplate('${esc(escJsAttr(t.name))}')">🗑</button>
+          <button class="id-change" data-on-click="toggleTemplateEditForm" data-args="${rcArgs(t.name)}">${editing?"✕":"✏️"}</button>
+          <button class="id-change" title="Delete this template" data-on-click="deleteTemplate" data-args="${rcArgs(t.name)}">🗑</button>
         </div>
       </div>
       ${editing?renderTemplateEditForm(t):""}
@@ -3715,7 +3728,7 @@ function renderTemplateEditForm(t,isNew){
     ${sublabel("When this template repeats and opens a new rollcall automatically — separate from the event time above.")}
     <label style="font-size:.78rem;font-weight:600;color:var(--sub)">Repeat</label>
     <div style="display:flex;gap:8px">
-      <select id="tsf-rec-${safeName}" onchange="_onTsfRecurrenceChange('${esc(escJsAttr(t.name))}')" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
+      <select id="tsf-rec-${safeName}" data-on-change="_onTsfRecurrenceChange" data-args="${rcArgs(t.name)}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
         <option value="daily" ${isDaily?"selected":""}>Daily</option>
         <option value="weekly" ${t.recurrence_type==="weekly"?"selected":""}>Weekly</option>
         <option value="biweekly" ${t.recurrence_type==="biweekly"?"selected":""}>Every 2 weeks</option>
@@ -3729,7 +3742,7 @@ function renderTemplateEditForm(t,isNew){
     </div>
     <div class="id-prompt-label" style="text-align:left;margin-bottom:0;margin-top:4px">Auto-disable after</div>
     <div style="display:flex;gap:8px">
-      <select id="tsf-expmode-${safeName}" onchange="this.parentElement.querySelector('input[type=date]').style.display=this.value==='custom'?'':'none'" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
+      <select id="tsf-expmode-${safeName}" data-on-change="uiShowSiblingDate" data-args="${rcArgs(RC_THIS)}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
         <option value="12m">12 months from now</option>
         <option value="6m">6 months from now</option>
         <option value="custom" selected>Custom date</option>
@@ -3737,7 +3750,7 @@ function renderTemplateEditForm(t,isNew){
       <input id="tsf-expdate-${safeName}" type="date" value="${esc(t.schedule_expires_at||"")}" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem"/>
     </div>
     ${sublabel("The template stays — only the recurring schedule turns off, and you can re-enable it anytime.")}`}
-    <button class="btn btn-primary" style="padding:9px" onclick="saveTemplate('${esc(escJsAttr(t.name))}')">${isNew?"➕ Create":"💾 Save"}</button>
+    <button class="btn btn-primary" style="padding:9px" data-on-click="saveTemplate" data-args="${rcArgs(t.name)}">${isNew?"➕ Create":"💾 Save"}</button>
   </div>`;
 }
 
@@ -4147,7 +4160,7 @@ function renderIdentityMerge(){
   const groupsByKey={};
   groups.forEach(g=>{groupsByKey[_identityMapKey(g.kind,g.user_id,g.proxy_name)]=g.aliases;});
   const canonicalRows=identities.filter(i=>i.kind==="user"||!i.merged_into);
-  const pill=a=>`<span class="alias-pill">${esc(a)}<span class="alias-pill-x" title="Unmerge" onclick="doUnmergeIdentity('${esc(escJsAttr(a))}')">✕</span></span>`;
+  const pill=a=>`<span class="alias-pill">${esc(a)}<span class="alias-pill-x" title="Unmerge" data-on-click="doUnmergeIdentity" data-args="${rcArgs(a)}">✕</span></span>`;
   const mergedRows=canonicalRows
     .map(row=>({row,aliases:groupsByKey[_identityMapKey(row.kind,row.user_id,row.proxy_name)]||[]}))
     .filter(x=>x.aliases.length>0);
@@ -4186,14 +4199,14 @@ function renderIdentityMerge(){
       const metaBadge=`<span class="itcount${(row.proxy_count||0)>3?" hot":""}">${esc(metaBits.join(" · "))}</span>`;
       const title=suggestion?`${esc(row.proxy_name)} ↔ ${esc(otherLabel)}`:esc(row.proxy_name);
       const mergeBtn=suggestion
-        ?`<button class="id-change" title="Merge these" onclick="doMergeIdentity('${esc(escJsAttr(suggestion.alias_proxy_name))}','${suggestion.candidate_kind}',${suggestion.candidate_user_id!=null?suggestion.candidate_user_id:"null"},${suggestion.candidate_proxy_name!=null?`'${esc(escJsAttr(suggestion.candidate_proxy_name))}'`:"null"})">🔗</button>`
+        ?`<button class="id-change" title="Merge these" data-on-click="doMergeIdentity" data-args="${rcArgs(suggestion.alias_proxy_name,suggestion.candidate_kind,suggestion.candidate_user_id??null,suggestion.candidate_proxy_name??null)}">🔗</button>`
         :"";
       const dismissBtn=suggestion
-        ?`<button class="id-change" title="Not a match" onclick="doDismissSuggestion(${_suggestionsCache.indexOf(suggestion)})">✕</button>`
+        ?`<button class="id-change" title="Not a match" data-on-click="doDismissSuggestion" data-args="${rcArgs(_suggestionsCache.indexOf(suggestion))}">✕</button>`
         :"";
       // The "nothing to merge, and that's fine" exit — distinct from 🗑,
       // which throws the name away. Keeps it as a future merge target.
-      const standaloneBtn=`<button class="id-change" title="'${esc(row.proxy_name)}' is a real person with no Telegram account — stop asking" onclick="doMarkStandalone('${esc(escJsAttr(row.proxy_name))}')">✅</button>`;
+      const standaloneBtn=`<button class="id-change" title="'${esc(row.proxy_name)}' is a real person with no Telegram account — stop asking" data-on-click="doMarkStandalone" data-args="${rcArgs(row.proxy_name)}">✅</button>`;
       return `<div class="sched-item">
         <div class="sched-item-info">
           <div class="sched-item-title">${title}</div>
@@ -4201,18 +4214,18 @@ function renderIdentityMerge(){
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0">
           ${mergeBtn}${dismissBtn}${standaloneBtn}
-          <button class="id-change" title="'${esc(row.proxy_name)}' is invalid/garbage — discard it" onclick="doDiscardIdentity('${esc(escJsAttr(row.proxy_name))}')">🗑</button>
+          <button class="id-change" title="'${esc(row.proxy_name)}' is invalid/garbage — discard it" data-on-click="doDiscardIdentity" data-args="${rcArgs(row.proxy_name)}">🗑</button>
         </div>
       </div>`;
     };
-    html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:6px;cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none" onclick="toggleIdentityUnmatched()">
+    html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:6px;cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none" data-on-click="toggleIdentityUnmatched">
       <span id="im-unmatched-chevron">${_identityUnmatchedOpen?"▲":"▼"}</span>Review & merge (${reviewRows.length})
     </div>`;
     html+=`<div id="im-unmatched-body" class="${_identityUnmatchedOpen?"":"hidden"}">`;
     html+=vis.map(rowHtml).join("");
     if(extra.length){
       html+=`<div class="alias-extra hidden">${extra.map(rowHtml).join("")}</div>`;
-      html+=`<button class="alias-more-btn" onclick="_toggleExtraAliases(this)">+${extra.length} more</button>`;
+      html+=`<button class="alias-more-btn" data-on-click="_toggleExtraAliases" data-args="${rcArgs(RC_THIS)}">+${extra.length} more</button>`;
     }
     html+=`</div>`;
   }
@@ -4237,7 +4250,7 @@ function renderIdentityMerge(){
     html+=mergedRows.map(({row,aliases})=>{
       const vis=aliases.slice(0,3), extra=aliases.slice(3);
       const cell=vis.map(pill).join("")
-        +(extra.length?`<span class="alias-extra hidden">${extra.map(pill).join("")}</span><button class="alias-more-btn" onclick="_toggleExtraAliases(this)">+${extra.length} more</button>`:"");
+        +(extra.length?`<span class="alias-extra hidden">${extra.map(pill).join("")}</span><button class="alias-more-btn" data-on-click="_toggleExtraAliases" data-args="${rcArgs(RC_THIS)}">+${extra.length} more</button>`:"");
       return `<tr>
         <td class="itn">${esc(row.display_name)}</td>
         <td><span class="itn-tag${row.kind==="proxy"?" proxy":""}">${row.kind==="proxy"?"Proxy":"Member"}</span></td>
@@ -4252,29 +4265,29 @@ function renderIdentityMerge(){
   // queue, but still live identities — restoring one puts it straight back
   // in the queue, and it stays pickable as a merge target either way.
   if(standalone.length){
-    html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin:14px 0 6px;cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none" onclick="toggleIdentityStandalone()">
+    html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin:14px 0 6px;cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none" data-on-click="toggleIdentityStandalone">
       <span id="im-standalone-chevron">${_identityStandaloneOpen?"▲":"▼"}</span>✅ Standalone people (${standalone.length})
     </div>`;
     html+=`<div id="im-standalone-body" class="${_identityStandaloneOpen?"":"hidden"}">`;
     html+=`<div style="font-size:.72rem;color:var(--sub);margin-bottom:6px">No Telegram account — still valid merge targets if a similar name turns up later.</div>`;
     html+=standalone.map(name=>`
-      <span class="alias-pill">${esc(name)}<span class="alias-pill-x" title="Put back in the review queue" onclick="doUnmarkStandalone('${esc(escJsAttr(name))}')">✕</span></span>`).join("");
+      <span class="alias-pill">${esc(name)}<span class="alias-pill-x" title="Put back in the review queue" data-on-click="doUnmarkStandalone" data-args="${rcArgs(name)}">✕</span></span>`).join("");
     html+=`</div>`;
   }
 
   if(discarded.length){
-    html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin:14px 0 6px;cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none" onclick="toggleIdentityDiscarded()">
+    html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin:14px 0 6px;cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none" data-on-click="toggleIdentityDiscarded">
       <span id="im-discarded-chevron">${_identityDiscardedOpen?"▲":"▼"}</span>🗑 Discarded (${discarded.length})
     </div>`;
     html+=`<div id="im-discarded-body" class="${_identityDiscardedOpen?"":"hidden"}">`;
     html+=`<div class="discarded-grid">`;
     html+=discarded.map(name=>`
       <label style="display:flex;align-items:center;gap:5px;font-size:.8rem;color:var(--sub);min-width:0;padding:2px 0;cursor:pointer">
-        <input type="checkbox" class="im-discard-cb" value="${esc(escJsAttr(name))}" style="flex-shrink:0">
+        <input type="checkbox" class="im-discard-cb" value="${esc(name)}" style="flex-shrink:0">
         <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(name)}">${esc(name)}</span>
       </label>`).join("");
     html+=`</div>`;
-    html+=`<button class="id-change" style="margin-top:8px" onclick="doUndiscardSelected()">↩ Restore selected</button>`;
+    html+=`<button class="id-change" style="margin-top:8px" data-on-click="doUndiscardSelected">↩ Restore selected</button>`;
     html+=`</div>`;
   }
 
@@ -4306,7 +4319,7 @@ function renderIdentityMerge(){
         <input type="hidden" id="im-target-select">
         <div class="im-combo-list hidden" id="im-target-list"></div>
       </div>
-      <button class="btn btn-primary" style="width:100%;padding:9px" onclick="doMergeIdentityManual()">🔗 Merge</button>`;
+      <button class="btn btn-primary" style="width:100%;padding:9px" data-on-click="doMergeIdentityManual">🔗 Merge</button>`;
   }
 
   body.innerHTML=html;
@@ -4496,7 +4509,7 @@ function _showDuesModal(title,sublabel,defaultVal,onConfirm,opts={}){
       <div class="dues-modal-sub" id="dm-sub"></div>
       <input class="dues-modal-input" id="dm-input" type="number" min="1"/>
       <div class="dues-modal-btns">
-        <button class="btn btn-secondary" onclick="document.getElementById('dues-confirm-modal').classList.add('hidden')">Cancel</button>
+        <button class="btn btn-secondary" data-on-click="uiHide" data-args="${rcArgs('dues-confirm-modal')}">Cancel</button>
         <button class="btn btn-primary" id="dm-confirm-btn">Confirm</button>
       </div>
     </div>`;
@@ -4597,7 +4610,7 @@ function _ghostSessionHtml(s){
     const on=sel.has(k);
     return `<label class="gr-row${on?" on":""}">
       <input type="checkbox" ${on?"checked":""}
-             onchange="toggleGhostPick(${s.rollcall_id},'${esc(escJsAttr(k))}')"/>
+             data-on-change="toggleGhostPick" data-args="${rcArgs(s.rollcall_id,k)}"/>
       <span class="gr-name">${esc(c.name)}</span>
       ${c.was_out?'<span class="gr-tag">was OUT</span>':""}
     </label>`;
@@ -4609,8 +4622,8 @@ function _ghostSessionHtml(s){
   // it shouldn't be pre-mixed into the list.
   const dropHtml=dropped.length?(showOut
     ? `<div class="gr-sub">Dropped out late</div>${dropped.map(row).join("")}
-       <button class="gr-more" onclick="toggleGhostOut(${s.rollcall_id})">Hide late drop-outs</button>`
-    : `<button class="gr-more" onclick="toggleGhostOut(${s.rollcall_id})">＋ Someone who dropped out late (${dropped.length})</button>`
+       <button class="gr-more" data-on-click="toggleGhostOut" data-args="${rcArgs(s.rollcall_id)}">Hide late drop-outs</button>`
+    : `<button class="gr-more" data-on-click="toggleGhostOut" data-args="${rcArgs(s.rollcall_id)}">＋ Someone who dropped out late (${dropped.length})</button>`
   ):"";
 
   return `<div class="gr-card">
@@ -4621,7 +4634,7 @@ function _ghostSessionHtml(s){
     ${stayed.length?stayed.map(row).join(""):'<div class="adm-row-s">Nobody was on the IN list.</div>'}
     ${dropHtml}
     <div class="gr-actions">
-      <button class="btn btn-primary" style="flex:1" onclick="submitGhostReview(${s.rollcall_id})">
+      <button class="btn btn-primary" style="flex:1" data-on-click="submitGhostReview" data-args="${rcArgs(s.rollcall_id)}">
         ${sel.size?`Record ${sel.size} no-show${sel.size>1?"s":""}`:"Everyone showed up"}
       </button>
     </div>
@@ -4734,7 +4747,7 @@ function renderAdminsPanel(){
       const btn=!you_are_owner?""
         :lastOwner?`<span class="gr-tag">only owner</span>`
         :`<button class="btn btn-secondary" style="padding:6px 10px;font-size:.78rem"
-             onclick="setAdminRole(${a.tg_user_id},'${isOwner?"admin":"owner"}')">${
+             data-on-click="setAdminRole" data-args="${rcArgs(a.tg_user_id,isOwner?'admin':'owner')}">${
              isOwner?"Step down":"Make owner"}</button>`;
       return `<div class="gr-row" style="cursor:default">
         <span class="gr-name">${esc(a.tg_name||("User "+a.tg_user_id))}${

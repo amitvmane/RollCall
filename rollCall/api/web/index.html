@@ -13,6 +13,7 @@
   <link rel="apple-touch-icon" sizes="180x180" href="/web/apple-touch-icon.png"/>
   <!-- manifest set dynamically by app.js once group token is known -->
   <script src="/shared/theme-init.js"></script>
+  <script src="/shared/actions.js"></script>
   <!-- NOT async/defer. app.js is loaded at the end of <body> and reads
        window.Telegram.WebApp at its TOP LEVEL — if this is still in flight at
        that moment, `tg` is null, the page never enters Mini App mode, never
@@ -41,9 +42,9 @@
          and silently wire the menu to whichever copy came first — instead
          #acct-wrap is moved into whichever header is on screen. -->
     <div class="brand-actions" id="home-brand-actions">
-      <button class="brand-install-btn hidden" id="install-btn-home" title="Add RollCall to your home screen" onclick="triggerInstall()">⬇<span class="inst-word">&nbsp;Install</span></button>
-      <button class="brand-theme-btn" id="help-btn-home" title="Command reference" onclick="window.location.href='/help'">❓</button>
-      <button class="brand-theme-btn" id="theme-btn-home" title="Theme" aria-label="Theme" data-theme-toggle onclick="toggleTheme()">🌙</button>
+      <button class="brand-install-btn hidden" id="install-btn-home" title="Add RollCall to your home screen" data-on-click="triggerInstall">⬇<span class="inst-word">&nbsp;Install</span></button>
+      <button class="brand-theme-btn" id="help-btn-home" title="Command reference" data-on-click="navTo" data-args='["/help"]'>❓</button>
+      <button class="brand-theme-btn" id="theme-btn-home" title="Theme" aria-label="Theme" data-theme-toggle data-on-click="toggleTheme">🌙</button>
     </div>
   </div>
   <div id="home-content" style="padding:16px;max-width:480px;margin:0 auto">
@@ -54,7 +55,7 @@
       <div style="font-size:.82rem;font-weight:600;color:var(--sub);margin-bottom:8px">Open a new group by pasting its link</div>
       <div style="display:flex;gap:8px">
         <input id="home-link-input" type="url" placeholder="https://…/web/group/…" style="flex:1;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:.9rem;background:var(--card);color:var(--text)"/>
-        <button class="btn btn-primary" onclick="homeOpenLink()" style="padding:10px 16px">Go</button>
+        <button class="btn btn-primary" data-on-click="homeOpenLink" style="padding:10px 16px">Go</button>
       </div>
     </div>
   </div>
@@ -68,8 +69,8 @@
     <div style="font-size:1rem;font-weight:700;margin-bottom:16px">＋ New Rollcall</div>
     <div id="nrc-body"></div>
     <div style="display:flex;gap:10px;margin-top:16px">
-      <button class="btn" style="flex:1;padding:12px;background:var(--border);color:var(--text);border-radius:10px;font-weight:600" onclick="closeNewRollcallModal()">Cancel</button>
-      <button class="btn btn-primary" id="nrc-submit-btn" style="flex:1;padding:12px;border-radius:10px;font-weight:600" onclick="submitNewRollcall()">Start →</button>
+      <button class="btn" style="flex:1;padding:12px;background:var(--border);color:var(--text);border-radius:10px;font-weight:600" data-on-click="closeNewRollcallModal">Cancel</button>
+      <button class="btn btn-primary" id="nrc-submit-btn" style="flex:1;padding:12px;border-radius:10px;font-weight:600" data-on-click="submitNewRollcall">Start →</button>
     </div>
   </div>
 </div>
@@ -82,11 +83,11 @@
      and closeSignIn() puts them back exactly where they were. One set of
      elements, one set of handlers, two places to show them. -->
 <div id="signin-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="signin-title">
-  <div class="signin-backdrop" onclick="closeSignIn()"></div>
+  <div class="signin-backdrop" data-on-click="closeSignIn"></div>
   <div class="signin-sheet">
     <div class="signin-hdr">
       <span class="signin-title" id="signin-title">Sign in</span>
-      <button class="signin-close" onclick="closeSignIn()" aria-label="Close sign in">✕</button>
+      <button class="signin-close" data-on-click="closeSignIn" aria-label="Close sign in">✕</button>
     </div>
     <div id="signin-body"></div>
     <div class="signin-foot">
@@ -98,7 +99,7 @@
 
 <div id="tg-offline-bar" class="tg-offline-bar hidden" role="alert">
   ⚠️ <strong>Bot is offline</strong> — web voting still works, but Telegram notifications may be delayed.
-  <button class="tg-offline-close" aria-label="Dismiss offline notice" onclick="this.parentElement.classList.add('hidden')">✕</button>
+  <button class="tg-offline-close" aria-label="Dismiss offline notice" data-on-click="uiHideParent" data-args='[{"$":"this"}]'>✕</button>
 </div>
 <div id="app">
   <!-- Brand bar — hidden in TG Mini App mode (body.tg-mode) -->
@@ -113,20 +114,20 @@
            one; with a single group it would be a dropdown with one entry. -->
       <div class="brand-group hidden" id="brand-group">
         <select id="group-switch" class="brand-group-sel"
-                aria-label="Switch group" onchange="onHeaderGroupChange(this.value)"></select>
+                aria-label="Switch group" data-on-change="onHeaderGroupChange" data-args='[{"$": "value"}]'></select>
       </div>
       <span id="presence-badge" class="presence-badge hidden"></span>
     </div>
     <div class="brand-actions">
-      <button class="brand-install-btn hidden" id="install-btn" title="Add RollCall to your home screen" onclick="triggerInstall()">⬇<span class="inst-word">&nbsp;Install</span></button>
-      <button class="brand-notify-btn hidden" id="notify-btn" title="Get notified when a rollcall opens" onclick="toggleNotifications()">🔔</button>
+      <button class="brand-install-btn hidden" id="install-btn" title="Add RollCall to your home screen" data-on-click="triggerInstall">⬇<span class="inst-word">&nbsp;Install</span></button>
+      <button class="brand-notify-btn hidden" id="notify-btn" title="Get notified when a rollcall opens" data-on-click="toggleNotifications">🔔</button>
       <!-- Admin entry point. The admin card used to sit inline near the bottom
            of a long scroll, below the leaderboard, with nothing at the top
            indicating it existed. Rendered only for web admins. -->
-      <button class="brand-admin-btn hidden" id="admin-nav-btn" title="Admin controls" onclick="toggleAdminPanel()">⚙<span class="adm-word">&nbsp;Admin</span></button>
-      <button class="brand-theme-btn" id="help-btn" title="Command reference" onclick="window.location.href='/help'">❓</button>
-      <button class="brand-theme-btn" id="home-btn" title="All your groups" onclick="window.location.href='/web/'">🏠</button>
-      <button class="brand-theme-btn" id="theme-btn" title="Theme" aria-label="Theme" data-theme-toggle onclick="toggleTheme()">🌙</button>
+      <button class="brand-admin-btn hidden" id="admin-nav-btn" title="Admin controls" data-on-click="toggleAdminPanel">⚙<span class="adm-word">&nbsp;Admin</span></button>
+      <button class="brand-theme-btn" id="help-btn" title="Command reference" data-on-click="navTo" data-args='["/help"]'>❓</button>
+      <button class="brand-theme-btn" id="home-btn" title="All your groups" data-on-click="navTo" data-args='["/web/"]'>🏠</button>
+      <button class="brand-theme-btn" id="theme-btn" title="Theme" aria-label="Theme" data-theme-toggle data-on-click="toggleTheme">🌙</button>
       <!-- Account control — the single, always-present place to see who you
            are and to sign out. Previously the only sign-out path was a button
            labelled "🔒 Locked" rendered at 55% opacity (so it read as
@@ -134,7 +135,7 @@
            about changing your name rather than signing out. -->
       <div class="acct-wrap" id="acct-wrap">
         <button class="brand-acct-btn" id="acct-btn" title="Your account"
-                aria-haspopup="true" aria-expanded="false" onclick="toggleAcctMenu(event)">
+                aria-haspopup="true" aria-expanded="false" data-on-click="toggleAcctMenu" data-args='[{"$": "event"}]'>
           <span class="acct-av" id="acct-av">?</span>
           <span class="acct-label" id="acct-label">Sign in</span>
         </button>
@@ -162,19 +163,19 @@
          time; each tab is a place, not a section heading. -->
     <nav id="view-nav" class="viewnav" role="tablist" aria-label="Sections">
       <button class="vn-item active" id="vn-rollcall" role="tab" aria-selected="true"
-              data-view="rollcall" onclick="showView('rollcall')">
+              data-view="rollcall" data-on-click="showView" data-args='["rollcall"]'>
         <span class="vn-ico">📋</span><span class="vn-lbl">Rollcall</span>
       </button>
       <button class="vn-item" id="vn-stats" role="tab" aria-selected="false"
-              data-view="stats" onclick="showView('stats')">
+              data-view="stats" data-on-click="showView" data-args='["stats"]'>
         <span class="vn-ico">📊</span><span class="vn-lbl">Stats</span>
       </button>
       <button class="vn-item hidden" id="vn-dues" role="tab" aria-selected="false"
-              data-view="dues" onclick="showView('dues')">
+              data-view="dues" data-on-click="showView" data-args='["dues"]'>
         <span class="vn-ico">💰</span><span class="vn-lbl">Dues</span>
       </button>
       <button class="vn-item hidden" id="vn-admin" role="tab" aria-selected="false"
-              data-view="admin" onclick="showView('admin')">
+              data-view="admin" data-on-click="showView" data-args='["admin"]'>
         <span class="vn-ico">⚙</span><span class="vn-lbl">Admin</span>
       </button>
     </nav>
@@ -204,7 +205,7 @@
         <span id="cap-text" class="cap-text"></span>
       </div>
       <div style="margin-top:10px">
-        <button class="copy-btn" onclick="copyPageLink()">🔗 Copy link to share</button>
+        <button class="copy-btn" data-on-click="copyPageLink">🔗 Copy link to share</button>
       </div>
     </div>
 
@@ -237,18 +238,18 @@
            lives only in that dialog. -->
       <div id="signin-prompt-row" class="hidden">
         <div class="id-prompt-label">Who's voting?</div>
-        <button class="btn btn-primary" style="width:100%;padding:11px" onclick="openSignIn()">Sign in to vote</button>
+        <button class="btn btn-primary" style="width:100%;padding:11px" data-on-click="openSignIn">Sign in to vote</button>
       </div>
       <!-- Picker: Telegram vs guest. Lives here in the DOM but is shown inside
            the sign-in dialog, which borrows it (see openSignIn in app.js). -->
       <div id="identity-picker-row" class="hidden">
         <div class="id-prompt-label">Who's voting?</div>
         <div style="display:flex;gap:8px">
-          <button class="id-picker-option id-picker-option-tg" id="picker-tg-btn" onclick="startTgVerify()">
+          <button class="id-picker-option id-picker-option-tg" id="picker-tg-btn" data-on-click="startTgVerify">
             <span class="id-picker-icon">✈</span>
             <span class="id-picker-label">Telegram</span>
           </button>
-          <button class="id-picker-option id-picker-option-guest" id="picker-guest-btn" onclick="showGuestInput()">
+          <button class="id-picker-option id-picker-option-guest" id="picker-guest-btn" data-on-click="showGuestInput">
             <span class="id-picker-icon">👤</span>
             <span class="id-picker-label">Guest</span>
           </button>
@@ -261,7 +262,7 @@
           <button class="btn btn-primary" id="name-save-btn" style="padding:10px 16px;font-size:.9rem">OK</button>
         </div>
         <div id="name-back-row" class="hidden" style="margin-top:10px;text-align:center">
-          <button class="id-change" style="font-size:.78rem;color:var(--accent)" onclick="showIdentityPicker()">← Verify with Telegram instead</button>
+          <button class="id-change" style="font-size:.78rem;color:var(--accent)" data-on-click="showIdentityPicker">← Verify with Telegram instead</button>
         </div>
       </div>
       <div id="name-tag-row" class="hidden">
@@ -335,8 +336,8 @@
       <div style="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:8px">📌 Permanent group link</div>
       <p style="font-size:.8rem;color:var(--sub);margin-bottom:10px">Bookmark or share this link — it always works, even when Telegram is down.</p>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-primary" style="flex:1;padding:10px" onclick="copyGroupLink()">📋 Copy link</button>
-        <button class="btn" id="share-btn" style="flex:1;padding:10px;background:var(--border);color:var(--text);border-radius:10px;font-weight:600;display:none" onclick="shareGroupLink()">↗ Share</button>
+        <button class="btn btn-primary" style="flex:1;padding:10px" data-on-click="copyGroupLink">📋 Copy link</button>
+        <button class="btn" id="share-btn" style="flex:1;padding:10px;background:var(--border);color:var(--text);border-radius:10px;font-weight:600;display:none" data-on-click="shareGroupLink">↗ Share</button>
       </div>
     </div>
     </div><!-- /#col-side -->
@@ -352,13 +353,13 @@
     <div id="dues-member-card" class="card hidden">
       <div class="dues-hdr">
         <span class="dues-hdr-title">💰 Dues</span>
-        <button class="dues-hdr-toggle" id="dues-member-toggle" aria-label="Show or hide your dues" onclick="toggleDuesMember()">▲</button>
+        <button class="dues-hdr-toggle" id="dues-member-toggle" aria-label="Show or hide your dues" data-on-click="toggleDuesMember">▲</button>
       </div>
       <div id="dues-member-body">
         <div id="dues-balance-row" class="dues-balance-row"></div>
         <div id="dues-pay-row" class="dues-pay-row hidden"></div>
         <div id="dues-ledger-section">
-          <button class="dues-section-toggle" onclick="toggleDuesLedger()">My ledger <span id="dues-ledger-chevron">▼</span></button>
+          <button class="dues-section-toggle" data-on-click="toggleDuesLedger">My ledger <span id="dues-ledger-chevron">▼</span></button>
           <div id="dues-ledger-body" class="hidden"></div>
         </div>
         <div id="dues-fund-row" class="dues-fund-row"></div>
@@ -369,33 +370,33 @@
     <div id="dues-admin-card" class="card hidden" style="border:1.5px dashed var(--border)">
       <div class="dues-hdr">
         <span class="dues-hdr-title">⚙️ Dues Admin</span>
-        <button class="dues-hdr-toggle" id="dues-admin-toggle" aria-label="Show or hide dues admin" onclick="toggleDuesAdmin()">▲</button>
+        <button class="dues-hdr-toggle" id="dues-admin-toggle" aria-label="Show or hide dues admin" data-on-click="toggleDuesAdmin">▲</button>
       </div>
       <div id="dues-admin-body">
         <!-- Balances table -->
         <div class="dues-admin-section">
-          <div class="dues-admin-section-hdr" onclick="toggleAdminSection('balances')">
+          <div class="dues-admin-section-hdr" data-on-click="toggleAdminSection" data-args='["balances"]'>
             Members <span id="balances-chevron">▼</span>
           </div>
           <div id="dues-balances-body" class="hidden"></div>
         </div>
         <!-- Close game -->
         <div class="dues-admin-section">
-          <div class="dues-admin-section-hdr" onclick="toggleAdminSection('close')">
+          <div class="dues-admin-section-hdr" data-on-click="toggleAdminSection" data-args='["close"]'>
             Close Game <span id="close-chevron">▼</span>
           </div>
           <div id="dues-close-body" class="hidden"></div>
         </div>
         <!-- Fund -->
         <div class="dues-admin-section">
-          <div class="dues-admin-section-hdr" onclick="toggleAdminSection('fund')">
+          <div class="dues-admin-section-hdr" data-on-click="toggleAdminSection" data-args='["fund"]'>
             Fund <span id="fund-chevron">▼</span>
           </div>
           <div id="dues-fund-admin-body" class="hidden"></div>
         </div>
         <!-- Settings -->
         <div class="dues-admin-section" style="border-bottom:none">
-          <div class="dues-admin-section-hdr" onclick="toggleAdminSection('settings')">
+          <div class="dues-admin-section-hdr" data-on-click="toggleAdminSection" data-args='["settings"]'>
             Settings <span id="settings-chevron">▼</span>
           </div>
           <div id="dues-settings-body" class="hidden"></div>
@@ -417,7 +418,7 @@
          style="border:1.5px dashed var(--warn,#c98a00);font-size:.85rem">
       ⚠️ Couldn't verify your admin access just now — Telegram may be slow.
       Admin controls are hidden until this succeeds.
-      <button class="btn" style="margin-top:8px" onclick="retryAdminCheck()">Retry</button>
+      <button class="btn" style="margin-top:8px" data-on-click="retryAdminCheck">Retry</button>
     </div>
 
     <!-- Signed out is NOT the same as "not an admin", but both used to render
@@ -446,59 +447,59 @@
 
       <!-- Quick actions: the two things an admin comes here to do most. -->
       <div class="adm-quick">
-        <button class="btn btn-primary" style="width:100%;padding:12px" onclick="openNewRollcallModal()">＋ New Rollcall</button>
+        <button class="btn btn-primary" style="width:100%;padding:12px" data-on-click="openNewRollcallModal">＋ New Rollcall</button>
         <div id="end-rc-row" style="display:none;margin-top:8px">
-          <button class="btn btn-danger" id="end-rc-btn" style="width:100%;padding:12px" onclick="doEndRcWeb()">⏹ End Active Rollcall</button>
+          <button class="btn btn-danger" id="end-rc-btn" style="width:100%;padding:12px" data-on-click="doEndRcWeb">⏹ End Active Rollcall</button>
           <input id="cancel-rc-reason" type="text" placeholder="Cancel reason (optional)" maxlength="200" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg);color:var(--text);font-size:.88rem;margin-top:8px"/>
-          <button class="btn btn-secondary" id="cancel-rc-btn" style="width:100%;padding:12px;margin-top:6px" onclick="doCancelRcWeb()">🗑 Cancel Rollcall (no stats)</button>
+          <button class="btn btn-secondary" id="cancel-rc-btn" style="width:100%;padding:12px;margin-top:6px" data-on-click="doCancelRcWeb">🗑 Cancel Rollcall (no stats)</button>
         </div>
       </div>
 
       <!-- ── Level 1: the menu ────────────────────────────────────────── -->
       <div class="adm-menu" id="admin-menu" role="menu">
-        <button class="adm-menu-item" role="menuitem" onclick="openAdminSection('settings')">
+        <button class="adm-menu-item" role="menuitem" data-on-click="openAdminSection" data-args='["settings"]'>
           <span class="adm-mi-icon">⚙</span>
           <span class="adm-mi-text"><span class="adm-mi-title">Group settings</span>
             <span class="adm-mi-sub">Silent mode, ghost tracking, timezone</span></span>
           <span class="adm-mi-chev">›</span>
         </button>
-        <button class="adm-menu-item" role="menuitem" onclick="openAdminSection('access')">
+        <button class="adm-menu-item" role="menuitem" data-on-click="openAdminSection" data-args='["access"]'>
           <span class="adm-mi-icon">🔐</span>
           <span class="adm-mi-text"><span class="adm-mi-title">Member access</span>
             <span class="adm-mi-sub">Generate a login or voting link</span></span>
           <span class="adm-mi-chev">›</span>
         </button>
-        <button class="adm-menu-item" id="adm-mi-proxy" role="menuitem" style="display:none" onclick="openAdminSection('proxy')">
+        <button class="adm-menu-item" id="adm-mi-proxy" role="menuitem" style="display:none" data-on-click="openAdminSection" data-args='["proxy"]'>
           <span class="adm-mi-icon">🗳</span>
           <span class="adm-mi-text"><span class="adm-mi-title">Proxy vote</span>
             <span class="adm-mi-sub">Vote for someone who isn't on Telegram</span></span>
           <span class="adm-mi-chev">›</span>
         </button>
-        <button class="adm-menu-item" role="menuitem" onclick="openAdminSection('templates')">
+        <button class="adm-menu-item" role="menuitem" data-on-click="openAdminSection" data-args='["templates"]'>
           <span class="adm-mi-icon">📋</span>
           <span class="adm-mi-text"><span class="adm-mi-title">Templates</span>
             <span class="adm-mi-sub">Saved rollcalls and recurring schedules</span></span>
           <span class="adm-mi-chev">›</span>
         </button>
-        <button class="adm-menu-item" role="menuitem" onclick="openAdminSection('scheduled')">
+        <button class="adm-menu-item" role="menuitem" data-on-click="openAdminSection" data-args='["scheduled"]'>
           <span class="adm-mi-icon">📅</span>
           <span class="adm-mi-text"><span class="adm-mi-title">Scheduled</span>
             <span class="adm-mi-sub">One-time rollcalls waiting to fire</span></span>
           <span class="adm-mi-chev">›</span>
         </button>
-        <button class="adm-menu-item" role="menuitem" onclick="openAdminSection('admins')">
+        <button class="adm-menu-item" role="menuitem" data-on-click="openAdminSection" data-args='["admins"]'>
           <span class="adm-mi-icon">👑</span>
           <span class="adm-mi-text"><span class="adm-mi-title">Owners &amp; admins</span>
             <span class="adm-mi-sub">Who can manage this group</span></span>
           <span class="adm-mi-chev">›</span>
         </button>
-        <button class="adm-menu-item hidden" id="adm-mi-ghost" role="menuitem" onclick="openAdminSection('ghost')">
+        <button class="adm-menu-item hidden" id="adm-mi-ghost" role="menuitem" data-on-click="openAdminSection" data-args='["ghost"]'>
           <span class="adm-mi-icon">👻</span>
           <span class="adm-mi-text"><span class="adm-mi-title">Review no-shows</span>
             <span class="adm-mi-sub">Mark who didn't turn up, forgive everyone else</span></span>
           <span class="adm-mi-chev" id="adm-ghost-badge">›</span>
         </button>
-        <button class="adm-menu-item" role="menuitem" onclick="openAdminSection('merge')">
+        <button class="adm-menu-item" role="menuitem" data-on-click="openAdminSection" data-args='["merge"]'>
           <span class="adm-mi-icon">🧬</span>
           <span class="adm-mi-text"><span class="adm-mi-title">Merge identities</span>
             <span class="adm-mi-sub">Fold guest names into real members</span></span>
@@ -506,7 +507,7 @@
         </button>
         <!-- Dues lives in its own card (it has a member-facing half too); the
              menu still points at it so "where is dues admin" has one answer. -->
-        <button class="adm-menu-item" id="adm-mi-dues" role="menuitem" style="display:none" onclick="jumpToDuesAdmin()">
+        <button class="adm-menu-item" id="adm-mi-dues" role="menuitem" style="display:none" data-on-click="jumpToDuesAdmin">
           <span class="adm-mi-icon">💰</span>
           <span class="adm-mi-text"><span class="adm-mi-title">Dues &amp; fund</span>
             <span class="adm-mi-sub">Balances, close a game, penalties</span></span>
@@ -517,7 +518,7 @@
       <!-- ── Level 2: one panel at a time ─────────────────────────────── -->
       <div class="adm-panel hidden" id="adm-panel-settings">
         <div class="adm-panel-hdr">
-          <button class="adm-back" onclick="closeAdminSection()">‹ Back</button>
+          <button class="adm-back" data-on-click="closeAdminSection">‹ Back</button>
           <span class="adm-panel-title">⚙ Group settings</span>
         </div>
         <div class="adm-row">
@@ -526,7 +527,7 @@
             <div class="adm-row-s">Suppress per-vote bot messages in group</div>
           </div>
           <label class="admin-toggle">
-            <input type="checkbox" id="shh-toggle" onchange="toggleShhMode(this.checked)"/>
+            <input type="checkbox" id="shh-toggle" data-on-change="toggleShhMode" data-args='[{"$": "checked"}]'/>
             <span class="admin-toggle-slider"></span>
           </label>
         </div>
@@ -536,7 +537,7 @@
             <div class="adm-row-s">Track members who RSVP IN but don't show up</div>
           </div>
           <label class="admin-toggle">
-            <input type="checkbox" id="ghost-toggle" onchange="toggleGhostTracking(this.checked)"/>
+            <input type="checkbox" id="ghost-toggle" data-on-change="toggleGhostTracking" data-args='[{"$": "checked"}]'/>
             <span class="admin-toggle-slider"></span>
           </label>
         </div>
@@ -547,7 +548,7 @@
           </div>
           <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
             <input id="ghost-limit-input" type="number" min="1" max="99" inputmode="numeric" style="width:56px;padding:7px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg);color:var(--text);font-size:.85rem;text-align:center"/>
-            <button class="btn btn-secondary" style="padding:8px 12px" onclick="doSaveGhostLimit()">Save</button>
+            <button class="btn btn-secondary" style="padding:8px 12px" data-on-click="doSaveGhostLimit">Save</button>
           </div>
         </div>
         <div class="adm-row">
@@ -556,7 +557,7 @@
             <div class="adm-row-s">Only Telegram admins can use bot commands</div>
           </div>
           <label class="admin-toggle">
-            <input type="checkbox" id="admin-rights-toggle" onchange="toggleAdminRights(this.checked)"/>
+            <input type="checkbox" id="admin-rights-toggle" data-on-change="toggleAdminRights" data-args='[{"$": "checked"}]'/>
             <span class="admin-toggle-slider"></span>
           </label>
         </div>
@@ -565,28 +566,28 @@
           <div class="adm-row-s" style="margin:2px 0 10px">Used for scheduled templates and auto-close timing. Telegram doesn't expose a group's location — this detects your browser's timezone instead.</div>
           <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
             <div id="tz-current" style="font-size:.85rem;font-weight:600;font-family:var(--font-mono)"></div>
-            <button class="btn btn-secondary" style="padding:8px 12px;white-space:nowrap" onclick="doDetectTimezone()">📍 Detect from this browser</button>
+            <button class="btn btn-secondary" style="padding:8px 12px;white-space:nowrap" data-on-click="doDetectTimezone">📍 Detect from this browser</button>
           </div>
         </div>
       </div>
 
       <div class="adm-panel hidden" id="adm-panel-access">
         <div class="adm-panel-hdr">
-          <button class="adm-back" onclick="closeAdminSection()">‹ Back</button>
+          <button class="adm-back" data-on-click="closeAdminSection">‹ Back</button>
           <span class="adm-panel-title">🔐 Member access</span>
         </div>
         <div class="adm-row-s" style="margin-bottom:10px">Pick a member for a 7-day single-use Telegram login link. For a guest or proxy who isn't on Telegram, choose "Someone else" — that generates a plain voting link with their name pre-filled (not a real login; guest voting never needed one, this just saves them typing).</div>
-        <select id="weblogin-member-select" class="adm-select" style="margin-bottom:8px" onchange="onWebloginSelectChange()">
+        <select id="weblogin-member-select" class="adm-select" style="margin-bottom:8px" data-on-change="onWebloginSelectChange">
           <option value="">Loading members…</option>
         </select>
         <div id="weblogin-name-row" class="hidden" style="display:flex;gap:8px;margin-bottom:8px">
           <input id="weblogin-name-input" type="text" placeholder="Guest or proxy name" style="flex:1;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg);color:var(--text);font-size:.88rem"/>
         </div>
-        <button class="btn btn-primary" style="width:100%;padding:9px 14px" onclick="doIssueWeblogin()">Generate</button>
+        <button class="btn btn-primary" style="width:100%;padding:9px 14px" data-on-click="doIssueWeblogin">Generate</button>
         <div id="weblogin-result" class="hidden" style="background:var(--border);border-radius:8px;padding:10px 12px;font-size:.8rem;margin-top:8px">
           <div style="font-weight:600;margin-bottom:4px" id="weblogin-result-name"></div>
           <div style="word-break:break-all;font-family:monospace;font-size:.77rem;margin-bottom:8px" id="weblogin-result-url"></div>
-          <button class="btn btn-secondary" style="width:100%;padding:8px" onclick="copyWebloginUrl()">📋 Copy link</button>
+          <button class="btn btn-secondary" style="width:100%;padding:8px" data-on-click="copyWebloginUrl">📋 Copy link</button>
         </div>
       </div>
 
@@ -594,16 +595,16 @@
            are shown/hidden together with #end-rc-row. -->
       <div class="adm-panel hidden" id="adm-panel-proxy">
         <div class="adm-panel-hdr">
-          <button class="adm-back" onclick="closeAdminSection()">‹ Back</button>
+          <button class="adm-back" data-on-click="closeAdminSection">‹ Back</button>
           <span class="adm-panel-title">🗳 Proxy vote</span>
         </div>
         <div id="proxy-vote-row">
           <div class="adm-row-s" style="margin-bottom:10px">Vote on behalf of a member who isn't on Telegram (guest, +1) — same as /sif in the group.</div>
           <input id="proxy-name-input" type="text" placeholder="Member name" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg);color:var(--text);font-size:.88rem;margin-bottom:8px"/>
           <div style="display:flex;gap:8px">
-            <button class="btn" style="flex:1;padding:9px;border-radius:8px;font-weight:600;background:var(--border);color:var(--text)" onclick="doProxyVoteWeb('in')">✅ IN</button>
-            <button class="btn" style="flex:1;padding:9px;border-radius:8px;font-weight:600;background:var(--border);color:var(--text)" onclick="doProxyVoteWeb('out')">❌ OUT</button>
-            <button class="btn" style="flex:1;padding:9px;border-radius:8px;font-weight:600;background:var(--border);color:var(--text)" onclick="doProxyVoteWeb('maybe')">🤔 MAYBE</button>
+            <button class="btn" style="flex:1;padding:9px;border-radius:8px;font-weight:600;background:var(--border);color:var(--text)" data-on-click="doProxyVoteWeb" data-args='["in"]'>✅ IN</button>
+            <button class="btn" style="flex:1;padding:9px;border-radius:8px;font-weight:600;background:var(--border);color:var(--text)" data-on-click="doProxyVoteWeb" data-args='["out"]'>❌ OUT</button>
+            <button class="btn" style="flex:1;padding:9px;border-radius:8px;font-weight:600;background:var(--border);color:var(--text)" data-on-click="doProxyVoteWeb" data-args='["maybe"]'>🤔 MAYBE</button>
           </div>
         </div>
       </div>
@@ -613,7 +614,7 @@
            API token needed). Body is rendered lazily on first open. -->
       <div class="adm-panel hidden" id="adm-panel-templates">
         <div class="adm-panel-hdr">
-          <button class="adm-back" onclick="closeAdminSection()">‹ Back</button>
+          <button class="adm-back" data-on-click="closeAdminSection">‹ Back</button>
           <span class="adm-panel-title">📋 Templates</span>
         </div>
         <div id="templates-schedule-body"></div>
@@ -624,7 +625,7 @@
            this is only the one-off entries). -->
       <div class="adm-panel hidden" id="adm-panel-scheduled">
         <div class="adm-panel-hdr">
-          <button class="adm-back" onclick="closeAdminSection()">‹ Back</button>
+          <button class="adm-back" data-on-click="closeAdminSection">‹ Back</button>
           <span class="adm-panel-title">📅 Scheduled (one-time)</span>
         </div>
         <div id="scheduled-once-body"></div>
@@ -643,7 +644,7 @@
            would have standing to grant it. -->
       <div class="adm-panel hidden" id="adm-panel-admins">
         <div class="adm-panel-hdr">
-          <button class="adm-back" onclick="closeAdminSection()">‹ Back</button>
+          <button class="adm-back" data-on-click="closeAdminSection">‹ Back</button>
           <span class="adm-panel-title">👑 Owners &amp; admins</span>
         </div>
         <div id="admins-body"></div>
@@ -651,7 +652,7 @@
 
       <div class="adm-panel hidden" id="adm-panel-ghost">
         <div class="adm-panel-hdr">
-          <button class="adm-back" onclick="closeAdminSection()">‹ Back</button>
+          <button class="adm-back" data-on-click="closeAdminSection">‹ Back</button>
           <span class="adm-panel-title">👻 Review no-shows</span>
         </div>
         <div id="ghost-review-body"></div>
@@ -659,7 +660,7 @@
 
       <div class="adm-panel hidden" id="adm-panel-merge">
         <div class="adm-panel-hdr">
-          <button class="adm-back" onclick="closeAdminSection()">‹ Back</button>
+          <button class="adm-back" data-on-click="closeAdminSection">‹ Back</button>
           <span class="adm-panel-title">🧬 Merge identities</span>
         </div>
         <div id="identity-merge-body"></div>

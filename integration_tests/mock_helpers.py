@@ -96,5 +96,15 @@ def reset_db():
             cur.execute(f"DELETE FROM {tbl}")
         except Exception:
             pass
+    # system_config also holds once-only stamps keyed by member/game ids.
+    # They outlived the rows above, and the suite reuses one DB file across
+    # runs, so e.g. the games-milestone test passed on a fresh DB only — a
+    # second local run found "game #3" already announced and failed. Only the
+    # per-entity prefixes go: VAPID keys and the like are process-wide.
+    for prefix in ("milestone_games:", "ghost_cancel_reversed:"):
+        try:
+            cur.execute(f"DELETE FROM system_config WHERE key LIKE '{prefix}%'")
+        except Exception:
+            pass
     conn.commit()
     cur.close()

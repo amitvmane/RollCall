@@ -250,6 +250,26 @@ class WebStatsResponseTimeRecord(BaseModel):
     seconds: int = 0
 
 
+class WebStatsPeakSlot(BaseModel):
+    weekday: str
+    hour: int
+    label: str
+    votes: int = 0
+    share: int = 0
+
+
+class WebStatsVotePeak(BaseModel):
+    """When the group votes — busiest weekday/hour in the game's timezone."""
+    days: int = 90
+    total_votes: int = 0
+    by_hour: List[int] = Field(default_factory=list)
+    by_weekday: List[int] = Field(default_factory=list)
+    top_slots: List[WebStatsPeakSlot] = Field(default_factory=list)
+    busiest_hour: Optional[int] = None
+    busiest_hour_label: Optional[str] = None
+    busiest_day: Optional[str] = None
+
+
 class WebGroupStatsResponse(BaseModel):
     total_rollcalls: int = 0
     avg_attendance: float = 0.0
@@ -267,6 +287,7 @@ class WebGroupStatsResponse(BaseModel):
     response_time_leaderboard: List[WebStatsResponseTimeEntry] = Field(default_factory=list)
     response_time_record: Optional[WebStatsResponseTimeRecord] = None
     response_time_min_votes: int = 0
+    vote_peak: Optional[WebStatsVotePeak] = None
     personal: Optional[WebStatsPersonal] = None
     weekday_stats: List[WebStatsWeekday] = Field(default_factory=list)
 

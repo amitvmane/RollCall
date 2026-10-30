@@ -132,6 +132,7 @@ def group_stats(chat_id: int) -> dict:
         "proxy_out": int(totals.get("proxy_out") or 0),
         "proxy_maybe": int(totals.get("proxy_maybe") or 0),
         "waitlist_promotions": int(totals.get("waitlist_promotions") or 0),
+        "vote_peak": voting_peak_times(chat_id),
         "top_attendees": [
             {
                 # Leaderboard rows carry display_name; there is no first_name
@@ -332,6 +333,74 @@ def response_time_board(chat_id: int, limit: int = 10) -> dict:
 def response_time_stats(chat_id: int, limit: int = 10) -> list:
     """Response-time leaderboard entries, fastest typical voter first."""
     return response_time_board(chat_id, limit)["entries"]
+
+
+_WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+
+def hour_label(h: int) -> str:
+    """9 → '9 AM', 0 → '12 AM', 13 → '1 PM'."""
+    return f"{(h % 12) or 12} {'AM' if h < 12 else 'PM'}"
+
+
+def voting_peak_times(chat_id: int, days: int = 90) -> dict:
+    """When this group votes: busiest weekday + hour, in the game's timezone.
+
+    Built from each member's first vote per rollcall (users.created_at), so
+    it needs no new table. Answers "when do people actually respond?" — when
+    to open a rollcall, when a reminder lands, when the bot gets its burst.
+    """
+    from datetime import datetime, timedelta, timezone as _tz
+    import pytz
+    import db as _db
+
+    since = (datetime.now(_tz.utc) - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    by_hour = [0] * 24
+    by_weekday = [0] * 7
+    slots: dict = {}
+    zones: dict = {}
+    total = 0
+    for v in _db.get_vote_times(chat_id, since):
+        at = v["at"]
+        if isinstance(at, str):
+            try:
+                at = datetime.fromisoformat(at.replace("Z", "").replace("T", " ")[:19])
+            except ValueError:
+                continue
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=_tz.utc)      # DB CURRENT_TIMESTAMP is UTC
+        name = v.get("tz") or "Asia/Kolkata"
+        if name not in zones:
+            try:
+                zones[name] = pytz.timezone(name)
+            except Exception:
+                zones[name] = pytz.timezone("Asia/Kolkata")
+        local = at.astimezone(zones[name])
+        wd, hr = local.weekday(), local.hour
+        by_hour[hr] += 1
+        by_weekday[wd] += 1
+        slots[(wd, hr)] = slots.get((wd, hr), 0) + 1
+        total += 1
+
+    def _slot(key, n):
+        wd, hr = key
+        return {"weekday": _WEEKDAYS[wd], "hour": hr,
+                "label": f"{_WEEKDAYS[wd]} {hour_label(hr)}–{hour_label((hr + 1) % 24)}",
+                "votes": n, "share": round(100 * n / total) if total else 0}
+
+    top = sorted(slots.items(), key=lambda kv: (-kv[1], kv[0]))[:3]
+    busiest_hour = max(range(24), key=lambda h: (by_hour[h], -h)) if total else None
+    busiest_day = max(range(7), key=lambda d: (by_weekday[d], -d)) if total else None
+    return {
+        "days": days,
+        "total_votes": total,
+        "by_hour": by_hour,
+        "by_weekday": by_weekday,
+        "top_slots": [_slot(k, n) for k, n in top],
+        "busiest_hour": busiest_hour,
+        "busiest_hour_label": hour_label(busiest_hour) if busiest_hour is not None else None,
+        "busiest_day": _WEEKDAYS[busiest_day] if busiest_day is not None else None,
+    }
 
 
 def period_summary(chat_id: int, days: int = 7) -> dict:
@@ -548,6 +617,7 @@ def web_group_stats(
         "response_time_min_votes": rt_board["min_votes"],
         "personal": personal,
         "weekday_stats": weekday_attendance(chat_id),
+        "vote_peak": gs.get("vote_peak"),
     }
 
 

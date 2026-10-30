@@ -1316,6 +1316,64 @@ async def phase_close_races():
     finally:
         tg.uninstall()
 
+    # ── 4: panel End button in shh mode — #2's panel is relabelled ────────
+    # /erc got this fix first; the End button posts no fresh panels in shh
+    # mode, so the existing one kept saying "ID: 2".
+    clock = _FakeClock()
+    tg = _ThrottlingTelegram(clock, burst=1000)
+    tg.install()
+    try:
+        await feed("/src First", ALICE)
+        await feed("/src Second", ALICE)
+        second_panel = keys()[2]
+        await feed("/shh", ALICE)
+        await feed_cb("btn_end_1", ALICE)
+        _outbound.clear(); _errors.clear()
+        await feed_cb("btn_endconfirm_1", ALICE)
+        await chat_outbox.drain()
+        edits = [a[0] for n, a, _ in _outbound if n == "edit_message_text" and a[2] == second_panel]
+        record("End button (shh) of #1: the remaining panel is relabelled ID 1",
+               bool(edits) and "Title: Second" in edits[-1] and "ID: 1" in edits[-1],
+               repr(edits[-1][:40]) if edits else "no edit")
+        record("End button (shh): no errors logged", not _errors, str(error_msgs()[:2]))
+        await feed("/louder", ALICE)
+        await feed("/erc", ALICE)
+    finally:
+        tg.uninstall()
+
+    # ── 5: End button whose ghost prompt Telegram never takes ─────────────
+    # Used to raise out of the handler: the renumber notice and new panels
+    # were skipped and the admin could be told the end had failed.
+    clock = _FakeClock()
+    tg = _ThrottlingTelegram(clock, burst=1000)
+    tg.install()
+    try:
+        await feed("/toggle_ghost_tracking on", ALICE)
+        await feed("/src First", ALICE)
+        await feed("/src Second", ALICE)
+        for v in _VOTERS[:2]:
+            bot_state._rate_limits.clear()
+            await feed("/in", v)
+        await feed_cb("btn_end_1", ALICE)
+        tg.refuse_if = lambda text: "Did anyone ghost" in text
+        _outbound.clear(); _errors.clear(); tg.attempted.clear()
+        await feed_cb("btn_endconfirm_1", ALICE)
+        await chat_outbox.drain()
+        texts = [str(a[1]) for n, a, _ in _outbound if n == "send_message"]
+        record("End button, ghost prompt refused: rollcall closed",
+               [r.title for r in manager.get_rollcalls(CHAT_ID)] == ["Second"])
+        record("End button, ghost prompt refused: renumber notice still posted",
+               any("IDs updated" in t for t in texts), f"{[t[:30] for t in texts]}")
+        record("End button, ghost prompt refused: new panel for #1 still posted",
+               any("Title: Second" in t and "ID: 1" in t for t in texts))
+        record("End button, ghost prompt refused: admin not told it failed", not _no_false_failure(tg))
+        record("End button, ghost prompt refused: no errors logged", not _errors, str(error_msgs()[:2]))
+        tg.refuse_if = None
+        await feed("/erc", ALICE)
+        await feed("/toggle_ghost_tracking off", ALICE)
+    finally:
+        tg.uninstall()
+
 
 async def run_all():
     print("\n=== Phase 1: Lifecycle & basic voting ===\n")
@@ -2014,7 +2072,6 @@ async def run_all():
     # scheduler calls — because that is the path that was broken. Asserting
     # the button on a /src panel would have passed throughout the bug.
     import os as _os
-    from datetime import datetime as _dt
     from check_reminders import _auto_start_from_template
 
     _prev_base = _os.environ.get("WEB_BASE_URL")
@@ -2037,7 +2094,10 @@ async def run_all():
         await _auto_start_from_template(
             CHAT_ID,
             {"name": "friday", "title": "Scheduled Friday", "chatid": CHAT_ID},
-            _dt.now().strftime("%Y-%m-%d"),
+            # A claim date nothing else uses. Today's date failed every
+            # Friday: the weekly "friday" template had already claimed it
+            # earlier in the run, so this auto-start correctly did nothing.
+            "2000-01-07",
         )
         sched_out = list(_outbound)
         buttons = _url_buttons(sched_out)

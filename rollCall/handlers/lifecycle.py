@@ -1136,7 +1136,9 @@ async def _cb_end_confirm(call, cid: int, rc_number: int, rc) -> None:
         await safe_edit_markup(cid, call.message.message_id, reply_markup=None)
         return
 
-    await bot.answer_callback_query(call.id, "Rollcall ended")
+    # The rollcall is closed: from here every Telegram call is best-effort,
+    # so one refused message can't skip the rest or report a failed end.
+    await best_effort(bot.answer_callback_query(call.id, "Rollcall ended"), "tap answer", cid)
 
     # Replace the "Are you sure?" prompt in-place with the finish list.
     try:
@@ -1165,22 +1167,34 @@ async def _cb_end_confirm(call, cid: int, rc_number: int, rc) -> None:
             InlineKeyboardButton("👻 Yes, select ghosts", callback_data=f"ghost_yes_{result['ghost_rc_db_id']}"),
             InlineKeyboardButton("✅ No, all showed up", callback_data=f"ghost_no_{result['ghost_rc_db_id']}")
         )
-        await bot.send_message(cid, f"👻 Did anyone ghost '{rc.title}'?", reply_markup=ghost_markup)
+        await best_effort(bot.send_message(cid, f"👻 Did anyone ghost '{rc.title}'?",
+                                           reply_markup=ghost_markup), "ghost prompt", cid)
 
     updated_rollcalls = manager.get_rollcalls(cid)
-    if updated_rollcalls and not manager.get_shh_mode(cid):
-        lines = [f"⚠️ Rollcall #{ended_number} ended. IDs updated:"]
-        for entry in result["renumbered"]:
-            lines.append(f"  #{entry['old']} '{entry['title']}' → #{entry['new']}")
-        await bot.send_message(cid, "\n".join(lines))
-        for idx, rollcall in enumerate(updated_rollcalls):
-            new_id = idx + 1
+    if not updated_rollcalls:
+        return
+    if manager.get_shh_mode(cid):
+        # No fresh panels in shh mode — correct the existing ones' "ID: N"
+        # instead, as /erc does, so a typed `/in ::N` hits the right rollcall.
+        await _redraw_renumbered_panels(cid, result)
+        return
+    lines = [f"⚠️ Rollcall #{ended_number} ended. IDs updated:"]
+    for entry in result["renumbered"]:
+        lines.append(f"  #{entry['old']} '{entry['title']}' → #{entry['new']}")
+    await best_effort(bot.send_message(cid, "\n".join(lines)), "renumber notice", cid)
+    for idx, rollcall in enumerate(updated_rollcalls):
+        new_id = idx + 1
+        try:
             text = _build_panel_text(rollcall, new_id)
             panel_markup = await get_status_keyboard(new_id, cid)
             sent = await bot.send_message(cid, text, reply_markup=panel_markup)
-            if sent is not None:
-                _panel_msg_ids[(cid, new_id)] = sent.message_id
-                _persist_panel_msg_id(rollcall, sent.message_id)
+        except Exception as e:
+            logging.warning("Rollcall ended; renumbered panel #%s not delivered (chat=%s): %s",
+                            new_id, cid, e)
+            continue
+        if sent is not None:
+            _panel_msg_ids[(cid, new_id)] = sent.message_id
+            _persist_panel_msg_id(rollcall, sent.message_id)
 
 
 async def _cb_end_cancel(call, cid: int, rc_number: int, rc) -> None:

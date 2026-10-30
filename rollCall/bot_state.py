@@ -193,22 +193,17 @@ def _handler_chat_id(arg):
     return None
 
 
-async def best_effort(call, what: str, cid: int) -> bool:
-    """Make a Telegram call that comes AFTER a vote was saved; never raise.
+async def best_effort(awaitable, what: str, cid: int) -> bool:
+    """Await a Telegram call made AFTER a vote was saved; never raise.
 
-    When ten members vote in the same second (scheduled messages all firing
-    at 9:01) the bot asks to post ~20 messages in one group and Telegram
-    answers 429 "Too Many Requests". Those refusals used to reach
-    reply_error, which told a member whose vote had just been saved that
-    "something went wrong". The vote is the state; a message about it is
-    logged if it can't be delivered, and each later step still runs.
-
-    ``call`` is a zero-arg callable or an awaitable. Pacing itself (waiting
-    out a 429 in order) happens below, for every send the bot makes — see
-    chat_outbox.install_request_pacing. Returns True if it went out.
+    The vote is the state. If a message about it can't be delivered — a
+    deleted panel, a network blip, a rate limit that outlasted the pacing in
+    chat_outbox — that is logged, the next step (promotion notice, panel
+    refresh) still runs, and the voter is never told "something went wrong"
+    about a vote that worked. Returns True if it went out.
     """
     try:
-        await (call() if callable(call) else call)
+        await awaitable
         return True
     except Exception as e:
         logging.warning("Vote saved; %s not delivered (chat=%s): %s", what, cid, e)

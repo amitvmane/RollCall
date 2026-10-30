@@ -105,14 +105,14 @@ async def in_user(message):
         # reply must not be reported to the voter as a failed vote.
         if result["action"] == "waitlisted":
             if not manager.get_shh_mode(cid):
-                await best_effort(lambda: bot.send_message(
+                await best_effort(bot.send_message(
                     cid, f"Event max limit is reached, {display_name} was added in waitlist"),
                     "waitlist notice", cid)
         elif result["action"] == "added":
             if not manager.get_shh_mode(cid):
                 from models import User
                 u = User(display_name, username, user_id, [])
-                await best_effort(lambda: bot.send_message(
+                await best_effort(bot.send_message(
                     cid,
                     f"{format_mention_with_name_md(u)} is now IN!",
                     parse_mode="Markdown",
@@ -161,13 +161,13 @@ async def out_user(message):
             from models import User
             u = User(display_name, username, user_id, [])
             if result["was_in"]:
-                await best_effort(lambda: bot.send_message(
+                await best_effort(bot.send_message(
                     cid,
                     f"{format_mention_with_name_md(u)} → OUT for '{_esc_md(rc_title)}' (#{rc_number_1based})",
                     parse_mode="Markdown",
                 ), "OUT announcement", cid)
             else:
-                await best_effort(lambda: bot.send_message(
+                await best_effort(bot.send_message(
                     cid,
                     f"{format_mention_with_name_md(u)} is now OUT!",
                     parse_mode="Markdown",
@@ -218,7 +218,7 @@ async def maybe_user(message):
         if not manager.get_shh_mode(cid):
             from models import User
             u = User(display_name, username, user_id, [])
-            await best_effort(lambda: bot.send_message(
+            await best_effort(bot.send_message(
                 cid,
                 f"{format_mention_with_name_md(u)} is now MAYBE!",
                 parse_mode="Markdown",

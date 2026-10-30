@@ -53,20 +53,19 @@ async def announce_promotions(
                 # On its own: a group message Telegram won't take must not
                 # cost the promoted member their DM and push below — it used
                 # to, because the exception skipped the rest of this block.
-                if isinstance(p_id, int):
-                    group_msg = lambda: bot.send_message(  # noqa: E731
-                        cid,
-                        f"{format_mention_with_name_md(p_obj)} → IN (from WAITING) "
-                        f"for '{_esc_md(rc_title)}' (#{rc_number_1based})",
-                        parse_mode="Markdown",
-                    )
-                else:
-                    group_msg = lambda: bot.send_message(  # noqa: E731
-                        cid,
-                        f"{p['name']} → IN (from WAITING) for '{rc_title}' (#{rc_number_1based})",
-                    )
                 try:
-                    await group_msg()
+                    if isinstance(p_id, int):
+                        await bot.send_message(
+                            cid,
+                            f"{format_mention_with_name_md(p_obj)} → IN (from WAITING) "
+                            f"for '{_esc_md(rc_title)}' (#{rc_number_1based})",
+                            parse_mode="Markdown",
+                        )
+                    else:
+                        await bot.send_message(
+                            cid,
+                            f"{p['name']} → IN (from WAITING) for '{rc_title}' (#{rc_number_1based})",
+                        )
                 except Exception:
                     logging.warning("Promotion of %r saved; group message not delivered (chat=%s)",
                                     p.get("name"), cid, exc_info=True)

@@ -947,13 +947,13 @@ async def _cb_vote(call, cid: int, rc_number: int, rc, action: str) -> None:
         if not manager.get_shh_mode(cid):
             if isinstance(user_id_v, int):
                 _u = User(user_name_v, user_uname_v, user_id_v, [])
-                await best_effort(lambda: bot.send_message(
+                await best_effort(bot.send_message(
                     cid,
                     f"{format_mention_with_name_md(_u)} → WAITING for '{_esc_md(rc.title)}' (#{rc_number})",
                     parse_mode="Markdown",
                 ), "waitlist announcement", cid)
             else:
-                await best_effort(lambda: bot.send_message(cid, f"{user_name_v} → WAITING for '{rc.title}' (#{rc_number})"),
+                await best_effort(bot.send_message(cid, f"{user_name_v} → WAITING for '{rc.title}' (#{rc_number})"),
                                   "waitlist announcement", cid)
     else:
         await best_effort(bot.answer_callback_query(call.id, "Status updated"), "tap answer", cid)
@@ -961,13 +961,13 @@ async def _cb_vote(call, cid: int, rc_number: int, rc, action: str) -> None:
             label = {"in": "IN", "out": "OUT", "maybe": "MAYBE"}[action]
             if isinstance(user_id_v, int):
                 _u = User(user_name_v, user_uname_v, user_id_v, [])
-                await best_effort(lambda: bot.send_message(
+                await best_effort(bot.send_message(
                     cid,
                     f"{format_mention_with_name_md(_u)} → {label} for '{_esc_md(rc.title)}' (#{rc_number})",
                     parse_mode="Markdown",
                 ), "vote announcement", cid)
             else:
-                await best_effort(lambda: bot.send_message(cid, f"{user_name_v} → {label} for '{rc.title}' (#{rc_number})"),
+                await best_effort(bot.send_message(cid, f"{user_name_v} → {label} for '{rc.title}' (#{rc_number})"),
                                   "vote announcement", cid)
 
     promoted = svc_result.get("promoted")

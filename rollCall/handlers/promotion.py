@@ -16,6 +16,8 @@ failure must never fail the mutation that caused it.
 import asyncio
 import logging
 
+import chat_outbox
+
 from bot_state import (
     bot, _dm_promoted_real_user, _esc_md, _log_task_exc,
     format_mention_with_name_md,
@@ -50,18 +52,27 @@ async def announce_promotions(
             p_id = p["user_id"]
             p_obj = User(p["name"], p.get("username"), p_id, [])
             if not shh:
+                # Paced (waits out a 429 in order), and on its own: a group
+                # message Telegram won't take must not cost the promoted
+                # member their DM and push below — it used to, because the
+                # exception skipped the rest of this block.
                 if isinstance(p_id, int):
-                    await bot.send_message(
+                    group_msg = lambda: bot.send_message(  # noqa: E731
                         cid,
                         f"{format_mention_with_name_md(p_obj)} → IN (from WAITING) "
                         f"for '{_esc_md(rc_title)}' (#{rc_number_1based})",
                         parse_mode="Markdown",
                     )
                 else:
-                    await bot.send_message(
+                    group_msg = lambda: bot.send_message(  # noqa: E731
                         cid,
                         f"{p['name']} → IN (from WAITING) for '{rc_title}' (#{rc_number_1based})",
                     )
+                try:
+                    await chat_outbox.deliver(cid, group_msg)
+                except Exception:
+                    logging.warning("Promotion of %r saved; group message not delivered (chat=%s)",
+                                    p.get("name"), cid, exc_info=True)
             if isinstance(p_id, int):
                 _t = asyncio.create_task(_dm_promoted_real_user(p_id, rc_title, rc_number_1based))
                 _t.add_done_callback(_log_task_exc)

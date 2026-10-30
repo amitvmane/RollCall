@@ -30,6 +30,7 @@ from functions import admin_rights, roll_call_not_started
 from models import User
 from rollcall_manager import manager
 from services.common import ensure_rc_number, find_rollcall_index, rc_db_id as _rc_db_id
+import chat_outbox
 import db
 from db import update_rollcall
 from services import rollcalls as rollcalls_svc
@@ -281,11 +282,38 @@ def _persist_panel_msg_id(rc, msg_id: int) -> None:
 async def _update_panel(cid: int, rc_number: int, rc, force_new: bool = False) -> None:
     """Update the status panel for a rollcall.
 
-    Always edits the existing panel in-place immediately so every vote is
-    reflected without delay. Falls back to sending a new message if the
-    original panel was deleted or has not been sent yet.
-    force_new — always sends a fresh message (used by /panel command).
+    Edits the existing panel in place (a new message only if there is none,
+    or it was deleted). force_new — always sends a fresh message (/panel).
+
+    Bursts: when refreshes for the same rollcall overlap — ten votes in one
+    second — the first is drawn now and the rest are folded into ONE more
+    redraw once the burst settles, which reads the state as it is then
+    (chat_outbox.coalesce). A refresh that doesn't overlap another is drawn
+    immediately, exactly as before. Coalescing is keyed by the rollcall's db
+    id and the trailing redraw re-finds it by id, so a renumber or close in
+    between can't redraw the wrong panel.
     """
+    rc_id = _rc_db_id(rc)
+    if force_new or not rc_id:
+        await _render_panel(cid, rc_number, rc, force_new=force_new)
+        return
+
+    async def _trailing():
+        idx = find_rollcall_index(cid, rc_id, manager)
+        if idx is None:
+            return                      # closed meanwhile: its final panel is not ours to redraw
+        await _render_panel(cid, idx + 1, manager.get_rollcall(cid, idx))
+
+    await chat_outbox.coalesce(
+        ("panel", cid, rc_id),
+        lambda: _render_panel(cid, rc_number, rc),
+        _trailing,
+    )
+
+
+async def _render_panel(cid: int, rc_number: int, rc, force_new: bool = False) -> None:
+    """Draw the panel from `rc` as it is now. Sends are paced through
+    chat_outbox.deliver, so a 429 is waited out instead of lost."""
     key = (cid, rc_number)
 
     if key not in _panel_msg_ids and getattr(rc, 'panel_msg_id', None):
@@ -298,15 +326,21 @@ async def _update_panel(cid: int, rc_number: int, rc, force_new: bool = False) -
         existing_msg_id = _panel_msg_ids.get(key)
         if existing_msg_id:
             try:
-                await bot.edit_message_text(text, cid, existing_msg_id, reply_markup=markup)
+                await chat_outbox.deliver(cid, lambda: bot.edit_message_text(
+                    text, cid, existing_msg_id, reply_markup=markup))
                 return
             except Exception as e:
                 err = str(e).lower()
                 if "message is not modified" in err:
                     return
+                if chat_outbox.is_rate_limited(e):
+                    # Telegram is throttling this chat. Posting a whole new
+                    # panel instead (the fallback below) would only add to
+                    # the flood and leave a duplicate list behind.
+                    raise
                 logging.debug(f"Panel edit failed for ({cid}, {rc_number}): {e}")
 
-    sent = await bot.send_message(cid, text, reply_markup=markup)
+    sent = await chat_outbox.deliver(cid, lambda: bot.send_message(cid, text, reply_markup=markup))
     _panel_msg_ids[key] = sent.message_id
     _persist_panel_msg_id(rc, sent.message_id)
 
@@ -887,13 +921,13 @@ async def _cb_vote(call, cid: int, rc_number: int, rc, action: str) -> None:
         if not manager.get_shh_mode(cid):
             if isinstance(user_id_v, int):
                 _u = User(user_name_v, user_uname_v, user_id_v, [])
-                await best_effort(bot.send_message(
+                await best_effort(lambda: bot.send_message(
                     cid,
                     f"{format_mention_with_name_md(_u)} → WAITING for '{_esc_md(rc.title)}' (#{rc_number})",
                     parse_mode="Markdown",
                 ), "waitlist announcement", cid)
             else:
-                await best_effort(bot.send_message(cid, f"{user_name_v} → WAITING for '{rc.title}' (#{rc_number})"),
+                await best_effort(lambda: bot.send_message(cid, f"{user_name_v} → WAITING for '{rc.title}' (#{rc_number})"),
                                   "waitlist announcement", cid)
     else:
         await best_effort(bot.answer_callback_query(call.id, "Status updated"), "tap answer", cid)
@@ -901,13 +935,13 @@ async def _cb_vote(call, cid: int, rc_number: int, rc, action: str) -> None:
             label = {"in": "IN", "out": "OUT", "maybe": "MAYBE"}[action]
             if isinstance(user_id_v, int):
                 _u = User(user_name_v, user_uname_v, user_id_v, [])
-                await best_effort(bot.send_message(
+                await best_effort(lambda: bot.send_message(
                     cid,
                     f"{format_mention_with_name_md(_u)} → {label} for '{_esc_md(rc.title)}' (#{rc_number})",
                     parse_mode="Markdown",
                 ), "vote announcement", cid)
             else:
-                await best_effort(bot.send_message(cid, f"{user_name_v} → {label} for '{rc.title}' (#{rc_number})"),
+                await best_effort(lambda: bot.send_message(cid, f"{user_name_v} → {label} for '{rc.title}' (#{rc_number})"),
                                   "vote announcement", cid)
 
     promoted = svc_result.get("promoted")
@@ -915,14 +949,11 @@ async def _cb_vote(call, cid: int, rc_number: int, rc, action: str) -> None:
         from handlers.promotion import announce_one
         await best_effort(announce_one(cid, promoted, rc.title, rc_number, rc), "promotion notice", cid)
 
-    text = _build_panel_text(rc, rc_number)
-    markup = await get_status_keyboard(rc_number, cid)
-    try:
-        await bot.edit_message_text(text, cid, call.message.message_id, reply_markup=markup)
-        _panel_msg_ids[(cid, rc_number)] = call.message.message_id
-    except Exception as e:
-        if "message is not modified" not in str(e).lower():
-            logging.warning("Panel edit failed after vote (chat=%s msg=%s): %s", cid, call.message.message_id, e)
+    # The tapped message is the panel to redraw (as before); going through
+    # _update_panel means a burst of taps is coalesced and paced exactly
+    # like a burst of /in commands.
+    _panel_msg_ids[(cid, rc_number)] = call.message.message_id
+    await best_effort(_update_panel(cid, rc_number, rc), "panel refresh", cid)
 
 
 async def _cb_lists_menu(call, cid: int, rc_number: int, rc) -> None:

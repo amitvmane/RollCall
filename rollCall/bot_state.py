@@ -183,19 +183,27 @@ def _handler_chat_id(arg):
     return None
 
 
-async def best_effort(awaitable, what: str, cid: int) -> bool:
-    """Await a Telegram call made AFTER a vote was saved; never raise.
+async def best_effort(call, what: str, cid: int) -> bool:
+    """Make a Telegram call that comes AFTER a vote was saved; never raise.
 
     When ten members vote in the same second (scheduled messages all firing
-    at 9:01) the bot sends ~20 messages to one group and Telegram starts
-    answering 429 "Too Many Requests". Those replies used to propagate to
+    at 9:01) the bot asks to post ~20 messages in one group and Telegram
+    answers 429 "Too Many Requests". Those refusals used to reach
     reply_error, which told a member whose vote had just been saved that
-    "something went wrong" — so they voted again, or assumed they weren't in.
-    The vote is the state; a refused announcement is logged, and each later
-    step (promotion notice, panel refresh) still runs. Returns True on success.
+    "something went wrong". The vote is the state; a message about it is
+    logged if it can't be delivered, and each later step still runs.
+
+    ``call`` is either a zero-arg callable making ONE Telegram call — then a
+    429 is waited out and retried in order (chat_outbox.deliver) — or an
+    awaitable, for compound steps that pace their own sends (the panel,
+    promotion notices). Returns True if it went out.
     """
     try:
-        await awaitable
+        if callable(call):
+            import chat_outbox
+            await chat_outbox.deliver(cid, call)
+        else:
+            await call
         return True
     except Exception as e:
         logging.warning("Vote saved; %s not delivered (chat=%s): %s", what, cid, e)

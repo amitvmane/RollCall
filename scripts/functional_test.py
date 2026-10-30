@@ -826,78 +826,295 @@ async def phase_remaining_surface():
            f"{len(_errors)} errors: {error_msgs()[:5]}" if _errors else "")
 
 
-async def phase_vote_burst():
-    """Ten members' scheduled /in messages all fire at 9:01.
+class _FakeClock:
+    """Burst phases run on fake time: chat_outbox's waits advance this
+    instead of sleeping, so a 60-second recovery takes milliseconds."""
 
-    Polling hands them to the bot as ONE batch, and telebot runs the
-    handlers concurrently. Telegram then refuses some of the ~20 replies
-    with 429 Too Many Requests. Every vote must still be saved, and nobody
-    whose vote was saved may be told "something went wrong" (which is what
-    a refused reply used to turn into).
-    """
-    print("\n=== Phase: 10 simultaneous /in (scheduled messages) ===\n")
-    from telebot.apihelper import ApiTelegramException
+    def __init__(self):
+        self.now, self.slept = 5000.0, 0.0
 
-    await feed("/src Burst Game", ALICE)
-    voters = [(7001 + i, f"Burst{i + 1}", f"burst{i + 1}") for i in range(10)]
+    def __call__(self):
+        return self.now
 
-    # Fake Telegram rate limiting: every other send_message is refused 429.
-    real_send = bot.send_message
-    sends = {"n": 0, "refused": 0}
+    async def sleep(self, seconds):
+        self.now += max(0.0, seconds)
+        self.slept += max(0.0, seconds)
+        await asyncio.sleep(0)
 
-    attempted = []          # every text the bot TRIED to send, refused or not
 
-    async def throttled_send(*args, **kwargs):
-        sends["n"] += 1
-        attempted.append(str(args[1] if len(args) > 1 else kwargs.get("text", "")))
-        if sends["n"] % 2 == 0:
-            sends["refused"] += 1
-            raise ApiTelegramException("sendMessage", MagicMock(status_code=429), {
+class _ThrottlingTelegram:
+    """Telegram's per-chat flood limit, modelled as a token bucket on the fake
+    clock: `burst` messages at once, then `rate` per second. Anything over is
+    refused with a real ApiTelegramException 429 + retry_after — exactly what
+    the live API returns when ten scheduled /in fire in the same second."""
+
+    def __init__(self, clock, burst=3, rate=1.0):
+        self.clock, self.burst, self.rate = clock, burst, rate
+        self.tokens, self.stamp = {}, {}
+        self.attempted, self.refused = [], 0
+
+    def _take(self, chat, method):
+        from telebot.apihelper import ApiTelegramException
+        now = self.clock.now
+        t = min(self.burst, self.tokens.get(chat, self.burst)
+                + (now - self.stamp.get(chat, now)) * self.rate)
+        self.stamp[chat] = now
+        if t < 1:
+            self.tokens[chat] = t
+            self.refused += 1
+            wait = max(1, int((1 - t) / self.rate + 0.999))
+            raise ApiTelegramException(method, MagicMock(status_code=429), {
                 "ok": False, "error_code": 429,
-                "description": "Too Many Requests: retry after 5",
-                "parameters": {"retry_after": 5}})
-        return await real_send(*args, **kwargs)
+                "description": f"Too Many Requests: retry after {wait}",
+                "parameters": {"retry_after": wait}})
+        self.tokens[chat] = t - 1
 
-    _outbound.clear()
-    _errors.clear()
-    bot.send_message = throttled_send
+    def install(self):
+        import chat_outbox
+        self._saved = (bot.send_message, bot.edit_message_text,
+                       chat_outbox._clock, chat_outbox._sleep)
+        real_send, real_edit = bot.send_message, bot.edit_message_text
+
+        async def send(*a, **kw):
+            chat = a[0] if a else kw.get("chat_id")
+            self.attempted.append(("send", chat, str(a[1] if len(a) > 1 else kw.get("text", ""))))
+            self._take(chat, "sendMessage")
+            return await real_send(*a, **kw)
+
+        async def edit(*a, **kw):
+            chat = a[1] if len(a) > 1 else kw.get("chat_id")
+            self.attempted.append(("edit", chat, str(a[0] if a else kw.get("text", ""))))
+            self._take(chat, "editMessageText")
+            return await real_edit(*a, **kw)
+
+        bot.send_message, bot.edit_message_text = send, edit
+        chat_outbox._clock, chat_outbox._sleep = self.clock, self.clock.sleep
+
+    def uninstall(self):
+        import chat_outbox
+        (bot.send_message, bot.edit_message_text,
+         chat_outbox._clock, chat_outbox._sleep) = self._saved
+
+
+_VOTERS = [(7001 + i, f"Voter{chr(65 + i)}", f"voter{chr(97 + i)}") for i in range(10)]
+
+
+def _accepted(outbound, method, chat=CHAT_ID):
+    """Texts Telegram ACCEPTED (refused calls never reach the recorder)."""
+    out = []
+    for name, args, kwargs in outbound:
+        if name == method == "send_message" and args and args[0] == chat:
+            out.append((str(args[1]) if len(args) > 1 else "", kwargs))
+        elif name == method == "edit_message_text" and len(args) > 1 and args[1] == chat:
+            out.append((str(args[0]), kwargs))
+    return out
+
+
+def _panel_order_ok(text, names):
+    pos = [text.find(n) for n in names]
+    return all(p >= 0 for p in pos) and pos == sorted(pos)
+
+
+async def _settle(clock=None):
+    import chat_outbox
+    await chat_outbox.drain()
+    for _ in range(5):                     # DM/push tasks spawned by promotions
+        await asyncio.sleep(0)
+    if clock is not None:
+        clock.now += 60                    # a minute passes before anyone's next command
+
+
+def _outbox_empty():
+    import chat_outbox
+    return not (chat_outbox._blocked_until or chat_outbox._chat_locks
+                or chat_outbox._queued or chat_outbox._inflight)
+
+
+def _rc_in_order(rc):
+    return [getattr(u, "user_id", None) for u in rc.inList] if rc else []
+
+
+def _rc_wait_order(rc):
+    return [getattr(u, "user_id", None) for u in rc.waitList] if rc else []
+
+
+def _db_status_count(rc, status):
+    with _db._cursor() as cur:
+        ph = '%s' if _db.db_type == 'postgresql' else '?'
+        cur.execute(f"SELECT COUNT(*) FROM users WHERE rollcall_id = {ph} AND status = {ph} "
+                    f"AND user_id >= 7001 AND user_id <= 7010", (rc.db_id, status))
+        row = cur.fetchone()
+        return int(row[0] if not isinstance(row, dict) else list(row.values())[0])
+
+
+def _no_false_failure(tg):
+    return [t for _, _, t in tg.attempted
+            if "something went wrong" in t.lower() or "too many requests" in t.lower()]
+
+
+async def phase_vote_burst():
+    """Burst safety. Order, completeness and normal behaviour are what this
+    bot is trusted for, so each guarantee gets its own check:
+
+      A  normal use is unchanged — no waiting, one panel edit per vote
+      B  10 simultaneous /in      — all saved in order, every confirmation
+                                    delivered once, final panel shows all 10
+      C  10 simultaneous taps     — the same, through the panel buttons
+      D  burst over the IN limit  — first 8 IN, last 2 waitlisted, in order
+      E  burst of /out            — promotions announced and DMed, in order
+    """
+    print("\n=== Phase: vote bursts (Telegram throttling) ===\n")
+    import chat_outbox
+
+    # ── A: normal usage ───────────────────────────────────────────────────
+    clock = _FakeClock()
+    tg = _ThrottlingTelegram(clock, burst=1000)          # never throttles
+    tg.install()
     try:
-        await bot.process_new_updates([
-            make_message_update("/in", uid, fname, uname) for uid, fname, uname in voters])
+        await feed("/src Normal Game", ALICE)
+        edits_ok, confirms_ok = True, True
+        for uid, fname, uname in _VOTERS[:4]:
+            bot_state._rate_limits.clear()
+            out = await feed("/in", (uid, fname, uname))
+            edits = _accepted(out, "edit_message_text")
+            sends = _accepted(out, "send_message")
+            edits_ok &= len(edits) == 1 and fname in edits[0][0]
+            confirms_ok &= sum("is now IN" in t and fname in t for t, _ in sends) == 1
+        record("Normal: each vote redraws the panel immediately, once", edits_ok)
+        record("Normal: each vote is confirmed immediately, once", confirms_ok)
+        record("Normal: nothing waits when Telegram isn't throttling", clock.slept == 0,
+               f"waited {clock.slept}s")
+        await _settle(clock)
+        record("Normal: no deferred redraws left over", _outbox_empty())
+        await feed("/erc", ALICE)
     finally:
-        bot.send_message = real_send
-    burst_out = list(_outbound)
+        tg.uninstall()
 
-    rc = manager.get_rollcall(CHAT_ID, 0)
-    in_ids = {getattr(u, "user_id", None) for u in rc.inList} if rc else set()
-    missing = [f for uid, f, _ in voters if uid not in in_ids]
-    record("Burst: all 10 simultaneous /in votes are on the IN list",
-           not missing, f"missing {missing}")
+    # ── B: 10 simultaneous /in (scheduled messages at 9:01) ───────────────
+    clock = _FakeClock()
+    tg = _ThrottlingTelegram(clock)
+    tg.install()
+    try:
+        await feed("/src Burst Game", ALICE)
+        bot_state._rate_limits.clear()
+        _outbound.clear(); _errors.clear()
+        await bot.process_new_updates([make_message_update("/in", u, f, n) for u, f, n in _VOTERS])
+        await _settle(clock)
+        out = list(_outbound)
+        rc = manager.get_rollcall(CHAT_ID, 0)
+        ids = [u for u, _, _ in _VOTERS]
+        names = [f for _, f, _ in _VOTERS]
+        record("Burst /in: Telegram really throttled the burst", tg.refused >= 1, f"refused {tg.refused}")
+        record("Burst /in: the rest waited their turn instead of being refused",
+               clock.slept >= 5 and tg.refused <= 3, f"waited {clock.slept}s, refused {tg.refused}")
+        record("Burst /in: all 10 on the IN list, in arrival order", _rc_in_order(rc) == ids,
+               f"got {_rc_in_order(rc)}")
+        record("Burst /in: all 10 saved to the database", _db_status_count(rc, "in") == 10)
+        sends = [t for t, _ in _accepted(out, "send_message")]
+        per_voter = [sum("is now IN" in t and n in t for t in sends) for n in names]
+        record("Burst /in: every voter's confirmation delivered exactly once",
+               per_voter == [1] * 10, f"per voter {per_voter}")
+        confirm_order = [next(i for i, t in enumerate(sends) if n in t) for n in names]
+        record("Burst /in: confirmations posted in vote order", confirm_order == sorted(confirm_order))
+        edits = [t for t, _ in _accepted(out, "edit_message_text")]
+        record("Burst /in: final panel lists all 10 in order",
+               bool(edits) and _panel_order_ok(edits[-1], names), f"{len(edits)} edits")
+        record("Burst /in: panel redraws coalesced (fewer than one per vote)",
+               1 <= len(edits) < 10, f"{len(edits)} edits")
+        record("Burst /in: no duplicate panel posted", not has_panel_send(out))
+        record("Burst /in: nobody told their vote failed", not _no_false_failure(tg))
+        record("Burst /in: no errors logged", not _errors, str(error_msgs()[:2]))
+        record("Burst /in: delivery state cleared afterwards", _outbox_empty())
+        out = await feed("/whos_in", ALICE)
+        record("Burst /in: /whos_in lists all 10", all(n in text_of(out) for n in names))
+        await feed("/erc", ALICE)
+    finally:
+        tg.uninstall()
 
-    db_in = 0
-    if rc is not None:
-        with _db._cursor() as cur:
-            ph = '%s' if _db.db_type == 'postgresql' else '?'
-            cur.execute(f"SELECT COUNT(*) FROM users WHERE rollcall_id = {ph} AND status = 'in' "
-                        f"AND user_id >= 7001 AND user_id <= 7010", (rc.db_id,))
-            row = cur.fetchone()
-            db_in = int(row[0] if not isinstance(row, dict) else list(row.values())[0])
-    record("Burst: all 10 votes persisted to the database", db_in == 10, f"db has {db_in}/10")
+    # ── C: 10 simultaneous panel-button taps ──────────────────────────────
+    clock = _FakeClock()
+    tg = _ThrottlingTelegram(clock)
+    tg.install()
+    try:
+        await feed("/src Tap Game", ALICE)
+        rc = manager.get_rollcall(CHAT_ID, 0)
+        panel_id = bot_state._panel_msg_ids.get((CHAT_ID, 1))
+        bot_state._rate_limits.clear()
+        _outbound.clear(); _errors.clear()
+        await bot.process_new_updates([
+            make_callback_update(f"btn_in_1_{rc.db_id}", u, f, n, src_msg_id=panel_id)
+            for u, f, n in _VOTERS])
+        await _settle(clock)
+        out = list(_outbound)
+        rc = manager.get_rollcall(CHAT_ID, 0)
+        record("Burst taps: all 10 on the IN list, in arrival order",
+               _rc_in_order(rc) == [u for u, _, _ in _VOTERS], f"got {_rc_in_order(rc)}")
+        sends = [t for t, _ in _accepted(out, "send_message")]
+        per_voter = [sum("→ IN" in t and n in t for t in sends) for _, n, _ in _VOTERS]
+        record("Burst taps: every confirmation delivered exactly once",
+               per_voter == [1] * 10, f"per voter {per_voter}")
+        edits = [(t, kw) for t, kw in _accepted(out, "edit_message_text")]
+        record("Burst taps: final panel lists all 10 in order",
+               bool(edits) and _panel_order_ok(edits[-1][0], [n for _, n, _ in _VOTERS]))
+        record("Burst taps: the tapped panel is the one redrawn",
+               all(True for _ in edits) and bot_state._panel_msg_ids.get((CHAT_ID, 1)) == panel_id)
+        record("Burst taps: no duplicate panel posted", not has_panel_send(out))
+        record("Burst taps: no errors logged", not _errors, str(error_msgs()[:2]))
+        record("Burst taps: delivery state cleared afterwards", _outbox_empty())
+        await feed("/erc", ALICE)
+    finally:
+        tg.uninstall()
 
-    record("Burst: Telegram really refused replies during the burst",
-           sends["refused"] >= 3, f"only {sends['refused']} refused")
-    told_failed = [t for t in attempted + [text_of([o]) for o in burst_out]
-                   if "something went wrong" in t.lower() or "too many requests" in t.lower()]
-    record("Burst: no voter whose vote saved is told 'something went wrong'",
-           not told_failed, f"{len(told_failed)} error replies")
-    record("Burst: refused replies are not logged as errors",
-           not _errors, str(error_msgs()[:3]))
+    # ── D + E: burst over the IN limit, then a burst of /out ──────────────
+    clock = _FakeClock()
+    tg = _ThrottlingTelegram(clock)
+    tg.install()
+    try:
+        await feed("/src Limit Game", ALICE)
+        await feed("/set_limit 8", ALICE)
+        bot_state._rate_limits.clear()
+        _outbound.clear(); _errors.clear()
+        await bot.process_new_updates([make_message_update("/in", u, f, n) for u, f, n in _VOTERS])
+        await _settle(clock)
+        rc = manager.get_rollcall(CHAT_ID, 0)
+        ids = [u for u, _, _ in _VOTERS]
+        record("Burst over limit: first 8 arrivals IN, in order", _rc_in_order(rc) == ids[:8],
+               f"got {_rc_in_order(rc)}")
+        record("Burst over limit: last 2 arrivals waitlisted, in order",
+               _rc_wait_order(rc) == ids[8:], f"got {_rc_wait_order(rc)}")
+        sends = [t for t, _ in _accepted(list(_outbound), "send_message")]
+        waited = [sum("waitlist" in t and n in t for t in sends) for _, n, _ in _VOTERS[8:]]
+        record("Burst over limit: both waitlist notices delivered", waited == [1, 1], f"{waited}")
 
-    out = await feed("/whos_in", ALICE)
-    missing = [f for _, f, _ in voters if f.lower() not in text_of(out).lower()]
-    record("Burst: /whos_in afterwards lists all 10", not missing, f"missing {missing}")
-
-    await feed("/erc", ALICE)
+        bot_state._rate_limits.clear()
+        _outbound.clear(); _errors.clear()
+        a, b = _VOTERS[0], _VOTERS[1]
+        await bot.process_new_updates([make_message_update("/out", a[0], a[1], a[2]),
+                                       make_message_update("/out", b[0], b[1], b[2])])
+        await _settle(clock)
+        out = list(_outbound)
+        rc = manager.get_rollcall(CHAT_ID, 0)
+        record("Burst /out: the 2 waitlisted members promoted, in waitlist order",
+               _rc_in_order(rc) == ids[2:8] + ids[8:], f"got {_rc_in_order(rc)}")
+        sends = [t for t, _ in _accepted(out, "send_message")]
+        promoted = [sum("from WAITING" in t and n in t for t in sends) for _, n, _ in _VOTERS[8:]]
+        record("Burst /out: both promotions announced in the group", promoted == [1, 1], f"{promoted}")
+        dms = {args[0] for name, args, _ in out if name == "send_message" and args and args[0] > 0}
+        record("Burst /out: both promoted members DMed", {ids[8], ids[9]} <= dms, f"DMs to {sorted(dms)}")
+        edits = [t for t, _ in _accepted(out, "edit_message_text")]
+        final = edits[-1] if edits else ""
+        in_part, _, out_part = final.partition("\nOut:")
+        record("Burst /out: final panel shows the new IN list, in order",
+               _panel_order_ok(in_part, [f for _, f, _ in _VOTERS[2:]])
+               and _VOTERS[0][1] not in in_part and _VOTERS[1][1] not in in_part, repr(final[:120]))
+        record("Burst /out: final panel shows both drop-outs under Out",
+               _panel_order_ok(out_part, [_VOTERS[0][1], _VOTERS[1][1]]), repr(out_part[:60]))
+        record("Burst /out: nobody told it failed", not _no_false_failure(tg))
+        record("Burst /out: no errors logged", not _errors, str(error_msgs()[:2]))
+        record("Burst /out: delivery state cleared afterwards", _outbox_empty())
+        await feed("/erc", ALICE)
+    finally:
+        tg.uninstall()
 
 
 async def run_all():

@@ -32,6 +32,19 @@ python scripts/smoke_test.py
 
 CI runs the same script as the `Smoke (real-import boot check)` job. Unit tests can't catch signature mismatches (telebot is mocked in `conftest.py`), so this layer is the one that surfaces issues like the v7.8 `use_class_middlewares=True` crash.
 
+## Group messages after a vote (burst safety)
+
+Telegram throttles a bot to ~1 message/sec per group and answers 429 beyond
+that — ten scheduled `/in` at 9:01 hit it. After a vote is saved, send group
+messages through `best_effort(lambda: bot.send_message(...), what, cid)` (or
+`chat_outbox.deliver`), never a bare `await bot.send_message`: a 429 is then
+waited out in order instead of lost or reported to the voter as a failure.
+Pass a *lambda* (retryable), not a coroutine. Panel refreshes go through
+`_update_panel`, which coalesces overlapping redraws. `chat_outbox` never
+touches votes or their order — those are fixed under the chat write lock
+before any message is sent. Covered by `phase_vote_burst` in
+`scripts/functional_test.py` (fake clock + throttling fake Telegram).
+
 ## Web front-end wiring (CSP)
 
 The CSP refuses inline script (`api/security_headers.py`). Never write an

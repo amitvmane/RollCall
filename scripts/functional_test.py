@@ -861,6 +861,7 @@ class _ThrottlingTelegram:
         self.tokens, self.stamp = {}, {}
         self.attempted, self.refused = [], 0
         self._next_id = 90000
+        self.refuse_if = None     # text -> True: Telegram refuses it every time (retry after 120s)
 
     def _take(self, chat, method):
         from telebot.apihelper import ApiTelegramException
@@ -893,6 +894,12 @@ class _ThrottlingTelegram:
         chat = int(params["chat_id"])
         text = str(params.get("text", ""))
         self.attempted.append((url, chat, text))
+        if self.refuse_if and self.refuse_if(text):
+            from telebot.apihelper import ApiTelegramException
+            self.refused += 1
+            raise ApiTelegramException(url, MagicMock(status_code=429), {
+                "ok": False, "error_code": 429, "description": "Too Many Requests: retry after 120",
+                "parameters": {"retry_after": 120}})
         self._take(chat, url)
         self._next_id += 1
         msg = {"message_id": self._next_id, "date": 0, "text": text,
@@ -1208,6 +1215,104 @@ async def phase_mixed_command_burst():
         record("/erc under throttling: no errors logged", not _errors, str(error_msgs()[:2]))
         clock.now += 60
         record("Mixed burst: delivery state cleared afterwards", _outbox_empty())
+    finally:
+        tg.uninstall()
+
+
+async def phase_close_races():
+    """Regressions from the 2026-10-30 review of the burst changes.
+
+    1. A vote's panel redraw used the rollcall number from when the vote was
+       saved. Its confirmation can wait out a rate limit for seconds; if
+       another rollcall closed meanwhile, the panel was drawn as "ID: 2" when
+       it was now #1 (typed `/in ::2` then failed).
+    3. /erc's summary failing used to skip everything after it — the ghost
+       prompt and removing the closed panel's buttons.
+    """
+    print("\n=== Phase: close/renumber races under throttling ===\n")
+    import chat_outbox
+    from bot_state import _panel_msg_ids
+
+    def keys():
+        return {k[1]: v for k, v in _panel_msg_ids.items() if k[0] == CHAT_ID}
+
+    # ── 1: vote on #2 waits; /erc #1 renumbers it to #1 meanwhile ─────────
+    clock = _FakeClock()
+    tg = _ThrottlingTelegram(clock, burst=6)
+    tg.install()
+    try:
+        await feed("/src First", ALICE)
+        await feed("/src Second", ALICE)
+        second_panel = keys()[2]
+        clock.now += 60
+        bot_state._rate_limits.clear()
+        _outbound.clear(); _errors.clear(); tg.attempted.clear()
+        tg.tokens[CHAT_ID] = 0; tg.stamp[CHAT_ID] = clock.now        # Telegram: throttled
+        vote = asyncio.ensure_future(bot.process_new_updates(
+            [make_message_update("/in ::2", *_VOTERS[0])]))
+        await asyncio.sleep(0); await asyncio.sleep(0)               # saved; confirmation waiting
+        await bot.process_new_updates([make_message_update("/erc ::1", *ALICE)])
+        await vote
+        await chat_outbox.drain()
+        edits = [a for n, a, _ in _outbound if n == "edit_message_text" and a[2] == second_panel]
+        last = edits[-1][0] if edits else ""
+        record("Renumber race: the vote's panel is drawn as the rollcall's NEW number",
+               "Title: Second" in last and "ID: 1" in last, repr(last[:40]))
+        record("Renumber race: no stale #2 panel mapping left behind",
+               keys() == {1: second_panel}, f"{keys()}")
+        record("Renumber race: the vote is on Second", _VOTERS[0][0] in
+               [u.user_id for u in manager.get_rollcall(CHAT_ID, 0).inList])
+        record("Renumber race: no errors logged", not _errors, str(error_msgs()[:2]))
+        clock.now += 60
+        await feed("/erc", ALICE)
+    finally:
+        tg.uninstall()
+
+    # ── 1b: no burst at all — closing #1 must still relabel #2's panel ────
+    for close_cmd in ("/erc ::1", "/xrc ::1"):
+        clock = _FakeClock()
+        tg = _ThrottlingTelegram(clock, burst=1000)
+        tg.install()
+        try:
+            await feed("/src First", ALICE)
+            await feed("/src Second", ALICE)
+            second_panel = keys()[2]
+            _outbound.clear()
+            await feed(close_cmd, ALICE)
+            await chat_outbox.drain()
+            edits = [a[0] for n, a, _ in _outbound if n == "edit_message_text" and a[2] == second_panel]
+            record(f"{close_cmd.split()[0]} of #1: the remaining panel is relabelled ID 1",
+                   bool(edits) and "Title: Second" in edits[-1] and "ID: 1" in edits[-1],
+                   repr(edits[-1][:40]) if edits else "no edit")
+            await feed("/erc", ALICE)
+        finally:
+            tg.uninstall()
+
+    # ── 3: /erc whose summary Telegram never takes ────────────────────────
+    clock = _FakeClock()
+    tg = _ThrottlingTelegram(clock, burst=1000)
+    tg.install()
+    try:
+        await feed("/toggle_ghost_tracking on", ALICE)
+        await feed("/src Ghosty", ALICE)
+        panel = keys()[1]
+        for v in _VOTERS[:3]:
+            bot_state._rate_limits.clear()
+            await feed("/in", v)
+        tg.refuse_if = lambda text: "Ended by" in text
+        _outbound.clear(); _errors.clear(); tg.attempted.clear()
+        out = await feed("/erc", ALICE)
+        await chat_outbox.drain()
+        out = list(_outbound)
+        texts = [str(a[1]) for n, a, _ in out if n == "send_message"]
+        record("/erc summary refused: rollcall still closed", not manager.get_rollcalls(CHAT_ID))
+        record("/erc summary refused: ghost prompt still posted",
+               any("Did anyone ghost" in t for t in texts), f"{[t[:30] for t in texts]}")
+        record("/erc summary refused: closed panel's buttons still removed",
+               any(n == "edit_message_reply_markup" and a[1] == panel for n, a, _ in out))
+        record("/erc summary refused: admin not told it failed", not _no_false_failure(tg))
+        record("/erc summary refused: no errors logged", not _errors, str(error_msgs()[:2]))
+        await feed("/toggle_ghost_tracking off", ALICE)
     finally:
         tg.uninstall()
 
@@ -2315,6 +2420,7 @@ async def run_all():
     await phase_remaining_surface()
     await phase_vote_burst()
     await phase_mixed_command_burst()
+    await phase_close_races()
 
     print("\n=== Phase 16: Lifecycle close (final) ===\n")
 

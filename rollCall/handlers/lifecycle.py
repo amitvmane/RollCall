@@ -87,6 +87,21 @@ async def _strip_panel(cid: int, msg_id) -> None:
         await safe_edit_markup(cid, msg_id, reply_markup=None)
 
 
+async def _redraw_renumbered_panels(cid: int, result: dict) -> None:
+    """Redraw the existing panel of every rollcall that moved up a number.
+
+    Their panels still said the old "ID: N" (and its buttons' labels) until
+    someone voted on them, so a member typing `/in ::N` from the panel hit
+    the wrong rollcall or none. Edits go through _update_panel, so they are
+    coalesced and paced like any other redraw. Runs in shh mode too — it
+    corrects existing messages, it doesn't announce anything.
+    """
+    moved = {e["new"] for e in result.get("renumbered") or []}
+    for idx, rollcall in enumerate(manager.get_rollcalls(cid)):
+        if idx + 1 in moved:
+            await best_effort(_update_panel(cid, idx + 1, rollcall), "renumbered panel", cid)
+
+
 async def _post_end_cleanup(cid: int, ended_number: int, result: dict, rc_title: str = "",
                             settle_nudge: bool = True, retired=_NOT_DONE) -> None:
     """Panel-ID cleanup, ghost prompt, and renumber announcements after a rollcall ends.
@@ -144,7 +159,8 @@ async def _post_end_cleanup(cid: int, ended_number: int, result: dict, rc_title:
             ),
         )
         title_hint = f" '{rc_title}'" if rc_title else ""
-        await bot.send_message(cid, f"👻 Did anyone ghost{title_hint}?", reply_markup=ghost_markup)
+        await best_effort(bot.send_message(cid, f"👻 Did anyone ghost{title_hint}?",
+                                           reply_markup=ghost_markup), "ghost prompt", cid)
 
     updated_rollcalls = manager.get_rollcalls(cid)
     if updated_rollcalls:
@@ -152,11 +168,12 @@ async def _post_end_cleanup(cid: int, ended_number: int, result: dict, rc_title:
         for entry in result["renumbered"]:
             lines.append(f"  #{entry['old']} '{entry['title']}' → #{entry['new']}")
         if not manager.get_shh_mode(cid):
-            await bot.send_message(cid, "\n".join(lines))
+            await best_effort(bot.send_message(cid, "\n".join(lines)), "renumber notice", cid)
             for idx, rollcall in enumerate(updated_rollcalls):
                 new_id = idx + 1
                 text = f"Rollcall number {new_id}\n\n" + _build_panel_text(rollcall, new_id)
-                await bot.send_message(cid, text)
+                await best_effort(bot.send_message(cid, text), "renumbered list", cid)
+        await _redraw_renumbered_panels(cid, result)
 
 
 async def _post_cancel_cleanup(cid: int, ended_number: int, result: dict, retired=_NOT_DONE) -> None:
@@ -179,11 +196,12 @@ async def _post_cancel_cleanup(cid: int, ended_number: int, result: dict, retire
         for entry in result["renumbered"]:
             lines.append(f"  #{entry['old']} '{entry['title']}' → #{entry['new']}")
         if not manager.get_shh_mode(cid):
-            await bot.send_message(cid, "\n".join(lines))
+            await best_effort(bot.send_message(cid, "\n".join(lines)), "renumber notice", cid)
             for idx, rollcall in enumerate(updated_rollcalls):
                 new_id = idx + 1
                 text = f"Rollcall number {new_id}\n\n" + _build_panel_text(rollcall, new_id)
-                await bot.send_message(cid, text)
+                await best_effort(bot.send_message(cid, text), "renumbered list", cid)
+        await _redraw_renumbered_panels(cid, result)
 
 
 def _group_web_url(cid: int) -> str:
@@ -312,26 +330,28 @@ async def _update_panel(cid: int, rc_number: int, rc, force_new: bool = False) -
     second — the first is drawn now and the rest are folded into ONE more
     redraw once the burst settles, which reads the state as it is then
     (chat_outbox.coalesce). A refresh that doesn't overlap another is drawn
-    immediately, exactly as before. Coalescing is keyed by the rollcall's db
-    id and the trailing redraw re-finds it by id, so a renumber or close in
-    between can't redraw the wrong panel.
+    immediately, exactly as before.
+
+    Every draw re-finds the rollcall by db id and uses its number AT THAT
+    MOMENT. `rc_number` is only where the caller last saw it: a vote's
+    confirmation can wait out a rate limit for seconds, and if another
+    rollcall closes meanwhile this one is renumbered — drawing with the
+    caller's number labelled it "ID: 2" when it was now #1, and typed
+    `/in ::2` failed. A rollcall that closed meanwhile isn't redrawn at all
+    (that would put live buttons back on a closed panel).
     """
     rc_id = _rc_db_id(rc)
     if force_new or not rc_id:
         await _render_panel(cid, rc_number, rc, force_new=force_new)
         return
 
-    async def _trailing():
+    async def _draw_current():
         idx = find_rollcall_index(cid, rc_id, manager)
         if idx is None:
-            return                      # closed meanwhile: its final panel is not ours to redraw
+            return
         await _render_panel(cid, idx + 1, manager.get_rollcall(cid, idx))
 
-    await chat_outbox.coalesce(
-        ("panel", cid, rc_id),
-        lambda: _render_panel(cid, rc_number, rc),
-        _trailing,
-    )
+    await chat_outbox.coalesce(("panel", cid, rc_id), _draw_current, _draw_current)
 
 
 async def _render_panel(cid: int, rc_number: int, rc, force_new: bool = False) -> None:
@@ -665,7 +685,9 @@ async def end_roll_call(message):
             retired = _close_panel_bookkeeping(cid, ended_number, result, result.get("rc_db_id"))
 
         # Announce after releasing the lock — see _close_panel_bookkeeping.
-        await bot.send_message(cid, finish_text)
+        # Best-effort: the rollcall is closed; a summary Telegram won't take
+        # must not also cost the ghost prompt and button removal below.
+        await best_effort(bot.send_message(cid, finish_text), "end summary", cid)
         await _post_end_cleanup(cid, ended_number, result, rc_title=rc.title, retired=retired)
     except Exception as e:
         await reply_error(message, e)
@@ -709,12 +731,12 @@ async def cancel_roll_call(message):
 
         # Announce after releasing the lock — see _close_panel_bookkeeping.
         reason_part = f" — {_esc_md(reason)}" if reason else ""
-        await bot.send_message(
+        await best_effort(bot.send_message(
             cid,
             f"❌ *{_esc_md(rc.title)}* has been cancelled by {_esc_md(cancelled_by)}{reason_part}.\n"
             "No attendance was recorded.",
             parse_mode="Markdown",
-        )
+        ), "cancel notice", cid)
         await _post_cancel_cleanup(cid, ended_number, result, retired=retired)
     except Exception as e:
         await reply_error(message, e)
@@ -977,9 +999,13 @@ async def _cb_vote(call, cid: int, rc_number: int, rc, action: str) -> None:
 
     # The tapped message is the panel to redraw (as before); going through
     # _update_panel means a burst of taps is coalesced and paced exactly
-    # like a burst of /in commands.
-    _panel_msg_ids[(cid, rc_number)] = call.message.message_id
-    await best_effort(_update_panel(cid, rc_number, rc), "panel refresh", cid)
+    # like a burst of /in commands. Its position is looked up NOW — the
+    # sends above may have waited out a rate limit while another rollcall
+    # closed and this one was renumbered.
+    idx = find_rollcall_index(cid, rc_id, manager) if rc_id else rc_number - 1
+    if idx is not None:
+        _panel_msg_ids[(cid, idx + 1)] = call.message.message_id
+        await best_effort(_update_panel(cid, idx + 1, rc), "panel refresh", cid)
 
 
 async def _cb_lists_menu(call, cid: int, rc_number: int, rc) -> None:

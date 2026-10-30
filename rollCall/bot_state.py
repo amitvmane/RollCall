@@ -194,9 +194,10 @@ def _handler_chat_id(arg):
 
 
 async def best_effort(awaitable, what: str, cid: int) -> bool:
-    """Await a Telegram call made AFTER a vote was saved; never raise.
+    """Await a Telegram call made AFTER a change (vote, close, cancel) was
+    saved; never raise.
 
-    The vote is the state. If a message about it can't be delivered — a
+    The saved change is the state. If a message about it can't be delivered — a
     deleted panel, a network blip, a rate limit that outlasted the pacing in
     chat_outbox — that is logged, the next step (promotion notice, panel
     refresh) still runs, and the voter is never told "something went wrong"
@@ -206,7 +207,7 @@ async def best_effort(awaitable, what: str, cid: int) -> bool:
         await awaitable
         return True
     except Exception as e:
-        logging.warning("Vote saved; %s not delivered (chat=%s): %s", what, cid, e)
+        logging.warning("Change saved; %s not delivered (chat=%s): %s", what, cid, e)
         return False
 
 

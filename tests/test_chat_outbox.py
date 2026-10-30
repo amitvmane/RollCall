@@ -358,3 +358,88 @@ class TestReplyErrorOnRateLimit(unittest.TestCase):
         with patch.object(bot_state.bot, "send_message", new=AsyncMock()) as send:
             asyncio.run(bot_state.reply_error(-100, e))
         send.assert_not_called()
+
+
+class TestRedrawRetry(OutboxTestBase):
+    """A failed panel draw is retried once. A rush used to end with a single
+    redraw; if that one failed, the list stayed stale until the next change."""
+
+    def _run(self, outcomes):
+        """Each draw pops the next outcome: True = succeeds, False = raises."""
+        draws = []
+
+        async def draw():
+            ok = outcomes.pop(0) if outcomes else True
+            draws.append(ok)
+            if not ok:
+                raise RuntimeError("Telegram said no")
+
+        async def run():
+            try:
+                await chat_outbox.coalesce("k", draw, draw)
+            except RuntimeError:
+                pass
+            await chat_outbox.drain()
+        asyncio.run(run())
+        return draws
+
+    def test_failed_lone_draw_is_redrawn_once(self):
+        self.assertEqual(self._run([False, True]), [False, True])
+        self.assertTablesEmpty()
+
+    def test_failed_final_redraw_after_a_rush_is_retried_once(self):
+        drawn = []
+        outcomes = [True, False, True]       # lead ok, trailing fails, retry ok
+
+        async def draw():
+            ok = outcomes.pop(0)
+            drawn.append(ok)
+            if not ok:
+                raise RuntimeError("Telegram said no")
+            await asyncio.sleep(0)
+
+        async def run():
+            first = asyncio.ensure_future(chat_outbox.coalesce("k", draw, draw))
+            await asyncio.sleep(0)
+            await chat_outbox.coalesce("k", draw, draw)       # overlaps → trailing
+            await first
+            await chat_outbox.drain()
+        asyncio.run(run())
+        self.assertEqual(drawn, [True, False, True])
+        self.assertTablesEmpty()
+
+    def test_permanent_failure_stops_after_one_retry(self):
+        self.assertEqual(self._run([False, False, False, False]), [False, False],
+                         "a chat the bot can't post in must not be retried forever")
+        self.assertTablesEmpty()
+
+    def test_successful_draw_is_not_repeated(self):
+        self.assertEqual(self._run([True]), [True])
+        self.assertTablesEmpty()
+
+    def test_retry_allowance_resets_after_a_successful_draw(self):
+        """A failure late in a long rush still gets its retry, even if an
+        earlier failure in the same rush already used one."""
+        outcomes = [True, False, True, False, True]
+        drawn, state = [], {"changed": False}
+
+        async def draw():
+            ok = outcomes.pop(0)
+            drawn.append(ok)
+            if not ok:
+                raise RuntimeError("Telegram said no")
+            if len(drawn) == 3 and not state["changed"]:
+                state["changed"] = True                    # another vote lands mid-rush
+                await chat_outbox.coalesce("k", draw, draw)
+            await asyncio.sleep(0)
+
+        async def run():
+            first = asyncio.ensure_future(chat_outbox.coalesce("k", draw, draw))
+            await asyncio.sleep(0)
+            await chat_outbox.coalesce("k", draw, draw)
+            await first
+            await chat_outbox.drain()
+        asyncio.run(run())
+        self.assertEqual(drawn, [True, False, True, False, True],
+                         "the second failure was not retried")
+        self.assertTablesEmpty()

@@ -16,9 +16,12 @@ Two mechanisms, both invisible in normal use:
 1. ``deliver(cid, factory)`` — sends now. Only after Telegram has refused a
    send to this chat does it start pacing: later sends to that chat queue in
    FIFO order, wait until Telegram's ``retry_after`` has passed, then go out
-   about one a second. A send that cannot go out within ``MAX_WAIT`` raises
-   the last 429 so the caller can log it. No 429 → no waiting, no lock: the
-   exact call that was made before this module existed.
+   about one a second. A send gives up (GaveUp, logged by the caller) only
+   when Telegram asks it to wait past ``MAX_WAIT`` from when it was made;
+   time spent waiting its turn in the queue doesn't count against that, so
+   in a long rush a message can still go out after more than MAX_WAIT —
+   late beats lost. No 429 → no waiting, no lock: the exact call that was
+   made before this module existed.
 
 2. ``coalesce(key, leading, trailing)`` — the panel. The first refresh runs
    immediately, exactly as before. Refreshes requested WHILE one is in flight
@@ -42,9 +45,10 @@ import time
 _clock = time.monotonic
 _sleep = asyncio.sleep
 
-MAX_WAIT = 60.0          # longest a message may be held back before giving up
+MAX_WAIT = 60.0          # give up if Telegram asks a send to wait past this (see deliver)
 RECOVERY_SPACING = 1.0   # pace while recovering from a 429 (Telegram: ~1/s/chat)
 PANEL_SETTLE = 1.0       # how long a burst gets to settle before the final redraw
+PANEL_RETRIES = 1        # a failed panel draw is retried this many times
 _DEFAULT_RETRY_AFTER = 3.0
 
 _blocked_until: dict = {}   # chat_id -> monotonic time Telegram said to wait until
@@ -91,8 +95,10 @@ async def deliver(cid, factory, max_wait: float = MAX_WAIT, retry: bool = True):
     call — for chat ``cid``, waiting out Telegram's rate limit if needed.
 
     Returns the call's result. Non-429 errors propagate unchanged on the
-    first occurrence. If the message can't go out within ``max_wait``,
-    raises GaveUp (error_code 429), and the caller logs it.
+    first occurrence. Raises GaveUp (error_code 429) — and the caller logs it
+    — when Telegram's retry_after would push the send past ``max_wait`` from
+    when it was made. Waiting for its turn behind earlier queued sends is
+    not cut short: the queue drains in order.
 
     The factory is only re-invoked after a 429, i.e. after Telegram said it
     did NOT post the message — so a retry can't duplicate one. retry=False
@@ -200,14 +206,26 @@ async def coalesce(key, leading, trailing) -> None:
     ``leading`` and ``trailing`` are zero-arg async callables. ``trailing``
     must read the CURRENT state (it runs later than the request).
     Exceptions from ``leading`` propagate to the caller, as before.
+
+    A failed draw is retried ONCE, after PANEL_SETTLE: if ``leading`` raised,
+    a trailing redraw is scheduled anyway; if a trailing redraw raises, it
+    runs one more time. The allowance resets after every successful draw, so
+    a failure late in a long rush gets its retry even if an earlier one used
+    it. Without this a rush ended with a single redraw, and if that one
+    failed the panel stayed stale until the next change. Two failures in a
+    row stop it: a chat the bot can't post in must not spin forever.
     """
     state = _inflight.get(key)
     if state is not None:
         state["dirty"] = True
         return
-    state = _inflight[key] = {"dirty": False}
+    state = _inflight[key] = {"dirty": False, "retries": PANEL_RETRIES}
     try:
         await leading()
+    except Exception:
+        state["dirty"] = True               # draw again once things settle
+        state["retries"] -= 1
+        raise
     finally:
         if state["dirty"]:
             task = asyncio.create_task(_trail(key, state, trailing))
@@ -225,8 +243,15 @@ async def _trail(key, state, trailing) -> None:
             state["dirty"] = False          # anything after this is drawn next round
             try:
                 await trailing()
+                state["retries"] = PANEL_RETRIES     # a success earns the next failure its retry
             except Exception:
-                logging.warning("Coalesced panel refresh failed (%s)", key, exc_info=True)
+                if state["retries"] > 0:
+                    state["retries"] -= 1
+                    state["dirty"] = True   # one more attempt after settling
+                    logging.warning("Panel refresh failed (%s) — retrying once", key, exc_info=True)
+                else:
+                    logging.warning("Panel refresh failed (%s) — giving up until the next change",
+                                    key, exc_info=True)
             if not state["dirty"]:
                 return
     finally:

@@ -39,6 +39,20 @@ def _parse_rc_and_comment(text: str) -> tuple[int, str]:
     return rc_number, comment
 
 
+def _voted_rollcall(cid, result):
+    """(0-based index, rollcall) the vote landed in, found by db id NOW —
+    or (None, None) if it has closed since.
+
+    Not by the position the vote was saved at: the confirmation sent in
+    between can wait out a rate limit for seconds, and if another rollcall
+    closes meanwhile the positions shift — the old index would then point at
+    a different rollcall (or none), and its panel would be redrawn instead.
+    """
+    from services.common import find_rollcall_index
+    idx = find_rollcall_index(cid, (result.get("rollcall") or {}).get("id"), manager)
+    return (idx, manager.get_rollcall(cid, idx)) if idx is not None else (None, None)
+
+
 @bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/in")
 async def in_user(message):
     try:
@@ -119,10 +133,9 @@ async def in_user(message):
                 ), "IN announcement", cid)
 
         from handlers.lifecycle import _update_panel
-        rc_number_1based = result["rc_number_1based"]
-        rc = manager.get_rollcall(cid, rc_number)
+        idx, rc = _voted_rollcall(cid, result)
         if rc:
-            await best_effort(_update_panel(cid, rc_number_1based, rc), "panel refresh", cid)
+            await best_effort(_update_panel(cid, idx + 1, rc), "panel refresh", cid)
 
     except Exception as e:
         await reply_error(message, e)
@@ -173,15 +186,15 @@ async def out_user(message):
                     parse_mode="Markdown",
                 ), "OUT announcement", cid)
 
+        idx, rc = _voted_rollcall(cid, result)
         if result["promoted"]:
-            await best_effort(announce_one(cid, result["promoted"], rc_title, rc_number_1based,
-                                           manager.get_rollcall(cid, rc_number)),
+            await best_effort(announce_one(cid, result["promoted"], rc_title, rc_number_1based, rc),
                               "promotion notice", cid)
 
         from handlers.lifecycle import _update_panel
-        rc = manager.get_rollcall(cid, rc_number)
+        idx, rc = _voted_rollcall(cid, result)
         if rc:
-            await best_effort(_update_panel(cid, rc_number_1based, rc), "panel refresh", cid)
+            await best_effort(_update_panel(cid, idx + 1, rc), "panel refresh", cid)
 
     except Exception as e:
         await reply_error(message, e)
@@ -224,15 +237,15 @@ async def maybe_user(message):
                 parse_mode="Markdown",
             ), "MAYBE announcement", cid)
 
+        idx, rc = _voted_rollcall(cid, result)
         if result["promoted"]:
-            await best_effort(announce_one(cid, result["promoted"], rc_title, rc_number_1based,
-                                           manager.get_rollcall(cid, rc_number)),
+            await best_effort(announce_one(cid, result["promoted"], rc_title, rc_number_1based, rc),
                               "promotion notice", cid)
 
         from handlers.lifecycle import _update_panel
-        rc = manager.get_rollcall(cid, rc_number)
+        idx, rc = _voted_rollcall(cid, result)
         if rc:
-            await best_effort(_update_panel(cid, rc_number_1based, rc), "panel refresh", cid)
+            await best_effort(_update_panel(cid, idx + 1, rc), "panel refresh", cid)
 
     except Exception as e:
         await reply_error(message, e)

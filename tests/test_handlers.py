@@ -696,15 +696,20 @@ class TestInUser(HandlerTestBase):
 
     async def test_in_rc_number_targeting(self):
         rc2 = self._make_rc("Second Event")
+        rc2.id = 2                       # distinct db id: the panel is re-found by id
         multi_manager = self._make_manager([self.rc, rc2])
-        multi_manager.get_rollcall.return_value = rc2
+        multi_manager.get_rollcall.side_effect = lambda cid, idx: [self.rc, rc2][idx]
         msg = self._make_message("/in ::2")
+        panel = AsyncMock(return_value=None)
         with self._rc_started(), patch('handlers.voting.manager', multi_manager), \
              patch('rollcall_manager.manager', multi_manager), \
              patch('services.voting.manager', multi_manager), \
-             patch('handlers.lifecycle._update_panel', return_value=False):
+             patch('handlers.lifecycle._update_panel', panel):
             await self.in_user(msg)
-        multi_manager.get_rollcall.assert_called_with(100, 1)  # index 1 = RC #2
+        multi_manager.get_rollcall.assert_any_call(100, 1)   # the vote targeted index 1 = RC #2
+        panel.assert_called_once()
+        self.assertIs(panel.call_args.args[2], rc2, "panel refresh must draw RC #2")
+        self.assertEqual(panel.call_args.args[1], 2)
 
     async def test_in_invalid_rc_number_sends_error(self):
         msg = self._make_message("/in ::99")

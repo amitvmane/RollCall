@@ -1219,6 +1219,109 @@ async def phase_mixed_command_burst():
         tg.uninstall()
 
 
+async def phase_stats_season():
+    """Stats checked against an independently kept ledger.
+
+    Plays a randomized season through real commands (mind changes, /xrc
+    cancels, no-show reviews) in a chat of its own, counts every number
+    separately, and compares with /stats, the web Stats tab, the no-show
+    board and history. Fixed seeds, so a failure reproduces exactly.
+    """
+    print("\n=== Phase: stats vs independent ledger (randomized seasons) ===\n")
+    import random
+    from services import stats as stats_svc, ghost as ghost_svc
+    from services.web import get_group_web_token
+
+    members = _VOTERS[:8]
+    for n, seed in enumerate((7, 42, 99)):
+        rng = random.Random(seed)
+        chat = -1001999000700 - n
+        mismatches = []
+
+        def expect(label, got, want):
+            if got != want:
+                mismatches.append(f"{label}: got {got!r}, expected {want!r}")
+
+        await feed("/toggle_ghost_tracking on", ALICE, chat_id=chat)
+        manager.set_absent_limit(chat, 1000)   # no reconfirm prompt: votes land directly
+        played, cancelled = [], []             # (rc_id, {uid: last vote}, ghosts)
+        ghosts_owed = {m[0]: 0 for m in members}
+        for g in range(14):
+            await feed(f"/src Season{g}", ALICE, chat_id=chat)
+            rc_id = manager.get_rollcall(chat, 0).id
+            votes = {}
+            for m in members:
+                final = rng.choice(["in", "in", "in", "out", "maybe", None])
+                first = [rng.choice(["in", "out", "maybe"])] if rng.random() < 0.3 else []
+                for c in first + [final]:
+                    if c is None:
+                        continue
+                    bot_state._rate_limits.clear()
+                    await feed(f"/{c}", m, chat_id=chat)
+                    votes[m[0]] = c
+            if rng.random() < 0.25:
+                await feed("/xrc", ALICE, chat_id=chat)
+                cancelled.append((rc_id, votes, set()))
+                continue
+            await feed("/erc", ALICE, chat_id=chat)
+            ins = [u for u, v in votes.items() if v == "in"]
+            ghosts = set()
+            if ins and rng.random() < 0.7:
+                ghosts = set(rng.sample(ins, k=min(len(ins), rng.choice([0, 1, 1, 2]))))
+                ghost_svc.review_session(chat, rc_id, ghosts)
+                for u in ins:
+                    ghosts_owed[u] = ghosts_owed[u] + 1 if u in ghosts else max(0, ghosts_owed[u] - 1)
+            played.append((rc_id, votes, ghosts))
+
+        lb = stats_svc.leaderboard(chat, limit=50)
+        expect("games counted", lb["total_rollcalls_in_chat"], len(played))
+        by_uid = {e["user_id"]: e for e in lb["entries"]}
+        for uid, name, _ in members:
+            att = sum(1 for _, v, gh in played if v.get(uid) == "in" and uid not in gh)
+            expect(f"{name} games played", by_uid.get(uid, {}).get("sessions_attended", 0), att)
+            if uid in by_uid and played:
+                rate = by_uid[uid].get("attendance_rate")
+                if rate is None or abs(rate - 100 * att / len(played)) >= 0.6:
+                    mismatches.append(f"{name} attendance rate {rate} vs {100 * att / len(played):.1f}")
+        order = [e["sessions_attended"] for e in lb["entries"]]
+        expect("leaderboard order", order, sorted(order, reverse=True))
+
+        board = {r.get("user_id"): r for r in _db.get_ghost_leaderboard(chat)}
+        for uid, name, _ in members:
+            expect(f"{name} no-shows", int((board.get(uid) or {}).get("ghost_count") or 0), ghosts_owed[uid])
+
+        cancelled_ids = {c[0] for c in cancelled}
+        hist = {h.get("rollcall_id", h.get("id")): h for h in stats_svc.history(chat, limit=50)}
+        for rc_id, votes, _ in played + cancelled:
+            h = hist.get(rc_id)
+            if h is None:
+                mismatches.append(f"history missing game {rc_id}")
+                continue
+            for k in ("in", "out", "maybe"):
+                expect(f"game {rc_id} {k}", h[f"{k}_count"], sum(1 for v in votes.values() if v == k))
+            expect(f"game {rc_id} cancelled flag", h["is_cancelled"], rc_id in cancelled_ids)
+
+        pending = {r["id"] for r in _db.get_unprocessed_rollcalls(chat)}
+        expect("cancelled games offered for no-show review", pending & cancelled_ids, set())
+
+        web = stats_svc.web_group_stats(get_group_web_token(chat))
+        expect("web Stats tab games played",
+               {e.get("user_id"): e.get("sessions_attended") for e in web["leaderboard"]},
+               {e["user_id"]: e["sessions_attended"] for e in stats_svc.leaderboard(chat, limit=10)["entries"]})
+        for h in web["recent_history"]:
+            rid = h.get("rollcall_id", h.get("id"))
+            expect(f"web game {rid} cancelled flag", h["is_cancelled"], rid in cancelled_ids)
+
+        expect("busiest-time vote total", stats_svc.voting_peak_times(chat)["total_votes"],
+               sum(len(v) for _, v, _ in played + cancelled))
+        rt = stats_svc.response_time_board(chat)["entries"]
+        expect("fastest voters duplicates", len({e["user_id"] for e in rt}), len(rt))
+
+        record(f"Stats season (seed {seed}, {len(played)} played, {len(cancelled)} cancelled) "
+               "match an independent count: /stats, web, no-shows, history, peaks",
+               not mismatches, "; ".join(mismatches[:6]))
+
+
 async def phase_close_races():
     """Regressions from the 2026-10-30 review of the burst changes.
 
@@ -2481,6 +2584,7 @@ async def run_all():
     await phase_vote_burst()
     await phase_mixed_command_burst()
     await phase_close_races()
+    await phase_stats_season()
 
     print("\n=== Phase 16: Lifecycle close (final) ===\n")
 

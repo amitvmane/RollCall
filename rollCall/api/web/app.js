@@ -164,7 +164,9 @@ function $(x){return document.getElementById(x)}
 function _confirmAction(msg){
   return new Promise(resolve=>{
     const w=window.Telegram&&window.Telegram.WebApp;
-    if(w&&typeof w.showConfirm==="function"){
+    // The SDK script loads in a plain browser too, reporting version 6.0;
+    // showConfirm needs 6.2 and logs a console error before throwing.
+    if(w&&typeof w.showConfirm==="function"&&typeof w.isVersionAtLeast==="function"&&w.isVersionAtLeast("6.2")){
       try{w.showConfirm(msg,ok=>resolve(!!ok));return;}catch(_){/* fall through */}
     }
     let r;

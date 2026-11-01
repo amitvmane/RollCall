@@ -148,10 +148,14 @@ def qr_png(vpa: str, amount: Optional[int] = None) -> BytesIO:
     parameter is omitted entirely rather than interpolated, which is what
     produced `am=None` in the URL and a QR that every UPI app rejected.
     """
-    import qrcode  # soft import — already in requirements
     amt_part = f"&am={amount}" if amount else ""
-    upi_url = f"upi://pay?pa={vpa}{amt_part}&cu=INR&tn=RollCall"
-    img = qrcode.make(upi_url)
+    return qr_url_png(f"upi://pay?pa={vpa}{amt_part}&cu=INR&tn=RollCall")
+
+
+def qr_url_png(url: str) -> BytesIO:
+    """Return a PNG BytesIO of a QR that encodes `url` verbatim."""
+    import qrcode  # soft import — already in requirements
+    img = qrcode.make(url)
     buf = BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)

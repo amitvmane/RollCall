@@ -1,7 +1,8 @@
 """
-Web voting handler — /weblink, /weblogin, and /mytoken commands.
+Web voting handler — /weblink, /app, /weblogin, and /mytoken commands.
 
 /weblink — shares the permanent group URL for bookmarking.
+/app — QR code that opens the group page's install sheet on a phone.
 /weblogin name — admin issues a single-use login URL for a member who can't
   use the Telegram verify flow (e.g. Telegram is down).
 /mytoken [off] — DMs the member their persistent personal login code for the
@@ -82,6 +83,39 @@ async def weblink_cmd(message):
         markup.add(InlineKeyboardButton("🌐 Open Voting Page", url=group_url))
 
         await bot.send_message(cid, "\n".join(lines), parse_mode="Markdown", reply_markup=markup)
+    except Exception as e:
+        await reply_error(cid, e)
+
+
+# ── /app ─────────────────────────────────────────────────────────────────────
+
+@bot.message_handler(func=lambda m: m.text.split()[0].split("@")[0].lower() in ("/app", "/install"))
+async def app_cmd(message):
+    """QR code of the group page with ?install=1, which opens the install
+    sheet on arrival. The group page rather than /web/: landing there saves
+    the group on the phone, so the installed app opens with it listed."""
+    cid = message.chat.id
+    try:
+        base = _web_base_url()
+        if not base:
+            await bot.send_message(
+                cid,
+                "Web voting is not configured. Set WEB_BASE_URL on the server to enable it."
+            )
+            return
+        install_url = f"{base}/web/group/{get_group_web_token(cid)}?install=1"
+        from utils.card_gen import qr_url_png
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("📲 Open install page", url=install_url))
+        await bot.send_photo(
+            cid, qr_url_png(install_url),
+            caption=(
+                "📲 *Install the RollCall app*\n\n"
+                "Scan with your phone's camera — the page shows the install steps for your phone.\n"
+                "Already on your phone? Tap the button below."
+            ),
+            parse_mode="Markdown", reply_markup=markup,
+        )
     except Exception as e:
         await reply_error(cid, e)
 

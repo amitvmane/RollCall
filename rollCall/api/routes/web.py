@@ -116,6 +116,30 @@ async def vapid_public_key() -> VapidPublicKeyResponse:
     return VapidPublicKeyResponse(public_key=push_svc.get_public_key())
 
 
+@router.get(
+    "/web/install-qr",
+    summary="QR code PNG that opens this app's install sheet on a phone",
+    response_class=Response,
+    response_model=None,
+)
+async def install_qr(
+    request: Request,
+    group: Optional[str] = Query(None, pattern=r"^[A-Za-z0-9_-]{1,64}$"),
+) -> Response:
+    # Shown in the install sheet on a laptop, where nothing can be installed
+    # to a phone — scanning hands the same page over to the phone. Encodes only
+    # a URL on this deployment (the pattern keeps `group` a bare token), so it
+    # can't be used to mint QR codes pointing anywhere else.
+    base = os.environ.get("WEB_BASE_URL", "").rstrip("/") or str(request.base_url).rstrip("/")
+    path = f"/web/group/{group}" if group else "/web/"
+    from utils.card_gen import qr_url_png
+    return Response(
+        content=qr_url_png(f"{base}{path}?install=1").getvalue(),
+        media_type="image/png",
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
+
+
 @router.post(
     "/web/group/{group_token}/push-subscribe",
     status_code=status.HTTP_204_NO_CONTENT,

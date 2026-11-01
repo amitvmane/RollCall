@@ -462,6 +462,7 @@ document.addEventListener("keydown",e=>{
   if(e.key!=="Escape")return;
   closeAcctMenu();
   if(_signinHome)closeSignIn();
+  closeInstallHelp();
 });
 
 // Three states, deliberately distinct: Telegram-verified, guest (a name but no
@@ -502,6 +503,9 @@ function renderAcctMenu(){
   if(window.matchMedia&&window.matchMedia("(pointer:coarse)").matches){
     html+=`<button class="acct-menu-item" role="menuitem" data-on-click="closeAcctMenu navTo" data-args='["/web/"]'>🏠 All your groups</button>`;
     html+=`<button class="acct-menu-item" role="menuitem" data-on-click="closeAcctMenu navTo" data-args='["/help"]'>❓ Command reference</button>`;
+  }
+  if(_canOfferInstall()){
+    html+=`<button class="acct-menu-item" role="menuitem" data-on-click="closeAcctMenu openInstallHelp">📲 Install app</button>`;
   }
   if(who||_idToken){
     html+=`<button class="acct-menu-item danger" role="menuitem" data-on-click="signOut">⏻ Sign out</button>`;
@@ -1819,8 +1823,21 @@ window.toggleNotifications = async function() {
 // ── PWA install prompt ─────────────────────────────────────────────────────
 let _installPrompt = null;
 
+// Whether to offer installing at all: not inside the installed app, and not in
+// Telegram's Mini App. NOT `if(tg)`: telegram-web-app.js is loaded on every
+// page and defines Telegram.WebApp in any browser, so `tg` is truthy for every
+// visitor — that test hid the ⬇ Install button from everyone. TG_USER and
+// initData are only set when Telegram actually launched the page. A function
+// declaration, not a const, so the account menu can call it however early it
+// renders.
+function _canOfferInstall(){
+  if(TG_USER||(tg&&tg.initData))return false;
+  return !(window.navigator.standalone===true||
+    (window.matchMedia&&window.matchMedia("(display-mode: standalone)").matches));
+}
+
 function _showInstallBtn(){
-  if(tg)return; // already inside Telegram — no native install UX needed
+  if(!_canOfferInstall())return;
   document.querySelectorAll(".brand-install-btn").forEach(b=>b.classList.remove("hidden"));
 }
 function _hideInstallBtn(){
@@ -1835,26 +1852,139 @@ window.addEventListener("beforeinstallprompt", e => {
   e.preventDefault();
   _installPrompt = e;
   _showInstallBtn();
+  // The sheet may already be open with the manual steps (a ?install=1 scan
+  // opens it on arrival, often before Chrome decides) — swap in the button.
+  if(!$("install-modal").classList.contains("hidden"))_renderInstallSheet();
 });
 
 window.addEventListener("appinstalled", () => {
   _installPrompt = null;
   _hideInstallBtn();
+  closeInstallHelp();
   toast("✅ RollCall installed! Open it from your home screen.", 4000);
 });
 
 window.triggerInstall = async function(){
   if(!_installPrompt){
-    if(_IOS_NEEDS_INSTALL)_iosInstallHelp("");
+    _showInstallSheet();
     return;
   }
-  _installPrompt.prompt();
-  const{outcome} = await _installPrompt.userChoice;
+  // A prompt event is single-use — prompt() a second time throws — so drop it
+  // whatever the answer. After "Not now" the button falls back to the manual
+  // steps until the browser offers a fresh one.
+  const ev=_installPrompt;
+  _installPrompt = null;
+  ev.prompt();
+  const{outcome} = await ev.userChoice;
   if(outcome === "accepted"){
-    _installPrompt = null;
     _hideInstallBtn();
+    closeInstallHelp();
+  }else if(!$("install-modal").classList.contains("hidden")){
+    _renderInstallSheet();
   }
 };
+
+// Which instructions apply. In-app browsers (a link tapped inside Telegram,
+// WhatsApp, Instagram…) cannot install anything, so they get "open in your
+// browser" rather than steps that lead to a menu item that isn't there. On
+// iOS every real browser carries a Safari/ token; a bare WKWebView doesn't.
+function _installPlatform(){
+  const ua=navigator.userAgent||"";
+  const ios=_IS_IOS, android=/Android/i.test(ua);
+  if(/FBAN|FBAV|Instagram|Line\/|WhatsApp|Telegram|Snapchat|; wv\)/i.test(ua)||(ios&&!/Safari\//.test(ua)))
+    return "inapp";
+  return ios?"ios":android?"android":"desktop";
+}
+
+function _installPageUrl(){
+  return location.origin+location.pathname;
+}
+
+function _renderInstallSheet(){
+  const body=$("install-body");
+  if(!body)return;
+  const copyBtn=`<button class="btn inst-alt" data-on-click="copyInstallLink">🔗 Copy link</button>`;
+  if(_installPrompt){
+    body.innerHTML=`<p class="inst-lead">One tap — your browser installs RollCall like any other app.</p>
+      <button class="btn btn-primary inst-go" data-on-click="triggerInstall">📲 Install RollCall</button>`;
+    return;
+  }
+  const plat=_installPlatform();
+  if(plat==="ios"){
+    body.innerHTML=`<ol class="inst-steps">
+        <li>Tap <b>Share</b> ⬆︎ — at the bottom of the screen in Safari, or next to the address bar.</li>
+        <li>Scroll and tap <b>Add to Home Screen</b> ➕.</li>
+        <li>Tap <b>Add</b>, then open RollCall from your home screen.</li>
+      </ol>
+      <p class="inst-note">Don't see <b>Add to Home Screen</b>? Open this page in Safari first — copy the link and paste it there.</p>
+      ${copyBtn}`;
+  }else if(plat==="android"){
+    body.innerHTML=`<ol class="inst-steps">
+        <li>Tap the browser menu <b>⋮</b> (top right).</li>
+        <li>Tap <b>Install app</b> or <b>Add to Home screen</b>.</li>
+        <li>Confirm, then open RollCall from your home screen or app drawer.</li>
+      </ol>
+      <p class="inst-note">No install option in the menu? Choose <b>Open in Chrome</b> first, or copy the link into Chrome.</p>
+      ${copyBtn}`;
+  }else if(plat==="inapp"){
+    body.innerHTML=`<p class="inst-lead">This page is open inside another app, which can't install apps.</p>
+      <ol class="inst-steps">
+        <li>Tap the <b>⋮</b> or <b>…</b> menu and choose <b>Open in browser</b> (Chrome or Safari).</li>
+        <li>Then use <b>📲 Install app</b> from the account menu there.</li>
+      </ol>
+      <p class="inst-note">No such option? Copy the link and paste it into Chrome or Safari.</p>
+      ${copyBtn}`;
+  }else{
+    const q=IS_GROUP&&URL_TOKEN?`?group=${encodeURIComponent(URL_TOKEN)}`:"";
+    body.innerHTML=`<p class="inst-lead">Scan with your phone's camera — the page opens there with the install steps for that phone.</p>
+      <img class="inst-qr" src="/api/v1/web/install-qr${q}" alt="QR code for this page" width="200" height="200"/>
+      <p class="inst-note">To install on this computer instead, use the install icon in Chrome or Edge's address bar.</p>
+      ${copyBtn}`;
+  }
+}
+
+function _showInstallSheet(){
+  _renderInstallSheet();
+  $("install-modal").classList.remove("hidden");
+  document.body.classList.add("modal-open");
+}
+
+// Account menu / home screen entry. With the browser's own prompt available,
+// the click IS the user gesture prompt() requires, so skip straight to it.
+window.openInstallHelp=function(){
+  if(_installPrompt){triggerInstall();return;}
+  _showInstallSheet();
+};
+
+window.closeInstallHelp=function(){
+  const m=$("install-modal");
+  if(!m||m.classList.contains("hidden"))return;
+  m.classList.add("hidden");
+  if(!_signinHome)document.body.classList.remove("modal-open");
+};
+
+window.copyInstallLink=async function(){
+  try{
+    await navigator.clipboard.writeText(_installPageUrl());
+    toast("🔗 Link copied — paste it into Chrome or Safari",3500);
+  }catch(_){
+    window.prompt("Copy this link:",_installPageUrl());
+  }
+};
+
+// ?install=1 — the /app QR code. Opens the sheet on arrival, then drops the
+// parameter so a reload or a bookmark doesn't keep reopening it. No prompt()
+// here: without a tap there is no user gesture, so the sheet's button does it.
+(function(){
+  try{
+    const p=new URLSearchParams(location.search);
+    if(p.get("install")!=="1")return;
+    p.delete("install");
+    const qs=p.toString();
+    history.replaceState(history.state,"",location.pathname+(qs?"?"+qs:"")+location.hash);
+    if(_canOfferInstall())setTimeout(_showInstallSheet,400);
+  }catch(_){}
+})();
 
 // ── Recent groups (localStorage) ───────────────────────────────────────────
 const LS_GROUPS="rc_groups";
@@ -1891,6 +2021,8 @@ function renderHomeScreen(){
     homeActions.appendChild(acct);
   }
   renderAcctControl();
+  const hi=document.getElementById("home-install");
+  if(hi)hi.classList.toggle("hidden",!_canOfferInstall());
   const container=document.getElementById("home-groups");
   if(!container)return;
 

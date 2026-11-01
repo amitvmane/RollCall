@@ -159,6 +159,19 @@ COMMANDS = [
         "details": "Prints the deployed version of the bot and a short changelog summary.",
     },
     {
+        "name": "app", "aliases": ["install"], "scope": "user", "category": "Settings",
+        "args": "", "sample": "/app",
+        "summary": "QR code to install the RollCall app on your phone",
+        "details": (
+            "Posts a QR code for this group's web page. Scan it with your phone's "
+            "camera and the page opens with install steps for that phone — one tap "
+            "on Android, Share → Add to Home Screen on iPhone. The installed app "
+            "opens straight to your groups, full screen, and can send notifications.\n\n"
+            "You can also install any time from the web page: account menu → 📲 Install app. "
+            "Requires WEB_BASE_URL to be configured on the server."
+        ),
+    },
+    {
         "name": "weblink", "aliases": [], "scope": "user", "category": "Settings",
         "args": "", "sample": "/weblink",
         "summary": "Get web voting links for this group",

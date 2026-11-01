@@ -614,6 +614,32 @@ async def phase_remaining_surface():
     out = await feed("/weblink", ALICE)
     record("/weblink responds (link or config warning)", bool(out))
 
+    # /app: a QR photo of the group page that opens the install sheet
+    # (?install=1), with a button for whoever is already on the phone.
+    _prev_wb = os.environ.get("WEB_BASE_URL")
+    os.environ["WEB_BASE_URL"] = "https://rollcall.test"
+    try:
+        out = await feed("/app", ALICE)
+        out_alias = await feed("/install", BOB)
+    finally:
+        if _prev_wb is None:
+            os.environ.pop("WEB_BASE_URL", None)
+        else:
+            os.environ["WEB_BASE_URL"] = _prev_wb
+    _photos = [kw for n, a, kw in out if n == "send_photo"]
+    _btn_urls = [b.url for kw in _photos if kw.get("reply_markup")
+                 for row in kw["reply_markup"].keyboard for b in row]
+    record("/app posts a QR photo", len(_photos) == 1 and "Install" in (_photos[0].get("caption") or ""),
+           str(out))
+    record("/app button opens the group page's install sheet",
+           len(_btn_urls) == 1 and _btn_urls[0].startswith("https://rollcall.test/web/group/")
+           and _btn_urls[0].endswith("?install=1"), str(_btn_urls))
+    record("/install alias posts the same QR", has_call(out_alias, "send_photo"), str(out_alias))
+    if _prev_wb is None:
+        out = await feed("/app", ALICE)
+        record("/app without WEB_BASE_URL explains, no photo",
+               has_call(out, "send_message") and not has_call(out, "send_photo"), str(out))
+
     out = await feed("/mytoken", BOB)
     record("/mytoken issues a personal token", bool(out))
 

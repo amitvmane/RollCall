@@ -681,9 +681,17 @@ const WIDTHS = [
         acctWidth: document.getElementById("acct-btn").getBoundingClientRect().width,
         adminWidth: admin.classList.contains("hidden") ? 0 : admin.getBoundingClientRect().width,
         overflow: document.documentElement.scrollWidth - window.innerWidth,
+        installOffered: (() => {
+          document.getElementById("acct-btn").click();
+          const t = document.getElementById("acct-menu").innerText;
+          document.getElementById("acct-btn").click();
+          return /install app/i.test(t) ||
+            !document.getElementById("install-btn").classList.contains("hidden");
+        })(),
       };
     });
     if (!s.tgMode) failures.push("tg-mode: Telegram Mini App not detected from initDataUnsafe");
+    if (s.installOffered) failures.push("tg-mode: Install app offered inside the Telegram Mini App");
     if (!(s.barHeight > 0)) failures.push("tg-mode: header not rendered inside the Mini App");
     if (!(s.acctWidth > 0)) failures.push("tg-mode: account chip not reachable inside the Mini App");
     if (!(s.adminWidth > 0)) failures.push("tg-mode: Admin button not reachable inside the Mini App");
@@ -691,6 +699,108 @@ const WIDTHS = [
     if (errs.length) failures.push(`tg-mode: JS error — ${errs[0]}`);
 
     console.log("  tg-mode: header controls survive inside the Telegram Mini App");
+    await page.close();
+  }
+
+  // ── Install option (outside Telegram) ───────────────────────────────────
+  // telegram-web-app.js is loaded on every page and defines Telegram.WebApp in
+  // ANY browser, with empty initData. The other checks block telegram.org, so
+  // window.Telegram never existed here — which is how `if(tg)return;` hid the
+  // ⬇ Install button from every real visitor while this file stayed green.
+  // The stub below is what the real script leaves behind outside Telegram.
+  {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
+    await page.setRequestInterception(true);
+    page.on("request", req =>
+      req.url().startsWith(BASE) ? req.continue()
+                                 : req.respond({ status: 200, contentType: "text/plain", body: "" }));
+    const errs = [];
+    page.on("pageerror", e => errs.push(String(e.message)));
+    await page.evaluateOnNewDocument(() => {
+      window.Telegram = { WebApp: { initData: "", initDataUnsafe: {}, ready() {}, expand() {} } };
+      // Headless Chrome may or may not fire a real beforeinstallprompt for
+      // this page, and when. Swallow the real one (registered before app.js,
+      // so it runs first) and drive the app's listener with synthetic ones.
+      window.addEventListener("beforeinstallprompt", e => { if (e.isTrusted) e.stopImmediatePropagation(); });
+    });
+
+    // A /app QR scan: the sheet opens on arrival and the flag is dropped.
+    await page.goto(`${BASE}/web/group/testtoken123?install=1`, { waitUntil: "load" });
+    await new Promise(r => setTimeout(r, 900));
+    let s = await page.evaluate(() => {
+      const m = document.getElementById("install-modal");
+      const close = m.querySelector(".signin-close");
+      const r = close.getBoundingClientRect();
+      const top = document.elementFromPoint(Math.round(r.x + r.width / 2), Math.round(r.y + r.height / 2));
+      return { open: !m.classList.contains("hidden"),
+               body: document.getElementById("install-body").innerText,
+               search: location.search,
+               closeReachable: top === close || close.contains(top),
+               overflow: document.documentElement.scrollWidth - window.innerWidth };
+    });
+    if (!s.open) failures.push("install: ?install=1 did not open the install sheet");
+    if (!s.body.trim()) failures.push("install: install sheet opened empty");
+    if (/install=1/.test(s.search)) failures.push("install: ?install=1 left in the URL — a reload reopens the sheet");
+    if (!s.closeReachable) failures.push("install: sheet close button is covered by something");
+    if (s.overflow > 1) failures.push(`install: page overflows by ${s.overflow}px with the sheet open`);
+
+    await page.keyboard.press("Escape");
+    s = await page.evaluate(async () => {
+      const modal = document.getElementById("install-modal");
+      const isOpen = () => !modal.classList.contains("hidden");
+      const tick = () => new Promise(r => setTimeout(r, 0));
+      const out = { closed: !isOpen() };
+      const clickInstallItem = () => {
+        document.getElementById("acct-btn").click();
+        const item = [...document.querySelectorAll("#acct-menu .acct-menu-item")]
+          .find(i => /install app/i.test(i.innerText));
+        if (item) item.click();
+        return !!item;
+      };
+      let prompts = 0;
+      const offerPrompt = () => {
+        const ev = new Event("beforeinstallprompt", { cancelable: true });
+        ev.prompt = () => { prompts++; };
+        ev.userChoice = Promise.resolve({ outcome: "dismissed" });
+        window.dispatchEvent(ev);
+      };
+
+      // Browser prompt available: the tap goes straight to it, no sheet.
+      offerPrompt();
+      out.item = clickInstallItem();
+      await tick();
+      out.menuPrompted = prompts === 1 && !isOpen();
+
+      // That event is now spent, so the next tap shows the manual steps
+      // rather than calling prompt() on it again (which would throw).
+      clickInstallItem();
+      out.manualOpened = isOpen() && prompts === 1;
+      out.manualSteps = !!document.querySelector("#install-body .inst-steps, #install-body .inst-qr");
+
+      // The browser offers a prompt while the sheet is open (a ?install=1 scan
+      // usually opens it first): the steps become the one-tap button.
+      offerPrompt();
+      const go = document.querySelector("#install-body .inst-go");
+      out.swapped = !!go;
+      if (go) go.click();
+      await tick();
+      out.sheetPrompted = prompts === 2;
+      out.fellBack = isOpen() && !document.querySelector("#install-body .inst-go");
+      closeInstallHelp();
+      return out;
+    });
+    if (!s.closed) failures.push("install: Escape did not close the install sheet");
+    if (!s.item) failures.push("install: account menu has no Install app item outside Telegram");
+    if (!s.menuPrompted) failures.push("install: menu item did not go straight to the browser's install prompt");
+    if (!s.manualOpened) failures.push("install: spent prompt reused, or the menu item did not open the sheet");
+    if (!s.manualSteps) failures.push("install: sheet opened without install steps");
+    if (!s.swapped) failures.push("install: a prompt arriving while the sheet is open did not show the Install button");
+    if (!s.sheetPrompted) failures.push("install: sheet's Install button did not trigger the prompt");
+    if (!s.fellBack) failures.push("install: after 'Not now' the sheet did not fall back to the manual steps");
+    if (errs.length) failures.push(`install: JS error — ${errs[0]}`);
+
+    console.log("  install: menu item + sheet reachable outside Telegram, ?install=1 opens it once");
     await page.close();
   }
 
@@ -721,8 +831,10 @@ const WIDTHS = [
         inHomeHeader: !!(acct && home && home.contains(acct)),
         chipVisible: acct ? acct.getBoundingClientRect().width > 0 : false,
         hasTheme: !!document.getElementById("theme-btn-home"),
+        installCard: !document.getElementById("home-install").classList.contains("hidden"),
       };
     });
+    if (!s.installCard) failures.push("home: no Install card on the home screen outside the app");
 
     if (!s.homeVisible) failures.push("home: home screen did not render at /web/");
     if (s.wrapCount !== 1) failures.push(`home: expected exactly one .acct-wrap in the document, found ${s.wrapCount}`);

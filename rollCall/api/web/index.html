@@ -51,6 +51,10 @@
     <h2 style="font-size:1.1rem;font-weight:700;margin-bottom:4px">Your groups</h2>
     <p style="font-size:.82rem;color:var(--sub);margin-bottom:16px">Every group you visit is saved here automatically — tap to open.</p>
     <div id="home-groups"></div>
+    <div id="home-install" class="hidden" style="margin-top:20px;padding:12px 14px;border:1.5px dashed var(--border);border-radius:12px;display:flex;align-items:center;justify-content:space-between;gap:12px">
+      <div style="font-size:.85rem;color:var(--sub)">Get RollCall as an app on your phone</div>
+      <button class="btn btn-primary" style="padding:8px 14px;font-size:.85rem;flex-shrink:0" data-on-click="openInstallHelp">📲 Install</button>
+    </div>
     <div style="margin-top:24px">
       <div style="font-size:.82rem;font-weight:600;color:var(--sub);margin-bottom:8px">Open a new group by pasting its link</div>
       <div style="display:flex;gap:8px">
@@ -93,6 +97,26 @@
     <div class="signin-foot">
       You can also keep voting as a guest — signing in just links your votes to
       your Telegram account on this device.
+    </div>
+  </div>
+</div>
+
+<!-- Install sheet. Reached from the account menu's "📲 Install app" (always
+     there outside the installed app and the Telegram Mini App), the home
+     screen, the header ⬇ button, and a /app QR scan (?install=1). Body is
+     rendered per platform by openInstallHelp() in app.js — the one-tap system
+     prompt where the browser offers it, the manual steps where it doesn't. -->
+<div id="install-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="install-title">
+  <div class="signin-backdrop" data-on-click="closeInstallHelp"></div>
+  <div class="signin-sheet">
+    <div class="signin-hdr">
+      <span class="signin-title" id="install-title">📲 Install RollCall</span>
+      <button class="signin-close" data-on-click="closeInstallHelp" aria-label="Close install help">✕</button>
+    </div>
+    <div id="install-body"></div>
+    <div class="signin-foot">
+      The app opens straight to your groups, full screen, and can notify you
+      when a rollcall opens. The web page keeps working either way.
     </div>
   </div>
 </div>

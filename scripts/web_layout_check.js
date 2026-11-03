@@ -688,8 +688,10 @@ const WIDTHS = [
           return /install app/i.test(t) ||
             !document.getElementById("install-btn").classList.contains("hidden");
         })(),
+        bellShown: !document.getElementById("notify-btn").classList.contains("hidden"),
       };
     });
+    if (s.bellShown) failures.push("tg-mode: 🔔 web-push bell shown inside the Telegram Mini App");
     if (!s.tgMode) failures.push("tg-mode: Telegram Mini App not detected from initDataUnsafe");
     if (s.installOffered) failures.push("tg-mode: Install app offered inside the Telegram Mini App");
     if (!(s.barHeight > 0)) failures.push("tg-mode: header not rendered inside the Mini App");
@@ -728,17 +730,25 @@ const WIDTHS = [
     // A /app QR scan: the sheet opens on arrival and the flag is dropped.
     await page.goto(`${BASE}/web/group/testtoken123?install=1`, { waitUntil: "load" });
     await new Promise(r => setTimeout(r, 900));
+    // The bell only appears once the service worker has registered.
+    await page.waitForFunction(() => !document.getElementById("notify-btn").classList.contains("hidden"),
+                               { timeout: 4000 }).catch(() => {});
     let s = await page.evaluate(() => {
       const m = document.getElementById("install-modal");
+      const bell = document.getElementById("notify-btn");
       const close = m.querySelector(".signin-close");
       const r = close.getBoundingClientRect();
       const top = document.elementFromPoint(Math.round(r.x + r.width / 2), Math.round(r.y + r.height / 2));
       return { open: !m.classList.contains("hidden"),
                body: document.getElementById("install-body").innerText,
                search: location.search,
+               pushApi: "PushManager" in window,
+               bellShown: !bell.classList.contains("hidden"),
                closeReachable: top === close || close.contains(top),
                overflow: document.documentElement.scrollWidth - window.innerWidth };
     });
+    // Same `if(tg)` bug, same stub: the bell was hidden from every browser.
+    if (s.pushApi && !s.bellShown) failures.push("install: 🔔 web-push bell hidden outside Telegram");
     if (!s.open) failures.push("install: ?install=1 did not open the install sheet");
     if (!s.body.trim()) failures.push("install: install sheet opened empty");
     if (/install=1/.test(s.search)) failures.push("install: ?install=1 left in the URL — a reload reopens the sheet");

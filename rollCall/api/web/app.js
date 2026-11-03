@@ -1702,7 +1702,7 @@ function _initPushUI() {
   const btn = $("notify-btn");
   if (!btn) return;
   // Show the bell button only in group mode (not TG mini-app — Telegram has its own notifications)
-  if (tg) return;
+  if (_inTelegramApp()) return;
   if (!("PushManager" in window) && !_IOS_NEEDS_INSTALL) return;
   if (!IS_GROUP) return;
   btn.classList.remove("hidden");
@@ -1823,15 +1823,20 @@ window.toggleNotifications = async function() {
 // ── PWA install prompt ─────────────────────────────────────────────────────
 let _installPrompt = null;
 
+// Whether Telegram actually launched this page as its Mini App. NOT `if(tg)`:
+// telegram-web-app.js is loaded on every page and defines Telegram.WebApp in
+// any browser, so `tg` is truthy for every visitor — that test hid the ⬇
+// Install button and the 🔔 bell from everyone. TG_USER and initData are only
+// set inside Telegram. Function declarations, not consts, so the account menu
+// can call them however early it renders.
+function _inTelegramApp(){
+  return !!(TG_USER||(tg&&tg.initData));
+}
+
 // Whether to offer installing at all: not inside the installed app, and not in
-// Telegram's Mini App. NOT `if(tg)`: telegram-web-app.js is loaded on every
-// page and defines Telegram.WebApp in any browser, so `tg` is truthy for every
-// visitor — that test hid the ⬇ Install button from everyone. TG_USER and
-// initData are only set when Telegram actually launched the page. A function
-// declaration, not a const, so the account menu can call it however early it
-// renders.
+// Telegram's Mini App.
 function _canOfferInstall(){
-  if(TG_USER||(tg&&tg.initData))return false;
+  if(_inTelegramApp())return false;
   return !(window.navigator.standalone===true||
     (window.matchMedia&&window.matchMedia("(display-mode: standalone)").matches));
 }

@@ -907,12 +907,15 @@ function renderLists(){
     const rows=items.length?items.map((u,i)=>{
       const isYou=currentName&&u.name.toLowerCase()===currentName.toLowerCase();
       const av=`<span class="av" style="background:${avColor(u.name)}">${esc((u.name[0]||"?").toUpperCase())}</span>`;
-      const cm=u.comment?`<span class="li-comment">— ${esc(u.comment)}</span>`:"";
+      // The comment sits UNDER the name, never beside it: side by side, a long
+      // one (up to 100 chars) kept its share of the row while the name was
+      // squeezed to "…" — on a phone with the admin controls, to nothing.
+      const cm=u.comment?`<span class="li-comment" title="${esc(u.comment)}">${esc(u.comment)}</span>`:"";
       const tgDot=u.is_proxy===false?'<span class="tg-dot" title="Telegram user"></span>':"";
       const adminActs=(_isWebAdmin&&statusKey!=="waiting")?_rowAdminActs(u,statusKey):"";
       return `<li class="${isYou?"you":""}">
         <span class="li-pos">${i+1}</span>${av}
-        <span class="li-name">${esc(u.name)}${tgDot}</span>${cm}
+        <span class="li-main"><span class="li-name">${esc(u.name)}${tgDot}</span>${cm}</span>
         ${adminActs}
       </li>`;
     }).join(""):"";

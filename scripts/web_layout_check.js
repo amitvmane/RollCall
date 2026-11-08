@@ -92,7 +92,10 @@ const GROUP = {
   rollcalls: [{
     num: 1, id: 1, title: "Saturday Football", status: "open",
     in: Array.from({ length: 14 }, (_, i) => ({ name: `Player ${i + 1}`, is_proxy: false })),
-    out: [{ name: "Omkar", is_proxy: false, comment: "away" }],
+    // A max-length (100-char) comment: side by side with the name it once
+    // squeezed the name to "…" on a phone. The roster check below needs it.
+    out: [{ name: "Omkar Kulkarni", is_proxy: false,
+            comment: "Can't make it today, stuck at the office till late, sorry all. Will be there next week for sure" }],
     maybe: [{ name: "Piyush", is_proxy: false }],
     waiting: [],
     location: "GroundZero", event_fee: 1500, in_list_limit: 16,
@@ -703,6 +706,58 @@ const WIDTHS = [
     console.log("  tg-mode: header controls survive inside the Telegram Mini App");
     await page.close();
   }
+
+  // ── Roster: a long comment never hides the name ─────────────────────────
+  // The real renderLists output, at the narrowest phone, for a member and for
+  // an admin (whose row also carries Move→ and a 44px ✕). A comment must not
+  // take any width from the name — it goes under it, clamped to two lines.
+  for (const admin of [false, true]) {
+    const who = admin ? "admin" : "member";
+    const page = await browser.newPage();
+    await page.setViewport({ width: 320, height: 700, isMobile: true, hasTouch: true });
+    await page.setRequestInterception(true);
+    page.on("request", req =>
+      req.url().startsWith(BASE) ? req.continue()
+                                 : req.respond({ status: 200, contentType: "text/plain", body: "" }));
+    const errs = [];
+    page.on("pageerror", e => errs.push(String(e.message)));
+    // localStorage outlives the page: earlier checks sign in, so the member
+    // run must clear it or it silently becomes a second admin run.
+    await page.evaluateOnNewDocument(adm => {
+      localStorage.clear();
+      if (!adm) return;
+      localStorage.setItem("rc_verified_tg_user_id", "168415137");
+      localStorage.setItem("rc_verified_tg_name", "Amit");
+      localStorage.setItem("rc_identity_token", "168415137.9999999999.deadbeef");
+    }, admin);
+    await page.goto(`${BASE}/web/group/testtoken123`, { waitUntil: "load" });
+    const ready = await page.waitForFunction(adm => {
+      const c = document.querySelector("#lists-container .li-comment");
+      return c && !!c.closest("li").querySelector(".li-admin-acts") === adm;
+    }, { timeout: 8000 }, admin).then(() => true, () => false);
+    if (!ready) {
+      failures.push(`roster(${who}): commented row never rendered`);
+    } else {
+      const s = await page.evaluate(() => {
+        const c = document.querySelector("#lists-container .li-comment");
+        const name = c.closest("li").querySelector(".li-name");
+        // A row with no comment, same controls: the width a name is entitled to.
+        const plain = [...document.querySelectorAll("#lists-container li")]
+          .find(li => !li.querySelector(".li-comment")).querySelector(".li-name");
+        const lh = parseFloat(getComputedStyle(c).lineHeight);
+        return { nameW: name.clientWidth, plainW: plain.clientWidth,
+                 lines: Math.round(c.getBoundingClientRect().height / lh),
+                 overflow: document.documentElement.scrollWidth - window.innerWidth };
+      });
+      if (s.nameW < s.plainW - 1)
+        failures.push(`roster(${who}): long comment squeezes the name to ${s.nameW}px (${s.plainW}px without one)`);
+      if (s.lines > 2) failures.push(`roster(${who}): comment not clamped (${s.lines} lines)`);
+      if (s.overflow > 1) failures.push(`roster(${who}): page overflows by ${s.overflow}px`);
+    }
+    if (errs.length) failures.push(`roster(${who}): JS error — ${errs[0]}`);
+    await page.close();
+  }
+  console.log("  roster: a long comment takes no width from the name at 320px, member and admin");
 
   // ── Install option (outside Telegram) ───────────────────────────────────
   // telegram-web-app.js is loaded on every page and defines Telegram.WebApp in

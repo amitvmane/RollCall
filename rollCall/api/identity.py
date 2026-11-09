@@ -58,6 +58,7 @@ from fastapi import Header
 # 30 days. These back a "stay verified" UX in the browser; long enough to
 # avoid nagging re-verification, short enough to bound a leaked token.
 IDENTITY_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60
+_CLOCK_SKEW_SECONDS = 300
 
 
 class IdentityError(RuntimeError):
@@ -221,7 +222,13 @@ def _verify(token: Optional[str], scope: Optional[str]) -> Optional[int]:
         matched |= hmac.compare_digest(expected, sig)
     if not matched:
         return None
-    if exp < int(time.time()):
+    now = int(time.time())
+    if exp < now:
+        return None
+    # Nothing is ever issued for longer than IDENTITY_TOKEN_TTL_SECONDS, so a
+    # later expiry can only come from someone holding a signing key. Without
+    # this cap a leaked key yields tokens that outlive its rotation window.
+    if exp > now + IDENTITY_TOKEN_TTL_SECONDS + _CLOCK_SKEW_SECONDS:
         return None
     return user_id
 

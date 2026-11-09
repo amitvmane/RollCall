@@ -68,6 +68,18 @@ class TestIdentityToken(unittest.TestCase):
         tok = self.identity.issue_identity_token(7, ttl_seconds=-1)
         self.assertIsNone(self.identity.verify_identity_token(tok))
 
+    def test_expiry_beyond_max_ttl_rejected(self):
+        # Correctly signed, but nothing legitimate lives this long: only a
+        # leaked signing key produces it. Must not outlive a key rotation.
+        ttl = self.identity.IDENTITY_TOKEN_TTL_SECONDS
+        self.assertEqual(self.identity.verify_identity_token(
+            self.identity.issue_identity_token(8, ttl_seconds=ttl)), 8)
+        for far in (ttl + 3600, 10 * 365 * 86400):
+            tok = self.identity.issue_identity_token(8, ttl_seconds=far)
+            self.assertIsNone(self.identity.verify_identity_token(tok))
+            scoped = self.identity.issue_chat_bound_token(8, -100, ttl_seconds=far)
+            self.assertIsNone(self.identity.verify_identity_token(scoped, chat_id=-100))
+
     def test_different_bot_token_cannot_forge(self):
         tok = self.identity.issue_identity_token(55)
         orig = os.environ.get("TELEGRAM_TOKEN")

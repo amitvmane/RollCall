@@ -74,13 +74,38 @@ class TestCheckWebAdminLive(WebAdminAuthBase):
         from api.web_admin import check_web_admin_live
         return asyncio.run(check_web_admin_live(chat_id, user_id))
 
-    def test_default_open_group_cached_grant_costs_no_live_call(self):
-        # A cached grant is answered from the DB alone — the common path
-        # must not pay for a Telegram round-trip on every page load.
+    def test_default_open_group_cached_grant_costs_one_live_call_per_minute(self):
+        # A cached grant still asks Telegram whether its holder is in the
+        # group — but once, not on every request of a page load.
         self.db.set_web_admin(CHAT_ID, ALICE_ID, "Alice")
         mock_bot.get_chat_member.reset_mock()
         self.assertTrue(self._call(CHAT_ID, ALICE_ID))
-        mock_bot.get_chat_member.assert_not_called()
+        self.assertTrue(self._call(CHAT_ID, ALICE_ID))
+        self.assertEqual(mock_bot.get_chat_member.call_count, 1)
+
+    def test_default_open_group_grant_ends_when_member_leaves(self):
+        # Every member of an open group is an admin — so a grant must not
+        # outlive membership. It used to: someone removed from the group
+        # could keep ending rollcalls and editing dues from the web page.
+        for status in ("left", "kicked"):
+            from api.web_admin import reset_membership_cache_for_tests
+            reset_membership_cache_for_tests()
+            self.db.set_web_admin(CHAT_ID, ALICE_ID, "Alice")
+            self.db.set_web_admin(CHAT_ID, BOB_ID, "Bob")
+            mock_bot.get_chat_member.return_value.status = status
+            try:
+                self.assertFalse(self._call(CHAT_ID, BOB_ID), status)
+                self.assertFalse(self.db.is_web_admin(CHAT_ID, BOB_ID), status)
+            finally:
+                mock_bot.get_chat_member.return_value.status = "administrator"
+
+    def test_default_open_group_telegram_failure_keeps_cached_grant(self):
+        self.db.set_web_admin(CHAT_ID, ALICE_ID, "Alice")
+        mock_bot.get_chat_member.side_effect = Exception("Telegram unreachable")
+        try:
+            self.assertTrue(self._call(CHAT_ID, ALICE_ID))
+        finally:
+            mock_bot.get_chat_member.side_effect = None
 
     def test_default_open_group_true_once_cached(self):
         self.db.set_web_admin(CHAT_ID, ALICE_ID, "Alice")
@@ -243,6 +268,32 @@ class TestGroupSettingsExtendedFields(WebAdminAuthBase):
                 json={"id_token": bob_token, "admin_rights": True},
             )
             self.assertEqual(r.status_code, 403)
+        finally:
+            mock_bot.get_chat_member.return_value.status = "administrator"
+
+    def test_open_group_member_cannot_change_who_counts_as_admin(self):
+        # In an open group every member holds a web-admin grant, and
+        # /set_admins has always needed a real Telegram admin. The web page
+        # let any member lock the group down instead.
+        self.db.set_web_admin(CHAT_ID, BOB_ID, "Bob")
+        bob_token = self._id_token(BOB_ID)
+        mock_bot.get_chat_member.return_value.status = "member"
+        try:
+            r = self.client.patch(
+                f"/api/v1/web/group/{self.chat['group_web_token']}/settings",
+                json={"id_token": bob_token, "admin_rights": True, "absent_limit": 4},
+            )
+            self.assertEqual(r.status_code, 403)
+            settings = self.db.get_or_create_chat(CHAT_ID)
+            self.assertFalse(settings["admin_rights"])
+            # Refused before anything was applied — not a half-saved form.
+            self.assertNotEqual(settings["absent_limit"], 4)
+            # Everything else a web admin may change is still theirs.
+            r = self.client.patch(
+                f"/api/v1/web/group/{self.chat['group_web_token']}/settings",
+                json={"id_token": bob_token, "absent_limit": 4},
+            )
+            self.assertEqual(r.status_code, 204)
         finally:
             mock_bot.get_chat_member.return_value.status = "administrator"
 

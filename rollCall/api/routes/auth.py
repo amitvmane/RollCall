@@ -127,8 +127,8 @@ def _extract_ids(pairs: dict) -> tuple[int, Optional[int], bool]:
 
     chat_is_group is True only when a real `chat` object was present in
     initData — i.e. chat_id is trustworthy as an actual group/supergroup,
-    not a fallback guess (receiver, or the user's own id for a private
-    chat with the bot)."""
+    not the fallback (the user's own id, for their private chat with the
+    bot)."""
     user_id: Optional[int] = None
     chat_id: Optional[int] = None
     chat_is_group = False
@@ -150,7 +150,7 @@ def _extract_ids(pairs: dict) -> tuple[int, Optional[int], bool]:
             # "private" — that's the user's own DM with the bot, not a
             # group with rollcalls in it. Only a group/supergroup `chat`
             # is trustworthy real context; anything else must fall through
-            # to the receiver/user_id fallbacks below, same as if `chat`
+            # to the user_id fallback below, same as if `chat`
             # had been absent (as it correctly is on Telegram Desktop).
             if chat_obj.get("type") in ("group", "supergroup"):
                 chat_id = int(chat_obj["id"])
@@ -158,17 +158,12 @@ def _extract_ids(pairs: dict) -> tuple[int, Optional[int], bool]:
         except Exception:
             pass
 
-    # Fallback: receiver_id is the user in private chats (bot DMs)
-    if chat_id is None:
-        receiver_str = pairs.get("receiver")
-        if receiver_str:
-            try:
-                recv_obj = json.loads(unquote(receiver_str))
-                chat_id = int(recv_obj["id"])
-            except Exception:
-                pass
-
-    # Last resort: use user_id as chat_id (private chat with same id)
+    # No group context: the session is for the user's own private chat with
+    # the bot, whose chat id IS their user id. `receiver` is deliberately not
+    # used. It names the OTHER person in a private chat the app was launched
+    # from (attachment menu), and a private chat's id is that person's user
+    # id — so falling back to it minted a read+vote token for someone else's
+    # chat with the bot.
     if chat_id is None and user_id is not None:
         chat_id = user_id
 

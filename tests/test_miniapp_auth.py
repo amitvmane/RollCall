@@ -128,14 +128,18 @@ class TestExtractIds(unittest.TestCase):
         self.assertEqual(cid, 55)
         self.assertFalse(chat_is_group, "a private DM chat object must not be treated as real group context")
 
-    def test_private_chat_fallback_to_receiver(self):
+    def test_receiver_is_never_the_session_chat(self):
+        # `receiver` is the OTHER person in a private chat the app was
+        # launched from, and a private chat's id is that person's user id.
+        # Using it as the session chat handed user 7 a read+vote token for
+        # user 8's own chat with the bot.
         user_obj = json.dumps({"id": 7, "first_name": "X"})
-        receiver_obj = json.dumps({"id": 7, "first_name": "X"})
+        receiver_obj = json.dumps({"id": 8, "first_name": "Someone else"})
         pairs = {"user": quote(user_obj), "receiver": quote(receiver_obj)}
         uid, cid, chat_is_group = self._call(pairs)
         self.assertEqual(uid, 7)
-        self.assertEqual(cid, 7)
-        self.assertFalse(chat_is_group, "receiver fallback is not a real group chat")
+        self.assertEqual(cid, 7, "the session must be the caller's own chat, never the receiver's")
+        self.assertFalse(chat_is_group)
 
     def test_fallback_uses_user_id_when_no_chat(self):
         user_obj = json.dumps({"id": 99, "first_name": "Y"})

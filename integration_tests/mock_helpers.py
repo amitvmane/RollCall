@@ -69,6 +69,11 @@ def get_mock_bot():
 def reset_db():
     """Truncate all rows between tests. Keeps schema intact."""
     import db as _db
+    try:
+        from api.web_admin import reset_membership_cache_for_tests
+        reset_membership_cache_for_tests()
+    except Exception:
+        pass
     conn = _db.get_connection()
     # On Postgres a failed statement leaves the connection in an aborted
     # transaction where every subsequent command errors until it is rolled

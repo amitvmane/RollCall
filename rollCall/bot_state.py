@@ -615,6 +615,32 @@ async def is_chat_admin(cid: int, uid: int) -> bool:
     return True
 
 
+async def can_administer_chat(cid: int, uid: int) -> bool:
+    """is_chat_admin for a tap that did NOT come from inside the chat it
+    acts on (a button in a DM that starts something in a group).
+
+    A message posted in a group proves its sender is there; a DM button
+    proves nothing about the group it names, and the "everyone is an admin
+    until /set_admins" default would otherwise let anyone who knows a
+    group's chat id act in it. So this always asks Telegram: the user must
+    still be in the group, and an admin there if the group is locked down.
+    Fails closed — if Telegram can't be asked, the answer is no.
+    """
+    try:
+        member = await bot.get_chat_member(cid, uid)
+    except Exception:
+        logging.warning("can_administer_chat: get_chat_member failed chat=%s user=%s",
+                        cid, uid, exc_info=True)
+        return False
+    status = getattr(member, "status", None)
+    if manager.get_admin_rights(cid):
+        return status in ("administrator", "creator")
+    if status == "restricted":
+        # A restricted user may have left; is_member says which.
+        return getattr(member, "is_member", None) is True
+    return status in ("member", "administrator", "creator")
+
+
 def format_mention_with_name_md(user: User) -> str:
     """Markdown-safe version: escapes special chars in @username/name; preserves tg:// links."""
     if isinstance(user.user_id, int):

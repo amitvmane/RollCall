@@ -328,6 +328,41 @@ class TestWebVoteByToken(_Base):
         self.assertEqual(self.names(self.rc(0)), ["Walk-in"])   # Bravo
         self.assertEqual(self.names(self.rc(1)), [])            # Charlie
 
+    async def test_guest_text_cannot_carry_links_mentions_or_commands(self):
+        # No sign-in is needed to vote by link, and the bot then posts the
+        # name into the Telegram group, where links, @mentions and /commands
+        # in any bot message are tappable.
+        from services.web import vote_by_token
+        from exceptions import incorrectParameter
+        rc = await self.start_rc()
+        token = await self._token(rc)
+        for name in ("https://evil.example", "win at evil.com", "@" + "someone", "/erc", "a/b"):
+            with self.assertRaises(incorrectParameter, msg=name):
+                await vote_by_token(token, name, "in")
+        for comment in ("see t.me/x for prizes".replace("t.me/x", "http://x.io"), "tap /erc", "hi @" + "ravi"):
+            with self.assertRaises(incorrectParameter, msg=comment):
+                await vote_by_token(token, "Walk-in", "in", comment=comment)
+        self.assertEqual(self.names(self.rc(0)), [])
+
+    async def test_guest_text_is_flattened_to_one_line(self):
+        from services.web import vote_by_token
+        rc = await self.start_rc()
+        token = await self._token(rc)
+        out = await vote_by_token(token, "S.Kumar\n\nADMIN:\u202e pay", "in", comment="back by 7:30,\n50/50")
+        self.assertEqual(out["voter_name"], "S.Kumar ADMIN: pay")
+        self.assertEqual(self.names(self.rc(0)), ["S.Kumar ADMIN: pay"])
+        self.assertEqual(self.rc(0).inList[0].comment, "back by 7:30, 50/50")
+
+    async def test_member_name_from_telegram_is_not_filtered(self):
+        # A known member's name comes from Telegram, not from the browser:
+        # whatever the page sends is ignored, so it is never grounds to refuse.
+        from services.web import vote_by_token
+        rc = await self.start_rc()
+        token = await self._token(rc)
+        db.upsert_chat_member(CHAT_ID, 779, "A/B @home", "ab")
+        out = await vote_by_token(token, "http://ignored.example", "in", tg_user_id=779)
+        self.assertEqual(out["voter_name"], "A/B @home")
+
     async def test_verified_vote_keeps_an_admin_added_namesake(self):
         from services.web import vote_by_token
         rc = await self.start_rc()

@@ -2267,6 +2267,25 @@ def get_rollcall(rollcall_id: int) -> Optional[Dict]:
         logging.error(f"Error getting rollcall: {e}")
         return None
 
+
+def get_rollcall_in_chat(rollcall_id, chat_id: int) -> Optional[Dict]:
+    """get_rollcall, but only if the rollcall belongs to `chat_id`.
+
+    For any rollcall id that arrives from outside — above all a button's
+    callback_data, which Telegram relays without checking it against the
+    buttons the bot actually posted, so a modified client can send any id
+    from a chat of its own. Rollcall ids are sequential; without this an
+    admin of one group could read or review another group's sessions.
+    """
+    try:
+        row = get_rollcall(int(rollcall_id))
+    except (TypeError, ValueError):
+        return None
+    if row is None or row.get("chat_id") is None:
+        return None
+    return row if int(row["chat_id"]) == int(chat_id) else None
+
+
 def get_rollcall_by_web_token(token: str) -> Optional[Dict]:
     """Get an active rollcall by its magic-link web_token."""
     try:

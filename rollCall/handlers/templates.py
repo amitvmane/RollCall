@@ -10,7 +10,10 @@ from datetime import datetime, timedelta
 import pytz
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot_state import bot, _sched_selection, _log_task_exc, _esc_md, reply_error, safe_edit_text, is_chat_admin
+from bot_state import (
+    bot, _sched_selection, _log_task_exc, _esc_md, reply_error, safe_edit_text,
+    is_chat_admin, can_administer_chat,
+)
 from exceptions import insufficientPermissions, incorrectParameter, parameterMissing
 from functions import admin_rights, weekly_minutes, WEEKDAY_MAP
 from rollcall_manager import manager
@@ -1063,6 +1066,15 @@ async def idle_start_callback(call):
         allowed_uid = int(parts[3])
         if call.from_user.id != allowed_uid:
             await bot.answer_callback_query(call.id, "This button isn't for you.", show_alert=True)
+            return
+        # Both ids above come from the button, and Telegram does not check
+        # callback data against the buttons that were posted — a modified
+        # client can pair its own user id with ANY group's chat id. So the
+        # match proves nothing by itself: the presser must really be allowed
+        # to start a rollcall in that group, right now.
+        if not await can_administer_chat(chat_id, allowed_uid):
+            await bot.answer_callback_query(
+                call.id, "You're not an admin of that group any more.", show_alert=True)
             return
 
         import db as _db

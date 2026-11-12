@@ -166,6 +166,23 @@ async def _settle_admin_ok(call) -> bool:
     return False
 
 
+async def _own_game_or_refuse(call, cid: int, rollcall_id: int):
+    """The rollcall row a settle button names, if it is THIS chat's game.
+
+    The id comes from the button's callback data, which Telegram relays
+    without checking it against the buttons that were actually posted. The
+    money writes already refuse another chat's game inside the service;
+    this stops the steps BEFORE them — the title, the player list and the
+    penalty panel — from being opened on one (see db.get_rollcall_in_chat).
+    Answers the tap and returns None when it isn't.
+    """
+    row = _db.get_rollcall_in_chat(rollcall_id, cid)
+    if row is None:
+        await bot.answer_callback_query(
+            call.id, "That game isn't part of this group.", show_alert=True)
+    return row
+
+
 async def _send_remaining_unsettled_nudge(cid: int) -> None:
     remaining = dues_svc.list_unsettled_games(cid)["games"]
     if remaining:
@@ -235,6 +252,9 @@ async def settle_now_callback(call):
         if not await _settle_admin_ok(call):
             return
         rollcall_id = int(call.data.split(":", 1)[1])
+        row = await _own_game_or_refuse(call, cid, rollcall_id)
+        if row is None:
+            return
         if not _db.get_or_create_chat(cid).get("dues_enabled"):
             # Nudge pinned before /disable_dues — its button must not keep
             # opening the settle flow while dues is off.
@@ -251,7 +271,6 @@ async def settle_now_callback(call):
             await safe_edit_markup(cid, call.message.message_id, InlineKeyboardMarkup())
             await bot.send_message(cid, "✅ Already settled — books are closed for this game.")
             return
-        row = _db.get_rollcall(rollcall_id) or {}
         await _begin_settlement(cid, rollcall_id, row.get("title") or "<Empty>")
     except Exception as exc:
         logging.exception("settle_now_callback error")
@@ -288,6 +307,8 @@ async def settle_empty_callback(call):
 async def settle_skip_callback(call):
     try:
         cid = call.message.chat.id
+        if not await _settle_admin_ok(call):
+            return
         await bot.answer_callback_query(call.id, "Skipped")
         await safe_edit_text(
             cid, call.message.message_id,
@@ -310,12 +331,19 @@ async def _begin_settlement(cid: int, rollcall_id: int, title: str) -> None:
     otherwise the penalty panel opens scoped to this game, and its "Done"
     button hands off to the confirm/subsidy card (see handlers.penalty_panel's
     pen_d branch)."""
+    # Every caller resolves the game inside this chat first; checked again
+    # here because what follows lists the game's players and can close its
+    # no-show review, and neither may ever happen to another chat's game.
+    row = _db.get_rollcall_in_chat(rollcall_id, cid)
+    if row is None:
+        logging.warning("settlement refused: rollcall %s is not chat %s's", rollcall_id, cid)
+        return
+
     in_users = _db.get_rollcall_in_users(rollcall_id)
     if not in_users:
         await _show_empty_game_card(cid, rollcall_id, title)
         return
 
-    row = _db.get_rollcall(rollcall_id) or {}
     ghost_eligible = bool(
         manager.get_ghost_tracking_enabled(cid) and not row.get("absent_marked")
     )
@@ -399,7 +427,9 @@ async def settle_custom_callback(call):
         if not await _settle_admin_ok(call):
             return
         rollcall_id = int(call.data.split(":", 1)[1])
-        row = _db.get_rollcall(rollcall_id) or {}
+        row = await _own_game_or_refuse(call, cid, rollcall_id)
+        if row is None:
+            return
         title = row.get("title") or "<Empty>"
 
         _prune_pending(_pending_subsidy_input)
@@ -424,6 +454,8 @@ async def settle_custom_callback(call):
 async def settle_cancel_callback(call):
     try:
         cid = call.message.chat.id
+        if not await _settle_admin_ok(call):
+            return
         await bot.answer_callback_query(call.id, "Cancelled")
         await safe_edit_text(
             cid, call.message.message_id,
@@ -548,11 +580,13 @@ async def settle_pick_callback(call):
         if not await _settle_admin_ok(call):
             return
         target_id = int(call.data.split(":", 1)[1])
+        row = await _own_game_or_refuse(call, cid, target_id)
+        if row is None:
+            return
         await bot.answer_callback_query(call.id)
         from telebot.types import InlineKeyboardMarkup
         await safe_edit_markup(cid, call.message.message_id, InlineKeyboardMarkup())
 
-        row = _db.get_rollcall(target_id) or {}
         title = row.get("title") or "<Empty>"
         await _begin_settlement(cid, target_id, title)
     except Exception as exc:
@@ -1197,6 +1231,10 @@ async def cancel_game_dues_confirm_callback(call):
 async def cancel_game_dues_keep_callback(call):
     try:
         cid = call.message.chat.id
+        if not await is_chat_admin(cid, call.from_user.id):
+            await bot.answer_callback_query(
+                call.id, "⛔ Only admins can cancel game dues", show_alert=True)
+            return
         await bot.answer_callback_query(call.id, "Kept")
         await safe_edit_text(cid, call.message.message_id, "✅ Kept — game dues unchanged.")
         from telebot.types import InlineKeyboardMarkup
@@ -1910,6 +1948,10 @@ async def new_season_confirm_callback(call):
 async def new_season_cancel_callback(call):
     try:
         cid = call.message.chat.id
+        if not await is_chat_admin(cid, call.from_user.id):
+            await bot.answer_callback_query(
+                call.id, "⛔ Only admins can close the season", show_alert=True)
+            return
         await bot.answer_callback_query(call.id, "Cancelled")
         await safe_edit_text(cid, call.message.message_id,
                              "❌ Season reset cancelled — nothing changed.")
@@ -2010,7 +2052,7 @@ async def matchday_card(message):
         from utils.card_gen import matchday_card as _gen_card
         date_str = datetime.now().strftime("%A, %-d %b %Y")
         buf      = _gen_card(rc.title or "Game Day", date_str, in_names)
-        caption  = f"📋 *{rc.title or 'Game Day'}* — {len(in_names)} players IN"
+        caption  = f"📋 *{_esc_md(rc.title or 'Game Day')}* — {len(in_names)} players IN"
         await bot.send_photo(cid, buf, caption=caption, parse_mode="Markdown")
     except Exception as e:
         await reply_error(message, e)

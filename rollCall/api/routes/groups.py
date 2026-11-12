@@ -101,6 +101,19 @@ async def update_group_settings(
     chat_id: int = Path(..., description="Telegram chat id"),
     _token: AuthedToken = Depends(require_scope("admin")),
 ) -> GroupSettings:
+    # Same bar as /set_admins and the web settings route: changing who counts
+    # as an admin takes a real Telegram admin. A token minted through web
+    # sign-in belongs to a web admin, which in an open group is any member.
+    # Operator tokens (no issuer, or the global chat 0 token) have no person
+    # to ask Telegram about and are trusted as before.
+    if (body.admin_rights is not None and _token.issued_by_user_id
+            and _token.chat_id != 0):
+        from functions import is_telegram_chat_admin
+        if not await is_telegram_chat_admin(chat_id, int(_token.issued_by_user_id)):
+            raise HTTPException(
+                status_code=403,
+                detail="Only a Telegram admin of this group can change the admin-only setting.",
+            )
     result = settings_svc.update_group_settings(
         chat_id=chat_id,
         admin_user_id=body.admin_user_id,

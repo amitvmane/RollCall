@@ -5,6 +5,8 @@ services layer — which is documented as platform-agnostic — can use these
 without pulling in the Telegram bot machinery.
 """
 
+import re
+import unicodedata
 import zlib
 
 from exceptions import incorrectParameter
@@ -17,6 +19,54 @@ def esc_md(text: str) -> str:
         return text or ""
     for c in ('_', '*', '`', '[', ']'):
         text = text.replace(c, f'\\{c}')
+    return text
+
+
+# ── Text typed by someone we cannot identify ─────────────────────────────────
+#
+# The web voting link needs no sign-in, and what a guest types is then posted
+# by the bot into the Telegram group — in the "X → IN" notice and in the panel
+# for as long as the rollcall is open. Telegram turns links, @mentions and
+# /commands in ANY bot message into something tappable, so without this a
+# stranger holding the link could have the bot post a phishing link, ping
+# members at will, or sit in the list as "/erc" waiting for an admin's thumb.
+# Members typing in Telegram are not restricted: they can already post those
+# things themselves, under their own name.
+
+# Direction overrides/marks: invisible, and able to reorder how the rest of a
+# line reads. Zero-width joiners are NOT here — Indic and Persian names and
+# emoji sequences need them.
+_BIDI_CONTROLS = dict.fromkeys(map(ord, "\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"))
+
+# TLDs Telegram's linkifier is commonly fed. A bare "word.tld" is matched on
+# these only, never on any dot — "S.Kumar" and "Dr.Ravi" are names.
+_LINK_TLDS = (
+    "com|net|org|info|biz|io|me|co|in|app|dev|ai|xyz|top|site|online|store|shop|"
+    "link|click|live|club|pro|vip|icu|cc|tv|gg|ly|to|ru|cn|uk|us|eu|de|fr|tk|ml|ga|cf"
+)
+_GUEST_LINK_RE = re.compile(
+    r"://|www\.|@\w|(?<![\w.-])[\w-]+\.(?:" + _LINK_TLDS + r")(?![\w-])",
+    re.IGNORECASE,
+)
+_GUEST_COMMAND_RE = re.compile(r"(?:^|\s)/\w")
+
+
+def clean_guest_text(text: str, what: str = "name") -> str:
+    """Normalise free text from an unidentified web visitor, or refuse it.
+
+    Control characters and line breaks become single spaces and direction
+    overrides are dropped, so the text can't break out of the line it is
+    shown on. Raises incorrectParameter for links, @mentions and /commands.
+    `what` is "name" or "comment"; a name may not contain a slash at all.
+    """
+    text = (text or "").translate(_BIDI_CONTROLS)
+    text = "".join(" " if unicodedata.category(c) == "Cc" else c for c in text)
+    text = " ".join(text.split())
+    slash = ("/" in text or "\\" in text) if what == "name" else bool(_GUEST_COMMAND_RE.search(text))
+    if slash or _GUEST_LINK_RE.search(text):
+        raise incorrectParameter(
+            f"A {what} can't contain links, @mentions or /commands — plain text only."
+        )
     return text
 
 

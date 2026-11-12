@@ -74,6 +74,22 @@ db_mock.get_active_rollcalls.return_value = []
 db_mock.end_rollcall.return_value = None
 db_mock.update_chat_settings.return_value = None
 db_mock.get_rollcall.return_value = None
+
+
+def _get_rollcall_in_chat(rollcall_id, chat_id):
+    """Unit-test stand-in for db.get_rollcall_in_chat: whatever get_rollcall
+    is mocked to return, treated as the asking chat's own unless it names a
+    different chat. The real ownership rule runs against a real database in
+    integration_tests/test_callback_chat_scope.py."""
+    row = db_mock.get_rollcall(rollcall_id)
+    if row is None:
+        return {"id": rollcall_id, "chat_id": chat_id}
+    if row.get("chat_id") not in (None, chat_id):
+        return None
+    return row
+
+
+db_mock.get_rollcall_in_chat.side_effect = _get_rollcall_in_chat
 db_mock.get_all_chat_ids.return_value = []
 db_mock.load_ghost_selections.return_value = None
 db_mock.save_ghost_selections.return_value = True

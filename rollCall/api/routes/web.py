@@ -384,6 +384,19 @@ async def update_group_settings(
     actor_user_id = require_identity(body.id_token, detail="Verify with Telegram first.", chat_id=chat_id)
     if not await check_web_admin_live(chat_id, actor_user_id):
         raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
+    # Who counts as an admin is the one setting a web admin alone can't
+    # change. In an open group every member is a web admin, and /set_admins
+    # and /unset_admins have always required a real Telegram admin — without
+    # the same bar here, any member could lock the group down from the web
+    # page. Checked before anything is applied, so a refused request changes
+    # nothing. Fails closed if Telegram can't be asked.
+    if body.admin_rights is not None:
+        from functions import is_telegram_chat_admin
+        if not await is_telegram_chat_admin(chat_id, actor_user_id):
+            raise HTTPException(
+                status_code=403,
+                detail="Only a Telegram admin of this group can change the admin-only setting.",
+            )
     if body.shh_mode is not None:
         from rollcall_manager import manager as _mgr
         _mgr.set_shh_mode(chat_id, body.shh_mode)
@@ -1517,6 +1530,7 @@ async def vote_web(
 
     promoted = data.pop("promoted", [])
     replaced = data.pop("replaced_guest", None)
+    voter_name = data.pop("voter_name", None) or body.name
 
     # Reflect the web vote in the Telegram group — notification so the vote is
     # visible in chat history, then panel update so the list stays current.
@@ -1530,7 +1544,7 @@ async def vote_web(
                     f"🔁 Guest entry '{replaced['name']}' removed — replaced by "
                     "their verified Telegram vote (via 🌐 web).",
                 )
-        await _send_vote_notification(loc[0], body.name, body.vote)
+        await _send_vote_notification(loc[0], voter_name, body.vote)
         await _send_promotion_notification(loc[0], promoted, loc[1])
         await _mirror_panel_to_telegram(loc[0], loc[1])
 

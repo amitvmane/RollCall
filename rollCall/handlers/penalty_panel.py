@@ -191,6 +191,14 @@ async def send_penalty_panel(
     configured, or nobody to mark) — the caller must continue the settle flow
     itself, since there'll be no pen_d Done tap to hand off from.
     """
+    # The panel lists the session's players and its Done button closes the
+    # session's no-show review, so it only ever opens on this chat's own game
+    # (the id can reach here from a settle button — see get_rollcall_in_chat).
+    if db.get_rollcall_in_chat(rollcall_id, chat_id) is None:
+        logging.warning("penalty panel refused: rollcall %s is not chat %s's",
+                        rollcall_id, chat_id)
+        return False
+
     tiers = db.get_penalty_tiers(chat_id)
     if not tiers:
         # Dues enabled but no tiers configured. If ghost tracking was expected,

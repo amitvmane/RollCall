@@ -22,7 +22,7 @@ from rollcall_manager import manager
 from db import (
     get_ghost_count, increment_ghost_count, reset_ghost_count, decrement_ghost_count,
     get_ghost_leaderboard, get_ghost_count_by_proxy_name,
-    mark_rollcall_absent_done, get_unprocessed_rollcalls, get_rollcall,
+    mark_rollcall_absent_done, get_unprocessed_rollcalls, get_rollcall_in_chat,
     add_ghost_event, get_rollcall_in_users, get_rollcall_out_users,
     save_ghost_selections, load_ghost_selections,
     log_admin_action, upsert_chat_member,
@@ -212,10 +212,13 @@ async def ghost_callback_handler(call):
         data = call.data
 
         # Ghost marking mutates attendance stats and streaks — admin-gate the
-        # ghost_* actions (same pattern as the end-rollcall button). Other
-        # prefixes this handler serves (reconf_, proxy_add_, …) are
+        # ghost_* actions (same pattern as the end-rollcall button), and
+        # mabs_sel_, the session picker /mark_absent posts: that command is
+        # admin-only, but its buttons sit in the group for anyone to tap.
+        # Other prefixes this handler serves (reconf_, proxy_add_, …) are
         # user-facing self-service flows and stay open.
-        if data.startswith("ghost_") and manager.get_admin_rights(cid):
+        is_review = data.startswith("ghost_") or data.startswith("mabs_sel_")
+        if is_review and manager.get_admin_rights(cid):
             member = await bot.get_chat_member(cid, call.from_user.id)
             if member.status not in ("administrator", "creator"):
                 await bot.answer_callback_query(
@@ -223,16 +226,41 @@ async def ghost_callback_handler(call):
                 )
                 return
 
-        # A cancelled game has no no-shows. /mark_absent no longer lists one,
-        # but a prompt posted before the cancel keeps its buttons — and
-        # "No, all showed up" would forgive absences for a game nobody played.
-        if data.startswith("ghost_") or data.startswith("mabs_sel_"):
-            rc_row = get_rollcall(int(data.split("_")[2]))
-            if rc_row and rc_row.get("is_cancelled"):
+        if is_review:
+            # The session id comes from the button, and Telegram does not
+            # check callback data against the buttons that were posted — a
+            # modified client can send any id from a group of its own. Only
+            # ever review a session that belongs to THIS chat: otherwise an
+            # admin of one group could list another group's players and
+            # close or rewrite its no-show review (see get_rollcall_in_chat).
+            try:
+                rc_ref = int(data.split("_")[2])
+            except (IndexError, ValueError):
+                await bot.answer_callback_query(call.id, "Unknown ghost action")
+                return
+            rc_row = get_rollcall_in_chat(rc_ref, cid)
+            if rc_row is None:
+                await bot.answer_callback_query(
+                    call.id, "That session isn't part of this group.", show_alert=True)
+                return
+            # A cancelled game has no no-shows. /mark_absent no longer lists
+            # one, but a prompt posted before the cancel keeps its buttons —
+            # and "No, all showed up" would forgive absences for a game
+            # nobody played.
+            if rc_row.get("is_cancelled"):
                 mark_rollcall_absent_done(rc_row["id"])
                 await bot.answer_callback_query(call.id, "That game was cancelled — nothing to review.")
                 await safe_edit_text(cid, call.message.message_id,
                                      "🚫 This game was cancelled — no no-shows to review.")
+                return
+            # One review per session. A second prompt for the same game can
+            # be on screen (the end-of-game prompt plus /mark_absent), and
+            # an unanswered one outlives the auto-forgive sweep — answering
+            # it again would count every no-show and every forgiveness twice.
+            if rc_row.get("absent_marked"):
+                await bot.answer_callback_query(call.id, "This session was already reviewed.")
+                await safe_edit_text(cid, call.message.message_id,
+                                     "✅ This session has already been reviewed.")
                 return
 
         # ── ghost_no ─────────────────────────────────────────────────────────

@@ -7,7 +7,10 @@ from datetime import datetime, timedelta, timezone
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot_state import bot, _pending_deletes, _pending_overrides, _esc_md, _prune_pending, reply_error
+from bot_state import (
+    bot, _pending_deletes, _pending_overrides, _esc_md, _prune_pending, reply_error,
+    is_chat_admin,
+)
 from db import generate_api_token, insert_api_token, _hash_token
 from exceptions import (
     rollCallNotStarted, insufficientPermissions, parameterMissing, incorrectParameter,
@@ -354,9 +357,18 @@ async def audit_pagination_callback(call):
             await bot.answer_callback_query(call.id)
             return
         parts = call.data.split("_")  # audit_pg_<page>_<per_page>
-        page = int(parts[2])
-        per_page = int(parts[3])
         cid = call.message.chat.id
+        # /audit_log is admin-only, but the page buttons it posts sit in the
+        # group for anyone to tap — same gate, or a member could page through
+        # the log an admin opened.
+        if not await is_chat_admin(cid, call.from_user.id):
+            await bot.answer_callback_query(
+                call.id, "⛔ Only admins can view the audit log", show_alert=True)
+            return
+        # Same bounds /audit_log applies to what is typed: the numbers are
+        # read back from the button, and nothing guarantees they are ours.
+        page = max(1, int(parts[2]))
+        per_page = max(5, min(50, int(parts[3])))
         await bot.answer_callback_query(call.id)
         await _send_audit_page(cid, page=page, per_page=per_page, edit_msg_id=call.message.message_id)
     except Exception as e:

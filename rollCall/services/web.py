@@ -197,15 +197,26 @@ async def vote_by_token(
 
     is_real_user = isinstance(tg_user_id, int) and tg_user_id > 0
 
-    if is_real_user:
+    from utils.text import clean_guest_text
+    member_info = db.get_member_display_info(chat_id, tg_user_id) if is_real_user else None
+    if member_info and member_info.get("first_name"):
         # Prefer the canonical Telegram first_name and username stored in
-        # chat_members over whatever the client submitted. Falls back to the
-        # submitted name/username for first-time web voters with no bot history.
-        member_info = db.get_member_display_info(chat_id, tg_user_id)
-        if member_info:
-            name = member_info["first_name"] or name
-            username = member_info.get("username") or username
+        # chat_members over whatever the client submitted.
+        name = member_info["first_name"]
+        username = member_info.get("username") or username
     else:
+        # The name is whatever the browser sent — a guest's, or a first-time
+        # verified voter's with no bot history yet. It is about to be posted
+        # into the Telegram group by the bot, so it gets the checks any text
+        # from an unidentified visitor gets (see clean_guest_text).
+        name = clean_guest_text(name, "name")
+        if not name:
+            raise parameterMissing("Name is required")
+        if member_info:
+            username = member_info.get("username") or username
+    if not is_real_user:
+        if comment:
+            comment = clean_guest_text(comment, "comment") or None
         # For proxy votes, normalise to canonical casing of any existing same-name entry
         name = _find_canonical_name(rc_pre, name)
 
@@ -266,6 +277,10 @@ async def vote_by_token(
     # the route can say so in the group (a removal nobody announces is a
     # member silently vanishing from the list).
     out["replaced_guest"] = replaced
+    # And the name the vote was actually recorded under — the member's
+    # Telegram name, or the guest's name after clean_guest_text — so the
+    # group notice shows that rather than the raw text the browser sent.
+    out["voter_name"] = name
     return out
 
 

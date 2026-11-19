@@ -1085,6 +1085,11 @@ _RECONCILE_COLUMNS = {
         # the source of truth. Defaulting to 'platform' means adding the column
         # changes nothing until something opts a chat into 'local'.
         ("admin_source",           "admin_source TEXT DEFAULT 'platform'",     "admin_source VARCHAR(16) DEFAULT 'platform'"),
+        # Bundled vote notices: while the group is silent (/shh), post one
+        # summary of list changes every N hours. 0 = plain silence.
+        ("vote_digest_hours",      "vote_digest_hours INTEGER DEFAULT 0",      "vote_digest_hours INTEGER DEFAULT 0"),
+        # Rain/forecast heads-up before a game with a location (info only).
+        ("weather_alerts",         "weather_alerts INTEGER DEFAULT 0",         "weather_alerts INTEGER DEFAULT 0"),
     ],
     "users": [
         ("in_pos",   "in_pos INTEGER DEFAULT NULL",   "in_pos INTEGER DEFAULT NULL"),
@@ -2132,7 +2137,7 @@ _VALID_CHAT_FIELDS = {
     'auto_buzz_hours', 'dues_weekly_nudge', 'dues_report_enabled', 'last_idle_nudge',
     'collector_rotation', 'last_collector_uid', 'dues_epoch',
     'reminder_before_close_hours', 'reminder_after_open_hours',
-    'admin_source',
+    'admin_source', 'vote_digest_hours', 'weather_alerts',
 }
 
 # Columns declared BOOLEAN in the Postgres schema. SQLite has no bool type and
@@ -7538,6 +7543,85 @@ def get_active_group_chat_ids(since_utc: str) -> List[int]:
             return [row["chat_id"] if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
     except Exception:
         logging.exception("get_active_group_chat_ids failed")
+        return []
+
+
+def get_chat_ids_with_vote_digest() -> List[int]:
+    """Chats with bundled vote notices switched on (vote_digest_hours > 0)."""
+    try:
+        with _cursor() as cursor:
+            cursor.execute("SELECT chat_id FROM chats WHERE COALESCE(vote_digest_hours, 0) > 0")
+            return [row["chat_id"] if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
+    except Exception:
+        logging.exception("get_chat_ids_with_vote_digest failed")
+        return []
+
+
+def get_chat_ids_with_weather_alerts() -> List[int]:
+    """Chats that asked for a forecast heads-up before games."""
+    try:
+        with _cursor() as cursor:
+            cursor.execute("SELECT chat_id FROM chats WHERE COALESCE(weather_alerts, 0) = 1")
+            return [row["chat_id"] if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
+    except Exception:
+        logging.exception("get_chat_ids_with_weather_alerts failed")
+        return []
+
+
+def get_top_teammates(chat_id: int, user_id: int, limit: int = 3) -> List[Dict]:
+    """Who this member has played the most completed games alongside.
+
+    "Played" is the one shared rule (_completed_sql + _user_played_sql /
+    _proxy_played_sql), so these counts never disagree with /stats. Guest
+    names merged into the member count as the member's own games; other
+    guests appear under their guest name. Returns [{name, games}], most first.
+    """
+    try:
+        aliases = _merged_alias_names(chat_id, user_id)
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            # "I played game r": my own IN row, or a merged alias's.
+            i_played = (f"(EXISTS (SELECT 1 FROM users u WHERE u.rollcall_id = r.id "
+                        f"AND u.user_id = {ph} AND {_user_played_sql('u', 'r')})")
+            i_played_params: tuple = (user_id,)
+            not_alias, not_alias_params = "", ()
+            if aliases:
+                alias_in = ",".join(["LOWER(" + ph + ")"] * len(aliases))
+                i_played += (f" OR EXISTS (SELECT 1 FROM proxy_users p WHERE p.rollcall_id = r.id "
+                             f"AND LOWER(p.name) IN ({alias_in}) AND {_proxy_played_sql('p', 'r')})")
+                i_played_params += tuple(aliases)
+                not_alias = f"AND LOWER(p2.name) NOT IN ({alias_in})"
+                not_alias_params = tuple(aliases)
+            i_played += ")"
+            # One row per person per game, keyed on identity — a member by
+            # user id, a guest by lower-cased name — so two members sharing a
+            # first name stay two people (tests/test_stats_identity_guard.py).
+            cursor.execute(f"""
+                SELECT MAX(name) AS name, COUNT(*) AS games FROM (
+                    SELECT u2.first_name AS name, 'u' || CAST(u2.user_id AS TEXT) AS who_key
+                    FROM rollcalls r
+                    JOIN users u2 ON u2.rollcall_id = r.id
+                    WHERE r.chat_id = {ph} AND {_completed_sql('r')}
+                      AND u2.user_id != {ph} AND {_user_played_sql('u2', 'r')}
+                      AND {i_played}
+                    UNION ALL
+                    SELECT p2.name, 'p' || LOWER(p2.name)
+                    FROM rollcalls r
+                    JOIN proxy_users p2 ON p2.rollcall_id = r.id
+                    WHERE r.chat_id = {ph} AND {_completed_sql('r')}
+                      AND {_proxy_played_sql('p2', 'r')} {not_alias}
+                      AND {i_played}
+                ) t
+                GROUP BY who_key
+                ORDER BY games DESC, MAX(name)
+                LIMIT {ph}
+            """, (chat_id, user_id, *i_played_params,
+                  chat_id, *not_alias_params, *i_played_params, limit))
+            return [{"name": row["name"] if isinstance(row, dict) else row[0],
+                     "games": int(row["games"] if isinstance(row, dict) else row[1])}
+                    for row in cursor.fetchall()]
+    except Exception:
+        logging.exception("get_top_teammates failed")
         return []
 
 

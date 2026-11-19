@@ -96,6 +96,55 @@ def personal_stats(chat_id: int, user_id: int) -> dict:
     return {"user_id": user_id, **{k: data[k] for k in _PERSON_KEYS}}
 
 
+_FORM_ICON = {"in": "✅", "out": "❌", "maybe": "🤔", "waitlist": "⏳",
+              "ghost": "👻", "cancelled": "🚫", "miss": "▫️"}
+
+
+def recap(chat_id: int, user_id: int, name: str = "") -> dict:
+    """One member's recap: the same numbers as /stats and the leaderboard
+    (personal_stats), plus recent form, top teammates and dues balance."""
+    from db import get_top_teammates
+    stats = personal_stats(chat_id, user_id)
+    history = get_user_session_history(chat_id, user_id, limit=10)
+    out = {
+        "name": name,
+        "games_played": stats["sessions_attended"],
+        "games_total": stats["total_rollcalls_in_chat"],
+        "attendance_rate": stats["attendance_rate"],
+        "current_streak": stats["current_streak"],
+        "best_streak": stats["best_streak"],
+        "late_drops": stats["late_drops"],
+        # Oldest first, so it reads left to right like a scoreline.
+        "form": [row.get("status") or "miss" for row in reversed(history)],
+        "teammates": get_top_teammates(chat_id, user_id, limit=3),
+        "dues_balance": None,
+    }
+    from db import get_or_create_chat
+    if get_or_create_chat(chat_id).get("dues_enabled"):
+        from services.dues import my_dues
+        out["dues_balance"] = my_dues(chat_id, user_id)["balance"]
+    return out
+
+
+def recap_text(r: dict, group_name: str = "") -> str:
+    head = f"🏅 {r['name'] or 'Your'} recap" + (f" — {group_name}" if group_name else "")
+    lines = [head, ""]
+    rate = f" ({r['attendance_rate']:g}%)" if r["attendance_rate"] is not None else ""
+    lines.append(f"🎯 Games played: {r['games_played']} of {r['games_total']}{rate}")
+    lines.append(f"🔥 Streak: {r['current_streak']} now · best {r['best_streak']}")
+    if r["form"]:
+        lines.append("📈 Last games: " + "".join(_FORM_ICON.get(s, "▫️") for s in r["form"]))
+    if r["teammates"]:
+        lines.append("🤝 Played most with: " + ", ".join(f"{t['name']} ({t['games']})" for t in r["teammates"]))
+    if r["late_drops"]:
+        lines.append(f"⏰ Late drop-outs: {r['late_drops']}")
+    if r["dues_balance"] is not None:
+        b = r["dues_balance"]
+        lines.append("💰 Dues: all settled" if b == 0 else
+                     (f"💰 Dues: ₹{b} to pay" if b > 0 else f"💰 Dues: ₹{-b} in credit"))
+    return "\n".join(lines)
+
+
 def proxy_stats(chat_id: int, proxy_name: str) -> dict:
     """Return attendance stats for a named proxy user (folded with whoever
     it is merged into, if anyone — it is the same person)."""

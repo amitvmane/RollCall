@@ -62,6 +62,9 @@ from api.schemas.web import (
     WebDismissSuggestionResponse,
     WebGroupResponse,
     WebGroupSettingsRequest,
+    WebHealthResponse,
+    WebRecapResponse,
+    WebWeatherResponse,
     WebGroupStatsResponse,
     WebHeartbeatRequest,
     WebIdentityGroupResponse,
@@ -399,7 +402,9 @@ async def update_group_settings(
             )
     if body.shh_mode is not None:
         from rollcall_manager import manager as _mgr
+        from services.vote_digest import clear_bundling
         _mgr.set_shh_mode(chat_id, body.shh_mode)
+        clear_bundling(chat_id)
         actor_name = "(web admin)"
         try:
             from db import get_member_display_info as _gmi
@@ -422,6 +427,29 @@ async def update_group_settings(
         await _send_event_notification(
             chat_id,
             f"🕐 Timezone set to {body.timezone} (by {actor_name}, via web)",
+        )
+
+    if body.vote_notices is not None:
+        actor_name = await _actor_display_name(chat_id, actor_user_id)
+        from services import vote_digest as digest_svc
+        from exceptions import incorrectParameter as _bad
+        try:
+            m = digest_svc.set_mode(chat_id, body.vote_notices, body.vote_digest_hours,
+                                    actor_user_id, actor_name)
+        except _bad as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        _desc = {"each": "🔔 Vote notices: one message per vote",
+                 "silent": "🔇 Vote notices: silent",
+                 "bundled": f"📦 Vote notices: bundled every {m['hours']}h"}[m["mode"]]
+        await _send_event_notification(chat_id, f"{_desc} (by {actor_name}, via web)")
+
+    if body.weather_alerts is not None:
+        actor_name = await _actor_display_name(chat_id, actor_user_id)
+        from services import weather as weather_svc
+        weather_svc.set_alerts(chat_id, body.weather_alerts, actor_user_id, actor_name)
+        await _send_event_notification(
+            chat_id,
+            f"🌦 Weather alerts {'on' if body.weather_alerts else 'off'} (by {actor_name}, via web)",
         )
 
     # These three mirror what the admin console's bearer-token-gated PATCH
@@ -1671,6 +1699,69 @@ async def web_list_admins(
             for r in rows
         ],
     )
+
+
+@router.get(
+    "/web/group/{group_token}/health",
+    response_model=WebHealthResponse,
+    summary="Admin checklist: what this group needs attention on (requires web-admin identity)",
+)
+async def web_group_health(
+    group_token: str = Path(...),
+    id_token: Optional[str] = Depends(identity_from_header),
+) -> WebHealthResponse:
+    chat_id, _actor = await _require_web_admin(group_token, id_token or "")
+    from services import group_health as health_svc
+    return WebHealthResponse(**health_svc.check(chat_id))
+
+
+def _member_of(group_token: str, id_token: str) -> tuple[int, int]:
+    """(chat_id, tg_user_id) for a signed-in member of THIS group."""
+    chat = _db.get_chat_by_group_web_token(group_token)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Invalid group token")
+    chat_id = int(chat["chat_id"])
+    uid = require_identity(id_token, detail="Sign in with Telegram first.", chat_id=chat_id)
+    return chat_id, uid
+
+
+@router.get(
+    "/web/group/{group_token}/recap",
+    response_model=WebRecapResponse,
+    summary="The signed-in member's own recap in this group",
+)
+async def web_my_recap(
+    group_token: str = Path(...),
+    id_token: Optional[str] = Depends(identity_from_header),
+) -> WebRecapResponse:
+    chat_id, uid = _member_of(group_token, id_token or "")
+    info = _db.get_member_display_info(chat_id, uid) or {}
+    r = stats_svc.recap(chat_id, uid, info.get("first_name") or "")
+    return WebRecapResponse(**r, text=stats_svc.recap_text(r))
+
+
+@router.get(
+    "/web/group/{group_token}/rollcalls/{rollcall_id}/weather",
+    response_model=WebWeatherResponse,
+    summary="Forecast for an open rollcall of this group (signed-in members)",
+)
+async def web_rollcall_weather(
+    group_token: str = Path(...),
+    rollcall_id: int = Path(...),
+    id_token: Optional[str] = Depends(identity_from_header),
+) -> WebWeatherResponse:
+    # Signed-in only: each call can reach the forecast services, and the
+    # group link alone is shared freely. Cached per place and hour anyway.
+    chat_id, _uid = _member_of(group_token, id_token or "")
+    from rollcall_manager import manager as _mgr
+    from services import weather as weather_svc
+    rc = next((r for r in _mgr.get_rollcalls(chat_id) if r.id == rollcall_id), None)
+    if rc is None:
+        raise HTTPException(status_code=404, detail="That rollcall isn't open in this group.")
+    result = await weather_svc.rollcall_weather(rc)
+    if result["ok"]:
+        weather_svc.remember(rc.id, result["text"])
+    return WebWeatherResponse(ok=result["ok"], text=result["text"])
 
 
 @router.post(

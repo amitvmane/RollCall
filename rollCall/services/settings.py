@@ -74,8 +74,11 @@ def set_shh_mode(
     admin_user_id: int,
     admin_name: str,
 ) -> dict:
-    """Toggle silent (shh) or verbose (louder) mode."""
+    """Toggle silent (shh) or verbose (louder) mode. Either one ends
+    bundled vote notices (services.vote_digest) — both name a mode."""
     manager.set_shh_mode(chat_id, enabled)
+    from services.vote_digest import clear_bundling
+    clear_bundling(chat_id)
     log_admin_action(chat_id, admin_user_id, admin_name,
                      "shh" if enabled else "louder")
     return {"shh_mode": enabled}

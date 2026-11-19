@@ -106,7 +106,9 @@ def reset_db():
     # runs, so e.g. the games-milestone test passed on a fresh DB only — a
     # second local run found "game #3" already announced and failed. Only the
     # per-entity prefixes go: VAPID keys and the like are process-wide.
-    for prefix in ("milestone_games:", "ghost_cancel_reversed:"):
+    for prefix in ("milestone_games:", "ghost_cancel_reversed:",
+                   "vote_digest_snap:", "vote_digest_sent:", "geo:",
+                   "weather_early:", "weather_late:", "weather_warned:", "weather_last:"):
         try:
             cur.execute(f"DELETE FROM system_config WHERE key LIKE '{prefix}%'")
         except Exception:

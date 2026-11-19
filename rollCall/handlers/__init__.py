@@ -16,3 +16,4 @@ from handlers import web          # noqa: F401
 from handlers import dues         # noqa: F401
 from handlers import penalty_panel  # noqa: F401
 from handlers import payment_panel  # noqa: F401
+from handlers import insights     # noqa: F401

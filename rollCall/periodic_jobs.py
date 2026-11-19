@@ -84,6 +84,84 @@ async def run_periodic_jobs() -> None:
         await _ghost_auto_forgive()
     except Exception:
         logging.exception("[periodic] ghost auto-forgive sweep failed")
+    try:
+        await _vote_digests()
+    except Exception:
+        logging.exception("[periodic] vote digest sweep failed")
+    try:
+        await _weather_alerts()
+    except Exception:
+        logging.exception("[periodic] weather alert sweep failed")
+
+
+# ── Bundled vote notices ──────────────────────────────────────────────────────
+
+async def _vote_digests() -> None:
+    """Post each bundled group's summary when its interval is up — and only
+    if something on the list moved. services.vote_digest decides; this
+    only delivers, outside any chat lock (the send may be paced)."""
+    import db as _db
+    from services.vote_digest import due_digest
+
+    for chat_id in _db.get_chat_ids_with_vote_digest():
+        try:
+            text = due_digest(chat_id)
+            if text:
+                await bot.send_message(chat_id, text)
+        except Exception:
+            logging.exception("[periodic] vote digest failed for chat %s", chat_id)
+
+
+# ── Weather alerts ────────────────────────────────────────────────────────────
+
+# Two looks per game: the evening-before window and a final check shortly
+# before. The early one posts only when rain is expected; the late one also
+# posts "now looks clear" if the early one had warned — otherwise a group
+# warned the night before would never hear the all-clear.
+_WEATHER_EARLY_HOURS = 18
+_WEATHER_LATE_HOURS = 3
+
+
+async def _weather_alerts() -> None:
+    import db as _db
+    from services import weather as weather_svc
+    from rollcall_manager import manager
+
+    now = datetime.now(timezone.utc)
+    for chat_id in _db.get_chat_ids_with_weather_alerts():
+        for rc in manager.get_rollcalls(chat_id):
+            try:
+                when = weather_svc._game_time(rc)
+                if when is None or not rc.location or rc.id is None:
+                    continue
+                hours_left = (when - now).total_seconds() / 3600
+                if hours_left <= 0:
+                    continue
+                if hours_left <= _WEATHER_LATE_HOURS:
+                    stage = "late"
+                elif hours_left <= _WEATHER_EARLY_HOURS:
+                    stage = "early"
+                else:
+                    continue
+                stamp = f"weather_{stage}:{rc.id}"
+                if _db.get_system_config(stamp):
+                    continue
+                # Stamp first: a forecast service that keeps failing must not
+                # be retried (and logged) every minute until the game.
+                _db.set_system_config(stamp, now.isoformat(timespec="seconds"))
+                result = await weather_svc.rollcall_weather(rc)
+                if not result["ok"]:
+                    continue
+                weather_svc.remember(rc.id, result["text"])
+                warned_early = bool(_db.get_system_config(f"weather_warned:{rc.id}"))
+                rainy = result["result"]["rainy"] > 0
+                if rainy or (stage == "late" and warned_early):
+                    if rainy:
+                        _db.set_system_config(f"weather_warned:{rc.id}", "1")
+                    await bot.send_message(chat_id, "🌦 " + result["text"])
+            except Exception:
+                logging.exception("[periodic] weather alert failed for chat %s rollcall %s",
+                                  chat_id, getattr(rc, "id", None))
 
 
 # ── Weekly dues nudges ────────────────────────────────────────────────────────

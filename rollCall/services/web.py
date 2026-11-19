@@ -37,6 +37,18 @@ def _ensure_web_token(rc) -> str:
     return token
 
 
+def _weather_line(rc):
+    """The last forecast fetched for this rollcall (alert job or /weather).
+    Never fetches: a page load must not trigger outbound calls."""
+    if getattr(rc, "id", None) is None:
+        return None
+    try:
+        from services.weather import last_for
+        return last_for(rc.id)
+    except Exception:
+        return None
+
+
 def _serialize_web_rollcall(rc) -> dict:
     """Minimal dict for the web voting UI."""
     finalize_str = None
@@ -46,8 +58,13 @@ def _serialize_web_rollcall(rc) -> dict:
             import pytz
             tz = pytz.timezone(rc.timezone or "Asia/Kolkata")
             fd = rc.finalizeDate
+            # A naive value is the group's local time — Postgres' TIMESTAMP
+            # column drops the offset it was saved with. Reading it as UTC
+            # here (as this used to) showed the game 5h30m off on Postgres;
+            # the scheduler, reminders and /calendar all read it as local.
             if fd.tzinfo is None:
-                fd = pytz.utc.localize(fd).astimezone(tz)
+                fd = tz.localize(fd)
+            fd = fd.astimezone(tz)
             finalize_str = fd.strftime("%A, %d %b at %H:%M")
             finalize_epoch = fd.timestamp()
         except Exception:
@@ -68,6 +85,7 @@ def _serialize_web_rollcall(rc) -> dict:
         "limit": rc.inListLimit,
         "location": rc.location,
         "fee": rc.event_fee,
+        "weather": _weather_line(rc),
         "in": [_user_dict(u) for u in rc.inList],
         "out": [_user_dict(u) for u in rc.outList],
         "maybe": [_user_dict(u) for u in rc.maybeList],
@@ -365,4 +383,6 @@ def get_rollcalls_by_group_token(group_token: str) -> dict:
         "admin_rights": bool(chat.get("admin_rights", False)),
         "ghost_tracking_enabled": bool(chat.get("ghost_tracking_enabled", True)),
         "absent_limit": int(chat.get("absent_limit") or 1),
+        "vote_digest_hours": int(chat.get("vote_digest_hours") or 0),
+        "weather_alerts": bool(int(chat.get("weather_alerts") or 0)),
     }

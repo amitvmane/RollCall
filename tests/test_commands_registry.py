@@ -60,6 +60,16 @@ class TestMenuEntries(unittest.TestCase):
                                    f"/{name} out of registry order within {cat!r}")
             seen_pos_by_cat[cat] = pos
 
+    def test_admin_menu_fits_telegram_limit(self):
+        """Telegram refuses set_my_commands with more than 100 commands
+        (BOT_COMMANDS_TOO_MUCH). register_commands sends the admin scope as
+        user + admin commands, so one command too many silently leaves every
+        admin without a menu — runner only logs a warning. At 100 as of
+        2026-11-19: a new command needs a sub-command or a retired one."""
+        admin_menu = (menu_entries("user", USER_CATEGORY_ORDER)
+                      + menu_entries("admin", ADMIN_CATEGORY_ORDER))
+        self.assertLessEqual(len(admin_menu), 100)
+
 
 if __name__ == "__main__":
     unittest.main()

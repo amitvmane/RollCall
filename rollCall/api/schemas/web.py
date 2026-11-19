@@ -19,6 +19,7 @@ class WebRollcallResponse(BaseModel):
     limit: Optional[int] = None
     location: Optional[str] = None
     fee: Optional[str] = None
+    weather: Optional[str] = None
     in_list: list[WebUser] = Field(default_factory=list, alias="in")
     out_list: list[WebUser] = Field(default_factory=list, alias="out")
     maybe_list: list[WebUser] = Field(default_factory=list, alias="maybe")
@@ -56,6 +57,8 @@ class WebGroupResponse(BaseModel):
     admin_rights: bool = False
     ghost_tracking_enabled: bool = True
     absent_limit: int = 1
+    vote_digest_hours: int = 0
+    weather_alerts: bool = False
 
 
 class WebGroupSettingsRequest(BaseModel):
@@ -65,6 +68,10 @@ class WebGroupSettingsRequest(BaseModel):
     admin_rights: Optional[bool] = Field(None, description="Admin-only mode — restricts bot commands to Telegram admins")
     ghost_tracking_enabled: Optional[bool] = Field(None, description="Track members who RSVP IN but don't show up")
     absent_limit: Optional[int] = Field(None, ge=1, le=99, description="Missed sessions before a ghost warning triggers")
+    vote_notices: Optional[Literal["each", "bundled", "silent"]] = Field(
+        None, description="One message per vote, a bundled summary every vote_digest_hours, or silent")
+    vote_digest_hours: Optional[int] = Field(None, ge=1, le=48, description="Hours between bundled summaries (with vote_notices=bundled)")
+    weather_alerts: Optional[bool] = Field(None, description="Forecast heads-up before games with a location")
 
 
 class ScheduledRollcallRequest(BaseModel):
@@ -614,3 +621,38 @@ class WebSetAdminRoleRequest(BaseModel):
     id_token: str = Field(..., description="Signed identity token of the acting owner")
     tg_user_id: int = Field(..., description="Whose role to change")
     role: str = Field(..., description="'owner' or 'admin'")
+
+
+class WebHealthItem(BaseModel):
+    level: Literal["ok", "warn", "info"]
+    text: str
+    fix: str = ""
+
+
+class WebHealthResponse(BaseModel):
+    items: list[WebHealthItem]
+    warnings: int
+
+
+class WebTeammate(BaseModel):
+    name: str
+    games: int
+
+
+class WebRecapResponse(BaseModel):
+    name: str = ""
+    games_played: int
+    games_total: int
+    attendance_rate: Optional[float] = None
+    current_streak: int = 0
+    best_streak: int = 0
+    late_drops: int = 0
+    form: list[str] = Field(default_factory=list)
+    teammates: list[WebTeammate] = Field(default_factory=list)
+    dues_balance: Optional[float] = None
+    text: str
+
+
+class WebWeatherResponse(BaseModel):
+    ok: bool
+    text: str

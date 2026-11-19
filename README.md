@@ -404,6 +404,8 @@ entries, never deletes, and every money mutation is announced in the chat.
 | `/card` | `/mc` | Shareable match-day card image of the IN list |
 | `/calendar` | | One merged view of everything upcoming — active rollcalls closing, scheduled games, recurring templates |
 | `/export_stats` | | CSV of the leaderboard — attendance, ghosts, streaks, one row per member |
+| `/recap` | | Your games, streak, last 10 games, most-played-with teammates and dues balance (web: Stats tab) |
+| `/weather [::N]` | | Rain forecast for the game's time and location — agreement across ECMWF, GFS, ICON and MET Norway |
 | `/version` | `/v` | Show bot version |
 
 ### Chat Settings
@@ -412,6 +414,9 @@ entries, never deletes, and every money mutation is announced in the chat.
 |---|---|---|
 | `/shh` | | Silent mode — suppresses confirmations and list output after each vote |
 | `/louder` | | Resume full panel output after votes |
+| `/vote_digest [hours\|off]` | | Bundled vote notices — quiet, plus one summary every N hours, only if the list changed |
+| `/weather alerts on\|off` | | Post the forecast before games if rain is expected (information only) |
+| `/group_health` | | Admin checklist of what needs attention, with the fixing command for each (web: Admin → Group health) |
 | `/timezone Region/City` | `/tz` | Set timezone (e.g. `Asia/Kolkata`) |
 
 ### Super Admin

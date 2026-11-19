@@ -96,6 +96,29 @@ COMMANDS = [
         "details": "Prints the waitlist (users who voted IN after the IN limit was reached).",
     },
     {
+        "name": "weather", "aliases": [], "scope": "user", "category": "View Lists",
+        "args": "[::N] | alerts [on|off]", "sample": "/weather",
+        "summary": "Rain forecast for the game",
+        "details": (
+            "Forecast for the open game's time and /location, from several independent "
+            "models (ECMWF, GFS, ICON, MET Norway): \"3 of 4 forecasts expect rain\".\n"
+            "Needs a location and a game time (/set_rollcall_time). If the place isn't found, "
+            "add the area or city, or paste coordinates like 12.97,77.59.\n"
+            "/weather alerts on|off — (admins) post the forecast automatically the evening "
+            "before and a few hours before each game, only if rain is expected. Information "
+            "only — nothing is cancelled."
+        ),
+    },
+    {
+        "name": "recap", "aliases": [], "scope": "user", "category": "Stats & History",
+        "args": "", "sample": "/recap",
+        "summary": "Your games, streaks and teammates",
+        "details": (
+            "Your games played, streak, last 10 games, who you play with most and your dues "
+            "balance. In a DM it covers each group you play in. Also on the web: Stats tab."
+        ),
+    },
+    {
         "name": "stats", "aliases": ["s"], "scope": "user", "category": "Stats & History",
         "args": "[group | top | ghost | @user | name]",
         "sample": "/stats top",
@@ -345,6 +368,29 @@ COMMANDS = [
         "args": "", "sample": "/louder",
         "summary": "Disable silent mode",
         "details": "Restores per-vote ack messages.",
+    },
+    {
+        "name": "vote_digest", "aliases": [], "scope": "admin", "category": "Settings",
+        "args": "[hours | off]", "sample": "/vote_digest 6",
+        "summary": "Bundle vote notices into one summary",
+        "details": (
+            "A middle setting between one message per vote and /shh.\n"
+            "/vote_digest 6   — stay quiet, and every 6 hours post one summary of who\n"
+            "                   moved (only if the list changed). 1-48 hours.\n"
+            "/vote_digest off — back to one message per vote.\n"
+            "/vote_digest     — show the current setting.\n"
+            "/shh and /louder also end bundling. Same setting on the web: Admin → Group settings."
+        ),
+    },
+    {
+        "name": "group_health", "aliases": [], "scope": "admin", "category": "Settings",
+        "args": "", "sample": "/group_health",
+        "summary": "Checklist of what needs attention",
+        "details": (
+            "One list of the chores that slip: no game scheduled, a game with no time or "
+            "location, no-shows waiting for review, no UPI set, members owing a lot. "
+            "Each item names the command that fixes it. Same list on the web: Admin → Group health."
+        ),
     },
     {
         "name": "set_in_for", "aliases": ["sif"], "scope": "admin", "category": "Proxy",

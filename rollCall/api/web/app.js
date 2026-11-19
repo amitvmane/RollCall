@@ -784,7 +784,39 @@ function renderRcMeta(rc){
     }
     meta.push(feeLine);
   }
+  if(rc.weather)meta.push(esc(rc.weather.split("\n").pop()));
+  if(rc.location&&rc.finalize_date&&_idToken){
+    meta.push(`<button class="btn btn-secondary" style="padding:4px 10px;font-size:.8rem" data-on-click="checkRcWeather" data-args="${rcArgs(rc.rollcall_id)}">🌦 Check forecast</button>`);
+  }
   $("rc-meta").innerHTML=meta.map(m=>`<span>${m}</span>`).join("<br/>");
+}
+
+window.checkRcWeather=async function(rcId){
+  if(!_idToken){toast("Sign in with Telegram first.",3000);return;}
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/rollcalls/${encodeURIComponent(rcId)}/weather`,
+      {headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(20000)});
+    const d=await res.json().catch(()=>({}));
+    if(!res.ok)throw new Error(d.detail||"Could not get the forecast");
+    if(d.ok&&activeRcData&&activeRcData.rollcall_id===rcId){activeRcData.weather=d.text;renderRcMeta(activeRcData);}
+    toast(d.text.split("\n").pop(),6000);
+  }catch(e){toast(e.message||"Could not get the forecast",3500);}
+};
+
+async function loadMyRecap(){
+  const card=document.getElementById("recap-card");
+  if(!card)return;
+  if(!_idToken){card.classList.add("hidden");return;}
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/recap`,
+      {headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(8000)});
+    if(!res.ok)throw new Error("recap");
+    const d=await res.json();
+    if(!d.games_total){card.classList.add("hidden");return;}
+    card.innerHTML=`<div style="font-weight:700;font-size:1rem;margin-bottom:8px">🏅 Your recap</div>`+
+      `<div style="white-space:pre-line;font-size:.9rem;line-height:1.6">${esc(d.text.split("\n").slice(2).join("\n"))}</div>`;
+    card.classList.remove("hidden");
+  }catch(_){card.classList.add("hidden");}
 }
 
 // Live countdown: refresh the meta row every 30s so the "in Xh Ym" pill
@@ -2244,10 +2276,22 @@ window.retryAdminCheck=function(){
   _checkWebAdmin().catch(()=>{});
 };
 
+function _voteNoticesMode(){
+  if(!groupData||!groupData.shh_mode)return "each";
+  return (groupData.vote_digest_hours||0)>0?"bundled":"silent";
+}
+
 function _syncShhToggle(){
-  const tog=document.getElementById("shh-toggle");
-  if(!tog||!groupData)return;
-  tog.checked=!!groupData.shh_mode;
+  if(!groupData)return;
+  const sel=document.getElementById("vote-notices-select");
+  const mode=_voteNoticesMode();
+  if(sel)sel.value=mode;
+  const row=document.getElementById("vote-digest-hours-row");
+  if(row)row.classList.toggle("hidden",mode!=="bundled");
+  const hrs=document.getElementById("vote-digest-hours");
+  if(hrs)hrs.value=groupData.vote_digest_hours||6;
+  const wx=document.getElementById("weather-toggle");
+  if(wx)wx.checked=!!groupData.weather_alerts;
 }
 
 // Nothing running. Rather than one grey sentence in an otherwise blank
@@ -2325,7 +2369,7 @@ window.showView=function(name){
   // A view swap is a page change as far as the reader is concerned.
   window.scrollTo({top:0,behavior:"smooth"});
   if(name==="admin")_showAdminLevel(null);
-  if(name==="stats"&&IS_GROUP)loadWebStats();
+  if(name==="stats"&&IS_GROUP){loadWebStats();loadMyRecap().catch(()=>{});}
 };
 
 // Tabs appear as their surface becomes real: Dues once the group has it on,
@@ -2368,6 +2412,7 @@ const ADMIN_SECTIONS={
   merge:{load:()=>_ensureIdentityMergeLoaded()},
   ghost:{load:()=>loadGhostReview()},
   admins:{load:()=>loadAdminsPanel()},
+  health:{load:()=>loadHealthPanel()},
 };
 let _adminSection=null;
 
@@ -2542,23 +2587,36 @@ window.copyWebloginUrl=function(){
   }
 };
 
-window.toggleShhMode=async function(enabled){
-  if(!_idToken){toast("Verify with Telegram first.",3000);return;}
-  try{
-    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/settings`,{
-      method:"PATCH",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({id_token:_idToken,shh_mode:enabled}),
-      signal:AbortSignal.timeout(8000),
-    });
-    if(!res.ok){const d=await res.json().catch(()=>({}));throw new Error(d.detail||"Failed");}
-    if(groupData)groupData.shh_mode=enabled;
-    toast(enabled?"🔇 Silent mode ON":"🔔 Silent mode OFF",2000);
-  }catch(e){
-    toast(e.message||"Could not update silent mode",3500);
-    // Revert toggle on error
-    const tog=document.getElementById("shh-toggle");
+async function _saveVoteNotices(mode,hours){
+  const fields={vote_notices:mode};
+  if(mode==="bundled")fields.vote_digest_hours=hours;
+  const before={shh_mode:groupData&&groupData.shh_mode,vote_digest_hours:groupData&&groupData.vote_digest_hours};
+  const ok=await _patchGroupSetting(fields,()=>{});
+  if(ok&&groupData){
+    groupData.shh_mode=mode!=="each";
+    groupData.vote_digest_hours=mode==="bundled"?hours:0;
+    toast(mode==="bundled"?`📦 Bundled every ${hours}h`:mode==="silent"?"🔇 Silent":"🔔 Every vote",2000);
+  }else if(groupData){Object.assign(groupData,before);}
+  _syncShhToggle();
+}
+
+window.onVoteNoticesChange=function(mode){
+  const hrs=parseInt(document.getElementById("vote-digest-hours")?.value,10);
+  _saveVoteNotices(mode,hrs>=1&&hrs<=48?hrs:6);
+};
+
+window.doSaveVoteDigestHours=function(){
+  const hrs=parseInt(document.getElementById("vote-digest-hours")?.value,10);
+  if(!(hrs>=1&&hrs<=48)){toast("Pick 1 to 48 hours.",3000);return;}
+  _saveVoteNotices("bundled",hrs);
+};
+
+window.toggleWeatherAlerts=async function(enabled){
+  const ok=await _patchGroupSetting({weather_alerts:enabled},()=>{
+    const tog=document.getElementById("weather-toggle");
     if(tog)tog.checked=!enabled;
-  }
+  });
+  if(ok)toast(enabled?"🌦 Weather alerts ON":"🌦 Weather alerts OFF",2000);
 };
 
 async function _patchGroupSetting(fields,revert){
@@ -4852,6 +4910,26 @@ async function _peekGhostReview(){
 // Telegram is still the authority, because after that switch nobody would
 // have standing to grant ownership to anyone.
 let _adminsData=null;
+
+async function loadHealthPanel(){
+  const body=document.getElementById("health-body");
+  if(!body||!_idToken)return;
+  body.innerHTML='<div class="sched-empty">Loading…</div>';
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/health`,
+      {headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(8000)});
+    if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"Failed to load");
+    const data=await res.json();
+    const icon={ok:"✅",warn:"⚠️",info:"ℹ️"};
+    const head=data.warnings?`${data.warnings} thing${data.warnings>1?"s":""} need attention`:"All good";
+    body.innerHTML=`<div class="adm-row-t" style="margin-bottom:8px">${esc(head)}</div>`+
+      data.items.map(i=>`<div class="adm-row" style="align-items:flex-start"><div>`+
+        `<div class="adm-row-t">${icon[i.level]||""} ${esc(i.text)}</div>`+
+        (i.fix?`<div class="adm-row-s">→ ${esc(i.fix)}</div>`:"")+`</div></div>`).join("");
+  }catch(e){
+    body.innerHTML=`<div class="sched-empty">${esc(e.message||"Could not load")}</div>`;
+  }
+}
 
 async function loadAdminsPanel(){
   const body=document.getElementById("admins-body");

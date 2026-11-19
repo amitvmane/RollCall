@@ -370,6 +370,7 @@
     <section class="view" id="view-stats" role="tabpanel" aria-labelledby="vn-stats">
 
     <!-- Stats card — group mode only, lazy-loaded after identity is known -->
+    <div id="recap-card" class="card hidden"></div>
     <div id="stats-card" class="card hidden"></div>
     </section><!-- /#view-stats -->
 
@@ -484,7 +485,13 @@
         <button class="adm-menu-item" role="menuitem" data-on-click="openAdminSection" data-args='["settings"]'>
           <span class="adm-mi-icon">⚙</span>
           <span class="adm-mi-text"><span class="adm-mi-title">Group settings</span>
-            <span class="adm-mi-sub">Silent mode, ghost tracking, timezone</span></span>
+            <span class="adm-mi-sub">Vote notices, weather, ghost tracking, timezone</span></span>
+          <span class="adm-mi-chev">›</span>
+        </button>
+        <button class="adm-menu-item" role="menuitem" data-on-click="openAdminSection" data-args='["health"]'>
+          <span class="adm-mi-icon">🩺</span>
+          <span class="adm-mi-text"><span class="adm-mi-title">Group health</span>
+            <span class="adm-mi-sub">What needs attention, and the fix for each</span></span>
           <span class="adm-mi-chev">›</span>
         </button>
         <button class="adm-menu-item" role="menuitem" data-on-click="openAdminSection" data-args='["access"]'>
@@ -545,13 +552,30 @@
           <button class="adm-back" data-on-click="closeAdminSection">‹ Back</button>
           <span class="adm-panel-title">⚙ Group settings</span>
         </div>
+        <div class="adm-sub">
+          <div class="adm-row-t">🔔 Vote notices</div>
+          <div class="adm-row-s" style="margin:2px 0 10px">What the group chat sees when someone votes. Bundled posts one summary every few hours, and only if the list changed.</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <select id="vote-notices-select" class="adm-select" style="flex:1;min-width:150px" data-on-change="onVoteNoticesChange" data-args='[{"$": "value"}]'>
+              <option value="each">Every vote</option>
+              <option value="bundled">Bundled summary</option>
+              <option value="silent">Silent</option>
+            </select>
+            <span id="vote-digest-hours-row" class="hidden" style="display:flex;gap:6px;align-items:center">
+              <span class="adm-row-s">every</span>
+              <input id="vote-digest-hours" type="number" min="1" max="48" inputmode="numeric" style="width:56px;padding:7px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg);color:var(--text);font-size:.85rem;text-align:center"/>
+              <span class="adm-row-s">h</span>
+              <button class="btn btn-secondary" style="padding:8px 12px" data-on-click="doSaveVoteDigestHours">Save</button>
+            </span>
+          </div>
+        </div>
         <div class="adm-row">
           <div>
-            <div class="adm-row-t">🔇 Silent mode</div>
-            <div class="adm-row-s">Suppress per-vote bot messages in group</div>
+            <div class="adm-row-t">🌦 Weather alerts</div>
+            <div class="adm-row-s">Warn the group if rain is expected before a game (needs a location and game time)</div>
           </div>
           <label class="admin-toggle">
-            <input type="checkbox" id="shh-toggle" data-on-change="toggleShhMode" data-args='[{"$": "checked"}]'/>
+            <input type="checkbox" id="weather-toggle" data-on-change="toggleWeatherAlerts" data-args='[{"$": "checked"}]'/>
             <span class="admin-toggle-slider"></span>
           </label>
         </div>
@@ -593,6 +617,14 @@
             <button class="btn btn-secondary" style="padding:8px 12px;white-space:nowrap" data-on-click="doDetectTimezone">📍 Detect from this browser</button>
           </div>
         </div>
+      </div>
+
+      <div class="adm-panel hidden" id="adm-panel-health">
+        <div class="adm-panel-hdr">
+          <button class="adm-back" data-on-click="closeAdminSection">‹ Back</button>
+          <span class="adm-panel-title">🩺 Group health</span>
+        </div>
+        <div id="health-body"><div class="sched-empty">Loading…</div></div>
       </div>
 
       <div class="adm-panel hidden" id="adm-panel-access">

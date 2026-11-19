@@ -1348,6 +1348,97 @@ async def phase_stats_season():
                not mismatches, "; ".join(mismatches[:6]))
 
 
+async def phase_insights():
+    """Bundled vote notices, weather, group health, recap and inline sharing
+    — through real telebot routing, including a real inline_query update."""
+    print("\n=== Phase: Insights & quieter notices ===\n")
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    import periodic_jobs
+    from services import weather as _wx
+
+    await feed("/src Insights Game", ALICE)
+    await feed("/in", BOB)
+
+    out = await feed("/vote_digest 3", ALICE)
+    ok, d = contains(out, "bundled", "every 3h")
+    record("/vote_digest 3 switches to bundled notices", ok, d)
+    out = await feed("/in", CAROL)
+    record("bundled: a vote posts no per-vote message",
+           not any("Carol" in (a[1] if len(a) > 1 else "") for n, a, kw in out if n == "send_message"), str(out)[:200])
+    _db.set_system_config(f"vote_digest_sent:{CHAT_ID}",
+                          (_dt.now(_tz.utc) - _td(hours=4)).isoformat(timespec="seconds"))
+    _outbound.clear()
+    await periodic_jobs._vote_digests()
+    ok, d = contains(list(_outbound), "Vote update", "Carol → IN")
+    record("bundled summary posts what moved since the last one", ok, d)
+    out = await feed("/vote_digest off", ALICE)
+    ok, d = contains(out, "one message per vote")
+    record("/vote_digest off restores per-vote messages", ok, d)
+
+    out = await feed("/weather", BOB)
+    ok, d = contains(out, "No location")
+    record("/weather without a location explains what's missing", ok, d)
+    await feed("/loc 12.97,77.59", ALICE)
+    when = (_dt.now() + _td(hours=8)).strftime("%d-%m-%Y %H:%M")
+    await feed(f"/srt {when}", ALICE)
+
+    async def _fake_fetch(url, params):
+        hours = [(_dt.now(_tz.utc) + _td(hours=h)).strftime("%Y-%m-%dT%H:00") for h in range(0, 72)]
+        if "open-meteo" in url:
+            return {"hourly": {"time": hours,
+                               "precipitation_ecmwf_ifs025": [3.0] * 72,
+                               "precipitation_gfs_seamless": [0.0] * 72,
+                               "precipitation_icon_seamless": [1.0] * 72}}
+        if "met.no" in url:
+            return {"properties": {"timeseries": [
+                {"time": h + ":00Z", "data": {"next_1_hours": {"details": {"precipitation_amount": 0.0}}}}
+                for h in hours]}}
+        return None
+    _orig_fetch = _wx._fetch_json
+    _wx._fetch_json = _fake_fetch
+    try:
+        out = await feed("/weather", BOB)
+    finally:
+        _wx._fetch_json = _orig_fetch
+    ok, d = contains(out, "2 of 4 forecasts expect rain")
+    record("/weather reports agreement across forecast models", ok, d)
+    out = await feed("/weather alerts on", ALICE)
+    ok, d = contains(out, "Weather alerts on")
+    record("/weather alerts on enables the heads-up", ok, d)
+    await feed("/weather alerts off", ALICE)
+
+    out = await feed("/group_health", ALICE)
+    ok, d = contains(out, "Group health")
+    record("/group_health posts the checklist", ok, d)
+
+    out = await feed("/recap", BOB)
+    ok, d = contains(out, "recap", "Games played")
+    record("/recap posts the member's recap", ok, d)
+
+    await feed("/erc", ALICE)
+
+    # Inline mode: Alice has played here and is a tracked member.
+    await feed("/src Shared Game", ALICE)
+    _answers = []
+
+    async def _answer_inline(query_id, results, **kw):
+        _answers.append(results)
+    _orig_answer = bot.answer_inline_query
+    bot.answer_inline_query = _answer_inline
+    try:
+        upd = Update.de_json({"update_id": _next_upd(), "inline_query": {
+            "id": "iq1", "from": {"id": ALICE[0], "is_bot": False, "first_name": ALICE[1]},
+            "query": "", "offset": ""}})
+        _errors.clear()
+        await bot.process_new_updates([upd])
+    finally:
+        bot.answer_inline_query = _orig_answer
+    titles = [r.title for r in (_answers[0] if _answers else [])]
+    record("inline query offers the open game as a shareable card",
+           "Shared Game" in titles and not _errors, f"titles={titles} errors={error_msgs()[:2]}")
+    await feed("/erc", ALICE)
+
+
 async def phase_close_races():
     """Regressions from the 2026-10-30 review of the burst changes.
 
@@ -2611,6 +2702,7 @@ async def run_all():
     await phase_mixed_command_burst()
     await phase_close_races()
     await phase_stats_season()
+    await phase_insights()
 
     print("\n=== Phase 16: Lifecycle close (final) ===\n")
 

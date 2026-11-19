@@ -245,3 +245,21 @@ class TestDuesReportHandler(IntegrationBase):
         self.assertFalse(chat.get("dues_report_enabled"))
         self.mgr.set_admin_rights(CHAT_ID, False)
         get_mock_bot().get_chat_member.return_value.status = "administrator"
+
+
+class TestDuesExportFormulaSafety(IntegrationBase):
+    """A member's name is theirs to choose; in a CSV it must open as text,
+    never run as a spreadsheet formula on the admin's machine."""
+
+    async def test_formula_name_is_neutralised_and_balances_stay_numbers(self):
+        import csv, io
+        _enable()
+        _seed_balance(USERS[0]["id"], '=HYPERLINK("http://x.example","pay")', 90)
+        _seed_balance(USERS[1]["id"], "+Ravi", -40)
+
+        rows = list(csv.reader(io.StringIO(dues_svc.dues_export_csv(CHAT_ID))))
+        by_id = {r[1]: r for r in rows[1:]}
+
+        self.assertEqual(by_id[str(USERS[0]["id"])][0], '\'=HYPERLINK("http://x.example","pay")')
+        self.assertEqual(by_id[str(USERS[1]["id"])][0], "'+Ravi")
+        self.assertEqual(float(by_id[str(USERS[1]["id"])][2]), -40)

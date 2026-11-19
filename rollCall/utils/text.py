@@ -70,6 +70,20 @@ def clean_guest_text(text: str, what: str = "name") -> str:
     return text
 
 
+# Spreadsheet apps run a cell that starts with one of these as a formula —
+# "=HYPERLINK(...)" in a member's Telegram name becomes a live link (or worse)
+# the moment an admin opens /export_stats or /dues_export.
+_CSV_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+
+
+def csv_cell(value):
+    """A CSV value that opens as text, never a formula. Only strings are
+    touched, so a negative balance stays a number."""
+    if isinstance(value, str) and value.startswith(_CSV_FORMULA_START):
+        return "'" + value
+    return value
+
+
 def parse_rc_suffix(args: list[str]) -> tuple[int, list[str]]:
     """Pop optional ::N suffix and return (0-based rc_index, remaining args)."""
     if args and "::" in args[-1]:

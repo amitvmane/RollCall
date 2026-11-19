@@ -171,3 +171,15 @@ class TestExportStats(IntegrationBase):
         csv_str = stats_svc.export_stats_csv(CHAT_ID)
         self.assertIn(USERS[0]["first_name"], csv_str)
         self.assertIn(str(USERS[0]["id"]), csv_str)
+
+    async def test_export_stats_neutralises_formula_names(self):
+        import csv, io
+        evil = {**USERS[2], "first_name": "=cmd|' /C calc'!A0"}
+        await self.start_rc("Game 1")
+        await self.vote_in(evil)
+        await self.end_roll_call(self.msg("/erc", ADMIN_USER))
+
+        rows = list(csv.DictReader(io.StringIO(stats_svc.export_stats_csv(CHAT_ID))))
+        names = [r["name"] for r in rows]
+        self.assertIn("'=cmd|' /C calc'!A0", names)
+        self.assertFalse(any(n.startswith(("=", "+", "-", "@")) for n in names))

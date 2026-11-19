@@ -15,7 +15,7 @@ import re
 from typing import Optional
 
 import db
-from utils.text import esc_md as _esc_md
+from utils.text import csv_cell, esc_md as _esc_md
 from exceptions import (
     duesGameAlreadyClosed,
     duesNothingToClose,
@@ -798,7 +798,7 @@ def dues_export_csv(chat_id: int) -> str:
         bal = b["balance"]
         status = "owed" if bal > 0 else ("credit" if bal < 0 else "settled")
         le = last_entries.get((b.get("user_id"), b["member_name"]), {})
-        writer.writerow([
+        writer.writerow([csv_cell(v) for v in (
             b["member_name"],
             b.get("user_id") or "",
             bal,
@@ -806,7 +806,7 @@ def dues_export_csv(chat_id: int) -> str:
             le.get("entry_type", ""),
             (le.get("created_at") or "")[:10],
             le.get("amount", ""),
-        ])
+        )])
     return buf.getvalue()
 
 

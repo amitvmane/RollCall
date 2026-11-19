@@ -32,6 +32,7 @@ from db import (
 )
 from rollcall_manager import manager
 from services.voting import LATE_DROP_HOURS
+from utils.text import csv_cell
 
 
 def resolve_user(chat_id: int, arg: str) -> Optional[tuple]:
@@ -241,7 +242,7 @@ def export_stats_csv(chat_id: int) -> str:
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=_EXPORT_COLUMNS)
     writer.writeheader()
-    writer.writerows(rows)
+    writer.writerows({k: csv_cell(v) for k, v in row.items()} for row in rows)
     return buf.getvalue()
 
 

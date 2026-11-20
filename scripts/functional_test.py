@@ -1494,10 +1494,13 @@ async def phase_teams():
     out = await feed_cb(f"tm:back:{rc.id}", BOB)
     record("🔙 Back returns to the vote panel", has_call(out, "edit_message_text") and not _errors,
            error_msgs()[:2])
+    out = await feed("/erc", ALICE)
+    ok, d = contains(out, "Teams:", "Team A", "Team B", "Guesty")
+    record("the end summary shows the teams instead of the IN list",
+           ok and "In:\n" not in text_of(out), d)
     out = await feed("/teams off", ALICE)
     ok, d = contains(out, "Teams off")
     record("/teams off hides teams again", ok, d)
-    await feed("/erc", ALICE)
 
 
 async def phase_close_races():

@@ -115,12 +115,12 @@ class TestTeamRules(_Base):
     async def test_view_does_not_write(self):
         rc = await self._game_with(4)
         _svc().form(rc, 2, "Admin", is_admin=True)
-        await self.vote_out(USERS[0])
+        await self.vote_in(USERS[5])
         _svc().view(self._rc())
-        self.assertIn(f"u{USERS[0]['id']}", [r["who_key"] for r in db.get_team_rows(rc.id)])
+        self.assertNotIn(f"u{USERS[5]['id']}", [r["who_key"] for r in db.get_team_rows(rc.id)])
         # The next change saves the reconciled sheet.
         _svc().move(self._rc(), f"u{USERS[1]['id']}", None, "User2")
-        self.assertNotIn(f"u{USERS[0]['id']}", [r["who_key"] for r in db.get_team_rows(rc.id)])
+        self.assertIn(f"u{USERS[5]['id']}", [r["who_key"] for r in db.get_team_rows(rc.id)])
 
     async def test_move_cycles_and_targets(self):
         rc = await self._game_with(4)
@@ -493,3 +493,123 @@ class TestParallelRollcalls(_Base):
         by_id = {r["rollcall_id"]: r for r in page["rollcalls"]}
         self.assertEqual(sorted(p["key"] for t in by_id[b.id]["teams"]["teams"] for p in t["players"]),
                          sorted(f"u{u['id']}" for u in USERS[4:8]))
+
+
+class TestLockedReplacement(_Base):
+
+    async def test_drop_while_locked_is_replaced_from_the_waitlist(self):
+        rc = await self._game_with(4)
+        rc.inListLimit = 4
+        rc.save()
+        await self.vote_in(USERS[4])  # waitlisted
+        rc = self._rc()
+        v = _svc().form(rc, 2, "Admin", is_admin=True, rng=random.Random(7))
+        gap_team = _team_of(v, f"u{USERS[2]['id']}")
+        _svc().set_locked(rc, True, is_admin=True)
+
+        await self.vote_out(USERS[2])
+        v = _svc().view(self._rc())
+        self.assertTrue(v["locked"], "a drop doesn't unlock the teams")
+        self.assertNotIn(f"u{USERS[2]['id']}", _keys(v))
+        self.assertEqual(_team_of(v, f"u{USERS[4]['id']}"), gap_team,
+                         "the promoted player takes the dropped player's team")
+        self.assertEqual(_sizes(v), [2, 2])
+
+
+class TestEndSummary(_Base):
+
+    def _summary(self):
+        return " ".join(self.sent_texts())
+
+    async def test_teams_replace_the_in_list(self):
+        rc = await self._game_with(4, guest="Ann")
+        _svc().form(rc, 2, "Admin", is_admin=True)
+        await self.vote_out(USERS[5])
+        get_mock_bot().reset_mock()
+        await self.end_roll_call(self.msg("/erc", ADMIN_USER))
+        text = self._summary()
+        self.assertIn("Teams:", text)
+        self.assertIn("🔴 Team A", text)
+        self.assertIn("🔵 Team B", text)
+        self.assertIn("Ann", text)
+        self.assertNotIn("In:\n", text, "the IN list is replaced by the teams")
+        self.assertIn("Out:\n", text, "OUT is still listed")
+
+    async def test_no_teams_keeps_the_usual_summary(self):
+        await self._game_with(3)
+        get_mock_bot().reset_mock()
+        await self.end_roll_call(self.msg("/erc", ADMIN_USER))
+        text = self._summary()
+        self.assertIn("In:\n1. ", text)
+        self.assertNotIn("Teams:", text)
+
+    async def test_teams_turned_off_keeps_the_usual_summary(self):
+        rc = await self._game_with(3)
+        _svc().form(rc, 2, "Admin", is_admin=True)
+        db.update_chat_settings(CHAT_ID, teams_enabled=0)
+        get_mock_bot().reset_mock()
+        await self.end_roll_call(self.msg("/erc", ADMIN_USER))
+        self.assertNotIn("Teams:", self._summary())
+
+
+class TestVacancies(_Base):
+    """A drop leaves an empty spot on that team; the next person IN — by
+    vote, /sif or waitlist, however much later — fills it."""
+
+    async def _uneven(self):
+        # A deliberately uneven sheet (5 v 2) made by hand, so "smallest
+        # team" and "the team that lost a player" are different answers.
+        rc = await self._game_with(7)
+        _svc().form(rc, 2, "Admin", is_admin=True, rng=random.Random(1))
+        for u in USERS[:7]:
+            _svc().move(self._rc(), f"u{u['id']}", 1, "Admin")
+        for u in USERS[5:7]:
+            _svc().move(self._rc(), f"u{u['id']}", 2, "Admin")
+        self.assertEqual(_sizes(_svc().view(self._rc())), [5, 2])
+
+    async def test_later_in_vote_fills_the_dropped_players_team(self):
+        await self._uneven()
+        await self.vote_out(USERS[0])            # leaves Team A
+        _svc().move(self._rc(), f"u{USERS[1]['id']}", 1, "Admin")  # an unrelated change in between
+        await self.vote_in(USERS[8])             # much later
+        v = _svc().view(self._rc())
+        self.assertEqual(_team_of(v, f"u{USERS[8]['id']}"), 1, "fills A's empty spot, not the smaller B")
+        self.assertEqual(_sizes(v), [5, 2])
+
+    async def test_later_sif_guest_fills_the_spot(self):
+        await self._uneven()
+        await self.vote_out(USERS[1])
+        await self.set_in_for(self.msg("/sif Zed", ADMIN_USER))
+        v = _svc().view(self._rc())
+        self.assertEqual(_team_of(v, "pzed"), 1)
+
+    async def test_spot_is_filled_once_then_smallest_team(self):
+        await self._uneven()
+        await self.vote_out(USERS[0])
+        await self.vote_in(USERS[8])
+        await self.vote_in(USERS[9])
+        v = _svc().view(self._rc())
+        self.assertEqual(_team_of(v, f"u{USERS[8]['id']}"), 1)
+        self.assertEqual(_team_of(v, f"u{USERS[9]['id']}"), 2, "no vacancy left: smallest team")
+
+    async def test_returning_player_goes_back_to_their_team(self):
+        await self._uneven()
+        await self.vote_out(USERS[6])            # from Team B
+        await self.vote_in(USERS[6])
+        self.assertEqual(_team_of(_svc().view(self._rc()), f"u{USERS[6]['id']}"), 2)
+
+    async def test_works_while_locked(self):
+        await self._uneven()
+        _svc().set_locked(self._rc(), True, is_admin=True)
+        await self.vote_out(USERS[2])
+        await self.vote_in(USERS[8])
+        v = _svc().view(self._rc())
+        self.assertTrue(v["locked"])
+        self.assertEqual(_team_of(v, f"u{USERS[8]['id']}"), 1)
+
+    async def test_reshuffle_clears_old_spots(self):
+        await self._uneven()
+        await self.vote_out(USERS[0])
+        _svc().reshuffle(self._rc(), "Admin", rng=random.Random(2))
+        keys = [r["who_key"] for r in db.get_team_rows(self._rc().id)]
+        self.assertNotIn(f"u{USERS[0]['id']}", keys)

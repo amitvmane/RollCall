@@ -28,6 +28,7 @@ re-find the rollcall inside the lock, as for votes.
 
 from __future__ import annotations
 
+import logging
 import random
 from datetime import datetime, timezone
 
@@ -99,26 +100,42 @@ def _locked(rc, lock_flag: int, now: datetime | None = None) -> tuple[bool, str 
 
 def _reconcile(rc, count: int) -> tuple[list[dict], list[str], list[dict]]:
     """The sheet as it should be now: (rows, keys to drop, rows to add).
-    Saved rows of players no longer IN are dropped; IN players with no row
-    go to the smallest team (lowest number on a tie), in IN-list order."""
+
+    A player who leaves IN keeps their saved row as a VACANCY on their team
+    — the sheet remembers the empty spot. Whoever is IN next and has no
+    row (a /in, /sif, or waitlist promotion, however much later) fills a
+    vacancy first, on the smallest team that has one, and that vacancy row
+    goes. With no vacancy left, a newcomer joins the smallest team (lowest
+    number on a tie). A player who comes back while their own row is still
+    vacant simply returns to their team. In IN-list order throughout."""
     saved = db.get_team_rows(rc_db_id(rc))
     players = _players(rc)
     names = dict(players)
     keep = [dict(r, name=names[r["who_key"]]) for r in saved
             if r["who_key"] in names and 1 <= int(r["team_no"]) <= count]
     placed = {r["who_key"] for r in keep}
-    drop = [r["who_key"] for r in saved if r["who_key"] not in placed]
+    vacant = [r for r in saved if r["who_key"] not in placed and 1 <= int(r["team_no"]) <= count]
+    # Rows for a team that no longer exists can't be vacancies.
+    stray = [r["who_key"] for r in saved
+             if r["who_key"] not in placed and not 1 <= int(r["team_no"]) <= count]
     sizes = {n: 0 for n in range(1, count + 1)}
     for r in keep:
         sizes[int(r["team_no"])] += 1
-    added = []
+    added, filled = [], []
     for key, name in players:
         if key in placed:
             continue
-        team = min(sizes, key=lambda n: (sizes[n], n))
+        open_teams = {int(r["team_no"]) for r in vacant}
+        if open_teams:
+            team = min(open_teams, key=lambda n: (sizes[n], n))
+            slot = next(r for r in vacant if int(r["team_no"]) == team)
+            vacant.remove(slot)
+            filled.append(slot["who_key"])
+        else:
+            team = min(sizes, key=lambda n: (sizes[n], n))
         sizes[team] += 1
         added.append({"who_key": key, "name": name, "team_no": team})
-    return keep + added, drop, added
+    return keep + added, stray + filled, added
 
 
 def view(rc, now: datetime | None = None) -> dict:
@@ -153,7 +170,8 @@ def view(rc, now: datetime | None = None) -> dict:
 
 
 def _sync(rc, count: int) -> list[dict]:
-    """Save the reconciled sheet; returns its rows."""
+    """Save the reconciled sheet; returns its rows. Vacancy rows stay
+    until someone fills them (see _reconcile)."""
     rows, drop, added = _reconcile(rc, count)
     rid = rc_db_id(rc)
     db.remove_team_players(rid, drop)
@@ -261,6 +279,29 @@ def publish(rc) -> tuple[dict, str]:
     db.update_rollcall(rc_db_id(rc), teams_published_at=datetime.now(timezone.utc).replace(tzinfo=None))
     v = view(rc)
     return v, render_text(rc, v)
+
+
+def summary_section(rc) -> str | None:
+    """The end-of-game summary's team section, replacing its IN list — or
+    None when this game had no teams (the summary then lists IN as usual).
+    Read before the rollcall closes, so the sheet still matches its IN list."""
+    try:
+        if not enabled(rc.chat_id):
+            return None
+        v = view(rc)
+    except Exception:
+        logging.exception("teams summary failed for rollcall %s", rc_db_id(rc))
+        return None
+    if not v["formed"]:
+        return None
+    lines = ["Teams:"]
+    for team in v["teams"]:
+        lines.append(f"{team['emoji']} Team {team['label']} ({len(team['players'])})")
+        lines.extend(f"{i}. {p['name']}" for i, p in enumerate(team["players"], 1))
+        if not team["players"]:
+            lines.append("Nobody")
+        lines.append("")
+    return "\n".join(lines) + "\n"
 
 
 def player_by_token(v: dict, token: str) -> str | None:

@@ -172,6 +172,22 @@ def _prune_pending(d: dict) -> None:
         d.pop(k, None)
 
 
+def _pending_live(d: dict, key) -> bool:
+    """True if `key` is armed in a pending-reply dict and not yet expired.
+
+    Message filters for "reply with ..." prompts must use this rather than a
+    bare `key in d`: the prune loop only sweeps every 10 minutes (and some
+    dicts are only pruned when a new prompt is armed), so an abandoned prompt
+    would otherwise keep capturing that person's ordinary chat messages."""
+    entry = d.get(key)
+    if entry is None:
+        return False
+    if datetime.now().timestamp() - entry.get('_ts', 0) > _PENDING_TTL_SECONDS:
+        d.pop(key, None)
+        return False
+    return True
+
+
 # ── Centralized handler error wrapping ───────────────────────────────────────
 # Exceptions whose `str(e)` is a curated user-facing message; the wrapper
 # sends them verbatim. Anything else is logged with full traceback and the

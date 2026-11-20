@@ -41,7 +41,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import db
 from bot_state import (
     bot, reply_error, safe_edit_text, safe_edit_markup, send_md_fallback,
-    _esc_md, _pending_payment_input, _prune_pending, is_chat_admin,
+    _esc_md, _pending_payment_input, _prune_pending, _pending_live, is_chat_admin,
 )
 from rollcall_manager import manager
 from services import dues as dues_svc
@@ -263,11 +263,14 @@ async def payment_panel_callback(call):
         await reply_error(call.message, exc)
 
 
-@bot.message_handler(func=lambda m: (
-    m.from_user is not None
-    and (m.chat.id, m.from_user.id) in _pending_payment_input
-    and m.text.strip().isdigit()
-))
+def _is_payment_reply(m) -> bool:
+    return (m.from_user is not None
+            and m.text is not None
+            and _pending_live(_pending_payment_input, (m.chat.id, m.from_user.id))
+            and m.text.strip().isdigit())
+
+
+@bot.message_handler(func=_is_payment_reply)
 async def payment_partial_reply(message):
     try:
         cid = message.chat.id

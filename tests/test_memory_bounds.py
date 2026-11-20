@@ -122,6 +122,14 @@ class TestPruneLoopCapsUntimestampedDicts(unittest.TestCase):
             self.assertIn(f"_cap_oldest({name}", src,
                           f"{name} is no longer bounded by the prune loop")
 
+    def test_prune_loop_ages_out_the_upi_prompts(self):
+        """These were pruned only when the next prompt was armed (2026-11-20)."""
+        src = open(os.path.join(os.path.dirname(__file__), "..",
+                                "rollCall", "runner.py")).read()
+        for name in ("_pending_colupi", "_pending_colupi_input", "_pending_upi_input"):
+            self.assertIn(f"_prune_pending({name})", src,
+                          f"{name} is no longer aged out by the prune loop")
+
 
 if __name__ == "__main__":
     unittest.main()

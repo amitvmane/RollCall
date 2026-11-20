@@ -89,9 +89,16 @@ async def run_periodic_jobs() -> None:
     except Exception:
         logging.exception("[periodic] vote digest sweep failed")
     try:
-        await _weather_alerts()
+        await asyncio.wait_for(_weather_alerts(), timeout=_WEATHER_TICK_BUDGET)
+    except asyncio.TimeoutError:
+        logging.warning("[periodic] weather alert lookup took over %ss — skipped this tick",
+                        _WEATHER_TICK_BUDGET)
     except Exception:
         logging.exception("[periodic] weather alert sweep failed")
+    try:
+        _prune_expired_config()
+    except Exception:
+        logging.exception("[periodic] system_config prune failed")
 
 
 # ── Bundled vote notices ──────────────────────────────────────────────────────
@@ -120,6 +127,14 @@ async def _vote_digests() -> None:
 # warned the night before would never hear the all-clear.
 _WEATHER_EARLY_HOURS = 18
 _WEATHER_LATE_HOURS = 3
+
+# This runs in the minute tick that also fires scheduled rollcalls, and a
+# forecast lookup is outbound HTTP. So each tick looks up at most ONE game
+# (any other game due is picked up on the next tick, a minute later), and
+# the whole step is capped — a hanging weather service costs one tick at
+# most this long, never the schedule. The game is stamped before the lookup,
+# so a capped lookup is not retried every minute.
+_WEATHER_TICK_BUDGET = 20
 
 
 async def _weather_alerts() -> None:
@@ -150,18 +165,44 @@ async def _weather_alerts() -> None:
                 # be retried (and logged) every minute until the game.
                 _db.set_system_config(stamp, now.isoformat(timespec="seconds"))
                 result = await weather_svc.rollcall_weather(rc)
-                if not result["ok"]:
-                    continue
-                weather_svc.remember(rc.id, result["text"])
-                warned_early = bool(_db.get_system_config(f"weather_warned:{rc.id}"))
-                rainy = result["result"]["rainy"] > 0
-                if rainy or (stage == "late" and warned_early):
-                    if rainy:
-                        _db.set_system_config(f"weather_warned:{rc.id}", "1")
-                    await bot.send_message(chat_id, "🌦 " + result["text"])
+                if result["ok"]:
+                    weather_svc.remember(rc.id, result["text"])
+                    warned_early = bool(_db.get_system_config(f"weather_warned:{rc.id}"))
+                    rainy = result["result"]["rainy"] > 0
+                    if rainy or (stage == "late" and warned_early):
+                        if rainy:
+                            _db.set_system_config(f"weather_warned:{rc.id}", "1")
+                        await bot.send_message(chat_id, "🌦 " + result["text"])
             except Exception:
                 logging.exception("[periodic] weather alert failed for chat %s rollcall %s",
                                   chat_id, getattr(rc, "id", None))
+            else:
+                return  # reached only after a lookup: one per tick (_WEATHER_TICK_BUDGET)
+
+
+# ── system_config housekeeping ────────────────────────────────────────────────
+
+# Per-rollcall weather stamps/forecasts and per-place geocoder results are
+# written to system_config and nothing else ever removes them — one set per
+# game, for the life of the deployment. All are useless well before this
+# age: forecasts only cover games ≤6 days out and the geocoder cache's own
+# TTL is 7 days. (Run-once stamps for jobs are keyed per chat, not per game,
+# so they are bounded and stay.)
+_EXPIRING_CONFIG_PREFIXES = ("weather_early:", "weather_late:", "weather_warned:",
+                             "weather_last:", "geo:")
+_EXPIRING_CONFIG_DAYS = 8
+
+
+def _prune_expired_config() -> None:
+    import db as _db
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if _db.get_system_config("config_prune_last") == today:
+        return
+    _db.set_system_config("config_prune_last", today)
+    cutoff = _utc_str(datetime.now(timezone.utc) - timedelta(days=_EXPIRING_CONFIG_DAYS))
+    removed = _db.delete_system_config_before(_EXPIRING_CONFIG_PREFIXES, cutoff)
+    if removed:
+        logging.info("[periodic] pruned %d expired system_config rows", removed)
 
 
 # ── Weekly dues nudges ────────────────────────────────────────────────────────

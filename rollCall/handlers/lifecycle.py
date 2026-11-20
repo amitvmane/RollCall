@@ -13,7 +13,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot_state import (
     bot, best_effort, _panel_msg_ids, _pending_deletes, _pending_overrides,
-    _pending_cancel_reason, _prune_pending,
+    _pending_cancel_reason, _prune_pending, _pending_live,
     _log_task_exc,
     _is_rate_limited, _get_display_name, format_mention_with_name,
     format_mention_with_name_md, _esc_md,
@@ -1347,7 +1347,7 @@ async def _cb_cancelrc_skip(call, cid: int) -> None:
     m.from_user is not None
     and m.text is not None
     and not m.text.startswith("/")
-    and (m.chat.id, m.from_user.id) in _pending_cancel_reason
+    and _pending_live(_pending_cancel_reason, (m.chat.id, m.from_user.id))
 ))
 async def cancel_reason_reply(message):
     """Free-text reply to the "reason for cancelling?" prompt — consumed

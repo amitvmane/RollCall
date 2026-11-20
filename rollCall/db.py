@@ -4723,7 +4723,6 @@ def get_proxy_stats(chat_id: int, proxy_name: str) -> Dict:
     try:
         with _cursor() as cursor:
             ph = '%s' if db_type == 'postgresql' else '?'
-            active_false = 'FALSE' if db_type == 'postgresql' else '0'
             cursor.execute(f"""
                 SELECT COUNT(*) AS total_rc,
                        SUM(CASE WHEN pu.status = 'in'    THEN 1 ELSE 0 END) AS total_in,
@@ -4777,7 +4776,6 @@ def get_group_attendance_totals(chat_id: int) -> Dict:
     try:
         cursor = conn.cursor()
         ph = '%s' if db_type == 'postgresql' else '?'
-        active_false = 'FALSE' if db_type == 'postgresql' else '0'
 
         cursor.execute(
             f"SELECT COUNT(*) FROM rollcalls r WHERE r.chat_id = {ph} AND {_completed_sql('r')}",
@@ -4876,7 +4874,6 @@ def get_bot_attendance_totals() -> Dict:
            'ended_rollcalls': 0, 'real_participants': 0, 'proxy_participants': 0}
     try:
         cursor = conn.cursor()
-        active_false = 'FALSE' if db_type == 'postgresql' else '0'
 
         cursor.execute(f"SELECT COUNT(*) FROM rollcalls r WHERE {_completed_sql('r')}")
         row = cursor.fetchone()
@@ -5723,6 +5720,27 @@ def set_system_config(key: str, value: str) -> None:
                 """, (key, value))
     except Exception:
         logging.exception("set_system_config failed for key=%s", key)
+
+
+def delete_system_config_before(prefixes, cutoff_utc: str) -> int:
+    """Delete system_config rows whose key starts with one of `prefixes` and
+    that were last written before `cutoff_utc` ('YYYY-MM-DD HH:MM:SS').
+    SUBSTR, not LIKE: the prefixes contain '_', a LIKE wildcard."""
+    prefixes = list(prefixes)
+    if not prefixes:
+        return 0
+    try:
+        with _cursor(commit=True) as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            match = " OR ".join([f"SUBSTR(key, 1, {ph}) = {ph}"] * len(prefixes))
+            params = [x for p in prefixes for x in (len(p), p)]
+            cursor.execute(
+                f"DELETE FROM system_config WHERE ({match}) AND updated_at < {ph}",
+                (*params, cutoff_utc))
+            return cursor.rowcount or 0
+    except Exception:
+        logging.exception("delete_system_config_before failed")
+        return 0
 
 
 def save_push_subscription(group_token: str, endpoint: str, p256dh: str, auth: str, tg_user_id: Optional[int] = None) -> None:

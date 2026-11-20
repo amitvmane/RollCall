@@ -27,6 +27,13 @@ from services.common import find_rollcall_index
 from utils.text import parse_rc_suffix
 
 _MAX_LABEL = 28
+# Telegram refuses a keyboard of more than 100 buttons — the whole sheet
+# would fail to post. Past this many players, moves are made on the web.
+_MAX_MOVE_BUTTONS = 80
+
+
+def _move_buttons_fit(v: dict) -> bool:
+    return sum(len(t["players"]) for t in v["teams"]) <= _MAX_MOVE_BUTTONS
 
 
 def _cb(op: str, rc_id: int, arg: str = "") -> str:
@@ -40,7 +47,7 @@ def teams_keyboard(rc_id: int, v: dict) -> InlineKeyboardMarkup:
                      for n in range(teams_svc.MIN_TEAMS, teams_svc.MAX_TEAMS + 1)])
     elif not v["locked"]:
         buttons = []
-        for team in v["teams"]:
+        for team in (v["teams"] if _move_buttons_fit(v) else []):
             nxt = teams_svc.LABELS[team["no"] % v["count"]]
             for p in team["players"]:
                 label = f"{team['emoji']} {p['name']}"[:_MAX_LABEL] + f" → {nxt}"
@@ -71,7 +78,8 @@ def teams_keyboard(rc_id: int, v: dict) -> InlineKeyboardMarkup:
 def _sheet_text(rc, v: dict) -> str:
     text = teams_svc.render_text(rc, v)
     if v["formed"] and not v["locked"]:
-        text += "\n\nTap a player to move them to the next team."
+        text += ("\n\nTap a player to move them to the next team." if _move_buttons_fit(v)
+                 else "\n\nToo many players for buttons — move players on the group's web page (🌐 Vote on Web).")
     elif not v["formed"]:
         text += "\n\nPick how many teams — players are split at random."
     return text

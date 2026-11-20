@@ -516,7 +516,8 @@ async def memory_prune_loop(interval_seconds: int = 600):
         _panel_msg_ids, _sched_selection,
         _group_warning_cooldowns, _ghost_selections, _ghost_show_out,
     )
-    from handlers.dues import _settle_nudge_msgs
+    from handlers.dues import (_settle_nudge_msgs, _pending_colupi,
+                               _pending_colupi_input, _pending_upi_input)
     from services import presence as presence_svc
 
     RATE_LIMIT_AGE = 300   # individual vote rate-limit window is 2s; 5 min is well past stale
@@ -581,6 +582,11 @@ async def memory_prune_loop(interval_seconds: int = 600):
             _prune_pending(_pending_subsidy_input)
             _prune_pending(_pending_payment_input)
             _prune_pending(_pending_cancel_reason)
+            # The UPI prompts used to be pruned only when the next one was
+            # armed — a group that never armed another kept one forever.
+            _prune_pending(_pending_colupi)
+            _prune_pending(_pending_colupi_input)
+            _prune_pending(_pending_upi_input)
 
             if len(_sched_selection) > SCHED_SELECTION_MAX:
                 _sched_selection.clear()

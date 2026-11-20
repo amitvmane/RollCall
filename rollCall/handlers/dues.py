@@ -35,7 +35,7 @@ import db as _db
 from bot_state import (
     bot, reply_error, _log_task_exc, send_md_fallback, _esc_md,
     safe_edit_markup, safe_edit_text, _pending_subsidy_input, _prune_pending,
-    is_chat_admin,
+    _pending_live, is_chat_admin,
 )
 from exceptions import (
     duesGameAlreadyClosed, duesNothingToClose,
@@ -469,11 +469,14 @@ async def settle_cancel_callback(call):
         await reply_error(call.message, exc)
 
 
-@bot.message_handler(func=lambda m: (
-    m.from_user is not None
-    and (m.chat.id, m.from_user.id) in _pending_subsidy_input
-    and m.text.strip().lstrip("-").isdigit()
-))
+def _is_subsidy_reply(m) -> bool:
+    return (m.from_user is not None
+            and m.text is not None
+            and _pending_live(_pending_subsidy_input, (m.chat.id, m.from_user.id))
+            and m.text.strip().lstrip("-").isdigit())
+
+
+@bot.message_handler(func=_is_subsidy_reply)
 async def settle_subsidy_reply(message):
     try:
         cid = message.chat.id
@@ -893,6 +896,14 @@ _pending_colupi: dict[tuple[int, int], dict] = {}
 _pending_colupi_input: dict[tuple[int, int], dict] = {}
 
 
+def _looks_like_vpa_reply(text: str) -> bool:
+    """A reply to a "send the UPI id" prompt: one token with an @ in it.
+    A sentence that merely mentions someone ("@ravi you in?") is chat, not
+    an answer — capturing it would answer with an error, or worse, save it."""
+    t = text.strip()
+    return "@" in t and not any(c.isspace() for c in t)
+
+
 async def _offer_collector_upi(cid: int, rc_idx: int, uid: int, target_name: str) -> None:
     last_upi = _db.get_last_collector_upi(cid, uid)
     if not last_upi:
@@ -975,8 +986,8 @@ async def collector_upi_callback(call):
     m.from_user is not None
     and m.text is not None
     and not m.text.startswith("/")
-    and (m.chat.id, m.from_user.id) in _pending_colupi_input
-    and "@" in m.text
+    and _pending_live(_pending_colupi_input, (m.chat.id, m.from_user.id))
+    and _looks_like_vpa_reply(m.text)
 ))
 async def collector_upi_reply(message):
     try:
@@ -1803,8 +1814,8 @@ async def dues_setup_upi_callback(call):
     m.from_user is not None
     and m.text is not None
     and not m.text.startswith("/")
-    and (m.chat.id, m.from_user.id) in _pending_upi_input
-    and "@" in m.text
+    and _pending_live(_pending_upi_input, (m.chat.id, m.from_user.id))
+    and _looks_like_vpa_reply(m.text)
 ))
 async def dues_setup_upi_reply(message):
     try:

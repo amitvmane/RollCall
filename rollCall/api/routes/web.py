@@ -454,6 +454,19 @@ async def update_group_settings(
             f"🌦 Weather alerts {'on' if body.weather_alerts else 'off'} (by {actor_name}, via web)",
         )
 
+    if body.teams_enabled is not None:
+        actor_name = await _actor_display_name(chat_id, actor_user_id)
+        from services import teams as teams_svc
+        teams_svc.set_enabled(chat_id, body.teams_enabled, actor_user_id, actor_name)
+        await _send_event_notification(
+            chat_id,
+            f"⚽ Teams {'on' if body.teams_enabled else 'off'} (by {actor_name}, via web)",
+        )
+        # Show or hide the ⚽ Teams button on panels already in the chat.
+        from rollcall_manager import manager as _mgr
+        for number in range(1, len(_mgr.get_rollcalls(chat_id)) + 1):
+            await _mirror_panel_to_telegram(chat_id, number)
+
     # These three mirror what the admin console's bearer-token-gated PATCH
     # already does via the same settings_svc.update_group_settings — no
     # chat announcement for any of them there either, just an audit log

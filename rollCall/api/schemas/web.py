@@ -82,6 +82,7 @@ class WebGroupResponse(BaseModel):
     absent_limit: int = 1
     vote_digest_hours: int = 0
     weather_alerts: bool = False
+    teams_enabled: bool = False
 
 
 class WebGroupSettingsRequest(BaseModel):
@@ -95,6 +96,7 @@ class WebGroupSettingsRequest(BaseModel):
         None, description="One message per vote, a bundled summary every vote_digest_hours, or silent")
     vote_digest_hours: Optional[int] = Field(None, ge=1, le=48, description="Hours between bundled summaries (with vote_notices=bundled)")
     weather_alerts: Optional[bool] = Field(None, description="Forecast heads-up before games with a location")
+    teams_enabled: Optional[bool] = Field(None, description="Teams on/off for the group (off by default)")
 
 
 class ScheduledRollcallRequest(BaseModel):

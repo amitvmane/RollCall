@@ -912,6 +912,9 @@ async function _teamsAction(body){
     const d=await res.json().catch(()=>({}));
     if(!res.ok)throw new Error(typeof d.detail==="string"?d.detail:"Could not update teams");
     const msg=d.message;delete d.message;
+    // Store on the rollcall it was made for — never on whichever tab is
+    // showing when the reply lands (several rollcalls can be open).
+    (groupData&&groupData.rollcalls||[]).forEach(r=>{if(r.rollcall_id===rc.rollcall_id)r.teams=d;});
     if(activeRcData&&activeRcData.rollcall_id===rc.rollcall_id){activeRcData.teams=d;renderTeams(activeRcData);}
     if(msg)toast(msg,2200);
   }catch(e){toast(e.message||"Could not update teams",3500);if(activeRcData)renderTeams(activeRcData);}
@@ -2357,6 +2360,8 @@ function _syncShhToggle(){
   if(hrs)hrs.value=groupData.vote_digest_hours||6;
   const wx=document.getElementById("weather-toggle");
   if(wx)wx.checked=!!groupData.weather_alerts;
+  const tm=document.getElementById("teams-toggle");
+  if(tm)tm.checked=!!groupData.teams_enabled;
 }
 
 // Nothing running. Rather than one grey sentence in an otherwise blank
@@ -2682,6 +2687,18 @@ window.toggleWeatherAlerts=async function(enabled){
     if(tog)tog.checked=!enabled;
   });
   if(ok)toast(enabled?"🌦 Weather alerts ON":"🌦 Weather alerts OFF",2000);
+};
+
+window.toggleTeamsEnabled=async function(enabled){
+  const ok=await _patchGroupSetting({teams_enabled:enabled},()=>{
+    const tog=document.getElementById("teams-toggle");
+    if(tog)tog.checked=!enabled;
+  });
+  if(ok){
+    if(groupData)groupData.teams_enabled=enabled;
+    toast(enabled?"⚽ Teams ON":"⚽ Teams OFF",2000);
+    loadGroup().catch(()=>{});
+  }
 };
 
 async function _patchGroupSetting(fields,revert){

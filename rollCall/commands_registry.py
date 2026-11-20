@@ -78,15 +78,22 @@ COMMANDS = [
     },
     {
         "name": "teams", "aliases": [], "scope": "user", "category": "View Lists",
-        "args": "[::N]", "sample": "/teams",
+        "args": "[::N] | on | off", "sample": "/teams ::2",
         "summary": "Make and view teams for the game",
         "details": (
-            "Shows the team sheet for an open rollcall, with buttons. Pick 2-4 teams and "
-            "the IN list (guests included) is split at random; anyone can reshuffle or tap "
-            "a player to move them until the teams are locked. Changing the number of teams "
-            "and lock/unlock are admin-only, and teams lock on their own at game time. "
-            "Publish posts the teams to the group. Same as the panel's Teams button and the "
-            "Teams card on the web page. ::N picks a rollcall."
+            "Teams are OFF until an admin turns them on: /teams on (or the Teams switch in "
+            "the web page's group settings); /teams off hides them again.\n\n"
+            "Once on, /teams shows the team sheet for an open rollcall, with buttons - the "
+            "same as the panel's Teams button and the Teams card on the web page. Pick 2-4 "
+            "teams and the players IN right now (guests included) are split at random. "
+            "Anyone can reshuffle or tap a player to move them until the teams are locked; "
+            "changing the number of teams and lock/unlock are admin-only, and teams lock on "
+            "their own at game time. Publish posts the teams to the group.\n\n"
+            "Teams follow the IN list: someone who votes IN later joins the smallest team, "
+            "and someone who drops out is taken off without a reshuffle. Waitlist and MAYBE "
+            "are not on teams.\n\n"
+            "Each rollcall has its own teams. ::N picks the rollcall (as in /rollcalls); "
+            "without it, rollcall #1."
         ),
     },
     {

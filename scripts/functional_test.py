@@ -1453,6 +1453,13 @@ async def phase_teams():
     await feed("/sif Guesty", ALICE)
     rc = manager.get_rollcalls(CHAT_ID)[0]
 
+    out = await feed("/teams", BOB)
+    ok, d = contains(out, "Teams are off")
+    record("teams are off until an admin turns them on", ok, d)
+    out = await feed("/teams on", ALICE)
+    ok, d = contains(out, "Teams on")
+    record("/teams on (admin) turns teams on", ok and not _errors, d or error_msgs()[:2])
+
     out = await feed_cb(f"btn_teams_1_{rc.id}", BOB)
     ok, d = contains(out, "No teams yet")
     record("⚽ Teams on the panel opens the team sheet", ok and not _errors, d or error_msgs()[:2])
@@ -1487,6 +1494,9 @@ async def phase_teams():
     out = await feed_cb(f"tm:back:{rc.id}", BOB)
     record("🔙 Back returns to the vote panel", has_call(out, "edit_message_text") and not _errors,
            error_msgs()[:2])
+    out = await feed("/teams off", ALICE)
+    ok, d = contains(out, "Teams off")
+    record("/teams off hides teams again", ok, d)
     await feed("/erc", ALICE)
 
 

@@ -258,11 +258,13 @@ async def get_status_keyboard(rc_number: int, chat_id: int) -> InlineKeyboardMar
         InlineKeyboardButton("❌ OUT",      callback_data=_btn("out", rc_number, rc_id)),
         InlineKeyboardButton("❓ MAYBE",    callback_data=_btn("maybe", rc_number, rc_id)),
     )
-    markup.add(
-        InlineKeyboardButton("📋 Lists",   callback_data=_btn("lists", rc_number, rc_id)),
-        InlineKeyboardButton("⚽ Teams",   callback_data=_btn("teams", rc_number, rc_id)),
-        InlineKeyboardButton("🔄 Refresh", callback_data=_btn("refresh", rc_number, rc_id)),
-    )
+    row = [InlineKeyboardButton("📋 Lists", callback_data=_btn("lists", rc_number, rc_id))]
+    # Teams are opt-in per group (services/teams.py) — no button while off.
+    from services import teams as teams_svc
+    if teams_svc.enabled(chat_id):
+        row.append(InlineKeyboardButton("⚽ Teams", callback_data=_btn("teams", rc_number, rc_id)))
+    row.append(InlineKeyboardButton("🔄 Refresh", callback_data=_btn("refresh", rc_number, rc_id)))
+    markup.add(*row)
     if web_url:
         markup.add(InlineKeyboardButton("🌐 Vote on Web", url=web_url))
     markup.add(

@@ -1,6 +1,10 @@
 """
 Teams for a rollcall — split the IN list into 2–4 teams.
 
+Opt-in per group (chats.teams_enabled, off by default): an admin turns
+teams on with /teams on or the web setting. While off there is no panel
+button or web card, and every action here refuses.
+
 Rules (agreed 2026-11-20):
   - A first split is random and as even as possible (7 vs 6 is fine).
     Reshuffle draws a new random split.
@@ -41,6 +45,24 @@ EMOJI = ["🔴", "🔵", "🟢", "🟡"]
 # teams_locked: 0 = automatic (locks at game time), 1 = locked by an admin,
 # -1 = unlocked by an admin (stays editable after game time).
 _AUTO, _LOCKED, _UNLOCKED = 0, 1, -1
+
+
+OFF_MESSAGE = "Teams are off for this group — an admin can turn them on with /teams on."
+
+
+def enabled(chat_id: int) -> bool:
+    return bool(int(db.get_or_create_chat(chat_id).get("teams_enabled") or 0))
+
+
+def set_enabled(chat_id: int, on: bool, admin_user_id: int, admin_name: str) -> dict:
+    db.update_chat_settings(chat_id, teams_enabled=1 if on else 0)
+    db.log_admin_action(chat_id, admin_user_id, admin_name, "teams_enabled", details="on" if on else "off")
+    return {"teams_enabled": on}
+
+
+def _require_enabled(rc) -> None:
+    if not enabled(rc.chat_id):
+        raise incorrectParameter(OFF_MESSAGE)
 
 
 def who_key(user) -> str:
@@ -141,6 +163,7 @@ def _sync(rc, count: int) -> list[dict]:
 
 
 def _require_open(rc, now=None) -> dict:
+    _require_enabled(rc)
     meta = _meta(rc)
     locked, locked_by = _locked(rc, meta["lock_flag"], now)
     if locked:
@@ -216,6 +239,7 @@ def move(rc, key: str, team_no, actor: str) -> dict:
 
 
 def set_locked(rc, locked: bool, is_admin: bool) -> dict:
+    _require_enabled(rc)
     if not is_admin:
         raise insufficientPermissions("Only an admin can lock or unlock teams.")
     meta = _meta(rc)
@@ -229,6 +253,7 @@ def set_locked(rc, locked: bool, is_admin: bool) -> dict:
 
 def publish(rc) -> tuple[dict, str]:
     """Record a publish; returns (view, text to post). Anyone may publish."""
+    _require_enabled(rc)
     meta = _meta(rc)
     if meta["count"] < MIN_TEAMS:
         raise incorrectParameter("No teams yet — make teams first.")

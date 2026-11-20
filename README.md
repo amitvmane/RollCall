@@ -282,8 +282,9 @@ Append `::N` to most commands to target a specific rollcall when multiple are ac
 | `/whos_maybe [::N]` | `/wm` | Show MAYBE list |
 | `/whos_waiting [::N]` | `/ww` | Show waitlist |
 | `/teams [::N]` | | Team sheet with buttons — make, reshuffle, move, lock, publish (see **Teams** below) |
+| `/teams on\|off` | | Admin: turn teams on or off for the group (off by default) |
 
-**Teams** — the ⚽ Teams button on the rollcall panel (and the Teams card on the group web page) splits the IN list, guests included, into 2–4 random teams. Anyone can reshuffle or move a player until the teams are locked; changing the number of teams and lock/unlock are admin-only, and teams lock on their own at game time. Moves are silent; 📣 Publish posts the teams to the group. Someone who drops is taken off with no reshuffle, and whoever comes IN next joins the smallest team.
+**Teams** — off by default; an admin turns them on with `/teams on` or the ⚽ Teams switch in the web page's group settings. Then the ⚽ Teams button on the rollcall panel (and the Teams card on the group web page) splits the IN list, guests included, into 2–4 random teams. Anyone can reshuffle or move a player until the teams are locked; changing the number of teams and lock/unlock are admin-only, and teams lock on their own at game time. Moves are silent; 📣 Publish posts the teams to the group. Someone who drops is taken off with no reshuffle, and whoever comes IN next joins the smallest team.
 
 ### Event Settings (admin only)
 

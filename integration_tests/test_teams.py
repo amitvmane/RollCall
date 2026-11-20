@@ -36,6 +36,13 @@ def _team_of(v, key):
 
 class _Base(IntegrationBase):
 
+    TEAMS_ON = True
+
+    def setUp(self):
+        super().setUp()
+        db.get_or_create_chat(CHAT_ID)
+        db.update_chat_settings(CHAT_ID, teams_enabled=1 if self.TEAMS_ON else 0)
+
     def _rc(self):
         return self.mgr.get_rollcalls(CHAT_ID)[0]
 
@@ -300,7 +307,189 @@ class TestWebTeams(_Base):
         r = self._post(rc.id, {"action": "reshuffle"}, USERS[0]["id"])
         self.assertEqual(r.status_code, 409)
 
+    async def test_off_hides_the_card_and_refuses(self):
+        rc = await self._game_with(4)
+        db.update_chat_settings(CHAT_ID, teams_enabled=0)
+        page = self.client.get(f"/api/v1/web/group/{self.token}").json()
+        self.assertIsNone(page["rollcalls"][0]["teams"])
+        self.assertFalse(page["teams_enabled"])
+        r = self._post(rc.id, {"action": "form", "count": 2}, USERS[0]["id"])
+        self.assertEqual(r.status_code, 409)
+
+    def test_settings_switch(self):
+        from api.identity import issue_identity_token
+        get_mock_bot().get_chat_member.return_value.status = "administrator"
+        db.update_chat_settings(CHAT_ID, teams_enabled=0)
+        r = self.client.patch(f"/api/v1/web/group/{self.token}/settings",
+                              json={"id_token": issue_identity_token(ADMIN_USER["id"]), "teams_enabled": True})
+        self.assertEqual(r.status_code, 204, r.text)
+        self.assertTrue(_svc().enabled(CHAT_ID))
+        self.assertTrue(self.client.get(f"/api/v1/web/group/{self.token}").json()["teams_enabled"])
+
     async def test_other_rollcall_is_404(self):
         rc = await self._game_with(2)
         r = self._post(rc.id + 999, {"action": "form", "count": 2}, USERS[0]["id"])
         self.assertEqual(r.status_code, 404)
+
+
+class TestOptIn(_Base):
+    """Teams are off until an admin turns them on (chats.teams_enabled)."""
+
+    TEAMS_ON = False
+
+    async def test_off_by_default_everywhere(self):
+        from handlers.teams import teams_cmd, teams_callback
+        from handlers.lifecycle import get_status_keyboard
+        self.assertFalse(_svc().enabled(CHAT_ID))
+        rc = await self._game_with(4)
+        datas = [b.callback_data for b in (await get_status_keyboard(1, CHAT_ID)).keyboard]
+        self.assertNotIn(f"btn_teams_1_{rc.id}", datas, "no Teams button while off")
+
+        get_mock_bot().reset_mock()
+        await teams_cmd(self.msg("/teams", USERS[0]))
+        self.assertIn("Teams are off", get_mock_bot().send_message.call_args.args[1])
+
+        get_mock_bot().reset_mock()
+        await teams_callback(self.call(f"tm:form:{rc.id}:2", USERS[0]))
+        self.assertIn("Teams are off", get_mock_bot().answer_callback_query.call_args.args[1])
+        self.assertEqual(db.get_team_rows(rc.id), [])
+        with self.assertRaises(Exception):
+            _svc().form(rc, 2, "Admin", is_admin=True)
+
+    async def test_admin_turns_on_and_off(self):
+        from handlers.teams import teams_cmd
+        from handlers.lifecycle import get_status_keyboard
+        rc = await self._game_with(4)
+        self._non_admin_group()
+        await teams_cmd(self.msg("/teams on", USERS[0]))
+        self.assertFalse(_svc().enabled(CHAT_ID), "members can't turn teams on in an admin-locked group")
+
+        get_mock_bot().get_chat_member.return_value.status = "administrator"
+        get_mock_bot().reset_mock()
+        await teams_cmd(self.msg("/teams on", ADMIN_USER))
+        self.assertTrue(_svc().enabled(CHAT_ID))
+        self.assertIn("Teams on", get_mock_bot().send_message.call_args_list[0].args[1])
+        datas = [b.callback_data for b in (await get_status_keyboard(1, CHAT_ID)).keyboard]
+        self.assertIn(f"btn_teams_1_{rc.id}", datas)
+
+        await teams_cmd(self.msg("/teams off", ADMIN_USER))
+        self.assertFalse(_svc().enabled(CHAT_ID))
+
+
+class TestStillVoting(_Base):
+    """Teams made while people are still voting follow the IN list."""
+
+    async def test_late_voters_are_spread_over_the_smallest_teams(self):
+        rc = await self._game_with(2)
+        v = _svc().form(rc, 2, "Admin", is_admin=True)
+        self.assertEqual(_sizes(v), [1, 1])
+        for u in USERS[2:7]:
+            await self.vote_in(u)
+        v = _svc().view(self._rc())
+        self.assertEqual(sorted(_sizes(v)), [3, 4], "5 late IN votes fill both teams evenly")
+        self.assertEqual(len(_keys(v)), 7)
+
+    async def test_maybe_and_out_never_join(self):
+        rc = await self._game_with(2)
+        _svc().form(rc, 2, "Admin", is_admin=True)
+        await self.vote_maybe(USERS[3])
+        await self.vote_out(USERS[4])
+        v = _svc().view(self._rc())
+        self.assertEqual(_keys(v), sorted([f"u{USERS[0]['id']}", f"u{USERS[1]['id']}"]))
+
+    async def test_view_shows_how_many_are_in_before_teams_exist(self):
+        rc = await self._game_with(3)
+        v = _svc().view(rc)
+        self.assertFalse(v["formed"])
+        self.assertEqual(v["players_in"], 3)
+
+
+class TestParallelRollcalls(_Base):
+    """Two open rollcalls keep separate teams on every surface."""
+
+    async def _two_games(self):
+        await self.start_rc("Morning")
+        await self.start_rc("Evening")
+        for u in USERS[:4]:
+            await self.vote_in(u, rc_suffix="::1")
+        for u in USERS[4:8]:
+            await self.vote_in(u, rc_suffix="::2")
+        rcs = self.mgr.get_rollcalls(CHAT_ID)
+        return rcs[0], rcs[1]
+
+    async def test_each_rollcall_has_its_own_sheet(self):
+        a, b = await self._two_games()
+        va = _svc().form(a, 2, "Admin", is_admin=True)
+        vb = _svc().form(b, 3, "Admin", is_admin=True)
+        self.assertEqual(_keys(va), sorted(f"u{u['id']}" for u in USERS[:4]))
+        self.assertEqual(_keys(vb), sorted(f"u{u['id']}" for u in USERS[4:8]))
+        self.assertEqual((va["count"], vb["count"]), (2, 3))
+
+        before_a = db.get_team_rows(a.id)
+        key = f"u{USERS[5]['id']}"
+        _svc().move(b, key, None, "User1")
+        _svc().reshuffle(b, "User1")
+        self.assertEqual(db.get_team_rows(a.id), before_a, "changing B never touches A")
+
+        await self.vote_in(USERS[8], rc_suffix="::2")
+        self.assertNotIn(f"u{USERS[8]['id']}", _keys(_svc().view(self.mgr.get_rollcalls(CHAT_ID)[0])))
+        self.assertIn(f"u{USERS[8]['id']}", _keys(_svc().view(self.mgr.get_rollcalls(CHAT_ID)[1])))
+
+    async def test_same_person_in_both_games_is_on_both_sheets(self):
+        a, b = await self._two_games()
+        await self.vote_in(USERS[0], rc_suffix="::2")
+        b = self.mgr.get_rollcalls(CHAT_ID)[1]
+        _svc().form(a, 2, "Admin", is_admin=True)
+        _svc().form(b, 2, "Admin", is_admin=True)
+        key = f"u{USERS[0]['id']}"
+        _svc().move(b, key, 1, "User1")
+        _svc().move(a, key, 2, "User1")
+        self.assertEqual(_team_of(_svc().view(self.mgr.get_rollcalls(CHAT_ID)[0]), key), 2)
+        self.assertEqual(_team_of(_svc().view(self.mgr.get_rollcalls(CHAT_ID)[1]), key), 1)
+
+    async def test_telegram_buttons_and_command_address_one_rollcall(self):
+        from handlers.teams import teams_cmd, teams_callback
+        a, b = await self._two_games()
+        get_mock_bot().reset_mock()
+        await teams_cmd(self.msg("/teams ::2", USERS[0]))
+        sent = get_mock_bot().send_message.call_args
+        self.assertIn("Teams — Evening", sent.args[1])
+        datas = [x.callback_data for x in sent.kwargs["reply_markup"].keyboard]
+        self.assertTrue(all(f":{b.id}" in d for d in datas if d.startswith("tm:")))
+
+        await teams_callback(self.call(f"tm:form:{b.id}:2", USERS[0]))
+        self.assertEqual(db.get_team_rows(a.id), [])
+        self.assertEqual(len(db.get_team_rows(b.id)), 4)
+
+        # A guest/member token from game B can't move anyone in game A.
+        _svc().form(a, 2, "Admin", is_admin=True)
+        before_a = db.get_team_rows(a.id)
+        await teams_callback(self.call(f"tm:mv:{a.id}:u{USERS[5]['id']}", USERS[0]))
+        self.assertEqual(db.get_team_rows(a.id), before_a)
+
+    async def test_web_addresses_the_rollcall_in_the_url(self):
+        from api.main import app
+        from api.rate_limit import reset_buckets_for_tests
+        from api.identity import issue_identity_token
+        reset_buckets_for_tests()
+        client = TestClient(app)
+        self.enterContext(patch.dict(os.environ, {"TELEGRAM_TOKEN": BOT_TOKEN}))
+        token = db.get_or_create_chat(CHAT_ID).get("group_web_token")
+        if not token:
+            from services.web import get_group_web_token
+            token = get_group_web_token(CHAT_ID)
+        hdr = {"X-Identity-Token": issue_identity_token(USERS[0]["id"])}
+        a, b = await self._two_games()
+        r = client.post(f"/api/v1/web/group/{token}/rollcalls/{b.id}/teams",
+                        json={"action": "form", "count": 2}, headers=hdr)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(db.get_team_rows(a.id), [])
+        # Moving a game-B player through game A's URL is refused.
+        _svc().form(a, 2, "Admin", is_admin=True)
+        r = client.post(f"/api/v1/web/group/{token}/rollcalls/{a.id}/teams",
+                        json={"action": "move", "who_key": f"u{USERS[5]['id']}", "team_no": 1}, headers=hdr)
+        self.assertEqual(r.status_code, 409)
+        page = client.get(f"/api/v1/web/group/{token}").json()
+        by_id = {r["rollcall_id"]: r for r in page["rollcalls"]}
+        self.assertEqual(sorted(p["key"] for t in by_id[b.id]["teams"]["teams"] for p in t["players"]),
+                         sorted(f"u{u['id']}" for u in USERS[4:8]))

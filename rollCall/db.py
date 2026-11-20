@@ -1110,6 +1110,9 @@ _RECONCILE_COLUMNS = {
         ("vote_digest_hours",      "vote_digest_hours INTEGER DEFAULT 0",      "vote_digest_hours INTEGER DEFAULT 0"),
         # Rain/forecast heads-up before a game with a location (info only).
         ("weather_alerts",         "weather_alerts INTEGER DEFAULT 0",         "weather_alerts INTEGER DEFAULT 0"),
+        # Teams (services/teams.py) are opt-in per group: off until an admin
+        # turns them on with /teams on or the web setting.
+        ("teams_enabled",          "teams_enabled INTEGER DEFAULT 0",          "teams_enabled INTEGER DEFAULT 0"),
     ],
     "users": [
         ("in_pos",   "in_pos INTEGER DEFAULT NULL",   "in_pos INTEGER DEFAULT NULL"),
@@ -2157,7 +2160,7 @@ _VALID_CHAT_FIELDS = {
     'auto_buzz_hours', 'dues_weekly_nudge', 'dues_report_enabled', 'last_idle_nudge',
     'collector_rotation', 'last_collector_uid', 'dues_epoch',
     'reminder_before_close_hours', 'reminder_after_open_hours',
-    'admin_source', 'vote_digest_hours', 'weather_alerts',
+    'admin_source', 'vote_digest_hours', 'weather_alerts', 'teams_enabled',
 }
 
 # Columns declared BOOLEAN in the Postgres schema. SQLite has no bool type and

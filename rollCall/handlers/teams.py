@@ -2,6 +2,7 @@
 Teams on Telegram: the panel's ⚽ Teams button swaps the panel for the
 team sheet, the way 📋 Lists does, and 🔙 Back returns to the panel.
 /teams [::N] posts the same sheet as a message of its own.
+/teams on|off (admin) — teams are opt-in per group and off by default.
 
 Callback data: tm:<op>:<rollcall db id>[:<arg>]
   form:<n>  make n teams          shuf      reshuffle
@@ -78,6 +79,9 @@ def _sheet_text(rc, v: dict) -> str:
 
 async def show_teams(call, cid: int, rc) -> None:
     """The panel's ⚽ Teams button — show the sheet in place of the panel."""
+    if not teams_svc.enabled(cid):
+        await bot.answer_callback_query(call.id, teams_svc.OFF_MESSAGE, show_alert=True)
+        return
     await bot.answer_callback_query(call.id)
     v = teams_svc.view(rc)
     await safe_edit_text(cid, call.message.message_id, _sheet_text(rc, v),
@@ -86,10 +90,25 @@ async def show_teams(call, cid: int, rc) -> None:
 
 @bot.message_handler(func=lambda m: bool(m.text) and m.text.split()[0].split("@")[0].lower() == "/teams")
 async def teams_cmd(message):
-    """/teams [::N] — post the team sheet (with its buttons) for a rollcall."""
+    """/teams [::N] — post the team sheet (with its buttons) for a rollcall.
+    /teams on|off — an admin turns teams on or off for the group."""
     cid = message.chat.id
     try:
-        idx, _rest = parse_rc_suffix(message.text.split()[1:])
+        args = message.text.split()[1:]
+        if args and args[0].lower() in ("on", "off"):
+            if not await admin_rights(message, manager):
+                raise insufficientPermissions("Only an admin can turn teams on or off.")
+            on = args[0].lower() == "on"
+            teams_svc.set_enabled(cid, on, message.from_user.id,
+                                  message.from_user.first_name or message.from_user.username or "Admin")
+            await bot.send_message(cid, "⚽ Teams on — use /teams or the ⚽ Teams button on a rollcall."
+                                   if on else "⚽ Teams off — the Teams button is hidden.")
+            await _redraw_open_panels(cid)
+            return
+        if not teams_svc.enabled(cid):
+            await bot.send_message(cid, teams_svc.OFF_MESSAGE)
+            return
+        idx, _rest = parse_rc_suffix(args)
         rollcalls = manager.get_rollcalls(cid)
         if not rollcalls:
             raise rollCallNotStarted("No rollcall is open — teams are made from an open game's IN list.")
@@ -100,6 +119,13 @@ async def teams_cmd(message):
         await bot.send_message(cid, _sheet_text(rc, v), reply_markup=teams_keyboard(rc.id, v))
     except Exception as e:
         await reply_error(message, e)
+
+
+async def _redraw_open_panels(cid: int) -> None:
+    """Show or hide the ⚽ Teams button on panels already posted."""
+    from handlers.lifecycle import _update_panel
+    for idx, rc in enumerate(manager.get_rollcalls(cid)):
+        await best_effort(_update_panel(cid, idx + 1, rc), "panel redraw", cid)
 
 
 async def _is_admin(call) -> bool:
@@ -135,6 +161,9 @@ async def teams_callback(call):
 
         if op == "back":
             await _back_to_panel(call, cid, rc_id)
+            return
+        if not teams_svc.enabled(cid):
+            await bot.answer_callback_query(call.id, teams_svc.OFF_MESSAGE, show_alert=True)
             return
 
         is_admin = await _is_admin(call) if op in ("form", "lock", "unlock") else False

@@ -50,11 +50,14 @@ def _weather_line(rc):
 
 
 def _teams(rc):
-    """The rollcall's team sheet (services.teams.view — read-only)."""
+    """The rollcall's team sheet (services.teams.view — read-only), or None
+    while teams are off for the group (the page then shows no Teams card)."""
     if getattr(rc, "id", None) is None:
         return None
     try:
-        from services.teams import view
+        from services.teams import enabled, view
+        if not enabled(rc.chat_id):
+            return None
         return view(rc)
     except Exception:
         logging.exception("teams view failed for rollcall %s", getattr(rc, "id", None))
@@ -398,4 +401,5 @@ def get_rollcalls_by_group_token(group_token: str) -> dict:
         "absent_limit": int(chat.get("absent_limit") or 1),
         "vote_digest_hours": int(chat.get("vote_digest_hours") or 0),
         "weather_alerts": bool(int(chat.get("weather_alerts") or 0)),
+        "teams_enabled": bool(int(chat.get("teams_enabled") or 0)),
     }

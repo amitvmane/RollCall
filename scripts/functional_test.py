@@ -1456,6 +1456,10 @@ async def phase_teams():
     out = await feed_cb(f"btn_teams_1_{rc.id}", BOB)
     ok, d = contains(out, "No teams yet")
     record("⚽ Teams on the panel opens the team sheet", ok and not _errors, d or error_msgs()[:2])
+    out = await feed("/teams", CAROL)
+    ok, d = contains(out, "Teams — Teams Game", "No teams yet")
+    record("/teams posts the team sheet", ok and has_call(out, "send_message") and not _errors,
+           d or error_msgs()[:2])
 
     out = await feed_cb(f"tm:form:{rc.id}:2", BOB)
     ok, d = contains(out, "Team A", "Team B", "Guesty")
@@ -1722,9 +1726,9 @@ async def run_all():
     ok = len(out) >= 1
     record("/location responds", ok)
 
-    out = await feed("/when tomorrow 7pm", ALICE)
-    ok = len(out) >= 1
-    record("/when responds", ok)
+    out = await feed("/when", ALICE)
+    ok, d = contains(out, "Coming up")
+    record("/when (now an alias) shows the /calendar list", ok, d)
 
     out = await feed("/shh", ALICE)
     ok = len(out) >= 1

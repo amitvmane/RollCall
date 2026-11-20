@@ -223,6 +223,21 @@ class TestTelegramSheet(_Base):
         await self._tap(f"tm:form:{rc.id}:3", USERS[0])
         self.assertEqual(_svc().view(self._rc())["count"], 2)
 
+    async def test_teams_command_posts_the_sheet(self):
+        from handlers.teams import teams_cmd
+        await teams_cmd(self.msg("/teams", USERS[0]))
+        self.assertTrue(any("No rollcall is open" in t for t in self.sent_texts()), self.sent_texts())
+        rc = await self._game_with(3)
+        get_mock_bot().reset_mock()
+        await teams_cmd(self.msg("/teams", USERS[0]))
+        sent = get_mock_bot().send_message.call_args
+        self.assertIn("Teams — Sunday Game", sent.args[1])
+        datas = [b.callback_data for b in sent.kwargs["reply_markup"].keyboard]
+        self.assertIn(f"tm:form:{rc.id}:2", datas)
+        get_mock_bot().reset_mock()
+        await teams_cmd(self.msg("/teams ::5", USERS[0]))
+        self.assertIn("::5", " ".join(self.sent_texts()))
+
     async def test_forged_rollcall_id_is_refused(self):
         rc = await self._game_with(2)
         await self._tap(f"tm:form:{rc.id + 999}:2", USERS[0])

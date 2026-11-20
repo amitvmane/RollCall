@@ -250,7 +250,7 @@ async def phase_a_build_state():
     await feed("/set_limit 3 ::1", ALICE)
     await feed("/location Stadium ::1", ALICE)
     await feed("/event_fee 200 ::1", ALICE)
-    await feed("/when tomorrow 7am ::1", ALICE)
+    await feed("/calendar", ALICE)
 
     # Votes on RC#1
     await feed("/in ::1", BOB)

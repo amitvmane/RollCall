@@ -59,7 +59,7 @@ class HandlerTestBase(unittest.IsolatedAsyncioTestCase):
         )
         from handlers.settings import (
             shh, louder, wait_limit, event_fee, individual_fee,
-            when, set_location,
+            set_location,
         )
 
         # Attach everything to cls for test access.
@@ -113,7 +113,6 @@ class HandlerTestBase(unittest.IsolatedAsyncioTestCase):
         cls.wait_limit = staticmethod(wait_limit)
         cls.event_fee = staticmethod(event_fee)
         cls.individual_fee = staticmethod(individual_fee)
-        cls.when = staticmethod(when)
         cls.set_location = staticmethod(set_location)
 
     def setUp(self):
@@ -1248,35 +1247,6 @@ class TestIndividualFee(HandlerTestBase):
         msg = self._make_message("/individual_fee")
         with self._rc_not_started(), self._patch_manager():
             await self.individual_fee(msg)
-        self.assertGreater(self._sent_count(), 0)
-
-
-# ===========================================================================
-# /when  /w
-# ===========================================================================
-
-class TestWhen(HandlerTestBase):
-
-    async def test_sends_event_time_when_set(self):
-        from datetime import datetime
-        self.rc.finalizeDate = datetime(2026, 5, 10, 18, 30)
-        msg = self._make_message("/when")
-        with self._rc_started(), self._patch_manager():
-            await self.when(msg)
-        sent = self._sent_text()
-        self.assertIn("10-05-2026", sent)
-
-    async def test_no_time_set_sends_error(self):
-        self.rc.finalizeDate = None
-        msg = self._make_message("/when")
-        with self._rc_started(), self._patch_manager():
-            await self.when(msg)
-        self.assertGreater(self._sent_count(), 0)
-
-    async def test_no_rollcall_sends_error(self):
-        msg = self._make_message("/when")
-        with self._rc_not_started(), self._patch_manager():
-            await self.when(msg)
         self.assertGreater(self._sent_count(), 0)
 
 

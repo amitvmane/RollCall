@@ -1,5 +1,5 @@
 """
-Settings handlers: /srt, /srr, /event_fee, /individual_fee, /when, /location, /set_limit, /shh, /louder
+Settings handlers: /srt, /srr, /event_fee, /individual_fee, /location, /set_limit, /shh, /louder
 """
 import asyncio
 import logging
@@ -228,38 +228,6 @@ async def individual_fee(message):
 
         result = settings_svc.get_individual_fee(cid, rc_number)
         await bot.send_message(cid, f"Individual fee is {result['individual_fee']}")
-
-    except Exception as e:
-        await reply_error(cid, e)
-
-
-@bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/when")
-@bot.message_handler(func=lambda message: (message.text.split(" "))[0].split("@")[0].lower() == "/w")
-async def when(message):
-    cid = message.chat.id
-    pmts = message.text.split(" ")
-    rc_number = 0
-
-    try:
-        if roll_call_not_started(message, manager) is False:
-            raise rollCallNotStarted("Roll call is not active")
-        if await admin_rights(message, manager) is False:
-            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
-
-        if len(pmts) > 0 and "::" in pmts[-1]:
-            try:
-                rc_number = int(pmts[-1].replace("::", "")) - 1
-                del pmts[-1]
-            except Exception:
-                raise incorrectParameter("The rollcall number must be a positive integer")
-
-            ensure_rc_number(cid, rc_number, manager)
-
-        rc = manager.get_rollcall(cid, rc_number)
-        if rc.finalizeDate is None:
-            raise incorrectParameter("There is no start time for the event")
-
-        await bot.send_message(cid, f"The event with title {rc.title} will start at {rc.finalizeDate.strftime('%d-%m-%Y %H:%M')}!")
 
     except Exception as e:
         await reply_error(cid, e)

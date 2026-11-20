@@ -122,19 +122,39 @@ class TestIndividualFee(IntegrationBase):
         self.assertTrue(any("25" in t or "fee" in t.lower() for t in texts))
 
 
-class TestWhen(IntegrationBase):
-    """/when displays the finalizeDate; errors if none is set."""
+class TestWhenIsCalendar(IntegrationBase):
+    """/when and /w were folded into /calendar in 11.0: everything /when
+    answered (an open game's time, or that it has none) is on the calendar."""
 
-    async def test_w_no_rollcall_sends_error(self):
-        await self.when(self.msg("/w", ADMIN_USER))
-        texts = self.sent_texts()
-        self.assertTrue(any("not active" in t.lower() for t in texts))
+    def test_when_and_w_route_to_calendar(self):
+        from commands_registry import lookup_command
+        self.assertEqual(lookup_command("/when")["name"], "calendar")
+        self.assertEqual(lookup_command("/w")["name"], "calendar")
 
-    async def test_w_no_finalize_date_sends_error(self):
-        await self.start_rc()
-        await self.when(self.msg("/w", ADMIN_USER))
-        texts = self.sent_texts()
-        self.assertTrue(any("no start time" in t.lower() or "start time" in t.lower() for t in texts))
+    async def test_nothing_open_or_scheduled(self):
+        await self.calendar_command(self.msg("/w", USERS[0]))
+        self.assertTrue(any("nothing scheduled" in t.lower() for t in self.sent_texts()))
+
+    async def test_open_rollcall_without_time_is_listed(self):
+        await self.start_rc("Sunday Game")
+        await self.calendar_command(self.msg("/when", USERS[0]))
+        text = " ".join(self.sent_texts())
+        self.assertIn("Sunday Game", text)
+        self.assertIn("no time set", text)
+
+    async def test_open_rollcall_time_is_shown(self):
+        from datetime import datetime, timedelta
+        import pytz
+        await self.start_rc("Evening Game")
+        rc = self.rc(0)
+        rc.finalizeDate = (datetime.now(pytz.timezone(rc.timezone or "Asia/Kolkata"))
+                           + timedelta(days=1)).replace(tzinfo=None)
+        rc.save()
+        await self.calendar_command(self.msg("/when", USERS[0]))
+        text = " ".join(self.sent_texts())
+        self.assertIn("Evening Game", text)
+        self.assertIn("closes Tomorrow", text)
+        self.assertNotIn("no time set", text)
 
 
 class TestLocation(IntegrationBase):

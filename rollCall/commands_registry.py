@@ -64,14 +64,29 @@ COMMANDS = [
         "details": "Lists every currently-open rollcall in this chat with their numbers (used for ::N targeting).",
     },
     {
-        "name": "calendar", "aliases": ["cal"], "scope": "user", "category": "View Lists",
+        "name": "calendar", "aliases": ["cal", "when", "w"], "scope": "user", "category": "View Lists",
         "args": "", "sample": "/calendar",
         "summary": "See what's coming up",
         "details": (
             "One merged, chronological list of everything scheduled for this chat: "
             "active rollcalls (when they close), pending one-time scheduled rollcalls "
             "(when they start), and recurring templates (their next auto-start). "
-            "Visible to everyone — for managing schedules, admins use /schedules."
+            "Open rollcalls with no time set are listed too. Visible to everyone — "
+            "for managing schedules, admins use /schedules. /when and /w still "
+            "work and show this list."
+        ),
+    },
+    {
+        "name": "teams", "aliases": [], "scope": "user", "category": "View Lists",
+        "args": "[::N]", "sample": "/teams",
+        "summary": "Make and view teams for the game",
+        "details": (
+            "Shows the team sheet for an open rollcall, with buttons. Pick 2-4 teams and "
+            "the IN list (guests included) is split at random; anyone can reshuffle or tap "
+            "a player to move them until the teams are locked. Changing the number of teams "
+            "and lock/unlock are admin-only, and teams lock on their own at game time. "
+            "Publish posts the teams to the group. Same as the panel's Teams button and the "
+            "Teams card on the web page. ::N picks a rollcall."
         ),
     },
     {
@@ -166,7 +181,7 @@ COMMANDS = [
         "name": "timezone", "aliases": ["tz"], "scope": "admin", "category": "Settings",
         "args": "[Region/City]", "sample": "/timezone Asia/Kolkata",
         "summary": "Set the group's timezone",
-        "details": "Sets the bot's timezone for this chat — used for /when, scheduled templates, and auto-close timing. Changing it needs admin rights once the group has run /set_admins; anyone can run it with no argument to see the current timezone and get a one-tap browser-based detect link (Telegram itself has no way to know your group's location).",
+        "details": "Sets the bot's timezone for this chat — used for /calendar, scheduled templates, and auto-close timing. Changing it needs admin rights once the group has run /set_admins; anyone can run it with no argument to see the current timezone and get a one-tap browser-based detect link (Telegram itself has no way to know your group's location).",
     },
     {
         "name": "help", "aliases": [], "scope": "user", "category": "Settings",
@@ -353,12 +368,6 @@ COMMANDS = [
         "args": "place", "sample": "/loc Indiranagar Turf 3",
         "summary": "Set event location",
         "details": "Stores a location string shown in panels and reminders.",
-    },
-    {
-        "name": "when", "aliases": ["w"], "scope": "admin", "category": "Settings",
-        "args": "", "sample": "/when",
-        "summary": "Show rollcall scheduled time",
-        "details": "Displays the rollcall's scheduled close time in the chat's timezone.",
     },
     {
         "name": "shh", "aliases": [], "scope": "admin", "category": "Settings",

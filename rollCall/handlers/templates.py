@@ -257,6 +257,27 @@ async def schedules_command(message):
         await bot.send_message(cid, "Error fetching schedule info.")
 
 
+def _untimed_open_rollcalls(cid: int, tz) -> list:
+    """Calendar lines for open rollcalls with no upcoming time — they have
+    no place in the dated list, but "is it on, and when?" still needs an
+    answer (what /when used to say)."""
+    now = datetime.now(tz)
+    lines = []
+    for idx, rc in enumerate(manager.get_rollcalls(cid)):
+        fd = getattr(rc, "finalizeDate", None)
+        if fd is not None and fd.tzinfo is None:
+            fd = tz.localize(fd)
+        if fd is not None and fd >= now:
+            continue
+        label = html.escape(rc.title or "Rollcall")
+        if fd is None:
+            lines.append(f"📋 {label} (#{idx + 1}) — open, no time set (/srt)")
+        else:
+            lines.append(f"📋 {label} (#{idx + 1}) — open, time passed "
+                         f"({fd.astimezone(tz).strftime('%a %d %b %H:%M')})")
+    return lines
+
+
 def _fmt_calendar_entry(ev: dict, tz) -> str:
     icon = {"closes": "🏁", "starts": "🆕", "recurs": "🔁"}.get(ev["kind"], "📅")
     verb = {"closes": "closes", "starts": "starts", "recurs": "next"}.get(ev["kind"], "")
@@ -271,12 +292,18 @@ def _fmt_calendar_entry(ev: dict, tz) -> str:
     return f"{icon} {html.escape(ev['label'])} — {verb} {day_label} {when.strftime('%H:%M')}"
 
 
-@bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() in ("/calendar", "/cal"))
+@bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower()
+                     in ("/calendar", "/cal", "/when", "/w"))
 async def calendar_command(message):
     """List upcoming events for this chat: active rollcalls closing,
     pending one-time scheduled rollcalls, and recurring templates' next
     occurrence — one merged, chronological view. Visible to everyone
-    (read-only), unlike the admin-only /schedules it draws on."""
+    (read-only), unlike the admin-only /schedules it draws on.
+
+    Also answers /when and /w, which this replaced in 11.0: /when only ever
+    showed one open rollcall's time, which is the "closes" line here. Open
+    rollcalls with no upcoming time are listed after the dated ones, so
+    "no time set yet" is still answered too."""
     cid = message.chat.id
     try:
         chat = manager.get_chat(cid)
@@ -287,7 +314,8 @@ async def calendar_command(message):
             tz = pytz.timezone("Asia/Kolkata")
 
         events = templates_svc.upcoming_events(cid)
-        if not events:
+        untimed = _untimed_open_rollcalls(cid, tz)
+        if not events and not untimed:
             await bot.send_message(
                 cid,
                 "📅 Nothing scheduled yet.\n"
@@ -296,7 +324,7 @@ async def calendar_command(message):
             )
             return
 
-        lines = [_fmt_calendar_entry(ev, tz) for ev in events]
+        lines = [_fmt_calendar_entry(ev, tz) for ev in events] + untimed
         text = "<b>📅 Coming up</b>\n\n" + "\n".join(lines)
         await bot.send_message(cid, text, parse_mode="HTML")
     except Exception:

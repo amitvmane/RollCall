@@ -281,6 +281,7 @@ Append `::N` to most commands to target a specific rollcall when multiple are ac
 | `/whos_out [::N]` | `/wo` | Show OUT list |
 | `/whos_maybe [::N]` | `/wm` | Show MAYBE list |
 | `/whos_waiting [::N]` | `/ww` | Show waitlist |
+| `/teams [::N]` | | Team sheet with buttons — make, reshuffle, move, lock, publish (see **Teams** below) |
 
 **Teams** — the ⚽ Teams button on the rollcall panel (and the Teams card on the group web page) splits the IN list, guests included, into 2–4 random teams. Anyone can reshuffle or move a player until the teams are locked; changing the number of teams and lock/unlock are admin-only, and teams lock on their own at game time. Moves are silent; 📣 Publish posts the teams to the group. Someone who drops is taken off with no reshuffle, and whoever comes IN next joins the smallest team.
 
@@ -295,7 +296,6 @@ Append `::N` to most commands to target a specific rollcall when multiple are ac
 | `/event_fee amount [::N]` | `/ef` | Set total event fee |
 | `/individual_fee [::N]` | `/if` | Show per-person fee split |
 | `/location place [::N]` | `/loc` | Set event location |
-| `/when [::N]` | `/w` | Show event time |
 | `/remind_before_close hours\|off` | | DM anyone who hasn't voted, this many hours before close |
 | `/remind_after_open hours\|off` | | DM anyone who hasn't voted, this many hours after the rollcall opens |
 
@@ -404,7 +404,7 @@ entries, never deletes, and every money mutation is announced in the chat.
 | `/stats [name\|@user\|group\|top\|bot]` | `/s` | Attendance rate, streaks, IN/OUT/MAYBE counts |
 | `/history [N] [page]` | | Paginated ended rollcalls with counts (default 10 per page) |
 | `/card` | `/mc` | Shareable match-day card image of the IN list |
-| `/calendar` | | One merged view of everything upcoming — active rollcalls closing, scheduled games, recurring templates |
+| `/calendar` | `/cal`, `/when`, `/w` | One merged view of everything upcoming — active rollcalls closing (or open with no time set), scheduled games, recurring templates |
 | `/export_stats` | | CSV of the leaderboard — attendance, ghosts, streaks, one row per member |
 | `/recap` | | Your games, streak, last 10 games, most-played-with teammates and dues balance (web: Stats tab) |
 | `/weather [::N]` | | Rain forecast for the game's time and location — agreement across ECMWF, GFS, ICON and MET Norway |
@@ -669,6 +669,7 @@ See [version.json](rollCall/version.json) for the full version history.
 
 | Version | Highlights |
 |---|---|
+| **11.0** | ⚽ Teams — `/teams`, a Teams button on every rollcall and a Teams card on the web: random 2–4 team split, anyone moves players until an admin locks, auto-lock at game time, Publish to the group. Also `/vote_digest`, `/recap`, `/weather` (+ alerts), `/group_health`, inline game sharing; `/when` folded into `/calendar`; buttons scoped to their own group, formula-safe CSV exports |
 | **10.0** | Recurring rollcalls (`/src … repeat=weekly`, `/repeat`), `/calendar`, reminder DMs (`/remind_before_close`, `/remind_after_open`), `/export_stats` CSV, a searchable web command reference, admin console fully retired, identity tokens off URLs, and unreviewed sessions auto-forgiving stale ghost prompts. Also `/adjust_dues` + `/import_dues` to backfill dues the group was already carrying before it started using the bot; merge-identity queue that drains to empty (standalone people stay valid merge targets); all dependency CVEs cleared; security headers on every web response; OpenAPI docs closed by default |
 | **9.9** | Group web page now does everything the admin console used to — voter management, template creation, deep stats (session history, ghost/response-time leaderboards); admin sign-in matches the portal (Telegram verify, widget, or code); multi-group switcher |
 | **9.8** | Security fix — Mini App proxy-vote endpoint enforced admin rights like `/sif`; landing page gained Sign in / Admin links; admin console sign-in via Telegram (no more `/gentoken` token paste); portal Dues tab promoted to its own tab |

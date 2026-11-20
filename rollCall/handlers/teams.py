@@ -1,6 +1,7 @@
 """
-Teams on the Telegram panel: the ⚽ Teams button swaps the panel for the
+Teams on Telegram: the panel's ⚽ Teams button swaps the panel for the
 team sheet, the way 📋 Lists does, and 🔙 Back returns to the panel.
+/teams [::N] posts the same sheet as a message of its own.
 
 Callback data: tm:<op>:<rollcall db id>[:<arg>]
   form:<n>  make n teams          shuf      reshuffle
@@ -16,12 +17,13 @@ from types import SimpleNamespace
 
 from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from bot_state import bot, best_effort, safe_edit_text
-from exceptions import incorrectParameter, insufficientPermissions
+from bot_state import bot, best_effort, reply_error, safe_edit_text
+from exceptions import incorrectParameter, insufficientPermissions, rollCallNotStarted
 from functions import admin_rights
 from rollcall_manager import manager
 from services import teams as teams_svc
 from services.common import find_rollcall_index
+from utils.text import parse_rc_suffix
 
 _MAX_LABEL = 28
 
@@ -80,6 +82,24 @@ async def show_teams(call, cid: int, rc) -> None:
     v = teams_svc.view(rc)
     await safe_edit_text(cid, call.message.message_id, _sheet_text(rc, v),
                          reply_markup=teams_keyboard(rc.id, v))
+
+
+@bot.message_handler(func=lambda m: bool(m.text) and m.text.split()[0].split("@")[0].lower() == "/teams")
+async def teams_cmd(message):
+    """/teams [::N] — post the team sheet (with its buttons) for a rollcall."""
+    cid = message.chat.id
+    try:
+        idx, _rest = parse_rc_suffix(message.text.split()[1:])
+        rollcalls = manager.get_rollcalls(cid)
+        if not rollcalls:
+            raise rollCallNotStarted("No rollcall is open — teams are made from an open game's IN list.")
+        if idx >= len(rollcalls):
+            raise incorrectParameter(f"There is no rollcall ::{idx + 1}.")
+        rc = rollcalls[idx]
+        v = teams_svc.view(rc)
+        await bot.send_message(cid, _sheet_text(rc, v), reply_markup=teams_keyboard(rc.id, v))
+    except Exception as e:
+        await reply_error(message, e)
 
 
 async def _is_admin(call) -> bool:

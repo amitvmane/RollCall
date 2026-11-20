@@ -38,7 +38,7 @@ def _import_all():
         calendar_command,
     )
     from handlers.settings import (
-        shh, louder, wait_limit, event_fee, individual_fee, when, set_location,
+        shh, louder, wait_limit, event_fee, individual_fee, set_location,
         set_rollcall_time, reminder,
     )
     from handlers.core import (
@@ -174,7 +174,6 @@ class IntegrationBase(unittest.IsolatedAsyncioTestCase):
         cls.wait_limit = staticmethod(h["wait_limit"])
         cls.event_fee = staticmethod(h["event_fee"])
         cls.individual_fee = staticmethod(h["individual_fee"])
-        cls.when = staticmethod(h["when"])
         cls.set_location = staticmethod(h["set_location"])
         cls.set_admins = staticmethod(h["set_admins"])
         cls.unset_admins = staticmethod(h["unset_admins"])

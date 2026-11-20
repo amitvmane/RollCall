@@ -30,6 +30,7 @@ from datetime import datetime, timedelta, timezone
 import pytz
 
 import db
+from services.common import game_time
 
 RAIN_MM = 0.5            # mm in an hour that counts as "rain expected"
 _FORECAST_TTL = 1800     # seconds a forecast is reused
@@ -216,19 +217,10 @@ def summary_line(result: dict) -> str:
     return head + (" · " + " · ".join(extras) if extras else "")
 
 
-def _game_time(rc) -> datetime | None:
-    when = getattr(rc, "finalizeDate", None)
-    if when is None:
-        return None
-    if when.tzinfo is None:
-        when = pytz.timezone(rc.timezone or "Asia/Kolkata").localize(when)
-    return when
-
-
 async def rollcall_weather(rc) -> dict:
     """Forecast for one rollcall: {"ok": bool, "text": str, "result"?: dict}.
     "text" explains what's missing when ok is False."""
-    when = _game_time(rc)
+    when = game_time(rc)
     if not getattr(rc, "location", None):
         return {"ok": False, "text": "No location set — add one with /location so I know where to look."}
     if when is None:

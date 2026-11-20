@@ -84,7 +84,7 @@ def reset_db():
         pass
     cur = conn.cursor()
     for tbl in [
-        "admin_actions", "ghost_events", "late_drops", "ghost_records", "ghost_selections",
+        "admin_actions", "ghost_events", "late_drops", "rollcall_teams", "ghost_records", "ghost_selections",
         "chat_members", "proxy_users", "rollcall_stats", "user_stats",
         "proxy_stats", "web_admins",
         "users", "rollcalls", "templates", "chats",

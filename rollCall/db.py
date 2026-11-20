@@ -808,6 +808,23 @@ def create_tables():
                 )
             """)
 
+        # Teams for a rollcall: one row per player on a team. who_key is the
+        # player's identity — 'u<user id>' for a member, 'p<lower name>' for a
+        # guest — so two members sharing a first name stay two players.
+        # Same DDL on both dialects (no surrogate id).
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS rollcall_teams (
+                rollcall_id INTEGER NOT NULL,
+                who_key TEXT NOT NULL,
+                name TEXT,
+                team_no INTEGER NOT NULL,
+                moved_by TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (rollcall_id, who_key),
+                FOREIGN KEY (rollcall_id) REFERENCES rollcalls(id) ON DELETE CASCADE
+            )
+        """)
+
         # Identity merge: alias a proxy name to a canonical identity (another
         # proxy name, or a real user) so stats/dues/ghost-tracking treat them
         # as one person. Resolved at read time — never rewrites the historical
@@ -1053,6 +1070,9 @@ _RECONCILE_COLUMNS = {
         ("auto_buzz_sent", "auto_buzz_sent INTEGER DEFAULT 0",         "auto_buzz_sent INTEGER DEFAULT 0"),
         ("reminder_before_close_sent", "reminder_before_close_sent INTEGER DEFAULT 0", "reminder_before_close_sent INTEGER DEFAULT 0"),
         ("reminder_after_open_sent",   "reminder_after_open_sent INTEGER DEFAULT 0",   "reminder_after_open_sent INTEGER DEFAULT 0"),
+        ("teams_count",        "teams_count INTEGER DEFAULT 0",        "teams_count INTEGER DEFAULT 0"),
+        ("teams_locked",       "teams_locked INTEGER DEFAULT 0",       "teams_locked INTEGER DEFAULT 0"),
+        ("teams_published_at", "teams_published_at TIMESTAMP",         "teams_published_at TIMESTAMP"),
     ],
     "chats": [
         ("shh_mode",               "shh_mode INTEGER DEFAULT 0",               "shh_mode BOOLEAN DEFAULT FALSE"),
@@ -2335,6 +2355,7 @@ _VALID_ROLLCALL_FIELDS = {
     'collector_uid', 'collector_name', 'collector_paid_ground', 'collector_upi',
     'auto_buzz_sent',
     'reminder_before_close_sent', 'reminder_after_open_sent',
+    'teams_count', 'teams_locked', 'teams_published_at',
 }
 
 # The rollcalls columns that are BOOLEAN on Postgres — same int-vs-bool trap as
@@ -7623,6 +7644,60 @@ def get_top_teammates(chat_id: int, user_id: int, limit: int = 3) -> List[Dict]:
     except Exception:
         logging.exception("get_top_teammates failed")
         return []
+
+
+# ── Teams ──────────────────────────────────────────────────────────────────
+
+def get_team_rows(rollcall_id: int) -> List[Dict]:
+    """Every player placed on a team for this rollcall: who_key, name, team_no."""
+    with _cursor() as cursor:
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"SELECT who_key, name, team_no FROM rollcall_teams WHERE rollcall_id = {ph} "
+            f"ORDER BY team_no, updated_at, who_key",
+            (rollcall_id,))
+        return [dict(r) for r in cursor.fetchall()]
+
+
+def replace_team_rows(rollcall_id: int, rows: List[Dict], moved_by: str) -> None:
+    """Set the whole team sheet at once (a fresh split or a reshuffle).
+    rows: [{who_key, name, team_no}]."""
+    with _cursor(commit=True) as cursor:
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(f"DELETE FROM rollcall_teams WHERE rollcall_id = {ph}", (rollcall_id,))
+        for r in rows:
+            cursor.execute(
+                f"INSERT INTO rollcall_teams (rollcall_id, who_key, name, team_no, moved_by) "
+                f"VALUES ({ph}, {ph}, {ph}, {ph}, {ph})",
+                (rollcall_id, r["who_key"], r["name"], int(r["team_no"]), moved_by))
+
+
+def set_team_player(rollcall_id: int, who_key: str, name: str, team_no: int, moved_by: str) -> None:
+    """Put one player on a team (insert, or move them if already placed)."""
+    with _cursor(commit=True) as cursor:
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"UPDATE rollcall_teams SET team_no = {ph}, name = {ph}, moved_by = {ph}, "
+            f"updated_at = CURRENT_TIMESTAMP WHERE rollcall_id = {ph} AND who_key = {ph}",
+            (int(team_no), name, moved_by, rollcall_id, who_key))
+        if cursor.rowcount == 0:
+            cursor.execute(
+                f"INSERT INTO rollcall_teams (rollcall_id, who_key, name, team_no, moved_by) "
+                f"VALUES ({ph}, {ph}, {ph}, {ph}, {ph})",
+                (rollcall_id, who_key, name, int(team_no), moved_by))
+
+
+def remove_team_players(rollcall_id: int, who_keys) -> None:
+    """Take players off the team sheet (they are no longer IN)."""
+    keys = list(who_keys)
+    if not keys:
+        return
+    with _cursor(commit=True) as cursor:
+        ph = "%s" if db_type == "postgresql" else "?"
+        cursor.execute(
+            f"DELETE FROM rollcall_teams WHERE rollcall_id = {ph} "
+            f"AND who_key IN ({','.join([ph] * len(keys))})",
+            (rollcall_id, *keys))
 
 
 # Initialize database on import

@@ -897,3 +897,18 @@ body.tg-mode .brand-group-sel{background:rgba(127,127,127,.16);color:var(--text)
      link inside body copy. */
   #group-cta a,#bookmark-card a{display:inline-flex;align-items:center;min-height:44px}
 }
+
+/* ── Teams card ── */
+.teams-hdr{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.teams-title{font-weight:700;font-size:.95rem}
+.teams-lock{font-size:.75rem;color:var(--sub);white-space:nowrap}
+.teams-sub{font-size:.8rem;color:var(--sub);margin:6px 0}
+.teams-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+.team-col{border:1px solid var(--border);border-radius:10px;padding:8px 10px;min-width:0}
+.team-name{font-weight:700;font-size:.85rem;margin-bottom:6px}
+.team-n{font-family:var(--font-mono);color:var(--sub);font-weight:500;margin-left:4px}
+.team-player{display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:.84rem;padding:3px 0}
+.team-pname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.team-move{flex-shrink:0;padding:2px 4px;border-radius:6px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.78rem}
+.teams-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.teams-btn{padding:6px 12px;font-size:.8rem}

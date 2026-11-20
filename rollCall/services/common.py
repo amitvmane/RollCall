@@ -155,6 +155,18 @@ def rc_db_id(rc):
     return getattr(rc, "id", None) or getattr(rc, "db_id", None)
 
 
+def game_time(rc):
+    """When the game is (the rollcall's close time), timezone-aware, or None.
+    A naive finalizeDate is the group's local time."""
+    when = getattr(rc, "finalizeDate", None)
+    if when is None:
+        return None
+    if when.tzinfo is None:
+        import pytz
+        when = pytz.timezone(getattr(rc, "timezone", None) or "Asia/Kolkata").localize(when)
+    return when
+
+
 def find_rollcall_index(chat_id: int, rollcall_id, mgr=None):
     """0-based position of the OPEN rollcall whose db id is `rollcall_id`,
     or None if it has ended, been cancelled, or never existed here."""

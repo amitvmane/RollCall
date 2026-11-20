@@ -857,7 +857,71 @@ function renderRollcall(rc){
   $("lists-card").classList.remove("hidden");
   _syncAdminRcControls();
   detectCurrentVote();renderLists();
+  renderTeams(rc);
 }
+
+// ── Teams ── same rules as the Telegram sheet (services/teams.py): any
+// signed-in member moves players until the teams lock; the number of teams
+// and lock/unlock are an admin's call (the server refuses otherwise).
+function renderTeams(rc){
+  const card=$("teams-card");
+  if(!card)return;
+  const t=rc&&rc.teams;
+  if(!IS_GROUP||!t){card.classList.add("hidden");return;}
+  card.classList.remove("hidden");
+  const canEdit=!!_idToken&&!t.locked;
+  const formBtn=(label,n)=>`<button class="btn btn-secondary teams-btn" data-on-click="teamsForm" data-args="${rcArgs(n)}">${label}</button>`;
+  let h=`<div class="teams-hdr"><span class="teams-title">⚽ Teams</span>${t.locked?`<span class="teams-lock">🔒 Locked${t.locked_by==="game"?" · game time":""}</span>`:""}</div>`;
+  if(!t.formed){
+    h+=`<p class="teams-sub">No teams yet · ${t.players_in} IN. Players are split at random.</p>`;
+    if(_idToken){
+      h+=`<div class="teams-actions">${formBtn("Make 2 teams",2)}${_isWebAdmin?formBtn("3 teams",3)+formBtn("4 teams",4):""}</div>`;
+    }else h+=`<p class="teams-sub">Sign in with Telegram to make teams.</p>`;
+    card.innerHTML=h;return;
+  }
+  h+=`<div class="teams-grid">`+t.teams.map(team=>`<div class="team-col"><div class="team-name">${team.emoji} Team ${esc(team.label)} <span class="team-n">${team.players.length}</span></div>`+
+    (team.players.length?team.players.map(p=>`<div class="team-player"><span class="team-pname">${esc(p.name)}</span>`+
+      (canEdit?`<select class="team-move" aria-label="Move ${esc(p.name)}" data-on-change="teamsMove" data-args="${rcArgs(p.key,RC_VALUE)}">`+
+        t.teams.map(o=>`<option value="${o.no}"${o.no===team.no?" selected":""}>${esc(o.label)}</option>`).join("")+`</select>`:"")+`</div>`).join("")
+      :`<div class="teams-sub">—</div>`)+`</div>`).join("")+`</div>`;
+  const acts=[];
+  if(canEdit)acts.push(`<button class="btn btn-secondary teams-btn" data-on-click="teamsReshuffle">🔀 Reshuffle</button>`);
+  if(_idToken)acts.push(`<button class="btn btn-secondary teams-btn" data-on-click="teamsPublish">📣 Publish</button>`);
+  if(_idToken&&_isWebAdmin){
+    if(!t.locked){
+      const n=t.count%4+1<2?2:t.count%4+1;
+      acts.push(formBtn(`🔢 Make ${n} teams`,n));
+      acts.push(`<button class="btn btn-secondary teams-btn" data-on-click="teamsLock">🔒 Lock</button>`);
+    }else acts.push(`<button class="btn btn-secondary teams-btn" data-on-click="teamsUnlock">🔓 Unlock</button>`);
+  }
+  if(acts.length)h+=`<div class="teams-actions">${acts.join("")}</div>`;
+  if(!_idToken)h+=`<p class="teams-sub">Sign in with Telegram to move players.</p>`;
+  else if(canEdit)h+=`<p class="teams-sub">Pick a team next to a name to move that player.</p>`;
+  card.innerHTML=h;
+}
+
+async function _teamsAction(body){
+  if(!_idToken){toast("Sign in with Telegram first.",3000);return;}
+  const rc=activeRcData;
+  if(!rc)return;
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/rollcalls/${encodeURIComponent(rc.rollcall_id)}/teams`,{
+      method:"POST",headers:{"Content-Type":"application/json","X-Identity-Token":_idToken},
+      body:JSON.stringify(body),signal:AbortSignal.timeout(10000),
+    });
+    const d=await res.json().catch(()=>({}));
+    if(!res.ok)throw new Error(typeof d.detail==="string"?d.detail:"Could not update teams");
+    const msg=d.message;delete d.message;
+    if(activeRcData&&activeRcData.rollcall_id===rc.rollcall_id){activeRcData.teams=d;renderTeams(activeRcData);}
+    if(msg)toast(msg,2200);
+  }catch(e){toast(e.message||"Could not update teams",3500);if(activeRcData)renderTeams(activeRcData);}
+}
+window.teamsForm=function(n){_teamsAction({action:"form",count:Number(n)});};
+window.teamsReshuffle=function(){_teamsAction({action:"reshuffle"});};
+window.teamsMove=function(key,teamNo){_teamsAction({action:"move",who_key:key,team_no:Number(teamNo)});};
+window.teamsLock=function(){_teamsAction({action:"lock"});};
+window.teamsUnlock=function(){_teamsAction({action:"unlock"});};
+window.teamsPublish=function(){_teamsAction({action:"publish"});};
 
 // Admin-only per-row controls (move to another list / remove) — web parity
 // for the admin console's Rollcalls-tab actions. "waiting" has no manual
@@ -1085,7 +1149,7 @@ function renderGroup(){
     // no game it was an empty bordered box above an empty column.
     $("rc-card")?.classList.add("hidden");
     $("no-rollcalls").classList.remove("hidden");
-    ["identity-card","vote-card","lists-card"].forEach(id=>$(id)?.classList.add("hidden"));
+    ["identity-card","vote-card","lists-card","teams-card"].forEach(id=>$(id)?.classList.add("hidden"));
     activeRcData=null;
     // Nothing is counting down, so the refresh bar is a progress indicator
     // for no progress — and the identity strip asks "who's voting?" about a
@@ -1153,7 +1217,7 @@ async function silentRefresh(){
         renderUpcoming(groupData.upcoming||[]);
         if(!rcs.length){
           $("tab-card").classList.add("hidden");$("no-rollcalls").classList.remove("hidden");
-          ["identity-card","vote-card","lists-card"].forEach(id=>$(id)?.classList.add("hidden"));
+          ["identity-card","vote-card","lists-card","teams-card"].forEach(id=>$(id)?.classList.add("hidden"));
         }else{
           $("no-rollcalls").classList.add("hidden");
           if(rcs.length>1){$("tab-card").classList.remove("hidden");renderTabs(rcs);}
@@ -2224,6 +2288,7 @@ function _applyAdminStatus(isAdmin){
   const navBtn=document.getElementById("admin-nav-btn");
   if(navBtn)navBtn.classList.toggle("hidden",!_isWebAdmin);
   if(_isWebAdmin){_syncShhToggle();_syncGroupSettingsCard();_syncTimezoneDisplay();_renderWeekdayHint();_loadWeblogInMembers();renderLists();}
+  if(activeRcData)renderTeams(activeRcData);
   _syncAdminRcControls();
   _syncViewTabs();
   _peekGhostReview().catch(()=>{});

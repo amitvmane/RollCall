@@ -10,6 +10,28 @@ class WebUser(BaseModel):
     user_id: Optional[int] = Field(None, description="Telegram user id of a real member (null for a guest/proxy) — lets admin actions address namesakes exactly")
 
 
+class WebTeamPlayer(BaseModel):
+    key: str = Field(..., description="Player identity on the sheet: u<user id> or p<guest name>")
+    name: str
+
+
+class WebTeam(BaseModel):
+    no: int
+    label: str
+    emoji: str
+    players: list[WebTeamPlayer] = Field(default_factory=list)
+
+
+class WebTeams(BaseModel):
+    formed: bool = False
+    count: int = 2
+    locked: bool = False
+    locked_by: Optional[str] = Field(None, description="'admin' or 'game' when locked")
+    published_at: Optional[str] = None
+    players_in: int = 0
+    teams: list[WebTeam] = Field(default_factory=list)
+
+
 class WebRollcallResponse(BaseModel):
     rollcall_id: int
     web_token: str = ""
@@ -20,6 +42,7 @@ class WebRollcallResponse(BaseModel):
     location: Optional[str] = None
     fee: Optional[str] = None
     weather: Optional[str] = None
+    teams: Optional[WebTeams] = None
     in_list: list[WebUser] = Field(default_factory=list, alias="in")
     out_list: list[WebUser] = Field(default_factory=list, alias="out")
     maybe_list: list[WebUser] = Field(default_factory=list, alias="maybe")
@@ -656,3 +679,14 @@ class WebRecapResponse(BaseModel):
 class WebWeatherResponse(BaseModel):
     ok: bool
     text: str
+
+
+class WebTeamsActionRequest(BaseModel):
+    action: Literal["form", "reshuffle", "move", "lock", "unlock", "publish"]
+    count: Optional[int] = Field(None, ge=2, le=4, description="form: number of teams")
+    who_key: Optional[str] = Field(None, max_length=200, description="move: the player")
+    team_no: Optional[int] = Field(None, ge=1, le=4, description="move: destination team")
+
+
+class WebTeamsResponse(WebTeams):
+    message: str = ""

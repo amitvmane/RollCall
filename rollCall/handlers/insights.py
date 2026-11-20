@@ -159,7 +159,7 @@ def _game_card(chat: dict, rc) -> str:
     lines = [f"🏏 {rc.title}"]
     if chat.get("group_name"):
         lines.append(f"👥 {chat['group_name']}")
-    when = weather_svc._game_time(rc)
+    when = weather_svc.game_time(rc)
     if when is not None:
         import pytz
         local = when.astimezone(pytz.timezone(rc.timezone or "Asia/Kolkata"))

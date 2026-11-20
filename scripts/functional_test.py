@@ -1439,6 +1439,53 @@ async def phase_insights():
     await feed("/erc", ALICE)
 
 
+async def phase_teams():
+    """Teams from the panel's ⚽ button: make, move (silent), lock (admin),
+    publish — through the real callback router and the fake Telegram's
+    callback-data / message limits."""
+    print("\n=== Phase: Teams ===\n")
+    from services import teams as _teams
+
+    await feed("/src Teams Game", ALICE)
+    for u in (BOB, CAROL, DAVE):
+        bot_state._rate_limits.clear()
+        await feed("/in", u)
+    await feed("/sif Guesty", ALICE)
+    rc = manager.get_rollcalls(CHAT_ID)[0]
+
+    out = await feed_cb(f"btn_teams_1_{rc.id}", BOB)
+    ok, d = contains(out, "No teams yet")
+    record("⚽ Teams on the panel opens the team sheet", ok and not _errors, d or error_msgs()[:2])
+
+    out = await feed_cb(f"tm:form:{rc.id}:2", BOB)
+    ok, d = contains(out, "Team A", "Team B", "Guesty")
+    record("a member can make 2 teams; guests are included", ok and not _errors, d or error_msgs()[:2])
+    v = _teams.view(rc)
+    record("...split evenly", sorted(len(t["players"]) for t in v["teams"]) == [2, 2], str(v["teams"])[:200])
+
+    key = f"u{CAROL[0]}"
+    start = next(t["no"] for t in v["teams"] for p in t["players"] if p["key"] == key)
+    out = await feed_cb(f"tm:mv:{rc.id}:{_teams.button_token(key)}", DAVE)
+    moved = next(t["no"] for t in _teams.view(rc)["teams"] for p in t["players"] if p["key"] == key)
+    record("tapping a player moves them to the next team, silently",
+           moved != start and not has_call(out, "send_message"), f"start={start} now={moved} out={str(out)[:200]}")
+
+    await feed_cb(f"tm:lock:{rc.id}", ALICE)
+    out = await feed_cb(f"tm:mv:{rc.id}:{_teams.button_token(key)}", BOB)
+    record("locked teams refuse moves", _teams.view(rc)["locked"] and
+           next(t["no"] for t in _teams.view(rc)["teams"] for p in t["players"] if p["key"] == key) == moved,
+           str(out)[:200])
+
+    out = await feed_cb(f"tm:pub:{rc.id}", BOB)
+    ok, d = contains(out, "Teams — Teams Game", "Published by Bob")
+    record("📣 Publish posts the teams to the group", ok and has_call(out, "send_message"), d)
+
+    out = await feed_cb(f"tm:back:{rc.id}", BOB)
+    record("🔙 Back returns to the vote panel", has_call(out, "edit_message_text") and not _errors,
+           error_msgs()[:2])
+    await feed("/erc", ALICE)
+
+
 async def phase_close_races():
     """Regressions from the 2026-10-30 review of the burst changes.
 
@@ -2703,6 +2750,7 @@ async def run_all():
     await phase_close_races()
     await phase_stats_season()
     await phase_insights()
+    await phase_teams()
 
     print("\n=== Phase 16: Lifecycle close (final) ===\n")
 

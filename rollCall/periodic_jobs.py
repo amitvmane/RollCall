@@ -131,7 +131,7 @@ async def _weather_alerts() -> None:
     for chat_id in _db.get_chat_ids_with_weather_alerts():
         for rc in manager.get_rollcalls(chat_id):
             try:
-                when = weather_svc._game_time(rc)
+                when = weather_svc.game_time(rc)
                 if when is None or not rc.location or rc.id is None:
                     continue
                 hours_left = (when - now).total_seconds() / 3600

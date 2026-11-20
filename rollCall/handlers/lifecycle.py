@@ -260,6 +260,7 @@ async def get_status_keyboard(rc_number: int, chat_id: int) -> InlineKeyboardMar
     )
     markup.add(
         InlineKeyboardButton("📋 Lists",   callback_data=_btn("lists", rc_number, rc_id)),
+        InlineKeyboardButton("⚽ Teams",   callback_data=_btn("teams", rc_number, rc_id)),
         InlineKeyboardButton("🔄 Refresh", callback_data=_btn("refresh", rc_number, rc_id)),
     )
     if web_url:
@@ -1414,6 +1415,12 @@ async def callback_handler(call):
 
         if action in ("wi", "wo", "wm", "ww"):
             await _cb_list_view(call, cid, rc_number, rc, action)
+            return
+
+        # ── Teams sheet (handlers/teams.py) ───────────────────────────────────
+        if action == "teams":
+            from handlers.teams import show_teams
+            await show_teams(call, cid, rc)
             return
 
         # ── Back to main panel ────────────────────────────────────────────────

@@ -49,6 +49,18 @@ def _weather_line(rc):
         return None
 
 
+def _teams(rc):
+    """The rollcall's team sheet (services.teams.view — read-only)."""
+    if getattr(rc, "id", None) is None:
+        return None
+    try:
+        from services.teams import view
+        return view(rc)
+    except Exception:
+        logging.exception("teams view failed for rollcall %s", getattr(rc, "id", None))
+        return None
+
+
 def _serialize_web_rollcall(rc) -> dict:
     """Minimal dict for the web voting UI."""
     finalize_str = None
@@ -86,6 +98,7 @@ def _serialize_web_rollcall(rc) -> dict:
         "location": rc.location,
         "fee": rc.event_fee,
         "weather": _weather_line(rc),
+        "teams": _teams(rc),
         "in": [_user_dict(u) for u in rc.inList],
         "out": [_user_dict(u) for u in rc.outList],
         "maybe": [_user_dict(u) for u in rc.maybeList],

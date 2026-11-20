@@ -31,8 +31,16 @@ class TestMenuEntries(unittest.TestCase):
 
     def test_returns_only_requested_scope(self):
         names = {name for name, _ in menu_entries("user", USER_CATEGORY_ORDER)}
-        expected = {c["name"] for c in COMMANDS if c["scope"] == "user"}
+        expected = {c["name"] for c in COMMANDS if c["scope"] == "user" and c.get("menu", True)}
         self.assertEqual(names, expected)
+
+    def test_typed_only_commands_leave_the_menu_but_stay_in_help(self):
+        from commands_registry import commands_for_scope, lookup_command
+        admin_menu = {name for name, _ in menu_entries("admin", ADMIN_CATEGORY_ORDER)}
+        self.assertNotIn("unset_admins", admin_menu)
+        self.assertIn("set_admins", admin_menu)
+        self.assertIn("unset_admins", {c["name"] for c in commands_for_scope({"admin"})})
+        self.assertIsNotNone(lookup_command("/unset_admins"))
 
     def test_summaries_prefixed_with_category_emoji(self):
         by_name = {c["name"]: c for c in COMMANDS}
@@ -64,8 +72,9 @@ class TestMenuEntries(unittest.TestCase):
         """Telegram refuses set_my_commands with more than 100 commands
         (BOT_COMMANDS_TOO_MUCH). register_commands sends the admin scope as
         user + admin commands, so one command too many silently leaves every
-        admin without a menu — runner only logs a warning. At 100 as of
-        2026-11-19: a new command needs a sub-command or a retired one."""
+        admin without a menu — runner only logs a warning. At 99 as of
+        2026-11-20 (/unset_admins is typed-only): a new command needs a
+        sub-command, a typed-only slot (menu: False) or a retired one."""
         admin_menu = (menu_entries("user", USER_CATEGORY_ORDER)
                       + menu_entries("admin", ADMIN_CATEGORY_ORDER))
         self.assertLessEqual(len(admin_menu), 100)

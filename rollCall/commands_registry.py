@@ -27,6 +27,9 @@ Schema per entry:
   summary   str           one-line description for the bot menu and the /help list
   details   str           multi-line explanation for /help <name>. Plain text;
                           escape Markdown specials yourself if you include them.
+  menu      bool          OPTIONAL, default True. False = typed-only: left out of
+                          the Telegram menu (capped at 100 entries) but still in
+                          /help and still works when typed.
 """
 
 COMMANDS = [
@@ -571,6 +574,7 @@ COMMANDS = [
         "args": "", "sample": "/unset_admins",
         "summary": "Disable admin-only mode",
         "details": "Allow non-admins to run admin commands again.",
+        "menu": False,
     },
     {
         "name": "toggle_ghost_tracking", "aliases": [], "scope": "admin", "category": "Ghost Tracking",
@@ -1118,10 +1122,10 @@ CATEGORY_EMOJI = {
 
 def menu_entries(scope, category_order):
     """(name, marked summary) pairs for the Telegram BotCommand menu:
-    commands of `scope`, grouped by category in `category_order` (registry
+    commands of `scope` (typed-only ones left out), grouped by category in `category_order` (registry
     order within a category, unknown categories last), each summary prefixed
     with its category emoji."""
-    cmds = [c for c in COMMANDS if c["scope"] == scope]
+    cmds = [c for c in COMMANDS if c["scope"] == scope and c.get("menu", True)]
     rank = {cat: i for i, cat in enumerate(category_order)}
     cmds.sort(key=lambda c: rank.get(c["category"], len(rank)))
     return [

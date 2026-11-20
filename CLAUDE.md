@@ -7,7 +7,7 @@
 - `help_commands()` in `rollCall/handlers/core.py` (drives `/help`, `/help admin`, and `/help <name>` detail view)
 
 Whenever a bot command is **added, renamed, or removed**:
-1. Edit only `commands_registry.py` — add/modify/remove the entry in the `COMMANDS` list with all eight fields (`name`, `aliases`, `scope`, `category`, `args`, `sample`, `summary`, `details`).
+1. Edit only `commands_registry.py` — add/modify/remove the entry in the `COMMANDS` list with all eight fields (`name`, `aliases`, `scope`, `category`, `args`, `sample`, `summary`, `details`). Optional ninth field `menu: False` makes a command typed-only: out of the Telegram menu (capped at 100 — the admin menu is full), still in `/help` and still working when typed.
 2. Make sure the actual handler function exists and uses the same command name (and aliases) in its `@bot.message_handler(...)` decorator.
 
 The menu and `/help` re-render automatically — no other files to keep in sync.

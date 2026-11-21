@@ -27,6 +27,51 @@ class TestTemplateCreate(IntegrationBase):
         self.assertIsNotNone(tmpl)
         self.assertEqual(tmpl["location"], "CentralPark")
 
+    async def test_quoted_location_keeps_its_spaces(self):
+        """Options were split on spaces before quotes were read, so
+        location="Turf 3" saved as "Turf"."""
+        await self.set_template(self.msg(
+            '/set_template park "Park Game" limit=12 location="Turf 3" fee="200 each"', ADMIN_USER))
+        tmpl = db.get_template(CHAT_ID, "park")
+        self.assertEqual(tmpl["location"], "Turf 3")
+        self.assertEqual(tmpl["eventfee"], "200 each")
+
+        # Location alone: everything else stays.
+        await self.set_template(self.msg('/set_template park location=“Ground Zero”', ADMIN_USER))
+        tmpl = db.get_template(CHAT_ID, "park")
+        self.assertEqual(tmpl["location"], "Ground Zero")
+        self.assertEqual(tmpl["title"], "Park Game")
+        self.assertEqual(tmpl["inlistlimit"], 12)
+
+    def test_option_parser(self):
+        from handlers.templates import _key_values
+        self.assertEqual(
+            _key_values('limit=5 location="A B" fee=\'1 2\' Event_Day=friday stray'),
+            [("limit", "5"), ("location", "A B"), ("fee", "1 2"), ("event_day", "friday")])
+        self.assertEqual(_key_values('location="Unclosed quote here'),
+                         [("location", "Unclosed quote here")])
+        # An unclosed quote must not swallow the options after it.
+        self.assertEqual(_key_values('location="Turf 3 fee=200'),
+                         [("location", "Turf 3"), ("fee", "200")])
+        self.assertEqual(_key_values("location=Joe's"), [("location", "Joe's")])
+        self.assertEqual(_key_values("location=https://m.app/?q=a&b=c fee=1"),
+                         [("location", "https://m.app/?q=a&b=c"), ("fee", "1")])
+        self.assertEqual(_key_values('location=""'), [("location", "")])
+
+    async def test_schedule_once_refuses_a_template_name_with_spaces(self):
+        from handlers.templates import schedule_once_command
+        await schedule_once_command(self.msg(
+            '/schedule_once tuesday 09:00 "Game" save_as_template="my game"', ADMIN_USER))
+        self.assertIsNone(db.get_template(CHAT_ID, "my game"))
+        self.assertTrue(any("can't contain spaces" in t for t in self.sent_texts()))
+
+    async def test_phone_quotes_on_title_and_options(self):
+        await self.set_template(self.msg(
+            "/set_template park “Park Game” location=‘Turf 3’", ADMIN_USER))
+        tmpl = db.get_template(CHAT_ID, "park")
+        self.assertEqual(tmpl["title"], "Park Game")
+        self.assertEqual(tmpl["location"], "Turf 3")
+
     async def test_set_template_with_event_day_time(self):
         await self.set_template(self.msg(
             '/set_template weekly "Weekly" event_day=sunday event_time=17:00',

@@ -1998,9 +1998,16 @@ async def run_all():
 
     # /set_template syntax: name "Title" [limit=N] [location=X] [fee=X]
     out = await feed('/set_template friday "Friday Football" limit=14 location="Turf 3" fee=200', ALICE)
-    ok = len(_errors) == 0 and len(out) >= 1
+    ok = len(_errors) == 0 and len(out) >= 1 and "Turf 3" in text_of(out)
     record("/set_template friday with title/limit/location/fee creates template",
-           ok, str(error_msgs()) if not ok else "")
+           ok, str(error_msgs()) or text_of(out)[:200] if not ok else "")
+
+    # Only the location changes; a quoted value keeps its spaces.
+    out = await feed('/set_template friday location="Ground Zero East"', ALICE)
+    t = text_of(out)
+    ok = len(_errors) == 0 and "Ground Zero East" in t and "Friday Football" in t
+    record("/set_template friday location=\"...\" updates only the location",
+           ok, str(error_msgs()) or t[:200] if not ok else "")
 
     out = await feed('/set_template practice "Tue Practice" limit=10', ALICE)
     ok = len(_errors) == 0 and len(out) >= 1

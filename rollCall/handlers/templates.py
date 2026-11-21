@@ -5,6 +5,7 @@ Template handlers: /templates, /set_template, /start_template, /delete_template,
 import asyncio
 import html
 import logging
+import re
 from datetime import datetime, timedelta
 
 import pytz
@@ -23,6 +24,26 @@ from utils.text import callback_key, match_callback_name
 
 def _ts() -> str:
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+
+# Phone and Mac keyboards turn typed quotes into curly ones by default.
+_STRAIGHT_QUOTES = str.maketrans({"“": '"', "”": '"', "„": '"', "‘": "'", "’": "'"})
+
+# key=value, key="two words", key='two words'. An unclosed quote runs up to
+# the next key= rather than swallowing the options after it.
+_KV_RE = re.compile(r'(\w+)=(?:"([^"]*)"|\'([^\']*)\'|["\']((?:(?!\s\w+=).)*)|(\S+))')
+
+
+def _straighten_quotes(text: str) -> str:
+    return text.translate(_STRAIGHT_QUOTES)
+
+
+def _key_values(tail: str) -> list[tuple[str, str]]:
+    """The key=value options after a command's title. Splitting on spaces
+    first cut location="Turf 3" down to "Turf"; a quoted value keeps its
+    spaces."""
+    return [(m.group(1).lower(), next(g for g in m.groups()[1:] if g is not None).strip())
+            for m in _KV_RE.finditer(tail)]
 
 
 def _extract_expiry_token(parts: list[str]):
@@ -577,7 +598,7 @@ async def set_template(message):
         if len(parts) == 2:
             tail = ""
         else:
-            tail = parts[2].strip()
+            tail = _straighten_quotes(parts[2].strip())
 
         try:
             existing = templates_svc.get_one_template(cid, name)
@@ -620,14 +641,8 @@ async def set_template(message):
                 title = first_token
                 tail = tail[first_space + 1:].strip() if first_space > 0 else ""
 
-        tokens = tail.split()
         bad_values = []
-        for tok in tokens:
-            if "=" not in tok:
-                continue
-            key, val = tok.split("=", 1)
-            key = key.strip().lower()
-            val = val.strip().strip('"').strip("'")
+        for key, val in _key_values(tail):
 
             def _try_int(field_name, current):
                 try:
@@ -733,7 +748,7 @@ async def schedule_once_command(message):
             return
 
         fire_weekday, fire_time = parts[1], parts[2]
-        tail = parts[3].strip()
+        tail = _straighten_quotes(parts[3].strip())
 
         title = None
         if tail.startswith('"'):
@@ -757,12 +772,7 @@ async def schedule_once_command(message):
 
         limit = location = fee = event_day = event_time = save_as_template = None
         bad_values = []
-        for tok in tail.split():
-            if "=" not in tok:
-                continue
-            key, val = tok.split("=", 1)
-            key = key.strip().lower()
-            val = val.strip().strip('"').strip("'")
+        for key, val in _key_values(tail):
             if key == "limit":
                 try:
                     limit = int(val)
@@ -778,6 +788,14 @@ async def schedule_once_command(message):
                 event_time = val
             elif key == "save_as_template":
                 save_as_template = val
+
+        # A quoted value can now hold spaces, but every other template
+        # command reads the name as one word — it could never be started
+        # or deleted from Telegram.
+        if save_as_template and any(c.isspace() for c in save_as_template):
+            await bot.send_message(cid, "⚠️ Template names can't contain spaces — try "
+                                        f"save_as_template={'_'.join(save_as_template.split())}")
+            return
 
         if bad_values:
             await bot.send_message(cid, f"⚠️ Ignored non-integer value(s): {', '.join(bad_values)}.")

@@ -265,9 +265,10 @@ def swap(rc, key_a: str, key_b: str, actor: str) -> dict:
         raise incorrectParameter("That player isn't IN any more.")
     if int(a["team_no"]) == int(b["team_no"]):
         raise incorrectParameter("Those two are on the same team.")
-    rid = rc_db_id(rc)
-    db.set_team_player(rid, key_a, a["name"], int(b["team_no"]), actor)
-    db.set_team_player(rid, key_b, b["name"], int(a["team_no"]), actor)
+    db.set_team_players(rc_db_id(rc), [
+        {"who_key": key_a, "name": a["name"], "team_no": int(b["team_no"])},
+        {"who_key": key_b, "name": b["name"], "team_no": int(a["team_no"])},
+    ], actor)
     result = view(rc)
     result["swapped"] = (a["name"], b["name"])
     return result

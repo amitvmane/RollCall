@@ -7695,17 +7695,24 @@ def replace_team_rows(rollcall_id: int, rows: List[Dict], moved_by: str) -> None
 
 def set_team_player(rollcall_id: int, who_key: str, name: str, team_no: int, moved_by: str) -> None:
     """Put one player on a team (insert, or move them if already placed)."""
+    set_team_players(rollcall_id, [{"who_key": who_key, "name": name, "team_no": team_no}], moved_by)
+
+
+def set_team_players(rollcall_id: int, rows: List[Dict], moved_by: str) -> None:
+    """set_team_player for several players in one transaction — a swap must
+    never land half-done. rows: [{who_key, name, team_no}]."""
     with _cursor(commit=True) as cursor:
         ph = "%s" if db_type == "postgresql" else "?"
-        cursor.execute(
-            f"UPDATE rollcall_teams SET team_no = {ph}, name = {ph}, moved_by = {ph}, "
-            f"updated_at = CURRENT_TIMESTAMP WHERE rollcall_id = {ph} AND who_key = {ph}",
-            (int(team_no), name, moved_by, rollcall_id, who_key))
-        if cursor.rowcount == 0:
+        for r in rows:
             cursor.execute(
-                f"INSERT INTO rollcall_teams (rollcall_id, who_key, name, team_no, moved_by) "
-                f"VALUES ({ph}, {ph}, {ph}, {ph}, {ph})",
-                (rollcall_id, who_key, name, int(team_no), moved_by))
+                f"UPDATE rollcall_teams SET team_no = {ph}, name = {ph}, moved_by = {ph}, "
+                f"updated_at = CURRENT_TIMESTAMP WHERE rollcall_id = {ph} AND who_key = {ph}",
+                (int(r["team_no"]), r["name"], moved_by, rollcall_id, r["who_key"]))
+            if cursor.rowcount == 0:
+                cursor.execute(
+                    f"INSERT INTO rollcall_teams (rollcall_id, who_key, name, team_no, moved_by) "
+                    f"VALUES ({ph}, {ph}, {ph}, {ph}, {ph})",
+                    (rollcall_id, r["who_key"], r["name"], int(r["team_no"]), moved_by))
 
 
 def remove_team_players(rollcall_id: int, who_keys) -> None:

@@ -8,7 +8,8 @@ Callback data: tm:<op>:<rollcall db id>[:<arg>]
   form:<n>  make n teams          shuf      reshuffle
   sw:<team>          swap picker: pick a player from <team>
   sp:<tok>[:<team>]  ...then who to swap them with (from <team>)
-  sx:<tok>:<tok>     swap those two      mt:<tok>:<team>  just move one
+  sx:<tok>:<tok>[:<team>]  swap those two (<team>: where the second one was shown)
+  mt:<tok>:<team>    just move one
   mv:<tok>  move a player on (sheets posted before the picker existed)
   lock / unlock / pub (admin)     back      return to the panel
   view      redraw
@@ -102,8 +103,20 @@ def _sheet_text(rc, v: dict) -> str:
     return text
 
 
-def _name_button(p: dict, data: str) -> InlineKeyboardButton:
-    return InlineKeyboardButton(p["name"][:_NAME_LABEL], callback_data=data)
+def _name_buttons(players: list, data) -> list:
+    """One button per player, data(p) as its callback. Two players whose
+    labels read the same (namesakes, or names alike in their first 14
+    letters) get a (2), (3)… in sheet order, so the picker can tell them
+    apart; an empty name would make Telegram refuse the whole keyboard."""
+    seen: dict = {}
+    out = []
+    for p in players:
+        label = (p["name"] or "")[:_NAME_LABEL].strip() or "?"
+        seen[label] = seen.get(label, 0) + 1
+        if seen[label] > 1:
+            label = f"{label} ({seen[label]})"
+        out.append(InlineKeyboardButton(label, callback_data=data(p)))
+    return out
 
 
 def _cancel(rc_id: int) -> InlineKeyboardButton:
@@ -118,8 +131,8 @@ def pick_screen(rc, v: dict, team_no) -> tuple[str, InlineKeyboardMarkup]:
     """Swap, step 1: one team's names; tabs reach the other teams."""
     team = _team(v, team_no)
     markup = InlineKeyboardMarkup()
-    _rows(markup, [_name_button(p, _cb("sp", rc.id, teams_svc.button_token(p["key"])))
-                   for p in team["players"]])
+    _rows(markup, _name_buttons(team["players"],
+                                lambda p: _cb("sp", rc.id, teams_svc.button_token(p["key"]))))
     _rows(markup, [_tab(t, _cb("sw", rc.id, str(t["no"]))) for t in v["teams"] if t["no"] != team["no"]]
           + [_cancel(rc.id)])
     return (teams_svc.render_text(rc, v)
@@ -134,8 +147,10 @@ def partner_screen(rc, v: dict, key: str, team_no=None) -> tuple[str, InlineKeyb
     name = next(p["name"] for p in own["players"] if p["key"] == key)
     tok = teams_svc.button_token(key)
     markup = InlineKeyboardMarkup()
-    _rows(markup, [_name_button(p, _cb("sx", rc.id, f"{tok}:{teams_svc.button_token(p['key'])}"))
-                   for p in target["players"]])
+    # The partner's team rides along so a swap tapped after the teams
+    # changed (a reshuffle, another swap) is caught, not applied backwards.
+    _rows(markup, _name_buttons(target["players"], lambda p: _cb(
+        "sx", rc.id, f"{tok}:{teams_svc.button_token(p['key'])}:{target['no']}")))
     _rows(markup, [_tab(t, _cb("sp", rc.id, f"{tok}:{t['no']}")) for t in others if t["no"] != target["no"]])
     markup.row(InlineKeyboardButton(f"➡ Just move {name[:_NAME_LABEL]} to {target['label']}",
                                     callback_data=_cb("mt", rc.id, f"{tok}:{target['no']}")),
@@ -255,13 +270,23 @@ async def teams_callback(call):
                 if op in ("sw", "sp", "sx", "mt"):
                     teams_svc.check_editable(rc)
                     v = teams_svc.view(rc)
+                    if op in ("sw", "sp") and not _move_buttons_fit(v):
+                        # A picker posted before the team grew past the cap.
+                        raise incorrectParameter("Too many players for buttons — swap players "
+                                                 "on the group's web page (🌐 Vote on Web).")
                 if op == "sw":
                     screen = ("pick", toks[0] or "1")
                 elif op == "sp":
                     screen = ("partner", _player(v, toks[0]), toks[1])
                 elif op == "sx":
-                    v = teams_svc.swap(rc, _player(v, toks[0]), _player(v, toks[1]), actor)
-                    toast = "{} ⇄ {}".format(*v["swapped"])
+                    a, b = _player(v, toks[0]), _player(v, toks[1])
+                    if toks[2] and str(_team_of(v, b)["no"]) != toks[2]:
+                        # Shown a stale partner list: draw the picker afresh.
+                        toast = "The teams changed — pick again."
+                        screen = ("pick", str(_team_of(v, a)["no"]))
+                    else:
+                        v = teams_svc.swap(rc, a, b, actor)
+                        toast = "{} ⇄ {}".format(*v["swapped"])
                 elif op == "mt":
                     v = teams_svc.move(rc, _player(v, toks[0]), toks[1] or None, actor)
                     toast = f"{v['moved']['name']} → Team {v['moved']['team']}"

@@ -293,6 +293,47 @@ class TestTelegramSheet(_Base):
         self.assertIn("locked", get_mock_bot().answer_callback_query.call_args.args[1])
         self.assertFalse(get_mock_bot().edit_message_text.called)
 
+    async def test_stale_partner_list_redraws_instead_of_swapping_backwards(self):
+        rc = await self._game_with(4)
+        await self._tap(f"tm:form:{rc.id}:2", USERS[0])
+        v = _svc().view(self._rc())
+        a, b = v["teams"][0]["players"][0], v["teams"][1]["players"][0]
+        await self._tap(f"tm:sp:{rc.id}:{_svc().button_token(a['key'])}", USERS[0])
+        stale = self._buttons()[b["name"][:14]]
+        self.assertTrue(stale.endswith(":2"), stale)
+        # Someone else moves B onto A's team while this list is on screen.
+        _svc().move(self._rc(), b["key"], 1, "Other")
+        _svc().move(self._rc(), a["key"], 2, "Other")
+        before = _svc().view(self._rc())
+        await self._tap(stale, USERS[0])
+        self.assertEqual(_svc().view(self._rc())["teams"], before["teams"], "nothing swapped")
+        self.assertIn("teams changed", get_mock_bot().answer_callback_query.call_args.args[1])
+        self.assertIn("Who swaps?", self._edited_text())
+        # A partner button posted before the team number rode along still works.
+        await self._tap(f"tm:sx:{rc.id}:{_svc().button_token(a['key'])}:{_svc().button_token(b['key'])}",
+                        USERS[0])
+        self.assertEqual(_team_of(_svc().view(self._rc()), a["key"]), 1)
+
+    async def test_namesakes_and_blank_names_get_distinct_labels(self):
+        from handlers.teams import pick_screen
+        v = {"teams": [{"no": 1, "label": "A", "emoji": "🔴", "players": [
+                {"key": "u1", "name": "Rahul"}, {"key": "u2", "name": "Rahul"},
+                {"key": "u3", "name": "Christopher Jones"}, {"key": "u4", "name": "Christopher James"},
+                {"key": "u5", "name": ""}]},
+               {"no": 2, "label": "B", "emoji": "🔵", "players": []}],
+             "formed": True, "locked": False, "locked_by": None, "count": 2, "players_in": 5}
+        rc = await self._game_with(1)
+        labels = [b.text for b in pick_screen(rc, v, 1)[1].keyboard][:5]
+        self.assertEqual(labels, ["Rahul", "Rahul (2)", "Christopher Jo", "Christopher Ja", "?"])
+
+    async def test_old_picker_past_the_button_cap_is_refused(self):
+        rc = await self._game_with(4)
+        await self._tap(f"tm:form:{rc.id}:2", USERS[0])
+        with patch("handlers.teams._MAX_MOVE_BUTTONS", 1):
+            await self._tap(f"tm:sw:{rc.id}:1", USERS[0])
+        self.assertIn("web page", get_mock_bot().answer_callback_query.call_args.args[1])
+        self.assertFalse(get_mock_bot().edit_message_text.called)
+
     async def test_non_admin_cannot_lock_or_publish_but_picks_the_count(self):
         rc = await self._game_with(4)
         await self._tap(f"tm:form:{rc.id}:2", USERS[0])

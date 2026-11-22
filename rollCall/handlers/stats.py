@@ -47,6 +47,15 @@ async def stats_command(message):
 
         if lower_arg == "group":
             scope = "group"
+        elif lower_arg.split()[0] in ("days", "day", "weekdays"):
+            scope = "days"
+            window = lower_arg.split()[1:]
+            fill_window = None
+            if window:
+                if not window[0].isdigit() or not 1 <= int(window[0]) <= 3650:
+                    await bot.send_message(cid, "Usage: /stats days [number of days] — e.g. /stats days 90")
+                    return
+                fill_window = int(window[0])
         elif lower_arg == "top":
             scope = "top"
         elif lower_arg in ["ghost", "ghosts", "absent"]:
@@ -82,6 +91,8 @@ async def stats_command(message):
     try:
         if scope == "group":
             out = _fmt_group_stats(stats_svc.group_stats(cid))
+        elif scope == "days":
+            out = _fmt_fill_days(stats_svc.fill_by_weekday(cid, fill_window))
         elif scope == "top":
             out = _fmt_leaderboard(stats_svc.leaderboard(cid))
         elif scope == "ghost":
@@ -110,6 +121,35 @@ async def stats_command(message):
 
 
 # ── Formatters ────────────────────────────────────────────────────────────────
+
+def _fmt_fill_days(data: dict) -> str:
+    span = f"last {data['days']} days" if data["days"] else "all games"
+    head = f"📅 *Which days fill up* ({span})"
+    if not data["weekdays"]:
+        return head + "\n\nNo completed games yet."
+    lines = [head, ""]
+    for w in data["weekdays"]:
+        day = w["weekday"][:3]
+        n = f"{w['games']} game{'' if w['games'] == 1 else 's'}"
+        if w["limited_games"]:
+            avg = f"avg {w['avg_in']:g}/{w['avg_limit']:g}"
+            fill = f"filled {w['filled']}/{w['limited_games']} ({w['fill_pct']}%)"
+            when = stats_svc.fill_duration(w["median_fill_seconds"])
+            lines.append(f"*{day}*  {n} · {fill} · {avg}" + (f" · full {when} after start" if when else ""))
+        else:
+            lines.append(f"*{day}*  {n} · avg {w['avg_in']:g} IN · no limit set")
+    lines.append("")
+    if data["best"]:
+        tip = f"💡 {data['best']}s fill most reliably"
+        if data["worst"]:
+            tip += f" — {data['worst']}s fill least often"
+        lines.append(tip + ".")
+    elif not data["limited_games"]:
+        lines.append("💡 No game had a limit, so nothing can fill — an admin can set one with /set\\_limit.")
+    lines.append("_Filled = the IN list reached the limit, counting the waitlist and late drop-outs. "
+                 "Cancelled games don't count._")
+    return "\n".join(lines)
+
 
 def _fmt_personal_stats(data: dict, first_name: str) -> str:
     if data["total_sessions_voted"] == 0 and data["sessions_attended"] == 0:
@@ -340,13 +380,11 @@ async def summary_command(message):
 
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] in ("/export_stats", "/es"))
 async def export_stats_command(message):
-    from functions import admin_rights
-    from exceptions import insufficientPermissions
     from bot_state import reply_error
     cid = message.chat.id
     try:
-        if await admin_rights(message, manager) is False:
-            raise insufficientPermissions("Admin only: /export_stats")
+        # Open to every member: stats are transparent to the whole group
+        # (user decision 2026-11-22) — the same numbers are on /stats and the web.
         import io
         import datetime as _dt
         csv_str = stats_svc.export_stats_csv(cid)

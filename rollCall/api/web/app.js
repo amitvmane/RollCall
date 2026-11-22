@@ -1283,36 +1283,8 @@ async function loadWebStats(){
   }catch(_){}
 }
 
-// Weekday scheduling hint — needs both stats data AND admin status, which
-// resolve independently; whichever finishes second triggers the render.
-let _weekdayStats=null;
-function _renderWeekdayHint(){
-  if(!_isWebAdmin||!_weekdayStats||_weekdayStats.length<2)return;
-  const card=document.getElementById("admin-card");
-  if(!card)return;
-  let el=document.getElementById("weekday-hint");
-  if(!el){
-    el=document.createElement("div");
-    el.id="weekday-hint";
-    el.style.cssText="border-top:1px solid var(--border);padding-top:12px;margin-top:10px";
-    card.appendChild(el);
-  }
-  const best=_weekdayStats[0];
-  const rows=_weekdayStats.map(w=>
-    `<div style="display:flex;justify-content:space-between;font-size:.8rem;padding:3px 0">
-      <span>${esc(w.weekday)}</span>
-      <span style="color:var(--sub)">${w.sessions} game${w.sessions===1?"":"s"} · <strong style="color:var(--text)">${w.avg_in} avg IN</strong></span>
-    </div>`).join("");
-  el.innerHTML=`
-    <div style="font-size:.82rem;font-weight:600;color:var(--sub);margin-bottom:6px">📅 Best days (last 90 days)</div>
-    ${rows}
-    <div style="font-size:.73rem;color:var(--sub);margin-top:6px">💡 ${esc(best.weekday)}s draw the most players — worth scheduling around.</div>`;
-}
-
 function renderStats(d){
   const sc=$("stats-card");if(!sc)return;
-  _weekdayStats=d.weekday_stats||null;
-  _renderWeekdayHint();
   const pct=v=>v==null?"—":`${v}%`;
   const n=v=>v??0;
   const me=d.personal;
@@ -1480,6 +1452,32 @@ function renderStats(d){
     <div class="ghost-list">${top}</div>`;
   }
 
+  // Which weekdays fill up to the limit — every member sees it, same
+  // numbers as /stats days (services.stats.fill_by_weekday).
+  const fd=d.fill_days;
+  let fillHtml="";
+  if(fd&&(fd.weekdays||[]).length){
+    const fillDur=s=>s==null?"":s<3600?`~${Math.max(1,Math.round(s/60))}m`:s<172800?`~${Math.round(s/3600)}h`:`~${Math.round(s/86400)}d`;
+    const rows=fd.weekdays.map(w=>{
+      const games=`${w.games} game${w.games===1?"":"s"}`;
+      const detail=w.limited_games
+        ?`${games} · avg ${w.avg_in}/${w.avg_limit}${w.median_fill_seconds!=null?` · full ${fillDur(w.median_fill_seconds)} after start`:""}`
+        :`${games} · avg ${w.avg_in} IN · no limit`;
+      const fill=w.limited_games?`${w.filled}/${w.limited_games} · ${w.fill_pct}%`:"—";
+      return `<div class="ghost-row" title="${esc(detail)}">
+        <span class="rt-rank">${esc(w.weekday.slice(0,3))}</span>
+        <span class="ghost-name">${esc(detail)}</span>
+        <span class="rt-best">${esc(fill)}</span>
+      </div>`;
+    }).join("");
+    const tip=fd.best?`💡 ${esc(fd.best)}s fill most reliably${fd.worst?` — ${esc(fd.worst)}s fill least often`:""}.`
+      :(!fd.limited_games?"💡 No game had a limit, so nothing can fill.":"");
+    fillHtml=`<div class="stats-section-hdr">📅 Which days fill up <small>(all games)</small></div>
+    ${tip?`<div class="vp-summary">${tip}</div>`:""}
+    <div class="ghost-list">${rows}</div>
+    <div class="rt-note">Filled = the IN list reached the limit (waitlist and late drop-outs count). Cancelled games don't count.</div>`;
+  }
+
   sc.innerHTML=`
   <div class="stats-section-hdr">📊 Group Stats</div>
   <div class="sp-group-row">
@@ -1492,6 +1490,7 @@ function renderStats(d){
   ${lbRows?`<div class="stats-section-hdr">🏆 Leaderboard</div><div class="slb-list">${lbRows}</div>`:""}
   ${shistRows?`<div class="stats-section-hdr">🗓 Session History</div><div class="shist-list">${shistRows}</div>`:""}
   ${rtRows?`<div class="stats-section-hdr">⚡ Fastest Voters</div>${rtRecord}${rtNote}<div class="rt-list">${rtRows}</div>`:""}
+  ${fillHtml}
   ${peakHtml}
   ${ghostRows?`<div class="stats-section-hdr">👻 Ghosts</div><div class="ghost-list">${ghostRows}</div>`:""}
   ${lateRows?`<div class="stats-section-hdr" title="IN → OUT/MAYBE within ${n(d.late_drop_hours)}h of game time">⏰ Late drops <small>(within ${n(d.late_drop_hours)}h of game)</small></div><div class="ghost-list">${lateRows}</div>`:""}`;
@@ -2299,7 +2298,7 @@ function _applyAdminStatus(isAdmin){
   // for actual admins.
   const navBtn=document.getElementById("admin-nav-btn");
   if(navBtn)navBtn.classList.toggle("hidden",!_isWebAdmin);
-  if(_isWebAdmin){_syncShhToggle();_syncGroupSettingsCard();_syncTimezoneDisplay();_renderWeekdayHint();_loadWeblogInMembers();renderLists();}
+  if(_isWebAdmin){_syncShhToggle();_syncGroupSettingsCard();_syncTimezoneDisplay();_loadWeblogInMembers();renderLists();}
   if(activeRcData)renderTeams(activeRcData);
   _syncAdminRcControls();
   _syncViewTabs();

@@ -7356,6 +7356,62 @@ def get_rollcalls_between(chat_id: int, start_utc: str, end_utc: str) -> List[Di
         return []
 
 
+def get_fill_history(chat_id: int, since_utc: Optional[str] = None) -> List[Dict]:
+    """Every completed (ended, not cancelled) rollcall since since_utc (all
+    time when None), with what is needed to tell whether it filled:
+
+      in_list_limit, created_at (opened), finalize_date / ended_at
+      signups     — IN or waitlisted at close, members and guests
+      late_drops  — late drop-outs who didn't end IN/waitlisted (they held
+                    a spot once; the vote rows alone no longer show it)
+      join_times  — first-vote time of each signup, oldest first
+
+    No vote history is kept, so someone who dropped well before the game
+    and was not replaced is invisible here — "filled" can only under-count."""
+    try:
+        with _cursor() as cursor:
+            ph = "%s" if db_type == "postgresql" else "?"
+            no = "FALSE" if db_type == "postgresql" else "0"
+            done = (f"r.chat_id = {ph} AND r.is_active = {no} AND r.ended_at IS NOT NULL "
+                    f"AND COALESCE(r.is_cancelled, {no}) = {no}")
+            params: tuple = (chat_id,)
+            if since_utc:
+                done += f" AND r.ended_at >= {ph}"
+                params += (since_utc,)
+            cursor.execute(
+                f"SELECT r.id, r.finalize_date, r.created_at, r.ended_at, r.in_list_limit "
+                f"FROM rollcalls r WHERE {done} ORDER BY r.ended_at", params)
+            games = {row["id"]: dict(row, signups=0, late_drops=0, join_times=[])
+                     for row in (dict(x) for x in cursor.fetchall())}
+            if not games:
+                return []
+            cursor.execute(
+                f"SELECT u.rollcall_id, u.created_at FROM users u JOIN rollcalls r ON r.id = u.rollcall_id "
+                f"WHERE {done} AND u.status IN ('in', 'waitlist') "
+                f"UNION ALL "
+                f"SELECT p.rollcall_id, p.created_at FROM proxy_users p JOIN rollcalls r ON r.id = p.rollcall_id "
+                f"WHERE {done} AND p.status IN ('in', 'waitlist')", params + params)
+            for row in cursor.fetchall():
+                g = games.get(row[0])
+                if g is not None:
+                    g["signups"] += 1
+                    g["join_times"].append(row[1])
+            cursor.execute(
+                f"SELECT ld.rollcall_id, COUNT(*) FROM late_drops ld JOIN rollcalls r ON r.id = ld.rollcall_id "
+                f"WHERE {done} AND NOT EXISTS (SELECT 1 FROM users u WHERE u.rollcall_id = ld.rollcall_id "
+                f"AND u.user_id = ld.user_id AND u.status IN ('in', 'waitlist')) "
+                f"GROUP BY ld.rollcall_id", params)
+            for row in cursor.fetchall():
+                if row[0] in games:
+                    games[row[0]]["late_drops"] = int(row[1])
+            for g in games.values():
+                g["join_times"].sort(key=str)
+            return list(games.values())
+    except Exception:
+        logging.exception("get_fill_history failed")
+        return []
+
+
 def get_attendance_between(chat_id: int, start_utc: str, end_utc: str) -> List[Dict]:
     """Per-member IN counts for rollcalls ended in a UTC window.
 

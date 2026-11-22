@@ -111,9 +111,11 @@ class TestPlayedRule(IntegrationBase):
         row = {"id": 1, "title": "Sat", "in_count": 8,
                "finalize_date": "2026-10-10 18:00:00", "ended_at": "2026-10-13 07:00:00",
                "created_at": "2026-10-08 09:00:00"}
+        fill_row = dict(row, in_list_limit=None, signups=8, late_drops=0, join_times=[])
         with patch("db.get_rollcalls_between", return_value=[row]), \
-             patch("db.get_attendance_between", return_value=[]):
+             patch("db.get_attendance_between", return_value=[]), \
+             patch("db.get_fill_history", return_value=[fill_row]):
             s = stats_svc.period_summary(CHAT_ID, days=7)["sessions"][0]
-            wd = stats_svc.weekday_attendance(CHAT_ID)
+            wd = stats_svc.fill_by_weekday(CHAT_ID)["weekdays"]
         self.assertEqual(s["ended_at"][:10], "2026-10-10")
         self.assertEqual(wd[0]["weekday"], "Saturday")

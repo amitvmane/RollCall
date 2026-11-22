@@ -148,12 +148,13 @@ COMMANDS = [
     },
     {
         "name": "stats", "aliases": ["s"], "scope": "user", "category": "Stats & History",
-        "args": "[group | top | ghost | @user | name]",
+        "args": "[group | days [N] | top | ghost | @user | name]",
         "sample": "/stats top",
         "summary": "Attendance stats and leaderboard",
         "details": (
             "/stats              — your own attendance, voting, streak\n"
             "/stats group        — chat-wide attendance summary (incl. proxies)\n"
+            "/stats days [N]     — which weekdays fill up to the limit (all games, or last N days)\n"
             "/stats top          — top 10 by real attendance (incl. proxies)\n"
             "/stats ghost        — no-show leaderboard\n"
             "/stats @user        — another member's stats (use @username)\n"
@@ -177,14 +178,14 @@ COMMANDS = [
         ),
     },
     {
-        "name": "export_stats", "aliases": ["es"], "scope": "admin", "category": "Stats & History",
+        "name": "export_stats", "aliases": ["es"], "scope": "user", "category": "Stats & History",
         "args": "", "sample": "/export_stats",
         "summary": "Export the leaderboard as a CSV file",
         "details": (
             "Sends a CSV file with one row per member (real or proxy): sessions "
             "attended, sessions voted, attendance/voting rate, ghost count, and "
             "current/best streak. Same shape as /dues_export, for attendance data "
-            "instead of dues. Admin-only."
+            "instead of dues. Anyone in the group can export it."
         ),
     },
     {

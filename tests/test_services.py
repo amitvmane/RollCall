@@ -1978,7 +1978,7 @@ class TestStatsService(unittest.TestCase):
              patch("services.stats.resolve_user", return_value=("real", 5, "Amit")), \
              patch("services.stats.personal_stats", return_value=personal), \
              patch("services.stats.get_user_session_history", return_value=[row]), \
-             patch("services.stats.weekday_attendance", return_value=[]), \
+             patch("services.stats.fill_by_weekday", return_value=None), \
              patch("services.stats._entry_badges", return_value=[]):
             from services.stats import web_group_stats
             result = web_group_stats("tok123", lookup_user_id=5)
@@ -1998,7 +1998,7 @@ class TestStatsService(unittest.TestCase):
              patch("services.stats.history", return_value=[]), \
              patch("services.stats.resolve_user", return_value=("real", 5, "Amit")), \
              patch("services.stats.personal_stats", return_value={"user_id": 5, "ghost_count": 3}) as ps, \
-             patch("services.stats.weekday_attendance", return_value=[]), \
+             patch("services.stats.fill_by_weekday", return_value=None), \
              patch("services.stats._entry_badges", return_value=[]):
             from services.stats import web_group_stats
             result = web_group_stats("tok123", lookup_name="@amit")

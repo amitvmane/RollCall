@@ -238,10 +238,25 @@ class WebStatsLeaderEntry(BaseModel):
     badges: List[str] = Field(default_factory=list)
 
 
-class WebStatsWeekday(BaseModel):
+class WebStatsFillDay(BaseModel):
     weekday: str
-    sessions: int = 0
+    games: int = 0
+    limited_games: int = 0
+    filled: int = 0
+    fill_pct: Optional[int] = None
     avg_in: float = 0.0
+    avg_limit: Optional[float] = None
+    median_fill_seconds: Optional[int] = None
+
+
+class WebStatsFillDays(BaseModel):
+    """Which weekdays fill up to the limit (services.stats.fill_by_weekday)."""
+    days: Optional[int] = None
+    weekdays: List[WebStatsFillDay] = Field(default_factory=list)
+    best: Optional[str] = None
+    worst: Optional[str] = None
+    total_games: int = 0
+    limited_games: int = 0
 
 
 class WebStatsHistoryEntry(BaseModel):
@@ -321,7 +336,7 @@ class WebGroupStatsResponse(BaseModel):
     response_time_min_votes: int = 0
     vote_peak: Optional[WebStatsVotePeak] = None
     personal: Optional[WebStatsPersonal] = None
-    weekday_stats: List[WebStatsWeekday] = Field(default_factory=list)
+    fill_days: Optional[WebStatsFillDays] = None
 
 
 # ── Web push schemas ──────────────────────────────────────────────────────────

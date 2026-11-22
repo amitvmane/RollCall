@@ -158,10 +158,17 @@ class TestExportStats(IntegrationBase):
         _, kwargs = get_mock_bot().send_document.call_args
         self.assertIn("stats_export_", kwargs.get("visible_file_name", ""))
 
-    async def test_export_stats_non_admin_rejected(self):
+    async def test_export_stats_open_to_every_member(self):
+        """Stats are transparent to the whole group (2026-11-22) — a member
+        who isn't an admin gets the same CSV."""
+        await self.start_rc("Game 1")
+        await self.vote_in(USERS[0])
+        await self.end_roll_call(self.msg("/erc", ADMIN_USER))
+        self.mgr.set_admin_rights(CHAT_ID, True)
+        get_mock_bot().get_chat_member.return_value.status = "member"
         get_mock_bot().send_document.reset_mock()
-        await self.export_stats_command(self.msg("/export_stats", USERS[0]))
-        get_mock_bot().send_document.assert_not_called()
+        await self.export_stats_command(self.msg("/export_stats", USERS[1]))
+        get_mock_bot().send_document.assert_called_once()
 
     async def test_export_stats_matches_direct_service_call(self):
         await self.start_rc("Game 1")

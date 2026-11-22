@@ -8,14 +8,15 @@ button or web card, and every action here refuses.
 Rules (agreed 2026-11-20):
   - A first split is random and as even as possible (7 vs 6 is fine).
     Reshuffle draws a new random split.
-  - Anyone in the group may move a player between teams until the teams are
-    locked. An admin picks how many teams and locks/unlocks; teams also lock
-    on their own once the game time passes (an admin unlock overrides that).
+  - Anyone in the group may make teams (any number), reshuffle and move
+    players until the teams are locked. Lock/unlock and publish are an
+    admin's (user decision 2026-11-22); teams also lock on their own once
+    the game time passes (an admin unlock overrides that).
   - Only IN players (members and guests) are on the sheet. Someone who drops
     is taken off with no reshuffle; whoever is newly IN — a waitlist
     promotion or a late vote — joins the smallest team, which is the gap the
     drop left.
-  - Moves are silent. Publish (anyone) posts the teams to the group.
+  - Moves are silent. Publish (admin) posts the teams to the group.
 
 The sheet lives in rollcall_teams; teams_count / teams_locked /
 teams_published_at on the rollcall row. Reading never writes: view() works
@@ -212,13 +213,10 @@ def _split(rc, count: int, actor: str, rng) -> None:
     db.update_rollcall(rc_db_id(rc), teams_count=count)
 
 
-def form(rc, count, actor: str, is_admin: bool, rng=random) -> dict:
-    """Make teams (or re-make them with a different number of teams).
-    Choosing anything but the default number is an admin's call."""
+def form(rc, count, actor: str, rng=random) -> dict:
+    """Make teams (or re-make them with a different number of teams)."""
     count = _validate_count(count)
-    meta = _require_open(rc)
-    if count != (meta["count"] or DEFAULT_TEAMS) and not is_admin:
-        raise insufficientPermissions("Only an admin can change the number of teams.")
+    _require_open(rc)
     _split(rc, count, actor, rng)
     return view(rc)
 
@@ -256,6 +254,31 @@ def move(rc, key: str, team_no, actor: str) -> dict:
     return result
 
 
+def swap(rc, key_a: str, key_b: str, actor: str) -> dict:
+    """Trade two players between their teams — the sizes stay as they are."""
+    meta = _require_open(rc)
+    if meta["count"] < MIN_TEAMS:
+        raise incorrectParameter("No teams yet — make teams first.")
+    rows = {r["who_key"]: r for r in _sync(rc, meta["count"])}
+    a, b = rows.get(key_a), rows.get(key_b)
+    if a is None or b is None:
+        raise incorrectParameter("That player isn't IN any more.")
+    if int(a["team_no"]) == int(b["team_no"]):
+        raise incorrectParameter("Those two are on the same team.")
+    rid = rc_db_id(rc)
+    db.set_team_player(rid, key_a, a["name"], int(b["team_no"]), actor)
+    db.set_team_player(rid, key_b, b["name"], int(a["team_no"]), actor)
+    result = view(rc)
+    result["swapped"] = (a["name"], b["name"])
+    return result
+
+
+def check_editable(rc) -> None:
+    """Raise unless teams can still be changed (on, formed and not locked)."""
+    if _require_open(rc)["count"] < MIN_TEAMS:
+        raise incorrectParameter("No teams yet — make teams first.")
+
+
 def set_locked(rc, locked: bool, is_admin: bool) -> dict:
     _require_enabled(rc)
     if not is_admin:
@@ -269,9 +292,11 @@ def set_locked(rc, locked: bool, is_admin: bool) -> dict:
     return view(rc)
 
 
-def publish(rc) -> tuple[dict, str]:
-    """Record a publish; returns (view, text to post). Anyone may publish."""
+def publish(rc, is_admin: bool) -> tuple[dict, str]:
+    """Record a publish; returns (view, text to post to the group)."""
     _require_enabled(rc)
+    if not is_admin:
+        raise insufficientPermissions("Only an admin can publish teams.")
     meta = _meta(rc)
     if meta["count"] < MIN_TEAMS:
         raise incorrectParameter("No teams yet — make teams first.")

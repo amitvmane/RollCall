@@ -1474,6 +1474,29 @@ async def phase_teams():
     v = _teams.view(rc)
     record("...split evenly", sorted(len(t["players"]) for t in v["teams"]) == [2, 2], str(v["teams"])[:200])
 
+    # Swap picker: the sheet never lists players; the picker shows one team,
+    # three names to a row, and a swap keeps the sizes.
+    out = await feed_cb(f"tm:form:{rc.id}:2", BOB)
+    sheet = button_labels(out)
+    record("the team sheet has a 🔁 Swap players button and no per-player buttons",
+           f"tm:sw:{rc.id}:1" in sheet and len(sheet) <= 6, str(sheet)[:200])
+    out = await feed_cb(f"tm:sw:{rc.id}:1", CAROL)
+    rows = [r for _, _, kw in out for r in (getattr(kw.get("reply_markup"), "keyboard", None) or [])]
+    names = [r for r in rows if all(b.callback_data.startswith("tm:sp:") for b in r)]
+    ok, d = contains(out, "Who swaps?")
+    record("🔁 Swap players shows one team's names, at most 3 to a row",
+           ok and names and all(len(r) <= 3 for r in names), d or str([len(r) for r in rows]))
+    v = _teams.view(rc)
+    a, b = v["teams"][0]["players"][0], v["teams"][1]["players"][0]
+    await feed_cb(f"tm:sp:{rc.id}:{_teams.button_token(a['key'])}", CAROL)
+    out = await feed_cb(f"tm:sx:{rc.id}:{_teams.button_token(a['key'])}:{_teams.button_token(b['key'])}", CAROL)
+    after = _teams.view(rc)
+    record("...picking two players swaps them and keeps the teams even",
+           sorted(len(t["players"]) for t in after["teams"]) == [2, 2]
+           and any(p["key"] == a["key"] for p in after["teams"][1]["players"])
+           and not has_call(out, "send_message") and not _errors, error_msgs()[:2] or str(after["teams"])[:200])
+    v = after
+
     key = f"u{CAROL[0]}"
     start = next(t["no"] for t in v["teams"] for p in t["players"] if p["key"] == key)
     out = await feed_cb(f"tm:mv:{rc.id}:{_teams.button_token(key)}", DAVE)

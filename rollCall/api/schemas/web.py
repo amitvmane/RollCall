@@ -684,9 +684,10 @@ class WebWeatherResponse(BaseModel):
 
 
 class WebTeamsActionRequest(BaseModel):
-    action: Literal["form", "reshuffle", "move", "lock", "unlock", "publish"]
+    action: Literal["form", "reshuffle", "move", "swap", "lock", "unlock", "publish"]
     count: Optional[int] = Field(None, ge=2, le=4, description="form: number of teams")
-    who_key: Optional[str] = Field(None, max_length=200, description="move: the player")
+    who_key: Optional[str] = Field(None, max_length=200, description="move/swap: the player")
+    with_key: Optional[str] = Field(None, max_length=200, description="swap: the player on another team")
     team_no: Optional[int] = Field(None, ge=1, le=4, description="move: destination team")
 
 

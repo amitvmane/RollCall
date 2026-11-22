@@ -148,16 +148,22 @@ class TestTeamsKeyboardSize(IntegrationBase):
         return {"formed": True, "count": 2, "locked": False, "locked_by": None,
                 "published_at": None, "players_in": players, "teams": teams}
 
-    def test_move_buttons_until_the_keyboard_would_be_refused(self):
-        from handlers.teams import _sheet_text, teams_keyboard
-        small = teams_keyboard(1, self._view(20)).keyboard
-        self.assertEqual(sum(1 for b in small if b.callback_data.startswith("tm:mv:")), 20)
-
-        v = self._view(120)
-        big = teams_keyboard(1, v).keyboard
-        self.assertLessEqual(len(big), 100)
-        self.assertFalse(any(b.callback_data.startswith("tm:mv:") for b in big))
+    def test_swap_picker_until_the_keyboard_would_be_refused(self):
+        from handlers.teams import _sheet_text, pick_screen, teams_keyboard
 
         class _Rc:
+            id = 1
             title = "Game"
-        self.assertIn("web page", _sheet_text(_Rc(), v))
+
+        def buttons(markup):
+            return list(markup.keyboard)   # the mock keyboard is flat
+
+        small = self._view(20)
+        sheet = buttons(teams_keyboard(1, small))
+        self.assertLessEqual(len(sheet), 6, "the sheet never lists players")
+        self.assertTrue(any(b.callback_data == "tm:sw:1:1" for b in sheet))
+        self.assertLessEqual(len(buttons(pick_screen(_Rc(), small, 1)[1])), 100)
+
+        big = self._view(200)   # 100 a team: one team's picker would be refused
+        self.assertFalse(any(b.callback_data.startswith("tm:sw:") for b in buttons(teams_keyboard(1, big))))
+        self.assertIn("web page", _sheet_text(_Rc(), big))

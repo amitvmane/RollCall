@@ -1782,7 +1782,7 @@ async def web_rollcall_weather(
 @router.post(
     "/web/group/{group_token}/rollcalls/{rollcall_id}/teams",
     response_model=WebTeamsResponse,
-    summary="Make, reshuffle, move, lock or publish teams (signed-in members; count/lock need admin)",
+    summary="Make, reshuffle, move, swap, lock or publish teams (signed-in members; lock/publish need admin)",
 )
 async def web_rollcall_teams(
     body: WebTeamsActionRequest,
@@ -1791,8 +1791,8 @@ async def web_rollcall_teams(
     id_token: Optional[str] = Depends(identity_from_header),
 ) -> WebTeamsResponse:
     # Same rules as the Telegram sheet (services.teams): any member may
-    # move players until the teams lock; the number of teams and locking
-    # are an admin's call. Signed-in only, so every move has a name on it.
+    # make, reshuffle and move until the teams lock; lock/unlock and
+    # publish are an admin's call. Signed-in only, so every move has a name on it.
     chat_id, uid = _member_of(group_token, id_token or "")
     from rollcall_manager import manager as _mgr
     from services import teams as teams_svc
@@ -1801,7 +1801,7 @@ async def web_rollcall_teams(
     if find_rollcall_index(chat_id, rollcall_id, _mgr) is None:
         raise HTTPException(status_code=404, detail="That rollcall isn't open in this group.")
     is_admin = (await check_web_admin_live(chat_id, uid)
-                if body.action in ("form", "lock", "unlock") else False)
+                if body.action in ("lock", "unlock", "publish") else False)
     actor = await _actor_display_name(chat_id, uid)
     if actor == "(web admin)":
         actor = "a member"
@@ -1813,7 +1813,7 @@ async def web_rollcall_teams(
                 raise HTTPException(status_code=404, detail="That rollcall isn't open in this group.")
             rc = _mgr.get_rollcall(chat_id, idx)
             if body.action == "form":
-                v = teams_svc.form(rc, body.count or teams_svc.DEFAULT_TEAMS, actor, is_admin)
+                v = teams_svc.form(rc, body.count or teams_svc.DEFAULT_TEAMS, actor)
                 message = f"{v['count']} teams made."
             elif body.action == "reshuffle":
                 v = teams_svc.reshuffle(rc, actor)
@@ -1823,11 +1823,16 @@ async def web_rollcall_teams(
                     raise incorrectParameter("Pick a player and a team.")
                 v = teams_svc.move(rc, body.who_key, body.team_no, actor)
                 message = f"{v['moved']['name']} → Team {v['moved']['team']}."
+            elif body.action == "swap":
+                if not body.who_key or not body.with_key:
+                    raise incorrectParameter("Pick two players.")
+                v = teams_svc.swap(rc, body.who_key, body.with_key, actor)
+                message = "{} ⇄ {}.".format(*v.pop("swapped"))
             elif body.action in ("lock", "unlock"):
                 v = teams_svc.set_locked(rc, body.action == "lock", is_admin)
                 message = "Teams locked." if body.action == "lock" else "Teams unlocked."
             else:
-                v, post = teams_svc.publish(rc)
+                v, post = teams_svc.publish(rc, is_admin)
                 message = "Posted to the group."
     except insufficientPermissions as e:
         raise HTTPException(status_code=403, detail=str(e))

@@ -63,7 +63,7 @@ class TestTeamRules(_Base):
 
     async def test_split_is_even_and_includes_guests(self):
         rc = await self._game_with(6, guest="Ann")
-        v = _svc().form(rc, 2, "Admin", is_admin=True, rng=random.Random(1))
+        v = _svc().form(rc, 2, "Admin", rng=random.Random(1))
         self.assertTrue(v["formed"])
         self.assertEqual(sorted(_sizes(v)), [3, 4])
         expected = sorted([f"u{u['id']}" for u in USERS[:6]] + ["pann"])
@@ -71,7 +71,7 @@ class TestTeamRules(_Base):
 
     async def test_three_teams_and_reshuffle_keep_everyone(self):
         rc = await self._game_with(7)
-        v = _svc().form(rc, 3, "Admin", is_admin=True, rng=random.Random(2))
+        v = _svc().form(rc, 3, "Admin", rng=random.Random(2))
         self.assertEqual(sorted(_sizes(v)), [2, 2, 3])
         before = _keys(v)
         v = _svc().reshuffle(rc, "User1", rng=random.Random(3))
@@ -81,11 +81,11 @@ class TestTeamRules(_Base):
     async def test_needs_two_players(self):
         rc = await self._game_with(1)
         with self.assertRaises(Exception):
-            _svc().form(rc, 2, "Admin", is_admin=True)
+            _svc().form(rc, 2, "Admin")
 
     async def test_drop_leaves_gap_and_new_player_fills_smallest_team(self):
         rc = await self._game_with(4)
-        v = _svc().form(rc, 2, "Admin", is_admin=True, rng=random.Random(4))
+        v = _svc().form(rc, 2, "Admin", rng=random.Random(4))
         dropped = f"u{USERS[0]['id']}"
         gap_team = _team_of(v, dropped)
 
@@ -105,7 +105,7 @@ class TestTeamRules(_Base):
         rc.save()
         await self.vote_in(USERS[4])  # waitlisted
         rc = self._rc()
-        v = _svc().form(rc, 2, "Admin", is_admin=True, rng=random.Random(5))
+        v = _svc().form(rc, 2, "Admin", rng=random.Random(5))
         self.assertNotIn(f"u{USERS[4]['id']}", _keys(v), "waitlist is not on the sheet")
         gap_team = _team_of(v, f"u{USERS[1]['id']}")
         await self.vote_out(USERS[1])
@@ -114,7 +114,7 @@ class TestTeamRules(_Base):
 
     async def test_view_does_not_write(self):
         rc = await self._game_with(4)
-        _svc().form(rc, 2, "Admin", is_admin=True)
+        _svc().form(rc, 2, "Admin")
         await self.vote_in(USERS[5])
         _svc().view(self._rc())
         self.assertNotIn(f"u{USERS[5]['id']}", [r["who_key"] for r in db.get_team_rows(rc.id)])
@@ -124,7 +124,7 @@ class TestTeamRules(_Base):
 
     async def test_move_cycles_and_targets(self):
         rc = await self._game_with(4)
-        v = _svc().form(rc, 2, "Admin", is_admin=True)
+        v = _svc().form(rc, 2, "Admin")
         key = f"u{USERS[2]['id']}"
         start = _team_of(v, key)
         v = _svc().move(rc, key, None, "User1")
@@ -136,18 +136,15 @@ class TestTeamRules(_Base):
         with self.assertRaises(Exception):
             _svc().move(rc, key, 3, "User1")
 
-    async def test_only_admin_changes_the_number_of_teams(self):
-        from exceptions import insufficientPermissions
+    async def test_any_member_picks_the_number_of_teams(self):
         rc = await self._game_with(6)
-        with self.assertRaises(insufficientPermissions):
-            _svc().form(rc, 3, "User1", is_admin=False)
-        v = _svc().form(rc, 2, "User1", is_admin=False)
-        self.assertEqual(v["count"], 2)
+        self.assertEqual(_svc().form(rc, 3, "User1")["count"], 3)
+        self.assertEqual(_svc().form(rc, 2, "User1")["count"], 2)
 
     async def test_lock_blocks_changes_and_unlock_reopens(self):
         from exceptions import incorrectParameter, insufficientPermissions
         rc = await self._game_with(4)
-        _svc().form(rc, 2, "Admin", is_admin=True)
+        _svc().form(rc, 2, "Admin")
         with self.assertRaises(insufficientPermissions):
             _svc().set_locked(rc, True, is_admin=False)
         v = _svc().set_locked(rc, True, is_admin=True)
@@ -156,13 +153,13 @@ class TestTeamRules(_Base):
             _svc().move(rc, f"u{USERS[0]['id']}", None, "User1")
         with self.assertRaises(incorrectParameter):
             _svc().reshuffle(rc, "User1")
-        _svc().publish(rc)  # publishing is still allowed
+        _svc().publish(rc, is_admin=True)  # publishing is still allowed
         v = _svc().set_locked(rc, False, is_admin=True)
         self.assertFalse(v["locked"])
 
     async def test_game_time_locks_until_admin_unlocks(self):
         rc = await self._game_with(4)
-        _svc().form(rc, 2, "Admin", is_admin=True)
+        _svc().form(rc, 2, "Admin")
         tz = pytz.timezone(rc.timezone or "Asia/Kolkata")
         rc.finalizeDate = datetime.now(tz).replace(tzinfo=None) - timedelta(minutes=5)
         rc.save()
@@ -173,8 +170,8 @@ class TestTeamRules(_Base):
 
     async def test_publish_text_lists_every_team(self):
         rc = await self._game_with(4, guest="Ann")
-        _svc().form(rc, 2, "Admin", is_admin=True)
-        v, text = _svc().publish(rc)
+        _svc().form(rc, 2, "Admin")
+        v, text = _svc().publish(rc, is_admin=True)
         self.assertIn("Team A", text)
         self.assertIn("Team B", text)
         self.assertIn("Ann", text)
@@ -220,15 +217,97 @@ class TestTelegramSheet(_Base):
         self.assertIn("Team B", sent.args[1])
         self.assertIn("Published by User3", sent.args[1])
 
-    async def test_non_admin_cannot_lock_or_change_count(self):
+    def _buttons(self):
+        m = get_mock_bot().edit_message_text.call_args.kwargs["reply_markup"]
+        return {b.text: b.callback_data for b in m.keyboard}
+
+    async def test_swap_picker_trades_two_players_and_keeps_sizes(self):
+        rc = await self._game_with(8, guest="Ann")
+        await self._tap(f"tm:form:{rc.id}:2", USERS[0])
+        sheet = self._buttons()
+        self.assertEqual(sheet["🔁 Swap players"], f"tm:sw:{rc.id}:1")
+        self.assertFalse(any(d.startswith("tm:mv:") for d in sheet.values()), "no per-player buttons")
+
+        v = _svc().view(self._rc())
+        a, b = v["teams"][0]["players"][0], v["teams"][1]["players"][0]
+        await self._tap(sheet["🔁 Swap players"], USERS[1])
+        self.assertIn("Who swaps? Pick a player from 🔴 Team A", self._edited_text())
+        pick = self._buttons()
+        self.assertEqual(len([d for d in pick.values() if d.startswith("tm:sp:")]), len(v["teams"][0]["players"]))
+        self.assertIn("🔵 Team B ▸", pick)
+        self.assertIn("✖ Cancel", pick)
+
+        await self._tap(pick[a["name"][:14]], USERS[1])
+        self.assertIn(f"Swap {a['name']}", self._edited_text())
+        partner = self._buttons()
+        self.assertTrue(all(len(d.encode()) <= 64 for d in partner.values()))
+        await self._tap(partner[b["name"][:14]], USERS[1])
+        after = _svc().view(self._rc())
+        self.assertEqual(_sizes(after), _sizes(v), "a swap keeps the teams even")
+        self.assertEqual((_team_of(after, a["key"]), _team_of(after, b["key"])), (2, 1))
+        self.assertIn(f"{a['name']} ⇄ {b['name']}", get_mock_bot().answer_callback_query.call_args.args[1])
+        self.assertIn("🔁 Swap players", self._buttons(), "back on the sheet after a swap")
+        self.assertFalse(get_mock_bot().send_message.called, "swaps are silent")
+
+    async def test_just_move_cancel_and_guest_swap(self):
+        rc = await self._game_with(3, guest="Ann")
+        await self._tap(f"tm:form:{rc.id}:2", USERS[0])
+        v = _svc().view(self._rc())
+        tok = _svc().button_token("pann")
+        start = _team_of(v, "pann")
+        await self._tap(f"tm:sp:{rc.id}:{tok}", USERS[0])
+        move = next(d for t, d in self._buttons().items() if t.startswith("➡ Just move Ann"))
+        await self._tap(move, USERS[0])
+        self.assertEqual(_team_of(_svc().view(self._rc()), "pann"), start % 2 + 1)
+
+        other = next(p["key"] for t in _svc().view(self._rc())["teams"] if t["no"] == start for p in t["players"])
+        await self._tap(f"tm:sx:{rc.id}:{tok}:{_svc().button_token(other)}", USERS[0])
+        self.assertEqual(_team_of(_svc().view(self._rc()), "pann"), start, "a guest swaps like anyone")
+
+        await self._tap(f"tm:sw:{rc.id}:1", USERS[0])
+        await self._tap(f"tm:view:{rc.id}", USERS[0])
+        self.assertIn("🔁 Swap players", self._buttons(), "Cancel returns to the sheet")
+
+    async def test_three_teams_partner_tabs(self):
+        rc = await self._game_with(6)
+        await self._tap(f"tm:form:{rc.id}:3", USERS[0])
+        key = _svc().view(self._rc())["teams"][0]["players"][0]["key"]
+        await self._tap(f"tm:sp:{rc.id}:{_svc().button_token(key)}", USERS[0])
+        self.assertIn("a player from 🔵 Team B", self._edited_text())
+        tabs = self._buttons()
+        self.assertIn("🟢 Team C ▸", tabs)
+        await self._tap(tabs["🟢 Team C ▸"], USERS[0])
+        self.assertIn("a player from 🟢 Team C", self._edited_text())
+
+    async def test_swap_refused_when_locked_stale_or_same_team(self):
+        rc = await self._game_with(4)
+        await self._tap(f"tm:form:{rc.id}:2", USERS[0])
+        v = _svc().view(self._rc())
+        a, a2 = (p["key"] for p in v["teams"][0]["players"][:2])
+        await self._tap(f"tm:sx:{rc.id}:{_svc().button_token(a)}:{_svc().button_token(a2)}", USERS[0])
+        self.assertIn("same team", get_mock_bot().answer_callback_query.call_args.args[1])
+        await self._tap(f"tm:sp:{rc.id}:u999999", USERS[0])
+        self.assertIn("isn't IN", get_mock_bot().answer_callback_query.call_args.args[1])
+        _svc().set_locked(self._rc(), True, is_admin=True)
+        await self._tap(f"tm:sw:{rc.id}:1", USERS[0])
+        self.assertIn("locked", get_mock_bot().answer_callback_query.call_args.args[1])
+        self.assertFalse(get_mock_bot().edit_message_text.called)
+
+    async def test_non_admin_cannot_lock_or_publish_but_picks_the_count(self):
         rc = await self._game_with(4)
         await self._tap(f"tm:form:{rc.id}:2", USERS[0])
         self._non_admin_group()
         await self._tap(f"tm:lock:{rc.id}", USERS[0])
         alert = get_mock_bot().answer_callback_query.call_args
         self.assertIn("Only an admin", alert.args[1])
+        self.assertFalse(_svc().view(self._rc())["locked"])
+        get_mock_bot().reset_mock()
+        await self._tap(f"tm:pub:{rc.id}", USERS[0])
+        self.assertIn("Only an admin can publish", get_mock_bot().answer_callback_query.call_args.args[1])
+        self.assertFalse(get_mock_bot().send_message.called, "nothing posted to the group")
+        self.assertIsNone(_svc().view(self._rc())["published_at"])
         await self._tap(f"tm:form:{rc.id}:3", USERS[0])
-        self.assertEqual(_svc().view(self._rc())["count"], 2)
+        self.assertEqual(_svc().view(self._rc())["count"], 3)
 
     async def test_teams_command_posts_the_sheet(self):
         from handlers.teams import teams_cmd
@@ -294,6 +373,28 @@ class TestWebTeams(_Base):
         self.assertEqual(r.status_code, 200, r.text)
         self.assertIn("Team A", get_mock_bot().send_message.call_args.args[1])
 
+    async def test_web_swap(self):
+        rc = await self._game_with(4)
+        v = self._post(rc.id, {"action": "form", "count": 2}, USERS[0]["id"]).json()
+        a, b = v["teams"][0]["players"][0], v["teams"][1]["players"][0]
+        r = self._post(rc.id, {"action": "swap", "who_key": a["key"], "with_key": b["key"]}, USERS[1]["id"])
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual((_team_of(r.json(), a["key"]), _team_of(r.json(), b["key"])), (2, 1))
+        self.assertEqual(r.json()["message"], f"{a['name']} ⇄ {b['name']}.")
+        r = self._post(rc.id, {"action": "swap", "who_key": a["key"]}, USERS[1]["id"])
+        self.assertEqual(r.status_code, 409)
+
+    async def test_publish_needs_web_admin_count_does_not(self):
+        rc = await self._game_with(6)
+        self._non_admin_group()
+        r = self._post(rc.id, {"action": "form", "count": 3}, USERS[0]["id"])
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["count"], 3)
+        get_mock_bot().reset_mock()
+        r = self._post(rc.id, {"action": "publish"}, USERS[0]["id"])
+        self.assertEqual(r.status_code, 403, r.text)
+        self.assertFalse(get_mock_bot().send_message.called)
+
     async def test_lock_needs_web_admin(self):
         rc = await self._game_with(4)
         self._post(rc.id, {"action": "form", "count": 2}, USERS[0]["id"])
@@ -354,7 +455,7 @@ class TestOptIn(_Base):
         self.assertIn("Teams are off", get_mock_bot().answer_callback_query.call_args.args[1])
         self.assertEqual(db.get_team_rows(rc.id), [])
         with self.assertRaises(Exception):
-            _svc().form(rc, 2, "Admin", is_admin=True)
+            _svc().form(rc, 2, "Admin")
 
     async def test_admin_turns_on_and_off(self):
         from handlers.teams import teams_cmd
@@ -381,7 +482,7 @@ class TestStillVoting(_Base):
 
     async def test_late_voters_are_spread_over_the_smallest_teams(self):
         rc = await self._game_with(2)
-        v = _svc().form(rc, 2, "Admin", is_admin=True)
+        v = _svc().form(rc, 2, "Admin")
         self.assertEqual(_sizes(v), [1, 1])
         for u in USERS[2:7]:
             await self.vote_in(u)
@@ -391,7 +492,7 @@ class TestStillVoting(_Base):
 
     async def test_maybe_and_out_never_join(self):
         rc = await self._game_with(2)
-        _svc().form(rc, 2, "Admin", is_admin=True)
+        _svc().form(rc, 2, "Admin")
         await self.vote_maybe(USERS[3])
         await self.vote_out(USERS[4])
         v = _svc().view(self._rc())
@@ -419,8 +520,8 @@ class TestParallelRollcalls(_Base):
 
     async def test_each_rollcall_has_its_own_sheet(self):
         a, b = await self._two_games()
-        va = _svc().form(a, 2, "Admin", is_admin=True)
-        vb = _svc().form(b, 3, "Admin", is_admin=True)
+        va = _svc().form(a, 2, "Admin")
+        vb = _svc().form(b, 3, "Admin")
         self.assertEqual(_keys(va), sorted(f"u{u['id']}" for u in USERS[:4]))
         self.assertEqual(_keys(vb), sorted(f"u{u['id']}" for u in USERS[4:8]))
         self.assertEqual((va["count"], vb["count"]), (2, 3))
@@ -439,8 +540,8 @@ class TestParallelRollcalls(_Base):
         a, b = await self._two_games()
         await self.vote_in(USERS[0], rc_suffix="::2")
         b = self.mgr.get_rollcalls(CHAT_ID)[1]
-        _svc().form(a, 2, "Admin", is_admin=True)
-        _svc().form(b, 2, "Admin", is_admin=True)
+        _svc().form(a, 2, "Admin")
+        _svc().form(b, 2, "Admin")
         key = f"u{USERS[0]['id']}"
         _svc().move(b, key, 1, "User1")
         _svc().move(a, key, 2, "User1")
@@ -462,7 +563,7 @@ class TestParallelRollcalls(_Base):
         self.assertEqual(len(db.get_team_rows(b.id)), 4)
 
         # A guest/member token from game B can't move anyone in game A.
-        _svc().form(a, 2, "Admin", is_admin=True)
+        _svc().form(a, 2, "Admin")
         before_a = db.get_team_rows(a.id)
         await teams_callback(self.call(f"tm:mv:{a.id}:u{USERS[5]['id']}", USERS[0]))
         self.assertEqual(db.get_team_rows(a.id), before_a)
@@ -485,7 +586,7 @@ class TestParallelRollcalls(_Base):
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(db.get_team_rows(a.id), [])
         # Moving a game-B player through game A's URL is refused.
-        _svc().form(a, 2, "Admin", is_admin=True)
+        _svc().form(a, 2, "Admin")
         r = client.post(f"/api/v1/web/group/{token}/rollcalls/{a.id}/teams",
                         json={"action": "move", "who_key": f"u{USERS[5]['id']}", "team_no": 1}, headers=hdr)
         self.assertEqual(r.status_code, 409)
@@ -503,7 +604,7 @@ class TestLockedReplacement(_Base):
         rc.save()
         await self.vote_in(USERS[4])  # waitlisted
         rc = self._rc()
-        v = _svc().form(rc, 2, "Admin", is_admin=True, rng=random.Random(7))
+        v = _svc().form(rc, 2, "Admin", rng=random.Random(7))
         gap_team = _team_of(v, f"u{USERS[2]['id']}")
         _svc().set_locked(rc, True, is_admin=True)
 
@@ -523,7 +624,7 @@ class TestEndSummary(_Base):
 
     async def test_teams_replace_the_in_list(self):
         rc = await self._game_with(4, guest="Ann")
-        _svc().form(rc, 2, "Admin", is_admin=True)
+        _svc().form(rc, 2, "Admin")
         await self.vote_out(USERS[5])
         get_mock_bot().reset_mock()
         await self.end_roll_call(self.msg("/erc", ADMIN_USER))
@@ -545,7 +646,7 @@ class TestEndSummary(_Base):
 
     async def test_teams_turned_off_keeps_the_usual_summary(self):
         rc = await self._game_with(3)
-        _svc().form(rc, 2, "Admin", is_admin=True)
+        _svc().form(rc, 2, "Admin")
         db.update_chat_settings(CHAT_ID, teams_enabled=0)
         get_mock_bot().reset_mock()
         await self.end_roll_call(self.msg("/erc", ADMIN_USER))
@@ -560,7 +661,7 @@ class TestVacancies(_Base):
         # A deliberately uneven sheet (5 v 2) made by hand, so "smallest
         # team" and "the team that lost a player" are different answers.
         rc = await self._game_with(7)
-        _svc().form(rc, 2, "Admin", is_admin=True, rng=random.Random(1))
+        _svc().form(rc, 2, "Admin", rng=random.Random(1))
         for u in USERS[:7]:
             _svc().move(self._rc(), f"u{u['id']}", 1, "Admin")
         for u in USERS[5:7]:

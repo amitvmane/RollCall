@@ -6,9 +6,15 @@ team sheet, the way 📋 Lists does, and 🔙 Back returns to the panel.
 
 Callback data: tm:<op>:<rollcall db id>[:<arg>]
   form:<n>  make n teams          shuf      reshuffle
-  mv:<tok>  move a player on      lock / unlock (admin)
-  pub       post teams to group   back      return to the panel
+  sw:<team>          swap picker: pick a player from <team>
+  sp:<tok>[:<team>]  ...then who to swap them with (from <team>)
+  sx:<tok>:<tok>     swap those two      mt:<tok>:<team>  just move one
+  mv:<tok>  move a player on (sheets posted before the picker existed)
+  lock / unlock / pub (admin)     back      return to the panel
   view      redraw
+
+The sheet itself carries at most six buttons; the picker shows one team's
+names at a time, three to a row, so an 8v8 stays readable.
 
 All rules live in services.teams (shared with the web page). Changes are
 made under the chat write lock; anything sent to Telegram happens after it.
@@ -26,14 +32,28 @@ from services import teams as teams_svc
 from services.common import find_rollcall_index
 from utils.text import parse_rc_suffix
 
-_MAX_LABEL = 28
-# Telegram refuses a keyboard of more than 100 buttons — the whole sheet
-# would fail to post. Past this many players, moves are made on the web.
+_NAME_LABEL = 14
+_PER_ROW = 3
+# Telegram refuses a keyboard of more than 100 buttons — the picker would
+# fail to draw. Past this many players on one team, swaps are made on the web.
 _MAX_MOVE_BUTTONS = 80
 
 
 def _move_buttons_fit(v: dict) -> bool:
-    return sum(len(t["players"]) for t in v["teams"]) <= _MAX_MOVE_BUTTONS
+    return max((len(t["players"]) for t in v["teams"]), default=0) <= _MAX_MOVE_BUTTONS
+
+
+def _rows(markup: InlineKeyboardMarkup, buttons: list) -> None:
+    for i in range(0, len(buttons), _PER_ROW):
+        markup.row(*buttons[i:i + _PER_ROW])
+
+
+def _team(v: dict, no) -> dict:
+    return next((t for t in v["teams"] if str(t["no"]) == str(no)), v["teams"][0])
+
+
+def _team_of(v: dict, key: str) -> dict:
+    return next(t for t in v["teams"] if any(p["key"] == key for p in t["players"]))
 
 
 def _cb(op: str, rc_id: int, arg: str = "") -> str:
@@ -46,26 +66,23 @@ def teams_keyboard(rc_id: int, v: dict) -> InlineKeyboardMarkup:
         markup.add(*[InlineKeyboardButton(f"⚽ {n} teams", callback_data=_cb("form", rc_id, str(n)))
                      for n in range(teams_svc.MIN_TEAMS, teams_svc.MAX_TEAMS + 1)])
     elif not v["locked"]:
-        buttons = []
-        for team in (v["teams"] if _move_buttons_fit(v) else []):
-            nxt = teams_svc.LABELS[team["no"] % v["count"]]
-            for p in team["players"]:
-                label = f"{team['emoji']} {p['name']}"[:_MAX_LABEL] + f" → {nxt}"
-                buttons.append(InlineKeyboardButton(
-                    label, callback_data=_cb("mv", rc_id, teams_svc.button_token(p["key"]))))
-        if buttons:
-            markup.add(*buttons)
-        markup.add(
-            InlineKeyboardButton("🔀 Reshuffle", callback_data=_cb("shuf", rc_id)),
+        shuffle = InlineKeyboardButton("🔀 Reshuffle", callback_data=_cb("shuf", rc_id))
+        if _move_buttons_fit(v):
+            markup.row(shuffle, InlineKeyboardButton("🔁 Swap players", callback_data=_cb("sw", rc_id, "1")))
+        else:
+            markup.row(shuffle)
+        markup.row(
+            InlineKeyboardButton("🔒 Lock", callback_data=_cb("lock", rc_id)),
             InlineKeyboardButton("📣 Publish", callback_data=_cb("pub", rc_id)),
         )
         nxt_count = v["count"] % teams_svc.MAX_TEAMS + 1
         if nxt_count < teams_svc.MIN_TEAMS:
             nxt_count = teams_svc.MIN_TEAMS
-        markup.add(
-            InlineKeyboardButton(f"🔢 Make {nxt_count} teams", callback_data=_cb("form", rc_id, str(nxt_count))),
-            InlineKeyboardButton("🔒 Lock", callback_data=_cb("lock", rc_id)),
+        markup.row(
+            InlineKeyboardButton(f"🔢 {nxt_count} teams", callback_data=_cb("form", rc_id, str(nxt_count))),
+            InlineKeyboardButton("🔙 Back", callback_data=_cb("back", rc_id)),
         )
+        return markup
     else:
         markup.add(
             InlineKeyboardButton("📣 Publish", callback_data=_cb("pub", rc_id)),
@@ -78,11 +95,54 @@ def teams_keyboard(rc_id: int, v: dict) -> InlineKeyboardMarkup:
 def _sheet_text(rc, v: dict) -> str:
     text = teams_svc.render_text(rc, v)
     if v["formed"] and not v["locked"]:
-        text += ("\n\nTap a player to move them to the next team." if _move_buttons_fit(v)
+        text += ("\n\n🔁 Swap players trades two players, so the teams stay even." if _move_buttons_fit(v)
                  else "\n\nToo many players for buttons — move players on the group's web page (🌐 Vote on Web).")
     elif not v["formed"]:
         text += "\n\nPick how many teams — players are split at random."
     return text
+
+
+def _name_button(p: dict, data: str) -> InlineKeyboardButton:
+    return InlineKeyboardButton(p["name"][:_NAME_LABEL], callback_data=data)
+
+
+def _cancel(rc_id: int) -> InlineKeyboardButton:
+    return InlineKeyboardButton("✖ Cancel", callback_data=_cb("view", rc_id))
+
+
+def _tab(t: dict, data: str) -> InlineKeyboardButton:
+    return InlineKeyboardButton(f"{t['emoji']} Team {t['label']} ▸", callback_data=data)
+
+
+def pick_screen(rc, v: dict, team_no) -> tuple[str, InlineKeyboardMarkup]:
+    """Swap, step 1: one team's names; tabs reach the other teams."""
+    team = _team(v, team_no)
+    markup = InlineKeyboardMarkup()
+    _rows(markup, [_name_button(p, _cb("sp", rc.id, teams_svc.button_token(p["key"])))
+                   for p in team["players"]])
+    _rows(markup, [_tab(t, _cb("sw", rc.id, str(t["no"]))) for t in v["teams"] if t["no"] != team["no"]]
+          + [_cancel(rc.id)])
+    return (teams_svc.render_text(rc, v)
+            + f"\n\n🔁 Who swaps? Pick a player from {team['emoji']} Team {team['label']}."), markup
+
+
+def partner_screen(rc, v: dict, key: str, team_no=None) -> tuple[str, InlineKeyboardMarkup]:
+    """Swap, step 2: who to trade the picked player with — or just move them."""
+    own = _team_of(v, key)
+    others = [t for t in v["teams"] if t["no"] != own["no"]]
+    target = next((t for t in others if str(t["no"]) == str(team_no)), None) or others[0]
+    name = next(p["name"] for p in own["players"] if p["key"] == key)
+    tok = teams_svc.button_token(key)
+    markup = InlineKeyboardMarkup()
+    _rows(markup, [_name_button(p, _cb("sx", rc.id, f"{tok}:{teams_svc.button_token(p['key'])}"))
+                   for p in target["players"]])
+    _rows(markup, [_tab(t, _cb("sp", rc.id, f"{tok}:{t['no']}")) for t in others if t["no"] != target["no"]])
+    markup.row(InlineKeyboardButton(f"➡ Just move {name[:_NAME_LABEL]} to {target['label']}",
+                                    callback_data=_cb("mt", rc.id, f"{tok}:{target['no']}")),
+               _cancel(rc.id))
+    return (teams_svc.render_text(rc, v)
+            + f"\n\n🔁 Swap {name} ({own['emoji']} Team {own['label']}) with… "
+              f"a player from {target['emoji']} Team {target['label']}."), markup
 
 
 async def show_teams(call, cid: int, rc) -> None:
@@ -141,6 +201,14 @@ async def _is_admin(call) -> bool:
         SimpleNamespace(chat=call.message.chat, from_user=call.from_user), manager))
 
 
+def _player(v: dict, token: str) -> str:
+    """The sheet key a button stands for — refused if they've left since."""
+    key = teams_svc.player_by_token(v, token)
+    if key is None:
+        raise incorrectParameter("That player isn't IN any more.")
+    return key
+
+
 def _actor(call) -> str:
     u = call.from_user
     return u.first_name or u.username or str(u.id)
@@ -174,32 +242,43 @@ async def teams_callback(call):
             await bot.answer_callback_query(call.id, teams_svc.OFF_MESSAGE, show_alert=True)
             return
 
-        is_admin = await _is_admin(call) if op in ("form", "lock", "unlock") else False
+        is_admin = await _is_admin(call) if op in ("lock", "unlock", "pub") else False
         actor = _actor(call)
-        toast, post = "", None
+        toast, post, screen = "", None, None
         async with manager.get_chat_write_lock(cid):
             idx = find_rollcall_index(cid, rc_id, manager)
             if idx is None:
                 rc = None
             else:
                 rc = manager.get_rollcall(cid, idx)
-                if op == "form":
-                    v = teams_svc.form(rc, arg, actor, is_admin)
+                toks = arg.split(":") + [""]
+                if op in ("sw", "sp", "sx", "mt"):
+                    teams_svc.check_editable(rc)
+                    v = teams_svc.view(rc)
+                if op == "sw":
+                    screen = ("pick", toks[0] or "1")
+                elif op == "sp":
+                    screen = ("partner", _player(v, toks[0]), toks[1])
+                elif op == "sx":
+                    v = teams_svc.swap(rc, _player(v, toks[0]), _player(v, toks[1]), actor)
+                    toast = "{} ⇄ {}".format(*v["swapped"])
+                elif op == "mt":
+                    v = teams_svc.move(rc, _player(v, toks[0]), toks[1] or None, actor)
+                    toast = f"{v['moved']['name']} → Team {v['moved']['team']}"
+                elif op == "form":
+                    v = teams_svc.form(rc, arg, actor)
                     toast = f"{v['count']} teams made"
                 elif op == "shuf":
                     v = teams_svc.reshuffle(rc, actor)
                     toast = "Reshuffled"
                 elif op == "mv":
-                    key = teams_svc.player_by_token(teams_svc.view(rc), arg)
-                    if key is None:
-                        raise incorrectParameter("That player isn't IN any more.")
-                    v = teams_svc.move(rc, key, None, actor)
+                    v = teams_svc.move(rc, _player(teams_svc.view(rc), arg), None, actor)
                     toast = f"{v['moved']['name']} → Team {v['moved']['team']}"
                 elif op in ("lock", "unlock"):
                     v = teams_svc.set_locked(rc, op == "lock", is_admin)
                     toast = "Teams locked" if op == "lock" else "Teams unlocked"
                 elif op == "pub":
-                    v, post = teams_svc.publish(rc)
+                    v, post = teams_svc.publish(rc, is_admin)
                     toast = "Published"
                 else:
                     v = teams_svc.view(rc)
@@ -207,9 +286,14 @@ async def teams_callback(call):
             await bot.answer_callback_query(call.id, "That rollcall has ended.", show_alert=True)
             return
 
+        if screen and screen[0] == "pick":
+            text, markup = pick_screen(rc, v, screen[1])
+        elif screen:
+            text, markup = partner_screen(rc, v, screen[1], screen[2])
+        else:
+            text, markup = _sheet_text(rc, v), teams_keyboard(rc_id, v)
         await best_effort(bot.answer_callback_query(call.id, toast or None), "teams tap", cid)
-        await safe_edit_text(cid, call.message.message_id, _sheet_text(rc, v),
-                             reply_markup=teams_keyboard(rc_id, v))
+        await safe_edit_text(cid, call.message.message_id, text, reply_markup=markup)
         if post:
             await best_effort(bot.send_message(cid, post + f"\n\n📣 Published by {actor}"),
                               "teams publish", cid)

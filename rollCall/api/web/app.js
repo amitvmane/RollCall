@@ -861,8 +861,8 @@ function renderRollcall(rc){
 }
 
 // ── Teams ── same rules as the Telegram sheet (services/teams.py): any
-// signed-in member moves players until the teams lock; the number of teams
-// and lock/unlock are an admin's call (the server refuses otherwise).
+// signed-in member makes, reshuffles and moves until the teams lock;
+// lock/unlock and publish are an admin's call (the server refuses otherwise).
 function renderTeams(rc){
   const card=$("teams-card");
   if(!card)return;
@@ -875,28 +875,32 @@ function renderTeams(rc){
   if(!t.formed){
     h+=`<p class="teams-sub">No teams yet · ${t.players_in} IN. Players are split at random.</p>`;
     if(_idToken){
-      h+=`<div class="teams-actions">${formBtn("Make 2 teams",2)}${_isWebAdmin?formBtn("3 teams",3)+formBtn("4 teams",4):""}</div>`;
+      h+=`<div class="teams-actions">${formBtn("Make 2 teams",2)}${formBtn("3 teams",3)}${formBtn("4 teams",4)}</div>`;
     }else h+=`<p class="teams-sub">Sign in with Telegram to make teams.</p>`;
     card.innerHTML=h;return;
   }
   h+=`<div class="teams-grid">`+t.teams.map(team=>`<div class="team-col"><div class="team-name">${team.emoji} Team ${esc(team.label)} <span class="team-n">${team.players.length}</span></div>`+
     (team.players.length?team.players.map(p=>`<div class="team-player"><span class="team-pname">${esc(p.name)}</span>`+
-      (canEdit?`<select class="team-move" aria-label="Move ${esc(p.name)}" data-on-change="teamsMove" data-args="${rcArgs(p.key,RC_VALUE)}">`+
-        t.teams.map(o=>`<option value="${o.no}"${o.no===team.no?" selected":""}>${esc(o.label)}</option>`).join("")+`</select>`:"")+`</div>`).join("")
+      (canEdit?`<select class="team-move" aria-label="Move or swap ${esc(p.name)}" data-on-change="teamsMove" data-args="${rcArgs(p.key,RC_VALUE)}">`+
+        `<optgroup label="Move to">`+t.teams.map(o=>`<option value="t${o.no}"${o.no===team.no?" selected":""}>${esc(o.label)}</option>`).join("")+`</optgroup>`+
+        t.teams.filter(o=>o.no!==team.no&&o.players.length).map(o=>`<optgroup label="Swap with (Team ${esc(o.label)})">`+
+          o.players.map(q=>`<option value="s${esc(q.key)}">⇄ ${esc(q.name)}</option>`).join("")+`</optgroup>`).join("")+
+        `</select>`:"")+`</div>`).join("")
       :`<div class="teams-sub">—</div>`)+`</div>`).join("")+`</div>`;
   const acts=[];
-  if(canEdit)acts.push(`<button class="btn btn-secondary teams-btn" data-on-click="teamsReshuffle">🔀 Reshuffle</button>`);
-  if(_idToken)acts.push(`<button class="btn btn-secondary teams-btn" data-on-click="teamsPublish">📣 Publish</button>`);
+  if(canEdit){
+    acts.push(`<button class="btn btn-secondary teams-btn" data-on-click="teamsReshuffle">🔀 Reshuffle</button>`);
+    const n=t.count%4+1<2?2:t.count%4+1;
+    acts.push(formBtn(`🔢 Make ${n} teams`,n));
+  }
   if(_idToken&&_isWebAdmin){
-    if(!t.locked){
-      const n=t.count%4+1<2?2:t.count%4+1;
-      acts.push(formBtn(`🔢 Make ${n} teams`,n));
-      acts.push(`<button class="btn btn-secondary teams-btn" data-on-click="teamsLock">🔒 Lock</button>`);
-    }else acts.push(`<button class="btn btn-secondary teams-btn" data-on-click="teamsUnlock">🔓 Unlock</button>`);
+    acts.push(`<button class="btn btn-secondary teams-btn" data-on-click="teamsPublish">📣 Publish</button>`);
+    acts.push(t.locked?`<button class="btn btn-secondary teams-btn" data-on-click="teamsUnlock">🔓 Unlock</button>`
+                      :`<button class="btn btn-secondary teams-btn" data-on-click="teamsLock">🔒 Lock</button>`);
   }
   if(acts.length)h+=`<div class="teams-actions">${acts.join("")}</div>`;
   if(!_idToken)h+=`<p class="teams-sub">Sign in with Telegram to move players.</p>`;
-  else if(canEdit)h+=`<p class="teams-sub">Pick a team next to a name to move that player.</p>`;
+  else if(canEdit)h+=`<p class="teams-sub">Use the menu next to a name to swap that player with someone, or move them.</p>`;
   card.innerHTML=h;
 }
 
@@ -921,7 +925,12 @@ async function _teamsAction(body){
 }
 window.teamsForm=function(n){_teamsAction({action:"form",count:Number(n)});};
 window.teamsReshuffle=function(){_teamsAction({action:"reshuffle"});};
-window.teamsMove=function(key,teamNo){_teamsAction({action:"move",who_key:key,team_no:Number(teamNo)});};
+// The player dropdown's value is "t<team no>" (move) or "s<player key>" (swap).
+window.teamsMove=function(key,choice){
+  choice=String(choice||"");
+  if(choice[0]==="s")_teamsAction({action:"swap",who_key:key,with_key:choice.slice(1)});
+  else _teamsAction({action:"move",who_key:key,team_no:Number(choice.slice(1))});
+};
 window.teamsLock=function(){_teamsAction({action:"lock"});};
 window.teamsUnlock=function(){_teamsAction({action:"unlock"});};
 window.teamsPublish=function(){_teamsAction({action:"publish"});};

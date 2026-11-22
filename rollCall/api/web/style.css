@@ -543,6 +543,10 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .sp-g-lbl{font-size:.75rem;color:var(--sub);margin-top:2px;font-weight:600}
 .sp-personal{background:var(--bg);border-radius:8px;padding:14px;margin-bottom:14px}
 .sp-you-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.sp-you-header .sp-rank{margin-left:auto}
+.sp-close{margin-left:8px;padding:2px 9px;min-height:0;font-size:.8rem;line-height:1.6}
+[data-on-click="showMemberStats"]{cursor:pointer}
+[data-on-click="showMemberStats"]:hover .slb-name,[data-on-click="showMemberStats"]:hover .ghost-name{text-decoration:underline}
 .sp-you-label{font-weight:700;font-size:.8rem;font-family:var(--font-body);text-transform:uppercase;letter-spacing:.08em}
 .sp-rank{font-size:.8rem;color:var(--accent);font-weight:700;background:var(--accent-dim);padding:2px 8px;border-radius:6px;font-family:var(--font-mono)}
 .sp-mini-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}

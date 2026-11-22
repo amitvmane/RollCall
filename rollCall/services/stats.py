@@ -6,6 +6,7 @@ own presentation (Markdown for the bot, JSON for the REST API, HTML
 for the Mini App).
 """
 
+import logging
 from typing import Optional
 
 from db import (
@@ -197,11 +198,14 @@ def group_stats(chat_id: int) -> dict:
             {
                 "name": row.get("user_name") or row.get("proxy_name"),
                 "ghost_count": int(row.get("ghost_count") or 0),
+                # Who the row is, so the web can open their stats.
+                "user_id": row.get("user_id"),
+                "proxy_name": None if row.get("user_id") else row.get("proxy_name"),
             }
             for row in ghost_board
         ],
         "late_drop_leaderboard": [
-            {"name": row.get("user_name"), "late_drops": row["late_drops"]}
+            {"name": row.get("user_name"), "late_drops": row["late_drops"], "user_id": row.get("user_id")}
             for row in get_late_drop_leaderboard(chat_id, limit=5)
         ],
         "late_drop_hours": LATE_DROP_HOURS,
@@ -614,6 +618,46 @@ def fill_duration(secs: Optional[int]) -> str:
     return f"~{round(secs / 86400)}d"
 
 
+def member_stats(chat_id: int, *, user_id: Optional[int] = None, proxy_name: Optional[str] = None,
+                 total_participants: Optional[int] = None, require_record: bool = True) -> Optional[dict]:
+    """One member's (user_id) or guest's (proxy_name) stats as the web shows
+    them: the /stats numbers plus rank and a recent-games strip. None when
+    they have no record in this group (require_record=False keeps the
+    all-zero card — the viewer's own, before their first game). Stats are
+    open to every member (user decision 2026-11-22); callers decide who may
+    ask, not this."""
+    try:
+        if user_id:
+            p = personal_stats(chat_id, user_id)
+            if require_record and not (p.get("total_sessions_voted") or p.get("sessions_attended")):
+                return None
+        elif proxy_name:
+            p = proxy_stats(chat_id, proxy_name)
+            if not p or (require_record and not (p.get("total_sessions_voted") or p.get("sessions_attended"))):
+                return None
+        else:
+            return None
+    except Exception:
+        logging.exception("member_stats failed (chat %s)", chat_id)
+        return None
+    if total_participants is None:
+        gs = group_stats(chat_id)
+        total_participants = gs["real_participants"] + gs["proxy_participants"]
+    rank = None
+    for entry in leaderboard(chat_id, limit=100)["entries"]:
+        if (user_id and entry.get("user_id") == user_id) or (
+                proxy_name and entry.get("kind") == "proxy" and entry.get("display_name") == proxy_name):
+            rank = entry["rank"]
+            break
+    p["rank"] = rank
+    p["total_participants"] = total_participants
+    p["recent_sessions"] = [
+        {"status": r.get("status", "miss"), "ended_at": session_display_date(r)}
+        for r in get_user_session_history(chat_id, user_id, limit=15)
+    ] if user_id else []
+    return p
+
+
 def web_group_stats(
     group_token: str,
     *,
@@ -649,56 +693,18 @@ def web_group_stats(
     total_pax = gs["real_participants"] + gs["proxy_participants"]
 
     personal: dict | None = None
-    if lookup_user_id or lookup_name:
-        uid: int | None = None
-        pname: str | None = None
-        kind: str | None = None
-
-        if lookup_user_id:
-            uid = lookup_user_id
-            kind = "real"
-        elif lookup_name:
-            # An unverified name only ever reaches proxy (guest) stats. A
-            # real member's personal numbers (ghost count, sessions) need
-            # their own signed id_token — ?name=@alice used to hand anyone
-            # with the group link Alice's record.
-            resolved = resolve_user(chat_id, lookup_name.strip())
-            if resolved and resolved[0] == "proxy":
-                kind = "proxy"
-                pname = resolved[1]
-
-        p: dict | None = None
-        try:
-            if kind == "real" and uid:
-                p = personal_stats(chat_id, uid)
-            elif kind == "proxy" and pname:
-                p = proxy_stats(chat_id, pname)
-        except Exception:
-            pass
-
-        if p:
-            # Find rank by scanning the full leaderboard (up to 100 entries)
-            full_lb = leaderboard(chat_id, limit=100)
-            rank: int | None = None
-            for entry in full_lb["entries"]:
-                if uid and entry.get("user_id") == uid:
-                    rank = entry["rank"]
-                    break
-                elif pname and entry.get("kind") == "proxy" and entry.get("display_name") == pname:
-                    rank = entry["rank"]
-                    break
-            p["rank"] = rank
-            p["total_participants"] = total_pax
-            # Per-session history for sparkline (real users only)
-            if kind == "real" and uid:
-                rows = get_user_session_history(chat_id, uid, limit=15)
-                p["recent_sessions"] = [
-                    {"status": r.get("status", "miss"), "ended_at": session_display_date(r)}
-                    for r in rows
-                ]
-            else:
-                p["recent_sessions"] = []
-            personal = p
+    if lookup_user_id:
+        personal = member_stats(chat_id, user_id=lookup_user_id, total_participants=total_pax,
+                                require_record=False)
+    elif lookup_name:
+        # An unverified name only ever reaches proxy (guest) stats. Another
+        # member's record is for signed-in members of this group, through
+        # member_stats() behind its own route — ?name=@alice used to hand
+        # anyone holding the group link Alice's record.
+        resolved = resolve_user(chat_id, lookup_name.strip())
+        if resolved and resolved[0] == "proxy":
+            personal = member_stats(chat_id, proxy_name=resolved[1], total_participants=total_pax,
+                                    require_record=False)
 
     return {
         "total_rollcalls": gs["total_rollcalls"],

@@ -125,7 +125,7 @@ class TestLateDrops(IntegrationBase):
         await self._end()
         self.assertEqual(self._count(), 1)
         board = stats_svc.group_stats(CHAT_ID)["late_drop_leaderboard"]
-        self.assertEqual(board, [{"name": U["first_name"], "late_drops": 1}])
+        self.assertEqual(board, [{"name": U["first_name"], "late_drops": 1, "user_id": U["id"]}])
 
     async def test_maybe_counts_too(self):
         await self._rc_at(1)

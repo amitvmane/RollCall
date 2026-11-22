@@ -64,6 +64,7 @@ from api.schemas.web import (
     WebGroupSettingsRequest,
     WebHealthResponse,
     WebRecapResponse,
+    WebMemberStatsResponse,
     WebWeatherResponse,
     WebTeamsActionRequest,
     WebTeamsResponse,
@@ -1753,6 +1754,45 @@ async def web_my_recap(
     info = _db.get_member_display_info(chat_id, uid) or {}
     r = stats_svc.recap(chat_id, uid, info.get("first_name") or "")
     return WebRecapResponse(**r, text=stats_svc.recap_text(r))
+
+
+@router.get(
+    "/web/group/{group_token}/stats/member",
+    response_model=WebMemberStatsResponse,
+    summary="Another member's or guest's stats in this group (signed-in members)",
+)
+async def web_member_stats(
+    group_token: str = Path(...),
+    user_id: Optional[int] = Query(None, description="A member's Telegram id (from the leaderboard)"),
+    name: Optional[str] = Query(None, max_length=100, description="A guest's name"),
+    id_token: Optional[str] = Depends(identity_from_header),
+) -> WebMemberStatsResponse:
+    # Web parity for /stats @user: any signed-in member of THIS group may see
+    # anyone's record in it (stats are open to all, 2026-11-22). Not for a
+    # bare group link — that only ever reaches guest stats, on /stats.
+    chat_id, viewer = _member_of(group_token, id_token or "")
+    # A portal sign-in token isn't bound to one chat — check the viewer is
+    # actually known in this group before showing anyone's record.
+    if _db.get_member_display_info(chat_id, viewer) is None:
+        raise HTTPException(status_code=403, detail="Only members of this group can see members' stats.")
+    if user_id:
+        p = stats_svc.member_stats(chat_id, user_id=user_id)
+        info = _db.get_member_display_info(chat_id, user_id) or {}
+        display, kind = info.get("first_name") or info.get("username") or "", "real"
+        if not display and p:
+            display = next((e["display_name"] for e in stats_svc.leaderboard(chat_id, limit=100)["entries"]
+                            if e.get("user_id") == user_id), "") or "Member"
+    elif name:
+        resolved = stats_svc.resolve_user(chat_id, name.strip())
+        if not resolved or resolved[0] != "proxy":
+            raise HTTPException(status_code=404, detail="No stats for that name in this group.")
+        p = stats_svc.member_stats(chat_id, proxy_name=resolved[1])
+        display, kind = resolved[2] or resolved[1], "proxy"
+    else:
+        raise HTTPException(status_code=422, detail="Pick a member.")
+    if not p:
+        raise HTTPException(status_code=404, detail="No games on record for them in this group yet.")
+    return WebMemberStatsResponse(display_name=display, kind=kind, personal=p)
 
 
 @router.get(

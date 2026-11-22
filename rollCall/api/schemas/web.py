@@ -272,11 +272,21 @@ class WebStatsHistoryEntry(BaseModel):
 class WebStatsGhostEntry(BaseModel):
     name: Optional[str] = None
     ghost_count: int = 0
+    user_id: Optional[int] = None
+    proxy_name: Optional[str] = None
 
 
 class WebStatsLateDropEntry(BaseModel):
     name: Optional[str] = None
     late_drops: int = 0
+    user_id: Optional[int] = None
+
+
+class WebMemberStatsResponse(BaseModel):
+    """Another member's (or guest's) stats — signed-in members of the group."""
+    display_name: str
+    kind: str = "real"
+    personal: WebStatsPersonal
 
 
 class WebStatsResponseTimeEntry(BaseModel):

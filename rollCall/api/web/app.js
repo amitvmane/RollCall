@@ -1283,22 +1283,41 @@ async function loadWebStats(){
   }catch(_){}
 }
 
+let _lastStats=null,_lookedUp=null;
+window.showMemberStats=async function(uid,guest){
+  if(!_idToken){toast("Sign in with Telegram to see members' stats.",3000);return;}
+  const q=new URLSearchParams(uid?{user_id:String(uid)}:{name:String(guest||"")});
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/stats/member?${q}`,{headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(8000)});
+    const body=await res.json().catch(()=>({}));
+    if(!res.ok)throw new Error(typeof body.detail==="string"?body.detail:"Could not load their stats");
+    _lookedUp=body;
+    if(_lastStats)renderStats(_lastStats);
+    const card=document.querySelector("#stats-card .sp-personal");
+    if(card)card.scrollIntoView({behavior:"smooth",block:"center"});
+  }catch(e){toast(e.message||"Could not load their stats",3000);}
+};
+window.closeMemberStats=function(){_lookedUp=null;if(_lastStats)renderStats(_lastStats);};
+
 function renderStats(d){
   const sc=$("stats-card");if(!sc)return;
+  _lastStats=d;
   const pct=v=>v==null?"—":`${v}%`;
   const n=v=>v??0;
   const me=d.personal;
 
-  let personalHtml="";
-  if(me){
+  // One person's card — the viewer's own ("You"), or a member someone
+  // tapped in a list (web parity for /stats @user).
+  const personalCard=(me,label,closable)=>{
     const rankStr=me.rank&&d.total_participants?`#${me.rank} of ${d.total_participants}`:"";
     const attRate=pct(me.attendance_rate);
     const attW=Math.min(100,me.attendance_rate||0);
-    personalHtml=`
+    return `
     <div class="sp-personal">
       <div class="sp-you-header">
-        <span class="sp-you-label">👤 You</span>
+        <span class="sp-you-label">👤 ${esc(label)}</span>
         ${rankStr?`<span class="sp-rank">${rankStr}</span>`:""}
+        ${closable?`<button type="button" class="btn btn-secondary sp-close" aria-label="Close" data-on-click="closeMemberStats">✖</button>`:""}
       </div>
       <div class="sp-mini-stats">
         <div class="sp-mini"><div class="sp-mini-val">${n(me.sessions_attended)}</div><div class="sp-mini-lbl">Sessions</div></div>
@@ -1325,7 +1344,12 @@ function renderStats(d){
         return`<span class="sp-dot ${cls}" title="${esc(ttl)} · ${esc((s.ended_at||'').slice(0,10))}"></span>`;
       }).join('')}</div>`:""}
     </div>`;
-  }
+  };
+  let personalHtml=me?personalCard(me,"You",false):"";
+  if(_lookedUp&&_idToken)personalHtml=personalCard(_lookedUp.personal,_lookedUp.display_name,true)+personalHtml;
+  // Signed-in members can tap a name to open that person's stats.
+  const tap=(uid,guest)=>_idToken&&(uid||guest)
+    ?` role="button" tabindex="0" title="See their stats" data-on-click="showMemberStats" data-args="${rcArgs(uid||null,guest||null)}"`:"";
 
   const lbRows=(d.leaderboard||[]).map((e,i)=>{
     const isMe=me&&(
@@ -1334,7 +1358,7 @@ function renderStats(d){
     );
     const w=Math.min(100,e.attendance_rate||0);
     const chips=(e.badges||[]).map(b=>`<span class="slb-badge" title="${b.startsWith("🔥")?"Current attendance streak":"Games played milestone"}">${esc(b)}</span>`).join("");
-    return `<div class="slb-row${isMe?" slb-you":""}${e.kind==="proxy"?" slb-proxy":""}">
+    return `<div class="slb-row${isMe?" slb-you":""}${e.kind==="proxy"?" slb-proxy":""}"${tap(e.kind==="proxy"?null:e.user_id,e.kind==="proxy"?e.display_name:null)}>
       <span class="slb-rank">#${e.rank??i+1}</span>
       <span class="slb-name">${esc(e.display_name||"—")}${chips}${isMe?" ← you":""}</span>
       <div class="slb-bar-wrap"><div class="slb-bar"><div class="slb-fill" style="width:${w}%"></div></div></div>
@@ -1398,13 +1422,13 @@ function renderStats(d){
   // Same "read"-scope data the admin console's Stats tab shows; kept public
   // to all members here too, consistent with the leaderboard above already
   // being group-visible rather than admin-only.
-  const ghostRows=(d.ghost_leaderboard||[]).map(g=>`<div class="ghost-row">
+  const ghostRows=(d.ghost_leaderboard||[]).map(g=>`<div class="ghost-row"${tap(g.user_id,g.proxy_name)}>
     <span class="ghost-name">${esc(g.name||"—")}</span>
     <span class="ghost-count">👻 ${n(g.ghost_count)}</span>
   </div>`).join("");
 
   // Late drops — IN, then OUT/MAYBE close to game time (recorded only).
-  const lateRows=(d.late_drop_leaderboard||[]).map(g=>`<div class="ghost-row">
+  const lateRows=(d.late_drop_leaderboard||[]).map(g=>`<div class="ghost-row"${tap(g.user_id,null)}>
     <span class="ghost-name">${esc(g.name||"—")}</span>
     <span class="ghost-count">⏰ ${n(g.late_drops)}</span>
   </div>`).join("");
@@ -1487,7 +1511,7 @@ function renderStats(d){
   </div>
   ${trendHtml}
   ${personalHtml}
-  ${lbRows?`<div class="stats-section-hdr">🏆 Leaderboard</div><div class="slb-list">${lbRows}</div>`:""}
+  ${lbRows?`<div class="stats-section-hdr">🏆 Leaderboard</div><div class="rt-note">${_idToken?"Tap a name to see their stats.":"Sign in with Telegram to tap a name and see their stats."}</div><div class="slb-list">${lbRows}</div>`:""}
   ${shistRows?`<div class="stats-section-hdr">🗓 Session History</div><div class="shist-list">${shistRows}</div>`:""}
   ${rtRows?`<div class="stats-section-hdr">⚡ Fastest Voters</div>${rtRecord}${rtNote}<div class="rt-list">${rtRows}</div>`:""}
   ${fillHtml}

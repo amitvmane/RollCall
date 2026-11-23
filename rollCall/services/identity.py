@@ -606,6 +606,39 @@ def list_suggestions(chat_id: int, limit: int = 200) -> list[dict]:
     return result[:limit]
 
 
+def review_queue(chat_id: int, suggestions: Optional[list] = None) -> dict:
+    """The merge queue, split by whether there is anything to decide.
+
+    In review = every guest (proxy) name that is not merged into anyone, not
+    a merge target that already has aliases, not marked standalone and not
+    discarded — exactly the names the web panel lists under review.
+
+      pending  — in review AND a likely match was found (either side of a
+                 suggestion): an admin should merge it or say "not a match".
+                 This is the number that matters — the web badge, the panel
+                 header and /group_health all show it.
+      no_match — in review with no likely match: almost always a one-off
+                 guest. Kept reachable (mark standalone, discard, or merge
+                 by hand) so the queue can still drain to empty, but not
+                 counted as pending.
+
+    Pass `suggestions` when already computed (list_suggestions is O(n^2))."""
+    if suggestions is None:
+        suggestions = list_suggestions(chat_id)
+    with_aliases = {(g["proxy_name"] or "").lower() for g in list_identity_groups(chat_id)
+                    if g["kind"] == "proxy"}
+    in_review = [i["proxy_name"] for i in list_all_identities(chat_id)
+                 if i["kind"] == "proxy" and not i["merged_into"] and not i["standalone"]
+                 and i["proxy_name"].lower() not in with_aliases]
+    matched = set()
+    for sug in suggestions:
+        matched.add(sug["alias_proxy_name"].lower())
+        if sug.get("candidate_kind") == "proxy" and sug.get("candidate_proxy_name"):
+            matched.add(sug["candidate_proxy_name"].lower())
+    return {"pending": [n for n in in_review if n.lower() in matched],
+            "no_match": [n for n in in_review if n.lower() not in matched]}
+
+
 def dismiss_suggestion(chat_id: int, alias_proxy_name: str, *,
                         candidate_user_id: Optional[int] = None,
                         candidate_proxy_name: Optional[str] = None,

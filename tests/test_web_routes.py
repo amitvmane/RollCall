@@ -1571,10 +1571,16 @@ class TestWebIdentityMerge(unittest.TestCase):
         with patch.object(_web_mod._db, "get_chat_by_group_web_token", return_value={"chat_id": -100}), \
              patch.object(_web_mod._db, "is_web_admin", return_value=True), \
              patch("api.identity.verify_identity_token", return_value=99), \
-             patch("services.identity.list_suggestions", return_value=suggestions):
+             patch("services.identity.list_suggestions", return_value=suggestions), \
+             patch("services.identity.review_queue",
+                   return_value={"pending": ["Ajya", "Ajay"], "no_match": ["Zed"]}) as rq:
             resp = _client().get("/api/v1/web/group/grp123/identities/suggestions", headers={"X-Identity-Token": "tok"})
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()["suggestions"][0]["alias_proxy_name"], "Ajya")
+        body = resp.json()
+        self.assertEqual(body["suggestions"][0]["alias_proxy_name"], "Ajya")
+        self.assertEqual((body["pending_count"], body["pending_names"], body["no_match_names"]),
+                         (2, ["Ajya", "Ajay"], ["Zed"]), "the admin-menu badge reads pending_count")
+        self.assertIs(rq.call_args.args[1], suggestions, "reuses the suggestions — no second O(n^2) pass")
 
     def test_merge_calls_service_and_does_not_mirror(self):
         # A merge is admin-side identity housekeeping — it must NOT post into

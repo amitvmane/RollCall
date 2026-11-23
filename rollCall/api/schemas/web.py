@@ -511,6 +511,12 @@ class WebIdentitySuggestion(BaseModel):
 
 class WebIdentitySuggestionsResponse(BaseModel):
     suggestions: List[WebIdentitySuggestion]
+    # services.identity.review_queue: names with a likely match (need a
+    # decision) vs names with none (one-off guests). pending_count is the
+    # number the admin menu badge and /group_health show.
+    pending_names: List[str] = Field(default_factory=list)
+    no_match_names: List[str] = Field(default_factory=list)
+    pending_count: int = 0
 
 
 class WebMergeIdentityRequest(BaseModel):

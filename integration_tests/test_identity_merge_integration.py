@@ -375,3 +375,39 @@ def test_multi_alias_merge_folds_identically_across_all_three_aggregators():
     matching_balance = [r for r in balances if r["user_id"] == 777]
     assert len(matching_balance) == 1
     assert matching_balance[0]["balance"] == 30  # 3 aliases x 10, Real7 itself has no entry
+
+
+def _proxy(chat_id, rid, name):
+    ph = "%s" if db.db_type == "postgresql" else "?"
+    with db._cursor(commit=True) as cur:
+        cur.execute(f"INSERT INTO proxy_users (rollcall_id, name, status) VALUES ({ph}, {ph}, {ph})",
+                    (rid, name, "in"))
+
+
+def test_review_queue_counts_only_names_with_a_likely_match():
+    """The merge panel listed every unmerged guest name, so nobody could tell
+    how many actually needed a decision. Pending = in review AND a likely
+    match; one-off guests with no match are listed apart and not counted."""
+    from services import group_health
+    chat = CHAT - 41
+    db.get_or_create_chat(chat)
+    db.upsert_chat_member(chat, 4101, "Rahul", "rahulk")
+    db.upsert_chat_member(chat, 4102, "Amit", "amitm")
+    rid = _mk_rollcall(chat)
+    for name in ("Rahull", "Qwertyguest", "Amitt", "Sanjay", "Junk1"):
+        _proxy(chat, rid, name)
+    identity.link_identities(chat, "Amitt", canonical_user_id=4102, admin_user_id=1, admin_name="Admin")
+    identity.mark_standalone(chat, "Sanjay", admin_user_id=1, admin_name="Admin")
+    identity.discard_identity(chat, "Junk1", admin_user_id=1, admin_name="Admin")
+
+    q = identity.review_queue(chat)
+    assert q["pending"] == ["Rahull"], "close to member Rahul → needs a decision"
+    assert q["no_match"] == ["Qwertyguest"], "merged, standalone and discarded names are not in review"
+
+    item = [i for i in group_health.check(chat)["items"] if "guest name" in i["text"]]
+    assert item and item[0]["text"].startswith("1 guest name(s)") and item[0]["level"] == "warn"
+
+    # "Not a match" settles it: nothing pending, health line gone.
+    identity.dismiss_suggestion(chat, "Rahull", candidate_user_id=4101, admin_user_id=1, admin_name="Admin")
+    assert identity.review_queue(chat)["pending"] == []
+    assert not [i for i in group_health.check(chat)["items"] if "guest name" in i["text"]]

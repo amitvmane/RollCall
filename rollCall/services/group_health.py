@@ -99,6 +99,19 @@ def check(chat_id: int) -> dict:
                           "text": "Weather alerts need a location and game time: " + ", ".join(f"'{t}'" for t in blind),
                           "fix": "/location and /set_rollcall_time"})
 
+    # 6. Guest names that look like someone already known — stats and dues
+    # count them as two people until an admin merges or rules them apart.
+    # Names with no likely match are one-off guests, not counted here.
+    try:
+        from services.identity import review_queue
+        pending = len(review_queue(chat_id)["pending"])
+    except Exception:
+        pending = 0
+    if pending:
+        items.append({"level": "warn",
+                      "text": f"{pending} guest name(s) look like someone already in the group",
+                      "fix": "web: Admin → Merge identities"})
+
     return {"items": items, "warnings": sum(1 for i in items if i["level"] == "warn")}
 
 

@@ -1147,7 +1147,11 @@ async def web_list_identity_suggestions(
 ) -> WebIdentitySuggestionsResponse:
     chat_id, _ = await _require_web_admin(group_token, id_token)
     from services import identity as identity_svc
-    return WebIdentitySuggestionsResponse(suggestions=identity_svc.list_suggestions(chat_id))
+    suggestions = identity_svc.list_suggestions(chat_id)
+    queue = identity_svc.review_queue(chat_id, suggestions)
+    return WebIdentitySuggestionsResponse(
+        suggestions=suggestions, pending_names=queue["pending"],
+        no_match_names=queue["no_match"], pending_count=len(queue["pending"]))
 
 
 @router.post(

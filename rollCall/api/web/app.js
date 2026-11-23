@@ -2339,6 +2339,7 @@ function _applyAdminStatus(isAdmin){
   _syncAdminRcControls();
   _syncViewTabs();
   _peekGhostReview().catch(()=>{});
+  _peekMergeQueue().catch(()=>{});
   // The empty state offers "＋ New Rollcall" to admins, and admin status
   // usually lands after it was first rendered.
   if(!activeRcData)renderEmptyState();
@@ -4268,7 +4269,8 @@ async function refreshDues(){
 let _identityMergeOpen=false, _identitiesCache=null, _identityGroupsCache=null,
     _suggestionsCache=null, _discardedCache=null, _identityDiscardedOpen=false,
     _standaloneCache=null, _identityStandaloneOpen=false,
-    _identityUnmatchedOpen=false, _imTargetCombo=null;
+    _identityUnmatchedOpen=true, _identityNoMatchOpen=false, _imTargetCombo=null,
+    _mergePendingCount=0;   // names with a likely match — the admin-menu badge
 
 window._toggleExtraAliases=function(btn){
   const extra=btn.previousElementSibling;
@@ -4280,6 +4282,14 @@ window._toggleExtraAliases=function(btn){
   const n=extra.querySelectorAll(".alias-pill").length||extra.children.length;
   if(hidden){extra.classList.remove("hidden");btn.textContent="show less";}
   else{extra.classList.add("hidden");btn.textContent=`+${n} more`;}
+};
+
+window.toggleIdentityNoMatch=function(){
+  _identityNoMatchOpen=!_identityNoMatchOpen;
+  const body=document.getElementById("im-nomatch-body");
+  const ch=document.getElementById("im-nomatch-chevron");
+  if(body)body.classList.toggle("hidden",!_identityNoMatchOpen);
+  if(ch)ch.textContent=_identityNoMatchOpen?"▲":"▼";
 };
 
 window.toggleIdentityUnmatched=function(){
@@ -4312,7 +4322,10 @@ async function loadIdentityMerge(){
     _identityGroupsCache=idData.groups||[];
     _discardedCache=idData.discarded||[];
     _standaloneCache=idData.standalone||[];
-    _suggestionsCache=sugRes.ok?(await sugRes.json()).suggestions||[]:[];
+    const sugData=sugRes.ok?await sugRes.json():{};
+    _suggestionsCache=sugData.suggestions||[];
+    _mergePendingCount=sugData.pending_count||0;
+    _syncMergeBadge();
     renderIdentityMerge();
   }catch(e){
     body.innerHTML=`<div class="sched-empty">${esc(e.message||"Could not load identities")}</div>`;
@@ -4502,57 +4515,81 @@ function renderIdentityMerge(){
   // separate "Suggested merges" + "Unmatched proxy names" sections) —
   // exact matches first, then fuzzy suggestions (closer first), then
   // everything else by recency/frequency. See _buildUnifiedReviewRows.
-  const reviewRows=_buildUnifiedReviewRows(unmatched,suggestions);
-  if(reviewRows.length){
-    const SHOW_N=12;
-    const vis=reviewRows.slice(0,SHOW_N), extra=reviewRows.slice(SHOW_N);
-    // exact_first_name is deliberately NOT given the same strong "chip-in"
-    // styling as exact_username/exact_proxy — first names commonly collide
-    // across different real people in the same group (see the confidence
-    // assignment in services/identity.list_suggestions), so it's rendered
-    // at the same "weaker signal" tier as a fuzzy "close" match instead of
-    // looking equally certain to an admin skimming this list.
-    const CONF_LABEL={exact_username:"✓ username match",exact_first_name:"≈ same first name",
-                       exact_proxy:"✓ exact match",close:"≈ close spelling"};
-    const STRONG_CONF=new Set(["exact_username","exact_proxy"]);
-    const rowHtml=r=>{
-      const{row,suggestion,otherLabel}=r;
-      const confBadge=suggestion
-        ?`<span class="itm-conf-badge ${STRONG_CONF.has(suggestion.confidence)?"chip-in":"chip-maybe"}">${CONF_LABEL[suggestion.confidence]}</span>`
-        :"";
-      const metaBits=[`${row.proxy_count||0}×`];
-      if(row.proxy_last_seen)metaBits.push(_relTime(row.proxy_last_seen));
-      const metaBadge=`<span class="itcount${(row.proxy_count||0)>3?" hot":""}">${esc(metaBits.join(" · "))}</span>`;
-      const title=suggestion?`${esc(row.proxy_name)} ↔ ${esc(otherLabel)}`:esc(row.proxy_name);
-      const mergeBtn=suggestion
-        ?`<button class="id-change" title="Merge these" data-on-click="doMergeIdentity" data-args="${rcArgs(suggestion.alias_proxy_name,suggestion.candidate_kind,suggestion.candidate_user_id??null,suggestion.candidate_proxy_name??null)}">🔗</button>`
-        :"";
-      const dismissBtn=suggestion
-        ?`<button class="id-change" title="Not a match" data-on-click="doDismissSuggestion" data-args="${rcArgs(_suggestionsCache.indexOf(suggestion))}">✕</button>`
-        :"";
-      // The "nothing to merge, and that's fine" exit — distinct from 🗑,
-      // which throws the name away. Keeps it as a future merge target.
-      const standaloneBtn=`<button class="id-change" title="'${esc(row.proxy_name)}' is a real person with no Telegram account — stop asking" data-on-click="doMarkStandalone" data-args="${rcArgs(row.proxy_name)}">✅</button>`;
-      return `<div class="sched-item">
-        <div class="sched-item-info">
-          <div class="sched-item-title">${title}</div>
-          <div class="sched-item-time">${confBadge}${metaBadge}</div>
-        </div>
-        <div style="display:flex;gap:6px;flex-shrink:0">
-          ${mergeBtn}${dismissBtn}${standaloneBtn}
-          <button class="id-change" title="'${esc(row.proxy_name)}' is invalid/garbage — discard it" data-on-click="doDiscardIdentity" data-args="${rcArgs(row.proxy_name)}">🗑</button>
-        </div>
-      </div>`;
-    };
-    html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:6px;cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none" data-on-click="toggleIdentityUnmatched">
-      <span id="im-unmatched-chevron">${_identityUnmatchedOpen?"▲":"▼"}</span>Review & merge (${reviewRows.length})
+  // Two lists, so the number that matters is obvious:
+  //   Needs review — a likely match was found; merge it or say "not a match".
+  //   No likely match — almost always one-off guests; collapsed, still
+  //   reachable (✅ guest / 🗑 / merge by hand) so the queue drains to empty.
+  // "Has a suggestion" is the same rule services.identity.review_queue uses
+  // for the menu badge and /group_health, so the counts agree.
+  const allReviewRows=_buildUnifiedReviewRows(unmatched,suggestions);
+  const reviewRows=allReviewRows.filter(r=>r.suggestion);
+  const noMatchRows=allReviewRows.filter(r=>!r.suggestion);
+  _mergePendingCount=reviewRows.length;
+  _syncMergeBadge();
+  const SHOW_N=12;
+  // exact_first_name is deliberately NOT given the same strong "chip-in"
+  // styling as exact_username/exact_proxy — first names commonly collide
+  // across different real people in the same group (see the confidence
+  // assignment in services/identity.list_suggestions), so it's rendered
+  // at the same "weaker signal" tier as a fuzzy "close" match instead of
+  // looking equally certain to an admin skimming this list.
+  const CONF_LABEL={exact_username:"✓ username match",exact_first_name:"≈ same first name",
+                     exact_proxy:"✓ exact match",close:"≈ close spelling"};
+  const STRONG_CONF=new Set(["exact_username","exact_proxy"]);
+  const rowHtml=r=>{
+    const{row,suggestion,otherLabel}=r;
+    const confBadge=suggestion
+      ?`<span class="itm-conf-badge ${STRONG_CONF.has(suggestion.confidence)?"chip-in":"chip-maybe"}">${CONF_LABEL[suggestion.confidence]}</span>`
+      :"";
+    const metaBits=[`${row.proxy_count||0}×`];
+    if(row.proxy_last_seen)metaBits.push(_relTime(row.proxy_last_seen));
+    const metaBadge=`<span class="itcount${(row.proxy_count||0)>3?" hot":""}">${esc(metaBits.join(" · "))}</span>`;
+    const title=suggestion?`${esc(row.proxy_name)} ↔ ${esc(otherLabel)}`:esc(row.proxy_name);
+    const mergeBtn=suggestion
+      ?`<button class="id-change" title="Merge these" data-on-click="doMergeIdentity" data-args="${rcArgs(suggestion.alias_proxy_name,suggestion.candidate_kind,suggestion.candidate_user_id??null,suggestion.candidate_proxy_name??null)}">🔗</button>`
+      :"";
+    const dismissBtn=suggestion
+      ?`<button class="id-change" title="Not a match" data-on-click="doDismissSuggestion" data-args="${rcArgs(_suggestionsCache.indexOf(suggestion))}">✕</button>`
+      :"";
+    // The "nothing to merge, and that's fine" exit — distinct from 🗑,
+    // which throws the name away. Keeps it as a future merge target.
+    const standaloneBtn=`<button class="id-change" title="'${esc(row.proxy_name)}' is a real person with no Telegram account — stop asking" data-on-click="doMarkStandalone" data-args="${rcArgs(row.proxy_name)}">✅</button>`;
+    return `<div class="sched-item">
+      <div class="sched-item-info">
+        <div class="sched-item-title">${title}</div>
+        <div class="sched-item-time">${confBadge}${metaBadge}</div>
+      </div>
+      <div style="display:flex;gap:6px;flex-shrink:0">
+        ${mergeBtn}${dismissBtn}${standaloneBtn}
+        <button class="id-change" title="'${esc(row.proxy_name)}' is invalid/garbage — discard it" data-on-click="doDiscardIdentity" data-args="${rcArgs(row.proxy_name)}">🗑</button>
+      </div>
     </div>`;
-    html+=`<div id="im-unmatched-body" class="${_identityUnmatchedOpen?"":"hidden"}">`;
-    html+=vis.map(rowHtml).join("");
+  };
+  const listHtml=rows=>{
+    const vis=rows.slice(0,SHOW_N), extra=rows.slice(SHOW_N);
+    let h=vis.map(rowHtml).join("");
     if(extra.length){
-      html+=`<div class="alias-extra hidden">${extra.map(rowHtml).join("")}</div>`;
-      html+=`<button class="alias-more-btn" data-on-click="_toggleExtraAliases" data-args="${rcArgs(RC_THIS)}">+${extra.length} more</button>`;
+      h+=`<div class="alias-extra hidden">${extra.map(rowHtml).join("")}</div>`;
+      h+=`<button class="alias-more-btn" data-on-click="_toggleExtraAliases" data-args="${rcArgs(RC_THIS)}">+${extra.length} more</button>`;
     }
+    return h;
+  };
+  const hdr="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:6px;cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none";
+  html+=`<div style="${hdr}" data-on-click="toggleIdentityUnmatched">
+    <span id="im-unmatched-chevron">${_identityUnmatchedOpen?"▲":"▼"}</span>Needs review (${reviewRows.length} pending)
+  </div>`;
+  html+=`<div id="im-unmatched-body" class="${_identityUnmatchedOpen?"":"hidden"}">`;
+  html+=reviewRows.length
+    ?`<div style="font-size:.72rem;color:var(--sub);margin-bottom:6px">Each name looks like someone already known. 🔗 merge, or ✕ not a match.</div>`+listHtml(reviewRows)
+    :`<div class="sched-empty">✅ Nothing pending — every guest name with a likely match has been dealt with.</div>`;
+  html+=`</div>`;
+  if(noMatchRows.length){
+    html+=`<div style="${hdr};margin-top:14px" data-on-click="toggleIdentityNoMatch">
+      <span id="im-nomatch-chevron">${_identityNoMatchOpen?"▲":"▼"}</span>No likely match (${noMatchRows.length})
+    </div>`;
+    html+=`<div id="im-nomatch-body" class="${_identityNoMatchOpen?"":"hidden"}">`;
+    html+=`<div style="font-size:.72rem;color:var(--sub);margin-bottom:6px">Probably one-off guests. ✅ keep as a guest, 🗑 if it's junk, or merge by hand below if you know who it is.</div>`;
+    html+=listHtml(noMatchRows);
     html+=`</div>`;
   }
 
@@ -4565,7 +4602,7 @@ function renderIdentityMerge(){
   // "+N more" toggle so one person with many aliases doesn't blow out
   // their row's height, and Count is highlighted once it crosses that
   // same threshold as a quick "worth a second look" signal.
-  html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin:${reviewRows.length?"14px":"0"} 0 6px">Identities</div>`;
+  html+=`<div style="font-size:.78rem;font-weight:600;color:var(--sub);margin:14px 0 6px">Identities</div>`;
   if(!mergedRows.length){
     html+=`<div class="sched-empty">No merges yet — use Review & merge above or pick manually below.</div>`;
   }else{
@@ -5014,6 +5051,25 @@ function _syncGhostBadge(){
   item.classList.remove("hidden");
   badge.textContent=n?String(n):"›";
   badge.classList.toggle("gr-badge",!!n);
+}
+
+// Merge identities: how many guest names look like someone already known —
+// on the menu entry, so "how many are pending" is known without opening it.
+function _syncMergeBadge(){
+  const badge=document.getElementById("adm-merge-badge");
+  if(!badge)return;
+  badge.textContent=_mergePendingCount?String(_mergePendingCount):"›";
+  badge.classList.toggle("gr-badge",!!_mergePendingCount);
+}
+async function _peekMergeQueue(){
+  if(!_idToken||!_isWebAdmin)return;
+  try{
+    const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/identities/suggestions`,
+      {headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(8000)});
+    if(!res.ok)return;
+    _mergePendingCount=(await res.json()).pending_count||0;
+    _syncMergeBadge();
+  }catch(_){}
 }
 
 // Pull the pending count once admin status is known, so the badge is there

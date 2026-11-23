@@ -263,6 +263,9 @@ class WebStatsFillDays(BaseModel):
     worst: Optional[str] = None
     worst_limit: Optional[int] = None
     single_limit: bool = True
+    one_off_games: int = 0               # (day, limit) played once — folded out of weekdays
+    one_off_days: List[str] = Field(default_factory=list)
+    one_off_note: str = ""               # services.stats.fill_one_off_note, shared with /stats days
     title_dated_games: int = 0           # no game time set — dated by the weekday in the title
     undated_games: int = 0               # games in unknown_day
     dating_note: str = ""                # services.stats.fill_dating_note, shared with /stats days

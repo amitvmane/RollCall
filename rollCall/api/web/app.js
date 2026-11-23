@@ -1500,7 +1500,8 @@ function renderStats(d){
     const at=(day,lim)=>`${esc(day)}s${fd.single_limit||!lim?"":` at limit ${lim}`}`;
     const tip=fd.best?`💡 ${at(fd.best,fd.best_limit)} fill most reliably${fd.worst?` — ${at(fd.worst,fd.worst_limit)} least often`:""}.`
       :((fd.weekdays||[]).length&&!fd.limited_games?"💡 No game had a limit, so nothing can fill.":"");
-    const dated=fd.dating_note?`<div class="rt-note">ℹ️ ${esc(fd.dating_note)}</div>`:"";
+    const dated=(fd.one_off_note?`<div class="rt-note">➕ ${esc(fd.one_off_note)}</div>`:"")
+      +(fd.dating_note?`<div class="rt-note">ℹ️ ${esc(fd.dating_note)}</div>`:"");
     const unknownHtml=fdUnknown.length?`<div class="stats-section-hdr">❔ Day unknown</div>
     <div class="ghost-list">${fdUnknown.map(w=>fillRow(w,"?")).join("")}</div>
     <div class="rt-note">${esc(fd.unknown_day_hint||"")}</div>`:"";

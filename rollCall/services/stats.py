@@ -389,8 +389,10 @@ def response_time_stats(chat_id: int, limit: int = 10) -> list:
     return response_time_board(chat_id, limit)["entries"]
 
 
-# A day needs this many games with a limit before it is called best/worst.
-FILL_MIN_GAMES = 2
+# A (day, limit) row needs this many games before the tip may call it
+# best/worst. At 2, a slot tried 3 times (67%) out-ranked one played 44 times
+# (57%) — a percentage from a handful of games is noise, not a pattern.
+FILL_MIN_GAMES = 5
 
 _WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
@@ -641,6 +643,14 @@ def fill_by_weekday(chat_id: int, days: Optional[int] = None) -> dict:
     order = sorted(buckets, key=lambda k: (7 if k[0] is None else k[0], -k[1] if k[1] else 1))
     rows = [dict(_fill_row(buckets[k], k[1]), weekday=_WEEKDAYS[k[0]]) for k in order if k[0] is not None]
     unknown = [_fill_row(buckets[k], k[1]) for k in order if k[0] is None]
+    # A (day, limit) played only once is a one-off, not a slot the group runs:
+    # folded into one line so the table shows the regular slots. Never folds
+    # everything away — a new group whose rows are all one-offs sees them all.
+    one_offs = [r for r in rows if r["games"] == 1]
+    if len(one_offs) < len(rows):
+        rows = [r for r in rows if r["games"] > 1]
+    else:
+        one_offs = []
     # Best / worst only among rows with enough limited games to mean something:
     # fill rate first, then how close the average comes to the limit.
     ranked = sorted((r for r in rows if r["limit"] and r["games"] >= FILL_MIN_GAMES),
@@ -656,10 +666,13 @@ def fill_by_weekday(chat_id: int, days: Optional[int] = None) -> dict:
            "single_limit": len({r["limit"] for r in rows if r["limit"]}) <= 1,
            "title_dated_games": title_dated,
            "undated_games": sum(r["games"] for r in unknown),
-           "total_games": sum(r["games"] for r in rows),
+           "one_off_games": len(one_offs),
+           "one_off_days": [d for d in _WEEKDAYS if any(r["weekday"] == d for r in one_offs)],
+           "total_games": sum(r["games"] for r in rows) + len(one_offs),
            "limited_games": sum(r["limited_games"] for r in rows)}
     out["dating_note"] = fill_dating_note(out)
     out["unknown_day_hint"] = UNKNOWN_DAY_HINT if unknown else ""
+    out["one_off_note"] = fill_one_off_note(out)
     return out
 
 
@@ -670,6 +683,17 @@ def fill_dating_note(data: dict) -> str:
     if not t:
         return ""
     return f"{t} game{'' if t == 1 else 's'} had no game time set — dated by the day in the title."
+
+
+def fill_one_off_note(data: dict) -> str:
+    """'6 one-off games not shown — a day and limit played only once (Tue, Thu, Fri).'
+    One shared wording for /stats days and the web card; '' when none."""
+    k = data.get("one_off_games") or 0
+    if not k:
+        return ""
+    days = ", ".join(d[:3] for d in data.get("one_off_days") or [])
+    return (f"{k} one-off game{'' if k == 1 else 's'} not shown — "
+            f"a day and limit played only once ({days}).")
 
 
 UNKNOWN_DAY_HINT = "No game time and no day in the title. Set one with /when, or name the day in the title."

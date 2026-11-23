@@ -159,6 +159,8 @@ def _fmt_fill_days(data: dict) -> str:
         lines.append(tip)
     elif data["weekdays"] and not data["limited_games"]:
         lines.append("💡 No game had a limit, so nothing can fill — an admin can set one with /set\\_limit.")
+    if data.get("one_off_note"):
+        lines.append(f"➕ {data['one_off_note']}")
     if data.get("dating_note"):
         lines.append(f"ℹ️ {data['dating_note']}")
     if unknown:

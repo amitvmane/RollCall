@@ -154,7 +154,7 @@ COMMANDS = [
         "details": (
             "/stats              — your own attendance, voting, streak\n"
             "/stats group        — chat-wide attendance summary (incl. proxies)\n"
-            "/stats days [N]     — which weekdays fill up to the limit (all games, or last N days)\n"
+            "/stats days [N]     — which game days fill up, per limit (all games, or last N days)\n"
             "/stats top          — top 10 by real attendance (incl. proxies)\n"
             "/stats ghost        — no-show leaderboard\n"
             "/stats @user        — another member's stats (use @username)\n"

@@ -1476,30 +1476,40 @@ function renderStats(d){
     <div class="ghost-list">${top}</div>`;
   }
 
-  // Which weekdays fill up to the limit — every member sees it, same
-  // numbers as /stats days (services.stats.fill_by_weekday).
+  // Which game days fill up — one row per (day played, limit), every member
+  // sees it, same numbers as /stats days (services.stats.fill_by_weekday).
   const fd=d.fill_days;
   let fillHtml="";
-  if(fd&&(fd.weekdays||[]).length){
+  const fdUnknown=(fd&&fd.unknown_day)||[];
+  if(fd&&((fd.weekdays||[]).length||fdUnknown.length)){
     const fillDur=s=>s==null?"":s<3600?`~${Math.max(1,Math.round(s/60))}m`:s<172800?`~${Math.round(s/3600)}h`:`~${Math.round(s/86400)}d`;
-    const rows=fd.weekdays.map(w=>{
-      const games=`${w.games} game${w.games===1?"":"s"}`;
-      const detail=w.limited_games
-        ?`${games} · avg ${w.avg_in}/${w.avg_limit}${w.median_fill_seconds!=null?` · full ${fillDur(w.median_fill_seconds)} after start`:""}`
-        :`${games} · avg ${w.avg_in} IN · no limit`;
-      const fill=w.limited_games?`${w.filled}/${w.limited_games} · ${w.fill_pct}%`:"—";
-      return `<div class="ghost-row" title="${esc(detail)}">
-        <span class="rt-rank">${esc(w.weekday.slice(0,3))}</span>
-        <span class="ghost-name">${esc(detail)}</span>
+    // Two lines so nothing is cut off on a phone: what the games were, then
+    // how they went (avg, peak demand, time to fill).
+    const fillRow=(w,label)=>{
+      const head=`${w.limit?`limit ${w.limit}`:"no limit"} · ${w.games} game${w.games===1?"":"s"}`;
+      const how=`avg ${w.avg_in}${w.limit?"":" IN"} · peak ${w.peak_signups}`
+        +(w.median_fill_seconds!=null?` · full ${fillDur(w.median_fill_seconds)} after start`:"");
+      const fill=w.limit?`${w.filled}/${w.games} · ${w.fill_pct}%`:"—";
+      return `<div class="ghost-row">
+        <span class="rt-rank">${esc(label)}</span>
+        <span class="fill-detail"><span class="fill-head">${esc(head)}</span><span class="fill-how">${esc(how)}</span></span>
         <span class="rt-best">${esc(fill)}</span>
       </div>`;
-    }).join("");
-    const tip=fd.best?`💡 ${esc(fd.best)}s fill most reliably${fd.worst?` — ${esc(fd.worst)}s fill least often`:""}.`
-      :(!fd.limited_games?"💡 No game had a limit, so nothing can fill.":"");
-    fillHtml=`<div class="stats-section-hdr">📅 Which days fill up <small>(all games)</small></div>
+    };
+    const rows=(fd.weekdays||[]).map(w=>fillRow(w,w.weekday.slice(0,3))).join("");
+    const at=(day,lim)=>`${esc(day)}s${fd.single_limit||!lim?"":` at limit ${lim}`}`;
+    const tip=fd.best?`💡 ${at(fd.best,fd.best_limit)} fill most reliably${fd.worst?` — ${at(fd.worst,fd.worst_limit)} least often`:""}.`
+      :((fd.weekdays||[]).length&&!fd.limited_games?"💡 No game had a limit, so nothing can fill.":"");
+    const dated=fd.dating_note?`<div class="rt-note">ℹ️ ${esc(fd.dating_note)}</div>`:"";
+    const unknownHtml=fdUnknown.length?`<div class="stats-section-hdr">❔ Day unknown</div>
+    <div class="ghost-list">${fdUnknown.map(w=>fillRow(w,"?")).join("")}</div>
+    <div class="rt-note">${esc(fd.unknown_day_hint||"")}</div>`:"";
+    fillHtml=`<div class="stats-section-hdr">📅 Which game days fill up <small>(all games)</small></div>
     ${tip?`<div class="vp-summary">${tip}</div>`:""}
-    <div class="ghost-list">${rows}</div>
-    <div class="rt-note">Filled = the IN list reached the limit (waitlist and late drop-outs count). Cancelled games don't count.</div>`;
+    ${rows?`<div class="ghost-list">${rows}</div>`:""}
+    ${dated}
+    ${unknownHtml}
+    <div class="rt-note">Day = when the game was played. Filled = the IN list reached the limit (waitlist and late drop-outs count). Peak = most who wanted in, waitlist included. Cancelled games don't count.</div>`;
   }
 
   sc.innerHTML=`

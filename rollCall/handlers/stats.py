@@ -122,32 +122,51 @@ async def stats_command(message):
 
 # ── Formatters ────────────────────────────────────────────────────────────────
 
+def _fill_tip(data: dict) -> str:
+    """'Sundays at limit 8 fill most reliably — Fridays at limit 10 least often.'"""
+    def at(day, limit):
+        return f"{day}s" + ("" if data.get("single_limit") or not limit else f" at limit {limit}")
+    if not data.get("best"):
+        return ""
+    tip = f"💡 {at(data['best'], data.get('best_limit'))} fill most reliably"
+    if data.get("worst"):
+        tip += f" — {at(data['worst'], data.get('worst_limit'))} least often"
+    return tip + "."
+
+
+def _fill_line(w: dict, label: str) -> str:
+    n = f"{w['games']} game{'' if w['games'] == 1 else 's'}"
+    peak = f"peak {w['peak_signups']}"
+    if w["limit"]:
+        when = stats_svc.fill_duration(w["median_fill_seconds"])
+        return (f"{label} · limit {w['limit']} · {n} · filled {w['filled']} ({w['fill_pct']}%)"
+                f" · avg {w['avg_in']:g} · {peak}" + (f" · full {when} after start" if when else ""))
+    return f"{label} · no limit · {n} · avg {w['avg_in']:g} IN · {peak}"
+
+
 def _fmt_fill_days(data: dict) -> str:
     span = f"last {data['days']} days" if data["days"] else "all games"
-    head = f"📅 *Which days fill up* ({span})"
-    if not data["weekdays"]:
+    head = f"📅 *Which game days fill up* ({span})"
+    unknown = data.get("unknown_day") or []
+    if not data["weekdays"] and not unknown:
         return head + "\n\nNo completed games yet."
     lines = [head, ""]
-    for w in data["weekdays"]:
-        day = w["weekday"][:3]
-        n = f"{w['games']} game{'' if w['games'] == 1 else 's'}"
-        if w["limited_games"]:
-            avg = f"avg {w['avg_in']:g}/{w['avg_limit']:g}"
-            fill = f"filled {w['filled']}/{w['limited_games']} ({w['fill_pct']}%)"
-            when = stats_svc.fill_duration(w["median_fill_seconds"])
-            lines.append(f"*{day}*  {n} · {fill} · {avg}" + (f" · full {when} after start" if when else ""))
-        else:
-            lines.append(f"*{day}*  {n} · avg {w['avg_in']:g} IN · no limit set")
-    lines.append("")
-    if data["best"]:
-        tip = f"💡 {data['best']}s fill most reliably"
-        if data["worst"]:
-            tip += f" — {data['worst']}s fill least often"
-        lines.append(tip + ".")
-    elif not data["limited_games"]:
+    lines += [_fill_line(w, f"*{w['weekday'][:3]}*") for w in data["weekdays"]]
+    if data["weekdays"]:
+        lines.append("")
+    tip = _fill_tip(data)
+    if tip:
+        lines.append(tip)
+    elif data["weekdays"] and not data["limited_games"]:
         lines.append("💡 No game had a limit, so nothing can fill — an admin can set one with /set\\_limit.")
-    lines.append("_Filled = the IN list reached the limit, counting the waitlist and late drop-outs. "
-                 "Cancelled games don't count._")
+    if data.get("dating_note"):
+        lines.append(f"ℹ️ {data['dating_note']}")
+    if unknown:
+        lines += ["", *[_fill_line(w, "❔ *Day unknown*") for w in unknown],
+                  f"_{stats_svc.UNKNOWN_DAY_HINT}_"]
+    lines += ["", "_Day = when the game was played. Filled = the IN list reached the limit "
+                  "(waitlist and late drop-outs count). Peak = most who wanted in, waitlist included. "
+                  "Cancelled games don't count._"]
     return "\n".join(lines)
 
 

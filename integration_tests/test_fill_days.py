@@ -14,10 +14,10 @@ def _ph():
 
 class TestFillDays(IntegrationBase):
 
-    async def _game(self, players, limit=None, day="2026-11-08", waitlist=0, cancel=False):
+    async def _game(self, players, limit=None, day="2026-11-08", waitlist=0, cancel=False, title="Game"):
         """A finished game on `day` (2026-11-08 is a Sunday)."""
         from handlers.settings import wait_limit
-        await self.start_rc("Game")
+        await self.start_rc(title)
         if limit:
             await wait_limit(self.msg(f"/sl {limit}", ADMIN_USER))
         for u in USERS[:players + waitlist]:
@@ -33,9 +33,10 @@ class TestFillDays(IntegrationBase):
                         (f"{day} 18:00:00", rid))
         return rid
 
-    def _day(self, name, data=None):
+    def _day(self, name, data=None, limit="any"):
         data = data or stats_svc.fill_by_weekday(CHAT_ID)
-        return next(w for w in data["weekdays"] if w["weekday"] == name)
+        return next(w for w in data["weekdays"]
+                    if w["weekday"] == name and (limit == "any" or w["limit"] == limit))
 
     async def test_filled_counts_the_waitlist_and_ignores_cancelled_games(self):
         await self._game(4, limit=4, waitlist=2)                 # Sun: full + 2 waiting
@@ -44,13 +45,69 @@ class TestFillDays(IntegrationBase):
         await self._game(2, limit=4, day="2026-11-11")           # Wed: half
         await self._game(5, day="2026-11-11")                    # Wed: no limit
         data = stats_svc.fill_by_weekday(CHAT_ID)
-        sun, wed = self._day("Sunday", data), self._day("Wednesday", data)
-        self.assertEqual((sun["games"], sun["limited_games"], sun["filled"], sun["fill_pct"]), (2, 2, 1, 50))
+        sun = self._day("Sunday", data)
+        self.assertEqual((sun["limit"], sun["games"], sun["filled"], sun["fill_pct"]), (4, 2, 1, 50))
         self.assertEqual(sun["avg_in"], 3.5, "spots taken, capped at the limit — the waitlist isn't a spot")
-        self.assertEqual(sun["avg_limit"], 4)
-        self.assertEqual((wed["games"], wed["limited_games"], wed["filled"]), (2, 1, 0))
-        self.assertEqual(wed["avg_in"], 2, "against the limit, so the no-limit game doesn't blur it")
-        self.assertEqual([w["weekday"] for w in data["weekdays"]], ["Wednesday", "Sunday"], "week order")
+        self.assertEqual(sun["peak_signups"], 6, "peak is demand: the waitlist counts")
+        wed4, wed_open = self._day("Wednesday", data, 4), self._day("Wednesday", data, None)
+        self.assertEqual((wed4["games"], wed4["filled"], wed4["avg_in"]), (1, 0, 2))
+        self.assertEqual((wed_open["games"], wed_open["fill_pct"], wed_open["avg_in"]), (1, None, 5),
+                         "the no-limit game is its own row, never blurred into the limited one")
+        self.assertEqual([(w["weekday"], w["limit"]) for w in data["weekdays"]],
+                         [("Wednesday", 4), ("Wednesday", None), ("Sunday", 4)], "week order, no-limit last")
+
+    async def test_each_limit_is_its_own_row(self):
+        """The reported bug: games at limit 2 and limit 8 on the same day were
+        averaged into one row ('avg 2.2/7.5'), which answers nothing."""
+        await self._game(2, limit=2)                             # Sun, limit 2: full
+        await self._game(2, limit=2)                             # Sun, limit 2: full
+        await self._game(3, limit=8)                             # Sun, limit 8: short
+        await self._game(5, limit=8)                             # Sun, limit 8: short
+        data = stats_svc.fill_by_weekday(CHAT_ID)
+        small, big = self._day("Sunday", data, 2), self._day("Sunday", data, 8)
+        self.assertEqual((small["games"], small["filled"], small["fill_pct"]), (2, 2, 100))
+        self.assertEqual((big["games"], big["filled"], big["fill_pct"], big["avg_in"]), (2, 0, 0, 4))
+        self.assertEqual((data["best"], data["best_limit"], data["worst"], data["worst_limit"]),
+                         ("Sunday", 2, "Sunday", 8))
+        self.assertFalse(data["single_limit"])
+
+    async def test_a_game_with_no_known_day_is_kept_out_of_the_weekday_rows(self):
+        """The reported bug: a weekend game whose vote opened on Monday was
+        counted as a Monday game (created_at fallback). With no game time and
+        no day in the title its day is unknown — guessing (the day voting
+        opened, the day it was ended) would put it on the wrong weekday and
+        could flip the tip. It is reported apart instead, per limit."""
+        await self._game(2, limit=2)                             # Sun, known
+        await self._game(2, limit=2)                             # Sun, known
+        ph = _ph()
+        for players in (2, 1, 2):
+            rid = await self._game(players, limit=2)
+            with db._cursor(commit=True) as cur:
+                cur.execute(f"UPDATE rollcalls SET finalize_date = NULL, created_at = {ph}, ended_at = {ph} "
+                            f"WHERE id = {ph}", ("2026-11-02 09:00:00", "2026-11-09 04:00:00", rid))  # Mon, Mon
+        data = stats_svc.fill_by_weekday(CHAT_ID)
+        self.assertEqual([(w["weekday"], w["games"]) for w in data["weekdays"]], [("Sunday", 2)],
+                         "no Monday row: neither when voting opened nor when it was ended dates a game")
+        self.assertEqual(len(data["unknown_day"]), 1)
+        u = data["unknown_day"][0]
+        self.assertEqual((u["limit"], u["games"], u["filled"], u["fill_pct"], u["peak_signups"]), (2, 3, 2, 67, 2))
+        self.assertEqual((data["undated_games"], data["total_games"]), (3, 2))
+        self.assertEqual((data["best"], data["worst"]), ("Sunday", None), "unknown games never reach the tip")
+        self.assertIn("/when", data["unknown_day_hint"])
+        from handlers.stats import _fmt_fill_days
+        text = _fmt_fill_days(data)
+        self.assertIn("❔ *Day unknown* · limit 2 · 3 games · filled 2 (67%)", text)
+        self.assertIn("Set one with /when", text)
+
+    async def test_only_day_unknown_games_still_render(self):
+        from handlers.stats import _fmt_fill_days
+        rid = await self._game(2, limit=2)
+        with db._cursor(commit=True) as cur:
+            cur.execute(f"UPDATE rollcalls SET finalize_date = NULL WHERE id = {_ph()}", (rid,))
+        text = _fmt_fill_days(stats_svc.fill_by_weekday(CHAT_ID))
+        self.assertNotIn("No completed games yet", text)
+        self.assertNotIn("No game had a limit", text)
+        self.assertIn("Day unknown", text)
 
     async def test_a_late_drop_out_still_counts_towards_filling(self):
         rid = await self._game(3, limit=4)
@@ -94,9 +151,11 @@ class TestFillDays(IntegrationBase):
         get_mock_bot().send_message.reset_mock()
         await stats_command(self.msg("/stats days", USERS[0]))
         text = get_mock_bot().send_message.call_args.args[1]
-        self.assertIn("Which days fill up", text)
-        self.assertIn("*Sun*  2 games · filled 2/2 (100%) · avg 2/2", text)
+        self.assertIn("Which game days fill up", text)
+        self.assertIn("*Sun* · limit 2 · 2 games · filled 2 (100%) · avg 2 · peak 2", text)
         self.assertIn("Sundays fill most reliably", text)
+        self.assertNotIn("at limit", text, "one limit in the group — the tip needn't name it")
+        self.assertIn("Day = when the game was played", text)
         get_mock_bot().send_message.reset_mock()
         await stats_command(self.msg("/stats days soon", USERS[0]))
         self.assertIn("Usage: /stats days", get_mock_bot().send_message.call_args.args[1])
@@ -108,3 +167,24 @@ class TestFillDays(IntegrationBase):
         self.assertIn("No completed games yet",
                       _fmt_fill_days({"days": None, "weekdays": [], "best": None, "worst": None,
                                       "total_games": 0, "limited_games": 0}))
+
+    async def test_a_weekday_in_the_title_dates_a_game_with_no_game_time(self):
+        """No game time, but 'Sunday Football' says when it was played."""
+        ph = _ph()
+        for title in ("Sunday Football", "Sat/Sun kickabout"):
+            rid = await self._game(2, limit=2, title=title)
+            with db._cursor(commit=True) as cur:
+                cur.execute(f"UPDATE rollcalls SET finalize_date = NULL, ended_at = {ph} WHERE id = {ph}",
+                            ("2026-11-10 08:00:00", rid))                # ended on a Tuesday
+        data = stats_svc.fill_by_weekday(CHAT_ID)
+        self.assertEqual([w["weekday"] for w in data["weekdays"]], ["Sunday"],
+                         "'Sunday Football' → Sunday, not the Tuesday it was ended")
+        self.assertEqual([u["games"] for u in data["unknown_day"]], [1], "'Sat/Sun' names two days → unknown")
+        self.assertEqual((data["title_dated_games"], data["undated_games"]), (1, 1))
+        self.assertEqual(data["dating_note"], "1 game had no game time set — dated by the day in the title.")
+
+    def test_title_weekday(self):
+        cases = {"Sunday Football": 6, "SAT 7am turf": 5, "Weekly game (thurs)": 3, "Tue/Tue": 1,
+                 "Sat/Sun": None, "Football": None, "Sunset league": None, "Saturn": None, None: None}
+        for title, want in cases.items():
+            self.assertEqual(stats_svc.title_weekday(title), want, title)

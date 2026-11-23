@@ -7360,7 +7360,7 @@ def get_fill_history(chat_id: int, since_utc: Optional[str] = None) -> List[Dict
     """Every completed (ended, not cancelled) rollcall since since_utc (all
     time when None), with what is needed to tell whether it filled:
 
-      in_list_limit, created_at (opened), finalize_date / ended_at
+      title, in_list_limit, created_at (opened), finalize_date / ended_at
       signups     — IN or waitlisted at close, members and guests
       late_drops  — late drop-outs who didn't end IN/waitlisted (they held
                     a spot once; the vote rows alone no longer show it)
@@ -7379,7 +7379,7 @@ def get_fill_history(chat_id: int, since_utc: Optional[str] = None) -> List[Dict
                 done += f" AND r.ended_at >= {ph}"
                 params += (since_utc,)
             cursor.execute(
-                f"SELECT r.id, r.finalize_date, r.created_at, r.ended_at, r.in_list_limit "
+                f"SELECT r.id, r.title, r.finalize_date, r.created_at, r.ended_at, r.in_list_limit "
                 f"FROM rollcalls r WHERE {done} ORDER BY r.ended_at", params)
             games = {row["id"]: dict(row, signups=0, late_drops=0, join_times=[])
                      for row in (dict(x) for x in cursor.fetchall())}

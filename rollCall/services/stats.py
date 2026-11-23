@@ -542,69 +542,137 @@ def _ts(value):
         return None
 
 
-def fill_by_weekday(chat_id: int, days: Optional[int] = None) -> dict:
-    """Which weekday's games fill up to their limit — all games, or the last N days.
+# "Sunday Football", "Sat 7am" — a weekday named in a rollcall title, as a
+# whole word. Full names and the usual short forms; Monday=0.
+_TITLE_DAYS = {"monday": 0, "mon": 0, "tuesday": 1, "tue": 1, "tues": 1,
+               "wednesday": 2, "wed": 2, "thursday": 3, "thu": 3, "thur": 3, "thurs": 3,
+               "friday": 4, "fri": 4, "saturday": 5, "sat": 5, "sunday": 6, "sun": 6}
 
-    avg_in is spots taken (capped at the limit) over the day's games with a
-    limit, or plain IN over all its games when none had one.
+
+def title_weekday(title) -> Optional[int]:
+    """The weekday a title names ('Sunday Football' → 6), or None when it
+    names none — or two different ones ('Sat/Sun'), which can't be settled."""
+    import re
+    found = {_TITLE_DAYS[w] for w in re.findall(r"[a-z]+", str(title or "").lower()) if w in _TITLE_DAYS}
+    return found.pop() if len(found) == 1 else None
+
+
+def game_weekday(g: dict):
+    """The weekday a finished game was PLAYED (Monday=0), and how it was known.
+
+    1. 'time'  — the game time (finalize_date, stored as the game's local
+                 wall time) when one was set.
+    2. 'title' — a weekday named in the title ('Sunday Football').
+    Otherwise (None, 'unknown'). Never guessed from when voting opened (a
+    weekend game whose vote opens on Monday is not a Monday game) nor from
+    when it was ended (an admin closing Sunday's game on Monday morning)."""
+    from datetime import datetime
+
+    fd = g.get("finalize_date")
+    if fd:
+        try:
+            return datetime.strptime(str(fd)[:10], "%Y-%m-%d").weekday(), "time"
+        except ValueError:
+            pass
+    wd = title_weekday(g.get("title"))
+    return (wd, "title") if wd is not None else (None, "unknown")
+
+
+def _fill_row(b: dict, limit: int) -> dict:
+    """One (day, limit) bucket's numbers — shared by the weekday rows and the
+    day-unknown rows so both are counted by the same rule."""
+    return {
+        "limit": limit or None,
+        "games": b["games"],
+        "limited_games": b["games"] if limit else 0,
+        "filled": b["filled"],
+        "fill_pct": round(100 * b["filled"] / b["games"]) if limit else None,
+        "avg_in": round(b["spots"] / b["games"], 1),
+        "avg_limit": limit or None,
+        "peak_signups": b["peak"],
+        "median_fill_seconds": _median(b["fill_secs"]) if b["fill_secs"] else None,
+    }
+
+
+def fill_by_weekday(chat_id: int, days: Optional[int] = None) -> dict:
+    """Which game days fill up to their limit — all games, or the last N days.
+
+    One row per (weekday the game was PLAYED, limit): a group that runs an
+    8-a-side on Sundays and a 12-a-side on Wednesdays gets two rows, never one
+    blurred "avg 2.2/7.5". No-limit games get their own row per day.
+
+    Games whose day can't be known (no game time, no weekday in the title)
+    are kept OUT of the weekday rows and the best/worst tip — a guessed day
+    would put them on the wrong weekday — and reported apart, per limit, in
+    unknown_day.
 
     A game counts as filled when its IN list reached the limit: signups at
     close (IN + waitlist, members and guests) plus late drop-outs who held a
-    spot. Time to fill is when the limit-th signup first voted, measured from
-    when the rollcall opened (median per day). A game with no limit counts
-    towards its day's average IN but can't fill. Cancelled games are left out.
-    Weekday = the day the game was played (session_display_date)."""
+    spot. avg_in is spots taken (capped at the limit); peak_signups is the
+    most who wanted in (waitlist included) — demand beyond the limit says
+    whether it could go up. Time to fill is when the limit-th signup first
+    voted, from when the rollcall opened (median). Cancelled games are left
+    out. Day = game_weekday()."""
     from datetime import datetime, timedelta, timezone as _tz
     import db as _db
 
     since = None
     if days:
         since = (datetime.now(_tz.utc) - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
-    by_day: dict = {}
+    buckets: dict = {}
+    title_dated = 0
     for g in _db.get_fill_history(chat_id, since):
-        try:
-            wd = datetime.strptime(session_display_date(g)[:10], "%Y-%m-%d").weekday()
-        except ValueError:
-            continue
-        b = by_day.setdefault(wd, {"games": 0, "limited": 0, "filled": 0, "in_total": 0,
-                                   "in_limited": 0, "limit_total": 0, "fill_secs": []})
+        wd, source = game_weekday(g)          # wd None → the day-unknown bucket
+        title_dated += source == "title"
         limit = int(g.get("in_list_limit") or 0)
+        b = buckets.setdefault((wd, limit), {"games": 0, "filled": 0, "spots": 0,
+                                             "peak": 0, "fill_secs": []})
         b["games"] += 1
-        b["in_total"] += min(g["signups"], limit) if limit else g["signups"]
-        if not limit:
-            continue
-        b["limited"] += 1
-        b["in_limited"] += min(g["signups"], limit)
-        b["limit_total"] += limit
-        if g["signups"] + g["late_drops"] >= limit:
+        b["spots"] += min(g["signups"], limit) if limit else g["signups"]
+        b["peak"] = max(b["peak"], g["signups"])
+        if limit and g["signups"] + g["late_drops"] >= limit:
             b["filled"] += 1
             opened = _ts(g.get("created_at"))
             joined = _ts(g["join_times"][limit - 1]) if len(g["join_times"]) >= limit else None
             if opened and joined:
                 b["fill_secs"].append(max(0, int((joined - opened).total_seconds())))
 
-    rows = []
-    for wd in sorted(by_day):
-        b = by_day[wd]
-        rows.append({
-            "weekday": _WEEKDAYS[wd],
-            "games": b["games"],
-            "limited_games": b["limited"],
-            "filled": b["filled"],
-            "fill_pct": round(100 * b["filled"] / b["limited"]) if b["limited"] else None,
-            # Against the limit when the day's games had one, so avg/limit compare like with like.
-            "avg_in": round(b["in_limited"] / b["limited"] if b["limited"] else b["in_total"] / b["games"], 1),
-            "avg_limit": round(b["limit_total"] / b["limited"], 1) if b["limited"] else None,
-            "median_fill_seconds": _median(b["fill_secs"]) if b["fill_secs"] else None,
-        })
-    # Best / worst only among days with enough limited games to mean something.
-    ranked = sorted((r for r in rows if (r["limited_games"] or 0) >= FILL_MIN_GAMES),
-                    key=lambda r: (-r["fill_pct"], -r["limited_games"]))
-    best = ranked[0]["weekday"] if ranked else None
-    worst = ranked[-1]["weekday"] if len(ranked) > 1 and ranked[-1]["fill_pct"] < ranked[0]["fill_pct"] else None
-    return {"days": days, "weekdays": rows, "best": best, "worst": worst,
-            "total_games": sum(r["games"] for r in rows),
-            "limited_games": sum(r["limited_games"] for r in rows)}
+    # Week order; within a day the biggest limit first, no-limit last.
+    order = sorted(buckets, key=lambda k: (7 if k[0] is None else k[0], -k[1] if k[1] else 1))
+    rows = [dict(_fill_row(buckets[k], k[1]), weekday=_WEEKDAYS[k[0]]) for k in order if k[0] is not None]
+    unknown = [_fill_row(buckets[k], k[1]) for k in order if k[0] is None]
+    # Best / worst only among rows with enough limited games to mean something:
+    # fill rate first, then how close the average comes to the limit.
+    ranked = sorted((r for r in rows if r["limit"] and r["games"] >= FILL_MIN_GAMES),
+                    key=lambda r: (-r["fill_pct"], -(r["avg_in"] / r["limit"]), -r["games"]))
+    best = ranked[0] if ranked else None
+    worst = ranked[-1] if len(ranked) > 1 and ranked[-1]["fill_pct"] < ranked[0]["fill_pct"] else None
+    out = {"days": days, "weekdays": rows, "unknown_day": unknown,
+           "best": best["weekday"] if best else None,
+           "best_limit": best["limit"] if best else None,
+           "worst": worst["weekday"] if worst else None,
+           "worst_limit": worst["limit"] if worst else None,
+           # One limit across every row → the tip needn't name it.
+           "single_limit": len({r["limit"] for r in rows if r["limit"]}) <= 1,
+           "title_dated_games": title_dated,
+           "undated_games": sum(r["games"] for r in unknown),
+           "total_games": sum(r["games"] for r in rows),
+           "limited_games": sum(r["limited_games"] for r in rows)}
+    out["dating_note"] = fill_dating_note(out)
+    out["unknown_day_hint"] = UNKNOWN_DAY_HINT if unknown else ""
+    return out
+
+
+def fill_dating_note(data: dict) -> str:
+    """One shared wording, /stats days and the web card: how many weekday-row
+    games were placed by the day in their title. '' when none."""
+    t = data.get("title_dated_games") or 0
+    if not t:
+        return ""
+    return f"{t} game{'' if t == 1 else 's'} had no game time set — dated by the day in the title."
+
+
+UNKNOWN_DAY_HINT = "No game time and no day in the title. Set one with /when, or name the day in the title."
 
 
 def fill_duration(secs: Optional[int]) -> str:

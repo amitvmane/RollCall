@@ -239,7 +239,8 @@ class WebStatsLeaderEntry(BaseModel):
 
 
 class WebStatsFillDay(BaseModel):
-    weekday: str
+    weekday: str = ""                    # "" on a day-unknown row
+    limit: Optional[int] = None          # one row per (game day, limit); None = no limit
     games: int = 0
     limited_games: int = 0
     filled: int = 0
@@ -247,14 +248,24 @@ class WebStatsFillDay(BaseModel):
     avg_in: float = 0.0
     avg_limit: Optional[float] = None
     median_fill_seconds: Optional[int] = None
+    peak_signups: int = 0                # most who wanted in, waitlist included
 
 
 class WebStatsFillDays(BaseModel):
     """Which weekdays fill up to the limit (services.stats.fill_by_weekday)."""
     days: Optional[int] = None
     weekdays: List[WebStatsFillDay] = Field(default_factory=list)
+    # No game time, no day in the title — kept out of the weekday rows, per limit.
+    unknown_day: List[WebStatsFillDay] = Field(default_factory=list)
+    unknown_day_hint: str = ""
     best: Optional[str] = None
+    best_limit: Optional[int] = None
     worst: Optional[str] = None
+    worst_limit: Optional[int] = None
+    single_limit: bool = True
+    title_dated_games: int = 0           # no game time set — dated by the weekday in the title
+    undated_games: int = 0               # games in unknown_day
+    dating_note: str = ""                # services.stats.fill_dating_note, shared with /stats days
     total_games: int = 0
     limited_games: int = 0
 

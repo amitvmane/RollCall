@@ -1795,7 +1795,7 @@ async def run_all():
     record("/stats responds", ok)
 
     out = await feed("/stats days 90", ALICE)
-    ok = any("Which days fill up" in str(m) for m in out)
+    ok = any("Which game days fill up" in str(m) for m in out)
     record("/stats days renders through real telebot (Markdown accepted)", ok, str(out)[:300])
 
     out = await feed("/history", ALICE)

@@ -2378,6 +2378,7 @@ function _setAdminCheckFailed(reason){
   const navBtn=document.getElementById("admin-nav-btn");
   if(navBtn){navBtn.classList.add("hidden");navBtn.classList.remove("active");}
   _syncViewTabs();
+  _syncAdminTodo();
   if(!activeRcData)renderEmptyState();
   renderAcctControl();
   loadDuesSection().catch(()=>{});
@@ -4593,7 +4594,10 @@ function renderIdentityMerge(){
     html+=`</div>`;
   }
 
-  // Dense 4-column table: Canonical | Type | Count | Aliases. Only rows
+  // Dense 3-column table: Canonical | Count | Aliases (a proxy canonical
+  // carries a "Proxy" tag under its name — a separate Type column used to be
+  // hidden on phones, and a display:none cell shifts every later cell one
+  // <col> left, squeezing the header into "COUNTALIASES"). Only rows
   // that actually have ≥1 alias — never-merged real members and bare
   // proxies have nothing to review here, so they're left out entirely
   // instead of cluttering the table with empty rows. Aliases render as
@@ -4607,16 +4611,15 @@ function renderIdentityMerge(){
     html+=`<div class="sched-empty">No merges yet — use Review & merge above or pick manually below.</div>`;
   }else{
     html+=`<div class="identity-tbl-wrap"><table class="identity-tbl">
-      <colgroup><col class="c-name"><col class="c-type"><col class="c-count"><col class="c-aliases"></colgroup>
-      <thead><tr><th>Canonical</th><th>Type</th><th>Count</th><th>Aliases</th></tr></thead>
+      <colgroup><col class="c-name"><col class="c-count"><col class="c-aliases"></colgroup>
+      <thead><tr><th>Canonical</th><th>Count</th><th>Aliases</th></tr></thead>
       <tbody>`;
     html+=mergedRows.map(({row,aliases})=>{
       const vis=aliases.slice(0,3), extra=aliases.slice(3);
       const cell=vis.map(pill).join("")
         +(extra.length?`<span class="alias-extra hidden">${extra.map(pill).join("")}</span><button class="alias-more-btn" data-on-click="_toggleExtraAliases" data-args="${rcArgs(RC_THIS)}">+${extra.length} more</button>`:"");
       return `<tr>
-        <td class="itn">${esc(row.display_name)}</td>
-        <td><span class="itn-tag${row.kind==="proxy"?" proxy":""}">${row.kind==="proxy"?"Proxy":"Member"}</span></td>
+        <td class="itn">${esc(row.display_name)}${row.kind==="proxy"?'<span class="itn-tag proxy itn-tag-m">Proxy</span>':""}</td>
         <td class="itcount${aliases.length>3?" hot":""}">${aliases.length}</td>
         <td>${cell}</td>
       </tr>`;
@@ -5051,6 +5054,7 @@ function _syncGhostBadge(){
   item.classList.remove("hidden");
   badge.textContent=n?String(n):"›";
   badge.classList.toggle("gr-badge",!!n);
+  _syncAdminTodo();
 }
 
 // Merge identities: how many guest names look like someone already known —
@@ -5060,7 +5064,39 @@ function _syncMergeBadge(){
   if(!badge)return;
   badge.textContent=_mergePendingCount?String(_mergePendingCount):"›";
   badge.classList.toggle("gr-badge",!!_mergePendingCount);
+  _syncAdminTodo();
 }
+
+// The landing-page to-do card. Same counts as the menu badges, so the two
+// can never disagree; each row jumps straight to the panel that clears it.
+function _pendingGhostCount(){
+  return (_ghostSessions&&_ghostSessions.ghost_tracking_enabled)
+    ?(_ghostSessions.sessions||[]).length:0;
+}
+function _syncAdminTodo(){
+  const card=document.getElementById("admin-todo-card");
+  const dot=document.getElementById("vn-admin-dot");
+  const rows=[];
+  if(_isWebAdmin){
+    const m=_mergePendingCount, g=_pendingGhostCount();
+    if(m)rows.push({ico:"🧬",sec:"merge",btn:"Review",
+      text:`${m} guest name${m>1?"s look":" looks"} like someone already in the group`});
+    if(g)rows.push({ico:"👻",sec:"ghost",btn:"Review",
+      text:`${g} game${g>1?"s":""} waiting for a no-show review`});
+  }
+  if(dot)dot.classList.toggle("hidden",!rows.length);
+  if(!card)return;
+  card.classList.toggle("hidden",!rows.length);
+  card.innerHTML=rows.length
+    ?`<div class="todo-hdr">🛠 Needs an admin</div>`+rows.map(r=>
+      `<div class="todo-row"><span class="todo-t">${r.ico} ${esc(r.text)}</span>`+
+      `<button class="btn btn-secondary todo-btn" data-on-click="openAdminTodo" data-args="${rcArgs(r.sec)}">${esc(r.btn)}</button></div>`).join("")
+    :"";
+}
+window.openAdminTodo=function(sec){
+  showView("admin");
+  openAdminSection(sec);
+};
 async function _peekMergeQueue(){
   if(!_idToken||!_isWebAdmin)return;
   try{

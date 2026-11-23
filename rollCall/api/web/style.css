@@ -734,13 +734,13 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
    review artifact for the design rationale. */
 .identity-tbl-wrap{overflow-x:auto}
 .identity-tbl{width:100%;border-collapse:collapse;font-size:.82rem;table-layout:fixed;margin-top:6px}
-.identity-tbl th{text-align:left;color:var(--sub);font-weight:700;padding:4px 6px 8px;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em}
+.identity-tbl th{text-align:left;color:var(--sub);font-weight:700;padding:4px 6px 8px;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.itn-tag-m{display:table;margin-top:3px}
 .identity-tbl td{padding:7px 6px;border-bottom:1px solid var(--border);vertical-align:top}
 .identity-tbl tr:last-child td{border-bottom:none}
-.identity-tbl col.c-name{width:30%}
-.identity-tbl col.c-type{width:15%}
-.identity-tbl col.c-count{width:13%}
-.identity-tbl col.c-aliases{width:42%}
+.identity-tbl col.c-name{width:36%}
+.identity-tbl col.c-count{width:16%}
+.identity-tbl col.c-aliases{width:48%}
 .itn{font-weight:600}
 .itn-tag{display:inline-block;font-size:0.72rem;font-weight:600;padding:1px 7px;border-radius:5px;background:var(--border);color:var(--sub)}
 .itn-tag.proxy{background:var(--accent-dim);color:var(--accent)}
@@ -771,8 +771,9 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .im-combo-empty{padding:8px 12px;font-size:.82rem;color:var(--sub);font-style:italic}
 
 @media(max-width:480px){
-  .identity-tbl col.c-name{width:34%}
-  .identity-tbl th:nth-child(2),.identity-tbl td:nth-child(2){display:none}
+  .identity-tbl col.c-count{width:19%}
+  .identity-tbl col.c-aliases{width:45%}
+  .identity-tbl th{letter-spacing:.02em}
   .discarded-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media(min-width:481px) and (max-width:600px){
@@ -805,6 +806,14 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .gr-tag{font-size:0.72rem;font-weight:700;color:var(--sub);border:1px solid var(--border);border-radius:5px;padding:1px 5px;white-space:nowrap}
 .gr-more{background:none;border:none;color:var(--accent);font-family:inherit;font-size:.8rem;font-weight:600;cursor:pointer;padding:8px 10px}
 .gr-actions{display:flex;gap:8px;margin-top:10px}
+.vn-item{position:relative}
+.vn-dot{position:absolute;top:4px;right:6px;width:8px;height:8px;border-radius:50%;background:var(--out,#dc2626)}
+#admin-todo-card{border:1.5px solid var(--accent);display:flex;flex-direction:column;gap:8px}
+#admin-todo-card.hidden{display:none}
+.todo-hdr{font-size:.78rem;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.04em}
+.todo-row{display:flex;align-items:center;gap:10px;justify-content:space-between}
+.todo-t{font-size:.88rem;flex:1;min-width:0}
+.todo-btn{flex:none;width:auto;padding:6px 14px}
 .gr-badge{background:var(--out,#dc2626);color:#fff;border-radius:999px;min-width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;font-size:.72rem;font-weight:800;padding:0 6px}
 
 /* ── Group switcher in the header ─────────────────────────────────────────

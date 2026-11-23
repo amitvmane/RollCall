@@ -200,7 +200,7 @@
       </button>
       <button class="vn-item hidden" id="vn-admin" role="tab" aria-selected="false"
               data-view="admin" data-on-click="showView" data-args='["admin"]'>
-        <span class="vn-ico">⚙</span><span class="vn-lbl">Admin</span>
+        <span class="vn-ico">⚙</span><span class="vn-lbl">Admin</span><span class="vn-dot hidden" id="vn-admin-dot" aria-label="Needs attention"></span>
       </button>
     </nav>
 
@@ -212,6 +212,11 @@
          col-main = what you came here to do (see the game, vote, see who's in)
          col-side = everything you consult rather than act on. -->
     <div id="col-main">
+    <!-- Admin to-do: work waiting on an admin (names to merge, no-shows to
+         review), on the page they land on — the counts on the admin menu are
+         only seen by someone who already went looking. Filled by
+         _syncAdminTodo() in app.js; hidden when there is nothing to do. -->
+    <div id="admin-todo-card" class="card hidden" role="status"></div>
     <!-- Tabs (multi-rollcall group mode) -->
     <div id="tab-card" class="card hidden">
       <div id="tab-bar" class="tab-bar"></div>

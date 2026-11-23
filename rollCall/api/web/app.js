@@ -1506,6 +1506,7 @@ function renderStats(d){
     <div class="ghost-list">${fdUnknown.map(w=>fillRow(w,"?")).join("")}</div>
     <div class="rt-note">${esc(fd.unknown_day_hint||"")}</div>`:"";
     fillHtml=`<div class="stats-section-hdr">📅 Which game days fill up <small>(all games)</small></div>
+    ${fd.by_day_note?`<div class="vp-summary">📊 ${esc(fd.by_day_note)}</div>`:""}
     ${tip?`<div class="vp-summary">${tip}</div>`:""}
     ${rows?`<div class="ghost-list">${rows}</div>`:""}
     ${dated}

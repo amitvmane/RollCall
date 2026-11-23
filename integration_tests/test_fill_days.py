@@ -224,3 +224,21 @@ class TestFillDays(IntegrationBase):
         data = stats_svc.fill_by_weekday(CHAT_ID)
         self.assertEqual((len(data["weekdays"]), data["one_off_games"], data["one_off_note"]), (2, 0, ""),
                          "a new group with only one-offs must not see an empty table")
+
+    async def test_by_day_adds_every_limit_of_a_day_together(self):
+        """'On average, which day fills more reliably?' — all of a day's limits
+        together, days with fewer than 5 limited games left out."""
+        from handlers.stats import _fmt_fill_days
+        for players in (2, 2, 2, 1):
+            await self._game(players, limit=2)                   # Sun, limit 2: 3/4
+        await self._game(3, limit=3)                             # Sun, limit 3: 1/1 (one-off, still Sunday's)
+        for players in (2, 1, 1, 1, 1):
+            await self._game(players, limit=2, day="2026-11-14")  # Sat: 1/5
+        await self._game(5, day="2026-11-14")                    # Sat, no limit: not counted
+        for _ in range(4):
+            await self._game(2, limit=2, day="2026-11-11")       # Wed: 4 games, under the floor
+        data = stats_svc.fill_by_weekday(CHAT_ID)
+        self.assertEqual([(d["weekday"], d["filled"], d["games"], d["fill_pct"]) for d in data["by_day"]],
+                         [("Sunday", 4, 5, 80), ("Saturday", 1, 5, 20)])
+        self.assertEqual(data["by_day_note"], "By day: Sun fills 80% (4/5) · Sat fills 20% (1/5)")
+        self.assertIn("📊 By day: Sun fills 80% (4/5)", _fmt_fill_days(data))

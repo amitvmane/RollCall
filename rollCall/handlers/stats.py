@@ -154,6 +154,8 @@ def _fmt_fill_days(data: dict) -> str:
     lines += [_fill_line(w, f"*{w['weekday'][:3]}*") for w in data["weekdays"]]
     if data["weekdays"]:
         lines.append("")
+    if data.get("by_day_note"):
+        lines.append(f"📊 {data['by_day_note']}")
     tip = _fill_tip(data)
     if tip:
         lines.append(tip)

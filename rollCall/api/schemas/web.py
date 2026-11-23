@@ -263,6 +263,8 @@ class WebStatsFillDays(BaseModel):
     worst: Optional[str] = None
     worst_limit: Optional[int] = None
     single_limit: bool = True
+    by_day: List[dict] = Field(default_factory=list)   # {weekday, filled, games, fill_pct}, all limits together
+    by_day_note: str = ""                # services.stats.fill_by_day_note, shared with /stats days
     one_off_games: int = 0               # (day, limit) played once — folded out of weekdays
     one_off_days: List[str] = Field(default_factory=list)
     one_off_note: str = ""               # services.stats.fill_one_off_note, shared with /stats days

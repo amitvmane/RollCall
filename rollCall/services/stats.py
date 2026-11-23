@@ -643,6 +643,18 @@ def fill_by_weekday(chat_id: int, days: Optional[int] = None) -> dict:
     order = sorted(buckets, key=lambda k: (7 if k[0] is None else k[0], -k[1] if k[1] else 1))
     rows = [dict(_fill_row(buckets[k], k[1]), weekday=_WEEKDAYS[k[0]]) for k in order if k[0] is not None]
     unknown = [_fill_row(buckets[k], k[1]) for k in order if k[0] is None]
+    # Per day, all limits together: "filled" is always against each game's own
+    # limit, so adding limits up is fair. Computed before one-offs are folded
+    # (they are still that day's games); same 5-game floor as the tip.
+    per_day: dict = {}
+    for wd, limit in order:
+        if wd is not None and limit:
+            d = per_day.setdefault(wd, [0, 0])
+            d[0] += buckets[(wd, limit)]["filled"]
+            d[1] += buckets[(wd, limit)]["games"]
+    by_day = sorted(({"weekday": _WEEKDAYS[wd], "filled": f, "games": n, "fill_pct": round(100 * f / n)}
+                     for wd, (f, n) in per_day.items() if n >= FILL_MIN_GAMES),
+                    key=lambda r: (-r["fill_pct"], -r["games"]))
     # A (day, limit) played only once is a one-off, not a slot the group runs:
     # folded into one line so the table shows the regular slots. Never folds
     # everything away — a new group whose rows are all one-offs sees them all.
@@ -666,6 +678,7 @@ def fill_by_weekday(chat_id: int, days: Optional[int] = None) -> dict:
            "single_limit": len({r["limit"] for r in rows if r["limit"]}) <= 1,
            "title_dated_games": title_dated,
            "undated_games": sum(r["games"] for r in unknown),
+           "by_day": by_day,
            "one_off_games": len(one_offs),
            "one_off_days": [d for d in _WEEKDAYS if any(r["weekday"] == d for r in one_offs)],
            "total_games": sum(r["games"] for r in rows) + len(one_offs),
@@ -673,6 +686,7 @@ def fill_by_weekday(chat_id: int, days: Optional[int] = None) -> dict:
     out["dating_note"] = fill_dating_note(out)
     out["unknown_day_hint"] = UNKNOWN_DAY_HINT if unknown else ""
     out["one_off_note"] = fill_one_off_note(out)
+    out["by_day_note"] = fill_by_day_note(out)
     return out
 
 
@@ -683,6 +697,17 @@ def fill_dating_note(data: dict) -> str:
     if not t:
         return ""
     return f"{t} game{'' if t == 1 else 's'} had no game time set — dated by the day in the title."
+
+
+def fill_by_day_note(data: dict) -> str:
+    """'By day: Sun fills 57% (27/47) · Sat 51% (22/43)' — every limit of a day
+    together, most reliable first. Shared by /stats days and the web; ''
+    when no day has enough games."""
+    days = data.get("by_day") or []
+    if not days:
+        return ""
+    return "By day: " + " · ".join(f"{d['weekday'][:3]} fills {d['fill_pct']}% ({d['filled']}/{d['games']})"
+                                   for d in days)
 
 
 def fill_one_off_note(data: dict) -> str:

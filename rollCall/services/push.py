@@ -143,9 +143,22 @@ def validate_endpoint(endpoint: str) -> None:
             "Try Chrome, Firefox, Safari or Edge.")
 
 
-def subscribe(group_token: str, endpoint: str, p256dh: str, auth: str, tg_user_id: Optional[int] = None) -> None:
-    """Store (or refresh) a subscription. Raises PushSubscriptionRejected."""
+def _guest_key(name) -> str:
+    """How a guest name is compared: whitespace collapsed, case ignored —
+    the same way the web vote finds an existing guest entry."""
+    return " ".join(str(name or "").split()).lower()
+
+
+def subscribe(group_token: str, endpoint: str, p256dh: str, auth: str,
+              tg_user_id: Optional[int] = None, guest_name: Optional[str] = None) -> None:
+    """Store (or refresh) a subscription. Raises PushSubscriptionRejected.
+
+    guest_name is kept only for a subscriber with no verified identity — a
+    member is reached by tg_user_id, never by a name anyone could type."""
     validate_endpoint(endpoint)
+    guest_name = " ".join((guest_name or "").split())[:64] or None
+    if tg_user_id:
+        guest_name = None
     # Refreshing a subscription this group already has is always fine — the
     # cap only stops NEW rows, so a full group can't lock out existing members.
     if not _db.is_push_subscribed(endpoint, group_token):
@@ -153,7 +166,8 @@ def subscribe(group_token: str, endpoint: str, p256dh: str, auth: str, tg_user_i
             raise PushSubscriptionRejected(
                 "This group has reached its notification subscriber limit."
             )
-    _db.save_push_subscription(group_token, endpoint, p256dh, auth, tg_user_id=tg_user_id)
+    _db.save_push_subscription(group_token, endpoint, p256dh, auth, tg_user_id=tg_user_id,
+                               guest_name=guest_name)
     logging.info("[push] subscribe: group=%s tg_user_id=%s endpoint=%.40s", group_token[:12], tg_user_id, endpoint)
 
 
@@ -309,20 +323,46 @@ async def notify_rollcall_started(group_token: str, title: str, url: str) -> Non
 async def notify_users(chat_id: int, user_ids, title: str, body: str, tag: str) -> int:
     """Push to specific members of a group, on every device they subscribed from.
 
-    The web-app counterpart of a Telegram DM. Only subscriptions that were made
-    while signed in carry a tg_user_id, so an anonymous subscriber is never a
-    target here -- there is no way to know it is them. Never raises.
+    The web-app counterpart of a Telegram DM. A member (int id) is reached on
+    subscriptions made while signed in. A guest — no Telegram, so their id on
+    a rollcall is their name (a str) — is reached on subscriptions that browser
+    made as that guest and never signed in on. Guest matching is by name, the
+    same trust as the guest vote itself: whoever types "Ravi" on the page is
+    Ravi, and what they'd learn is already on the group page. Never raises.
     """
     wanted = {u for u in user_ids if isinstance(u, int)}
-    if not wanted:
+    guests = {_guest_key(u) for u in user_ids if isinstance(u, str) and _guest_key(u)}
+    if not wanted and not guests:
         return 0
     try:
         group_token, url = group_link(chat_id)
         if not group_token:
             return 0
         subs = [s for s in _db.get_push_subscriptions(group_token)
-                if s.get("tg_user_id") in wanted]
+                if s.get("tg_user_id") in wanted
+                or (s.get("tg_user_id") is None and guests
+                    and _guest_key(s.get("guest_name")) in guests)]
     except Exception:
         logging.exception("[push] notify_users lookup failed chat=%s", chat_id)
         return 0
     return await _notify(group_token, subs, title, body, url, tag, f"notify_users[{tag}]")
+
+
+async def notify_guests_not_voted(chat_id: int, rc, title: str, body: str, tag: str) -> int:
+    """Remind guests (no Telegram) who turned the bell on as a named guest and
+    aren't on this rollcall's lists yet. Members are reminded by id through
+    notify_users; a guest isn't a "member" anywhere the bot can see, so this is
+    the only reminder they get. Never raises."""
+    try:
+        group_token, url = group_link(chat_id)
+        if not group_token or rc is None:
+            return 0
+        voted = {_guest_key(u.name) for u in rc.inList + rc.outList + rc.maybeList + rc.waitList
+                 if isinstance(u.user_id, str)}
+        subs = [s for s in _db.get_push_subscriptions(group_token)
+                if s.get("tg_user_id") is None and _guest_key(s.get("guest_name"))
+                and _guest_key(s.get("guest_name")) not in voted]
+    except Exception:
+        logging.exception("[push] notify_guests_not_voted lookup failed chat=%s", chat_id)
+        return 0
+    return await _notify(group_token, subs, title, body, url, tag, f"notify_guests[{tag}]")

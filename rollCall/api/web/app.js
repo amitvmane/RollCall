@@ -371,6 +371,7 @@ function saveName(){
   currentName=val.slice(0,64);
   if(TG_NAME)localStorage.setItem(LS_NAME_OVERRIDE,currentName);
   else localStorage.setItem(LS_NAME,currentName);
+  _syncPushGuestName();
   // Naming yourself IS the guest sign-in, so the dialog's job is done.
   if(_signinHome){closeSignIn();return;}
   renderIdentity();detectCurrentVote();
@@ -1825,6 +1826,24 @@ async function _relinkPushSubscription(){
   }catch(_){}
 }
 
+// A guest (no Telegram) is reached by the name they vote under — "you're IN
+// from the waitlist" has no other way to find them. When that name changes
+// with the bell already on, tell the server; the subscription is the same.
+async function _syncPushGuestName(){
+  try{
+    if(_idToken||!currentName||!_pushOnHere||!_swReg||!("PushManager" in window))return;
+    const sub=await _swReg.pushManager.getSubscription();
+    if(!sub)return;
+    const j=sub.toJSON();
+    await fetch(`/api/v1/web/group/${URL_TOKEN}/push-subscribe`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({endpoint:j.endpoint,keys:{p256dh:j.keys.p256dh,auth:j.keys.auth},
+                           guest_name:currentName}),
+      signal:AbortSignal.timeout(5000),
+    });
+  }catch(_){}
+}
+
 // ── PWA: service worker + push notifications ───────────────────────────────
 let _swReg = null;
 
@@ -1971,13 +1990,15 @@ window.toggleNotifications = async function() {
       body: JSON.stringify({
         endpoint: j.endpoint,
         keys: { p256dh: j.keys.p256dh, auth: j.keys.auth },
-        ...(_idToken?{id_token:_idToken}:{}),
+        ...(_idToken?{id_token:_idToken}:(currentName?{guest_name:currentName}:{})),
       }),
       signal: AbortSignal.timeout(5000),
     });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     _pushOnHere = true;
-    toast("🔔 You'll be notified when this group opens a rollcall!", 3500);
+    toast((_idToken||currentName)
+      ?"🔔 You'll be notified when a rollcall opens, and when you get a spot off the waitlist."
+      :"🔔 You'll be notified when this group opens a rollcall! Add your name to hear about your own spot too.", 4000);
     _updateNotifyBtn();
   } catch (e) {
     if (e.name === "NotAllowedError") {

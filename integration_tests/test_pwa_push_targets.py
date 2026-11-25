@@ -87,3 +87,72 @@ class TestPerMemberPush(IntegrationBase):
         self.assertEqual([c.args[1] for c in nu.await_args_list], [[ALICE], [BOB]])
         self.assertIn("Ravi", nu.await_args_list[1].args[3])        # proxy owner told whose debt
         self.assertTrue(all(c.kwargs["tag"] == "dues" for c in nu.await_args_list))
+
+
+class TestGuestPush(IntegrationBase):
+    """A guest has no Telegram: their id on a rollcall is their name, there is
+    no DM, and the group message lands in a chat they aren't in. A browser that
+    turned the bell on as a named guest is the only way to tell them."""
+
+    def setUp(self):
+        super().setUp()
+        self.token = db.get_or_create_chat(CHAT_ID)["group_web_token"]
+
+    def _sub(self, endpoint, guest=None, uid=None):
+        db.save_push_subscription(self.token, endpoint, "p256dh", "auth",
+                                  tg_user_id=uid, guest_name=guest)
+
+    async def _sent_to(self, coro):
+        with patch.object(push_svc, "_dispatch", new=AsyncMock(return_value=1)) as disp, \
+             patch.object(push_svc, "_load_or_create_vapid", return_value=("pem", "pub")):
+            await coro
+        return sorted(s["endpoint"] for s in disp.await_args.args[0]) if disp.await_count else []
+
+    async def test_promoted_guest_is_pushed_by_name(self):
+        self._sub("https://fcm.googleapis.com/ravi", "Ravi  K")
+        self._sub("https://fcm.googleapis.com/other", "Priya")
+        self._sub("https://fcm.googleapis.com/anon")
+        sent = await self._sent_to(push_svc.notify_users(CHAT_ID, ["ravi k"], "t", "b", tag="promoted"))
+        self.assertEqual(sent, ["https://fcm.googleapis.com/ravi"])
+
+    async def test_a_signed_in_device_is_never_reached_by_name(self):
+        # A member is reached by id only; a name anyone can type must not
+        # pull in their device.
+        self._sub("https://fcm.googleapis.com/alice", "Alice", uid=ALICE)
+        sent = await self._sent_to(push_svc.notify_users(CHAT_ID, ["Alice"], "t", "b", tag="x"))
+        self.assertEqual(sent, [])
+
+    async def test_subscribe_keeps_guest_name_only_without_identity(self):
+        with patch.object(push_svc, "validate_endpoint"):
+            push_svc.subscribe(self.token, "https://fcm.googleapis.com/g", "p", "a", guest_name=" Ravi ")
+            push_svc.subscribe(self.token, "https://fcm.googleapis.com/m", "p", "a",
+                               tg_user_id=ALICE, guest_name="Alice")
+            push_svc.subscribe(self.token, "https://fcm.googleapis.com/g", "p", "a")   # no name: kept
+        names = {s["endpoint"]: s["guest_name"] for s in db.get_push_subscriptions(self.token)}
+        self.assertEqual(names, {"https://fcm.googleapis.com/g": "Ravi",
+                                 "https://fcm.googleapis.com/m": None})
+        with patch.object(push_svc, "validate_endpoint"):
+            push_svc.subscribe(self.token, "https://fcm.googleapis.com/g", "p", "a", guest_name="Ravi K")
+        names = {s["endpoint"]: s["guest_name"] for s in db.get_push_subscriptions(self.token)}
+        self.assertEqual(names["https://fcm.googleapis.com/g"], "Ravi K")   # renamed
+
+    async def test_waitlist_promotion_pushes_a_guest(self):
+        from handlers.promotion import announce_promotions
+        with patch("services.push.notify_users", new=AsyncMock()) as nu:
+            await announce_promotions(CHAT_ID, [{"user_id": "Ravi", "name": "Ravi"}], "Friday Football", 1)
+            await asyncio.sleep(0)
+        nu.assert_awaited_once()
+        self.assertEqual(nu.await_args.args[:2], (CHAT_ID, ["Ravi"]))
+
+    async def test_vote_reminder_reaches_guests_who_have_not_voted(self):
+        import check_reminders
+        rc = await self.start_rc("Friday Football")
+        from services.web import vote_by_token, _ensure_web_token
+        await vote_by_token(_ensure_web_token(rc), "Voted Guest", "in")
+        self._sub("https://fcm.googleapis.com/voted", "voted guest")
+        self._sub("https://fcm.googleapis.com/quiet", "Quiet Guest")
+        # Every member has voted — guests must still be reminded.
+        with patch("services.lists.get_non_responders", return_value={"candidates": []}):
+            sent = await self._sent_to(
+                check_reminders._dm_non_responders(CHAT_ID, 1, "Friday Football", "closes soon"))
+        self.assertEqual(sent, ["https://fcm.googleapis.com/quiet"])

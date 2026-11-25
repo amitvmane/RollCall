@@ -385,6 +385,12 @@ class PushSubscribeRequest(BaseModel):
             "unlinked subscription exactly as before."
         ),
     )
+    guest_name: Optional[str] = Field(
+        None, max_length=64,
+        description="The name a guest votes under on this browser, so 'you're IN "
+                    "from the waitlist' can reach someone without Telegram. "
+                    "Ignored when id_token verifies.",
+    )
 
 
 class PushUnsubscribeRequest(BaseModel):

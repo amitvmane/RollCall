@@ -325,7 +325,10 @@ def _migrate_push_subscriptions_per_group(conn, cursor) -> None:
                 auth        TEXT NOT NULL,
                 created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 active      INTEGER NOT NULL DEFAULT 1,
-                tg_user_id  INTEGER DEFAULT NULL
+                tg_user_id  INTEGER DEFAULT NULL,
+                -- _reconcile_columns ran first and may have added this; a
+                -- rebuild without it would drop it until the next boot.
+                guest_name  TEXT DEFAULT NULL
             )""")
             cursor.execute("""INSERT INTO push_subscriptions_new
                     (id, group_token, endpoint, p256dh, auth, created_at, active, tg_user_id)
@@ -1138,6 +1141,10 @@ _RECONCILE_COLUMNS = {
     ],
     "push_subscriptions": [
         ("tg_user_id", "tg_user_id INTEGER DEFAULT NULL", "tg_user_id BIGINT DEFAULT NULL"),
+        # The name a guest (no Telegram) votes under on this browser, so a
+        # per-person push — "you're IN from the waitlist" — can reach them.
+        # Matched only on rows with no tg_user_id; see services.push.notify_users.
+        ("guest_name", "guest_name TEXT DEFAULT NULL", "guest_name TEXT DEFAULT NULL"),
     ],
     "web_verify_tokens": [
         ("tg_username", "tg_username TEXT DEFAULT NULL", "tg_username TEXT DEFAULT NULL"),
@@ -5743,25 +5750,28 @@ def delete_system_config_before(prefixes, cutoff_utc: str) -> int:
         return 0
 
 
-def save_push_subscription(group_token: str, endpoint: str, p256dh: str, auth: str, tg_user_id: Optional[int] = None) -> None:
+def save_push_subscription(group_token: str, endpoint: str, p256dh: str, auth: str,
+                           tg_user_id: Optional[int] = None, guest_name: Optional[str] = None) -> None:
     """Upsert this browser's subscription to ONE group. Re-activates if previously unsubscribed.
 
     Other groups the same browser follows have their own rows and are untouched.
+    guest_name: the name a guest votes under here; None keeps what's stored.
     """
     try:
         with _cursor(commit=True) as cursor:
             ph = '%s' if db_type == 'postgresql' else '?'
             if db_type == 'postgresql':
                 cursor.execute(f"""
-                    INSERT INTO push_subscriptions (group_token, endpoint, p256dh, auth, active, tg_user_id)
-                    VALUES ({ph}, {ph}, {ph}, {ph}, TRUE, {ph})
+                    INSERT INTO push_subscriptions (group_token, endpoint, p256dh, auth, active, tg_user_id, guest_name)
+                    VALUES ({ph}, {ph}, {ph}, {ph}, TRUE, {ph}, {ph})
                     ON CONFLICT (endpoint, group_token) DO UPDATE SET
                         p256dh      = EXCLUDED.p256dh,
                         auth        = EXCLUDED.auth,
                         active      = TRUE,
                         tg_user_id  = COALESCE(EXCLUDED.tg_user_id, push_subscriptions.tg_user_id),
+                        guest_name  = COALESCE(EXCLUDED.guest_name, push_subscriptions.guest_name),
                         created_at  = CURRENT_TIMESTAMP
-                """, (group_token, endpoint, p256dh, auth, tg_user_id))
+                """, (group_token, endpoint, p256dh, auth, tg_user_id, guest_name))
             else:
                 # A real upsert, NOT `INSERT OR REPLACE`: that deletes and
                 # re-inserts the row, so a re-subscribe without an id_token
@@ -5769,15 +5779,16 @@ def save_push_subscription(group_token: str, endpoint: str, p256dh: str, auth: s
                 # and the member silently stopped getting personal pushes.
                 # Same trap set_web_admin fell into with `role`.
                 cursor.execute(f"""
-                    INSERT INTO push_subscriptions (group_token, endpoint, p256dh, auth, active, tg_user_id)
-                    VALUES ({ph}, {ph}, {ph}, {ph}, 1, {ph})
+                    INSERT INTO push_subscriptions (group_token, endpoint, p256dh, auth, active, tg_user_id, guest_name)
+                    VALUES ({ph}, {ph}, {ph}, {ph}, 1, {ph}, {ph})
                     ON CONFLICT (endpoint, group_token) DO UPDATE SET
                         p256dh      = excluded.p256dh,
                         auth        = excluded.auth,
                         active      = 1,
                         tg_user_id  = COALESCE(excluded.tg_user_id, push_subscriptions.tg_user_id),
+                        guest_name  = COALESCE(excluded.guest_name, push_subscriptions.guest_name),
                         created_at  = CURRENT_TIMESTAMP
-                """, (group_token, endpoint, p256dh, auth, tg_user_id))
+                """, (group_token, endpoint, p256dh, auth, tg_user_id, guest_name))
     except Exception:
         logging.exception("save_push_subscription failed")
 
@@ -5792,7 +5803,7 @@ def get_push_subscriptions(group_token: str) -> List[Dict]:
             ph = '%s' if db_type == 'postgresql' else '?'
             active_val = 'TRUE' if db_type == 'postgresql' else '1'
             cursor.execute(
-                f"SELECT endpoint, p256dh, auth, tg_user_id FROM push_subscriptions WHERE group_token = {ph} AND active = {active_val}",
+                f"SELECT endpoint, p256dh, auth, tg_user_id, guest_name FROM push_subscriptions WHERE group_token = {ph} AND active = {active_val}",
                 (group_token,)
             )
             rows = cursor.fetchall()
@@ -5800,9 +5811,10 @@ def get_push_subscriptions(group_token: str) -> List[Dict]:
             for row in rows:
                 if isinstance(row, dict):
                     result.append({'endpoint': row['endpoint'], 'p256dh': row['p256dh'], 'auth': row['auth'],
-                                   'tg_user_id': row['tg_user_id']})
+                                   'tg_user_id': row['tg_user_id'], 'guest_name': row['guest_name']})
                 else:
-                    result.append({'endpoint': row[0], 'p256dh': row[1], 'auth': row[2], 'tg_user_id': row[3]})
+                    result.append({'endpoint': row[0], 'p256dh': row[1], 'auth': row[2], 'tg_user_id': row[3],
+                                   'guest_name': row[4]})
             return result
     except Exception:
         logging.exception("get_push_subscriptions failed")

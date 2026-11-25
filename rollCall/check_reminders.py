@@ -142,7 +142,18 @@ async def _dm_non_responders(chat_id: int, rc_number: int, title: str, when_phra
         candidates = svc.get("candidates") or []
     except Exception:
         logging.exception(f"[reminder-dm] get_non_responders failed for chat {chat_id}")
-        return
+        candidates = []
+    # Guests with no Telegram who follow the group on the web as a named
+    # guest — never in the candidates, which are Telegram members only.
+    # First, and before the no-members return: every member having voted
+    # says nothing about the guests.
+    from services import push as push_svc
+    from rollcall_manager import manager
+    await push_svc.notify_guests_not_voted(
+        chat_id, manager.get_rollcall(chat_id, rc_number - 1),
+        f"⏰ {title}", f"You haven't voted yet — it {when_phrase}. Tap to vote.",
+        tag=f"remind-{rc_number}",
+    )
     if not candidates:
         return
     sent = 0
@@ -164,7 +175,6 @@ async def _dm_non_responders(chat_id: int, rc_number: int, title: str, when_phra
     )
     # Same reminder to the same people in the web app, for members who vote
     # there and never started the bot (whose DM above just failed).
-    from services import push as push_svc
     await push_svc.notify_users(
         chat_id, [c.get("user_id") for c in candidates],
         f"⏰ {title}", f"You haven't voted yet — it {when_phrase}. Tap to vote.",

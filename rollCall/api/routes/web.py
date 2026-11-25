@@ -167,7 +167,8 @@ async def push_subscribe(
         if body.id_token else None
     )
     try:
-        push_svc.subscribe(group_token, body.endpoint, body.keys.p256dh, body.keys.auth, tg_user_id=tg_user_id)
+        push_svc.subscribe(group_token, body.endpoint, body.keys.p256dh, body.keys.auth,
+                           tg_user_id=tg_user_id, guest_name=body.guest_name)
     except push_svc.PushSubscriptionRejected as e:
         raise HTTPException(status_code=400, detail=str(e))
 

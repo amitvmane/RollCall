@@ -3,6 +3,10 @@
 For developers connecting another app or service to a RollCall group: read its
 rollcalls, take votes, and hear about changes as they happen.
 
+**Interactive reference** (every endpoint, request and response, with *Authorize*
+for your key and *Try it out*): [/help/api/reference](/help/api/reference) ·
+machine-readable OpenAPI: [/api/v1/partner/openapi.json](/api/v1/partner/openapi.json)
+
 ## 1. Get a key
 
 A group admin opens the group's web page → **Admin → 🔌 Integrations → Make key**,

@@ -146,7 +146,15 @@ def _kick() -> None:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return   # no loop (a script, a sync test): the minute tick sends it
-    loop.call_soon(lambda: loop.create_task(deliver_due()))
+
+    def _start():
+        t = loop.create_task(deliver_due())
+        _tasks.add(t)                    # an unreferenced task can be collected mid-run
+        t.add_done_callback(_tasks.discard)
+    loop.call_soon(_start)
+
+
+_tasks: set = set()
 
 
 # ── Endpoints (admin) ─────────────────────────────────────────────────────────
@@ -282,30 +290,39 @@ async def _post(url: str, secret: str, delivery_id: int, event: str, body: bytes
         return type(e).__name__ + (f": {e}" if str(e) else "")[:200]
 
 
-_delivering = asyncio.Lock()
+# A flag, not an asyncio.Lock: a module-level Lock binds to whichever event
+# loop first waits on it, and every send runs on the one loop anyway.
+_delivering = {"on": False}
 
 
 async def deliver_due(limit: int = 50) -> int:
     """Send every delivery that's due. One at a time per process (a second
     call while one runs just returns). Returns how many were attempted."""
-    if _delivering.locked():
+    if _delivering["on"]:
         return 0
-    async with _delivering:
-        now = int(time.time())
-        ph = _ph()
-        keys = ("id", "endpoint_id", "event", "payload", "attempts", "url", "secret", "chat_id")
-        with db._cursor() as cursor:
-            cursor.execute(
-                f"SELECT d.id, d.endpoint_id, d.event, d.payload, d.attempts, e.url, e.secret, e.chat_id "
-                f"FROM webhook_deliveries d JOIN webhook_endpoints e ON e.id = d.endpoint_id "
-                f"WHERE d.status = 'pending' AND d.next_attempt <= {ph} AND e.active = 1 "
-                f"ORDER BY d.id LIMIT {int(limit)}", (now,))
-            due = [_row(r, keys) for r in cursor.fetchall()]
-        for d in due:
-            body = json.dumps({"id": d["id"], **json.loads(d["payload"])}).encode()
-            err = await _post(d["url"], d["secret"], d["id"], d["event"], body)
-            _record(d, err)
-        return len(due)
+    _delivering["on"] = True
+    try:
+        return await _deliver_due(limit)
+    finally:
+        _delivering["on"] = False
+
+
+async def _deliver_due(limit: int) -> int:
+    now = int(time.time())
+    ph = _ph()
+    keys = ("id", "endpoint_id", "event", "payload", "attempts", "url", "secret", "chat_id")
+    with db._cursor() as cursor:
+        cursor.execute(
+            f"SELECT d.id, d.endpoint_id, d.event, d.payload, d.attempts, e.url, e.secret, e.chat_id "
+            f"FROM webhook_deliveries d JOIN webhook_endpoints e ON e.id = d.endpoint_id "
+            f"WHERE d.status = 'pending' AND d.next_attempt <= {ph} AND e.active = 1 "
+            f"ORDER BY d.id LIMIT {int(limit)}", (now,))
+        due = [_row(r, keys) for r in cursor.fetchall()]
+    for d in due:
+        body = json.dumps({"id": d["id"], **json.loads(d["payload"])}).encode()
+        err = await _post(d["url"], d["secret"], d["id"], d["event"], body)
+        _record(d, err)
+    return len(due)
 
 
 def _record(d: dict, err: Optional[str]) -> None:

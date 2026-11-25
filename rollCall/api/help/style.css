@@ -64,3 +64,19 @@
      an inline anchor has no height of its own beyond its line box. */
   .page-footer a,.cmd-card a{display:inline-flex;align-items:center;min-height:44px}
 }
+/* /help/api — the partner API guide (api/api_guide.py renders docs/API.md) */
+.api-guide{max-width:820px;margin:0 auto;padding:16px;line-height:1.55;color:var(--text)}
+.api-guide h1{font-size:1.5rem;margin:12px 0}
+.api-guide h2{font-size:1.15rem;margin:22px 0 8px}
+.api-guide h3{font-size:1rem;margin:16px 0 6px}
+.api-guide code{font-family:"IBM Plex Mono",monospace;font-size:.86em;background:var(--border);padding:1px 4px;border-radius:4px}
+.api-guide pre{overflow-x:auto;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px}
+.api-guide pre code{background:none;padding:0}
+.api-guide .tbl{overflow-x:auto}
+.api-guide table{border-collapse:collapse;width:100%;font-size:.88rem;margin:8px 0}
+.api-guide th,.api-guide td{border:1px solid var(--border);padding:6px 8px;text-align:left;vertical-align:top}
+
+/* /help/api/reference — Swagger UI (vendored in help/swagger/) */
+.api-ref{background:#fff}
+.api-ref-bar{max-width:1460px;margin:0 auto;padding:12px 20px;font:600 .9rem system-ui,sans-serif}
+.api-ref-bar a{color:#2563eb;text-decoration:none}

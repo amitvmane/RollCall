@@ -4,6 +4,11 @@ conftest.py - pytest fixtures and module mocks applied before all tests.
 All external dependencies (telebot, db, config) are mocked here so tests
 run without a real Telegram token or database.
 """
+import os as _os_hc
+# The human check (services/human_check) is off for the suites that post guest
+# votes and sign-in emails as plain HTTP calls; its own tests switch it on.
+_os_hc.environ.setdefault("HUMAN_CHECK", "off")
+
 
 import sys
 from unittest.mock import MagicMock

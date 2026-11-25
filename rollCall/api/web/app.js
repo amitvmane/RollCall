@@ -576,6 +576,73 @@ fetch("/api/v1/web/version",{signal:AbortSignal.timeout(5000)})
   })
   .catch(()=>{});
 
+// ── Human check (services/human_check.py) ─────────────────────────────────
+// Guest votes and sign-in emails need a "probably a person" pass. The server
+// answers 428 without one; _humanFetch then runs the check once and retries.
+// Default mode is a ~1s proof of work in the background (nothing external);
+// with HUMAN_CHECK=turnstile it's Cloudflare's widget. The pass lasts 12h.
+const LS_HUMAN="rc_human_pass";
+let _humanPass=null;
+try{_humanPass=sessionStorage.getItem(LS_HUMAN);}catch(_){}
+
+async function _solvePow(challenge,bits){
+  const enc=new TextEncoder();
+  const enough=d=>{let n=0;for(const b of new Uint8Array(d)){if(b===0){n+=8;continue;}n+=Math.clz32(b)-24;break;}return n>=bits;};
+  for(let base=0;base<4e6;base+=256){
+    const batch=[];
+    for(let i=0;i<256;i++)batch.push(crypto.subtle.digest("SHA-256",enc.encode(challenge+":"+(base+i))));
+    const ds=await Promise.all(batch);
+    for(let i=0;i<ds.length;i++)if(enough(ds[i]))return String(base+i);
+  }
+  throw new Error("Couldn't finish the check — try again.");
+}
+
+function _turnstileToken(siteKey){
+  return new Promise((resolve,reject)=>{
+    const run=()=>{
+      let box=document.getElementById("human-check-box");
+      if(!box){box=document.createElement("div");box.id="human-check-box";box.className="human-check-box";document.body.appendChild(box);}
+      box.innerHTML='<div class="human-check-title">Quick check that you\'re a person</div><div id="human-check-widget"></div>';
+      box.classList.remove("hidden");
+      window.turnstile.render("#human-check-widget",{sitekey:siteKey,
+        callback:t=>{box.classList.add("hidden");resolve(t);},
+        "error-callback":()=>{box.classList.add("hidden");reject(new Error("The check didn't load — try again."));}});
+    };
+    if(window.turnstile){run();return;}
+    const sc=document.createElement("script");
+    sc.src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+    sc.async=true;sc.onload=run;sc.onerror=()=>reject(new Error("The check didn't load — try again."));
+    document.head.appendChild(sc);
+  });
+}
+
+async function _getHumanPass(){
+  const cfg=await (await fetch("/api/v1/human/config",{signal:AbortSignal.timeout(8000)})).json();
+  let body;
+  if(cfg.mode==="turnstile"){
+    body={turnstile_token:await _turnstileToken(cfg.site_key)};
+  }else{
+    const ch=await (await fetch("/api/v1/human/challenge",{signal:AbortSignal.timeout(8000)})).json();
+    body={challenge:ch.challenge,nonce:await _solvePow(ch.challenge,ch.bits)};
+  }
+  const r=await fetch("/api/v1/human/verify",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error(d.detail||"The check didn't pass — try again.");
+  _humanPass=d.human_pass;
+  try{sessionStorage.setItem(LS_HUMAN,_humanPass);}catch(_){}
+  return _humanPass;
+}
+
+async function _humanFetch(url,opts={}){
+  const withPass=()=>({...opts,headers:{...(opts.headers||{}),...(_humanPass?{"X-Human-Pass":_humanPass}:{})}});
+  let res=await fetch(url,withPass());
+  if(res.status!==428)return res;
+  _humanPass=null;   // expired or used up: get a fresh one
+  await _getHumanPass();
+  return fetch(url,withPass());
+}
+
 // ── Sign-in without Telegram: email ───────────────────────────────────────
 // Ids at or above 2^52 are this app's own (identity_space.py): a person who
 // signed in by email and has no Telegram account.
@@ -605,7 +672,7 @@ window.sendEmailLink=async function(){
   if(!email){$("email-input").focus();return;}
   const btn=$("email-send-btn");btn.disabled=true;
   try{
-    const r=await fetch("/api/v1/auth/email/start",{
+    const r=await _humanFetch("/api/v1/auth/email/start",{
       method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({email,...(name?{name}:{}),...(IS_GROUP?{group_token:URL_TOKEN}:{})}),
       signal:AbortSignal.timeout(20000),
@@ -998,7 +1065,7 @@ async function castVote(voteType){
   try{
     const _hdrs={"Content-Type":"application/json"};
     if(_maToken)_hdrs["Authorization"]="Bearer "+_maToken;
-    const res=await fetch("/api/v1/web/"+token+"/vote",{
+    const res=await _humanFetch("/api/v1/web/"+token+"/vote",{
       method:"POST",signal:ac.signal,headers:_hdrs,
       body:JSON.stringify({
         name:currentName,vote:voteType,
@@ -2941,7 +3008,7 @@ function renderIntegrations(once){
   const scopeBoxes=scopes.map(sc=>`<label style="margin-right:10px;font-size:.82rem"><input type="checkbox" class="ik-scope" value="${esc(sc)}" ${sc==="read"?"checked":""} ${sc==="admin"&&!you_are_owner?"disabled":""}/> ${esc(sc)}</label>`).join("");
   const eventBoxes=events.map(ev=>`<label style="margin-right:10px;font-size:.82rem"><input type="checkbox" class="iw-event" value="${esc(ev)}" checked/> ${esc(ev)}</label>`).join("");
   body.innerHTML=reveal+`
-    <div class="adm-row-s" style="margin:4px 0 10px">Let another app read this group, take votes, or hear about changes. Give the developer docs/API.md from the RollCall repo.</div>
+    <div class="adm-row-s" style="margin:4px 0 10px">Let another app read this group, take votes, or hear about changes. Send the developer the <a href="/help/api" target="_blank" rel="noopener">API guide</a>.</div>
     <div class="adm-row-t" style="margin-top:6px">🔑 App keys</div>${keyRows}
     <div style="margin:8px 0 14px">
       <input id="ik-label" type="text" maxlength="60" placeholder="Which app? e.g. Club website" style="width:100%;margin-bottom:6px"/>
@@ -2949,7 +3016,8 @@ function renderIntegrations(once){
       <button class="btn btn-primary" style="padding:8px 14px;font-size:.85rem" data-on-click="createAppKey">＋ Make key</button>
     </div>
     <div class="adm-row-t">🪝 Webhooks</div>${hookRows}
-    <div style="margin:8px 0">
+    ${you_are_owner?"":'<div class="adm-row-s">Only a group owner can add webhooks — they send every vote and dues entry to another app.</div>'}
+    <div style="margin:8px 0" class="${you_are_owner?"":"hidden"}">
       <input id="iw-url" type="url" maxlength="500" placeholder="https://your-app.example.com/rollcall-hook" style="width:100%;margin-bottom:6px"/>
       <div style="margin-bottom:6px">${eventBoxes}</div>
       <button class="btn btn-primary" style="padding:8px 14px;font-size:.85rem" data-on-click="createWebhook">＋ Add webhook</button>

@@ -23,7 +23,7 @@ Legend: **you** = needs the owner (server, accounts, decisions) · **code** = ca
 |---|------|-----|--------|
 | 7 | Hand `docs/API.md` to the first partner; watch their webhook deliveries under Integrations. | you | Ready |
 | 8 | Old number-based REST paths: **kept, backward compatible — not being removed** (decision 2026-11-25). They answer with `Deprecation`/`Link` headers only. | — | Decided |
-| 9 | CAPTCHA on sign-in email, only if the new per-IP / hourly caps prove not enough. | code | Only if needed |
+| 9 | Optional, stronger human check: create a Cloudflare Turnstile widget, set `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` and `HUMAN_CHECK=turnstile`. The default self-hosted proof of work needs nothing. | you | Optional |
 
 ## Later / parked by you
 
@@ -41,6 +41,9 @@ Legend: **you** = needs the owner (server, accounts, decisions) · **code** = ca
 - Reaction-based voting; `/myvote`; `/ping in|out` split; the old DB-merge cutover.
 
 ## Recently done
+
+- 2026-11-25 — Human check (CAPTCHA) on guest votes and sign-in emails: self-hosted proof of work by default, Cloudflare Turnstile optional; 12-hour pass capped at 30 actions. API guide served at `/help/api`, linked from `/help` (🔌), the Integrations panel and the bot's `/help` (`/help api`).
+- 2026-11-25 — Review fixes: app keys vote for members only (no guest adds, no invented ids); webhooks owner-only; buzz mute counts buzzes, not rollcalls; merge re-checks groups after locking; webhook send tasks kept referenced.
 
 - 2026-11-25 — Partner API: app keys (Integrations; admin scope owners-only; may vote for members), signed webhooks with retries/backoff/auto-off and private-address refusal at connect time, `docs/API.md` v1.
 - 2026-11-25 — Merge from an email session (sign in with Telegram on the same device → offered), owner merge tool (email-only accounts whose history is only in that group).

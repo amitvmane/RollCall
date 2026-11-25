@@ -206,12 +206,21 @@ async def merge(local_uid: int, tg_uid: int, actor_name: str) -> dict:
     chats = affected_chats(local_uid)
     # Sorted order, one pass: every other path takes one chat lock at a time,
     # so this can't deadlock against them.
-    held = []
+    held, locked = [], set()
     try:
-        for c in chats:
-            lock = manager.get_chat_write_lock(c)
-            await lock.acquire()
-            held.append(lock)
+        # Re-check after locking: a vote in a NEW group between listing the
+        # chats and taking the locks would leave that group's open rollcall
+        # holding the old id in memory. Lock it too, until nothing changes.
+        while True:
+            for c in sorted(set(chats) - locked):
+                lock = manager.get_chat_write_lock(c)
+                await lock.acquire()
+                held.append(lock)
+                locked.add(c)
+            again = affected_chats(local_uid)
+            if set(again) <= locked:
+                break
+            chats = sorted(set(chats) | set(again))
         with db._cursor(commit=True) as cursor:
             _merge_rows(cursor, local_uid, tg_uid)
             cursor.execute(f"UPDATE principals SET merged_into_user_id = {_ph()} WHERE id = {_ph()}",

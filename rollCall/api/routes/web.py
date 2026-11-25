@@ -20,7 +20,7 @@ import os
 from pathlib import Path as _PathlibPath
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, status
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
@@ -1579,12 +1579,18 @@ async def get_web_rollcall(
 async def vote_web(
     body: WebVoteRequest,
     token: str = Path(..., description="Per-rollcall magic-link token"),
+    x_human_pass: Optional[str] = Header(None, alias="X-Human-Pass"),
 ) -> WebRollcallResponse:
     # Only attribute a vote to a real Telegram account when the caller proves
     # that identity with a signed token. Otherwise it's a name-only proxy entry,
     # so nobody can forge another member's attendance via the magic link.
     loc = web_svc.locate_rollcall(token)
     verified_user_id = verify_identity_token(body.id_token, chat_id=loc[0] if loc else None)
+    if not verified_user_id:
+        # A guest vote posts a typed name into the Telegram group, with no
+        # sign-in behind it — the one write here a script could spam.
+        from api.routes.human import check_human
+        check_human(x_human_pass)
     data = await web_svc.vote_by_token(
         token, body.name, body.vote,
         tg_user_id=verified_user_id, comment=body.comment,

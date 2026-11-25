@@ -115,6 +115,10 @@ async def revoke_key(group_token: str = Path(...), key_id: str = Path(..., max_l
 async def create_webhook(body: CreateWebhookRequest, group_token: str = Path(...),
                          id_token: Optional[str] = Depends(identity_from_header)) -> CreateWebhookResponse:
     chat_id, uid, name = await _actor(group_token, id_token)
+    # Owners only: a webhook streams every vote and dues entry to an outside
+    # address — and in an open Telegram group every member is a web admin.
+    if _db.get_web_admin_role(chat_id, uid) != "owner":
+        raise HTTPException(status_code=403, detail="Only a group owner can add a webhook.")
     try:
         ep = webhooks.create_endpoint(chat_id, body.url, body.events, uid)
     except webhooks.WebhookRejected as e:

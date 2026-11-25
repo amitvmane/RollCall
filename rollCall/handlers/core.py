@@ -74,7 +74,31 @@ def _render_command_list(scope_set, category_order, header):
     web_url = _help_web_url()
     if web_url:
         parts.append(f"🌐 Full searchable reference: {web_url}")
+    parts.append("🔌 Connect another app or platform: `/help api`")
     return "\n".join(parts)
+
+
+_API_HELP_WORDS = ("api", "integration", "integrations", "webhook", "webhooks", "partner")
+
+
+def _render_api_help() -> str:
+    """/help api — how another app or platform plugs into RollCall."""
+    web_url = _help_web_url()
+    guide = (f"{web_url}/api (interactive reference: {web_url}/api/reference)" if web_url
+             else "docs/API.md in the RollCall repo")
+    return "\n".join([
+        "🔌 *Connect another app or platform*",
+        "",
+        "Other apps can read a group's rollcalls, take votes, and get told the moment "
+        "something changes (webhooks).",
+        "",
+        "1. A group admin opens the group's web page (/weblink) → *Admin → Integrations*.",
+        "2. *Make key* for the app — read, vote, or admin (admin keys: owners only).",
+        "3. Optionally *Add webhook* — the app's https address, and which events to send.",
+        "4. Send the developer the guide: " + guide,
+        "",
+        "Keys belong to one group, expire, and can be revoked on the same screen.",
+    ])
 
 
 def _render_command_detail(cmd):
@@ -365,6 +389,10 @@ async def help_commands(message):
     # on a fuzzy typo guess. "dues"/"ghost"/"template" etc. aren't command
     # names themselves but are exactly what a user unsure of the exact
     # command would type.
+    if arg.lower() in _API_HELP_WORDS:
+        await send_long(message.chat.id, _render_api_help(), parse_mode='Markdown')
+        return
+
     by_category = _search_by_category(arg)
     if by_category:
         await send_long(

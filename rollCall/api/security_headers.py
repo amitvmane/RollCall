@@ -72,21 +72,36 @@ def _login_widget_enabled() -> bool:
     return os.environ.get("TG_LOGIN_WIDGET", "").strip().lower() in ("1", "true", "yes")
 
 
+# Cloudflare Turnstile (services/human_check, HUMAN_CHECK=turnstile only): its
+# script, and the iframe it renders the check in. Absent in the default
+# proof-of-work mode, which loads nothing external.
+_TURNSTILE = "https://challenges.cloudflare.com"
+
+
+def _turnstile_enabled() -> bool:
+    try:
+        from services.human_check import mode
+        return mode() == "turnstile"
+    except Exception:
+        return False
+
+
 def _csp_common() -> str:
     # Read per request, not at import: tests and a changed env must see it.
     evaluate = " 'unsafe-eval'" if _login_widget_enabled() else ""
+    turnstile = f" {_TURNSTILE}" if _turnstile_enabled() else ""
     return (
         "default-src 'self'; "
         "img-src 'self' data: blob:; "
         # No 'unsafe-inline' — see module docstring.
-        f"script-src 'self'{evaluate} {_TELEGRAM_SCRIPTS}; "
+        f"script-src 'self'{evaluate} {_TELEGRAM_SCRIPTS}{turnstile}; "
         # Inline <script> blocks are refused by the line above; this one
         # also refuses inline on*= attributes explicitly, for browsers that
         # honour the -attr directive separately.
         "script-src-attr 'none'; "
         f"style-src 'self' 'unsafe-inline' {_GOOGLE_FONTS_CSS}; "
         f"font-src 'self' data: {_GOOGLE_FONTS_FILES}; "
-        f"frame-src {_TELEGRAM_FRAMES}; "
+        f"frame-src {_TELEGRAM_FRAMES}{turnstile}; "
         "connect-src 'self'; "
         "object-src 'none'; "
         "base-uri 'self'; "

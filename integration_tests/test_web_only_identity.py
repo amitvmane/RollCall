@@ -641,3 +641,19 @@ class TestBuzzMuteWeb(_Base):
                                  json={"user_id": 7002})
             self.assertEqual(r.status_code, 204)
         self.assertEqual(buzz_mute.muted_ids(TG_CHAT), set())
+
+
+
+class TestBuzzCountsBuzzesNotRollcalls(_Base):
+
+    def test_one_buzz_over_three_rollcalls_is_one_unanswered_buzz(self):
+        from services import buzz_mute, rollcalls as rc_svc
+        from rollcall_manager import manager
+        self.db.get_or_create_chat(TG_CHAT)
+        for t in ("A", "B", "C"):
+            asyncio.run(rc_svc.start_rollcall(TG_CHAT, t, TG_MEMBER, "Ravi"))
+        buzz_mute.record(TG_CHAT, [rc.id for rc in manager.get_rollcalls(TG_CHAT)], [7002])
+        for _ in range(3):
+            asyncio.run(rc_svc.end_rollcall(TG_CHAT, 0, TG_MEMBER, "Ravi"))
+        self.assertEqual(buzz_mute.unanswered(TG_CHAT), {7002: 1})
+        self.assertEqual(buzz_mute.muted_ids(TG_CHAT), set())

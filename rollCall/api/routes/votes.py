@@ -47,6 +47,17 @@ async def cast_vote(
             detail="Token can only cast votes for its own issuing user",
         )
 
+    # A partner app key votes for MEMBERS: an int id the group already knows.
+    # Not a name (adding a guest is admin-only — routes/proxy_votes.py) and not
+    # an invented id, which would plant a phantom member in the group.
+    if _token.app_key and "admin" not in _token.scopes:
+        import db as _db
+        if not isinstance(body.user_id, int) or _db.get_member_display_info(chat_id, body.user_id) is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="An app key votes for members of this group only (guests need an admin key's proxy-votes)",
+            )
+
     common_args = dict(
         chat_id=chat_id,
         user_id=body.user_id,

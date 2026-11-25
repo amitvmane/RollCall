@@ -29,6 +29,7 @@ from exceptions import incorrectParameter
 
 DEFAULT_AFTER = 3
 MAX_AFTER = 20
+_last_mark = 0
 
 
 def _ph() -> str:
@@ -60,7 +61,12 @@ def record(chat_id: int, rollcall_ids: Iterable[int], user_ids: Iterable) -> Non
     uids = [int(u) for u in user_ids if isinstance(u, int)]
     if not rc_ids or not uids:
         return
-    now = int(time.time())
+    # buzzed_at is in MICROseconds and strictly increasing per process: it is
+    # the buzz's identity. One call (one buzz over several open rollcalls)
+    # shares it; two separate buzzes never do, even within the same second.
+    global _last_mark
+    now = max(int(time.time() * 1_000_000), _last_mark + 1)
+    _last_mark = now
     ph = _ph()
     try:
         with db._cursor(commit=True) as cursor:
@@ -81,7 +87,10 @@ def unanswered(chat_id: int) -> dict:
     try:
         with db._cursor() as cursor:
             cursor.execute(
-                f"SELECT b.user_id, COUNT(*) FROM buzz_log b JOIN rollcalls r ON r.id = b.rollcall_id "
+                # DISTINCT buzzed_at = buzzes, not rollcalls: one /buzz over three
+                # open rollcalls logs three rows at one moment, and counted as
+                # rows it muted someone after a single ping.
+                f"SELECT b.user_id, COUNT(DISTINCT b.buzzed_at) FROM buzz_log b JOIN rollcalls r ON r.id = b.rollcall_id "
                 f"WHERE b.chat_id = {ph} AND b.responded = 0 AND r.ended_at IS NOT NULL "
                 # A game that was called off asked nothing of anyone.
                 f"AND (r.is_cancelled IS NULL OR r.is_cancelled = {'FALSE' if db.db_type == 'postgresql' else '0'}) "
@@ -133,7 +142,7 @@ def find_member(chat_id: int, query: str) -> Optional[int]:
 
 
 def prune(days: int = 180) -> int:
-    cutoff = int(time.time()) - days * 86400
+    cutoff = (int(time.time()) - days * 86400) * 1_000_000   # buzzed_at is in µs
     with db._cursor(commit=True) as cursor:
         cursor.execute(f"DELETE FROM buzz_log WHERE buzzed_at < {_ph()}", (cutoff,))
         return cursor.rowcount or 0

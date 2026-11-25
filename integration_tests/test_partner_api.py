@@ -91,6 +91,11 @@ class TestAppKeys(_Base):
         r = self.client.post(f"/api/v1/chats/{CHAT}/rollcalls/by-id/{rc_id}/votes", headers=auth,
                              json={"vote": "in", "user_id": MEMBER, "first_name": "Mia"})
         self.assertEqual(r.status_code, 201, r.text)
+        # Members only: not a guest name (admin-only proxy add), not an invented id.
+        for who in ("Some Guest", 123456789):
+            r = self.client.post(f"/api/v1/chats/{CHAT}/rollcalls/by-id/{rc_id}/votes", headers=auth,
+                                 json={"vote": "in", "user_id": who, "first_name": "X"})
+            self.assertEqual(r.status_code, 403, who)
         self.client.post(self.url(f"api-keys/{key['key_id']}/revoke"), headers=self.h(OWNER))
         r = self.client.get(f"/api/v1/chats/{CHAT}/rollcalls", headers=auth)
         self.assertEqual(r.status_code, 401)
@@ -108,6 +113,13 @@ class TestWebhooks(_Base):
             c.execute("SELECT event, payload, status, attempts FROM webhook_deliveries ORDER BY id")
             return [dict(r) if isinstance(r, dict) else dict(zip(("event", "payload", "status", "attempts"), r))
                     for r in c.fetchall()]
+
+    def test_only_owners_add_webhooks(self):
+        # In an open Telegram group every member is a web admin; a webhook
+        # sends every vote and dues entry to another app.
+        r = self.client.post(self.url("webhooks"), headers=self.h(ADMIN),
+                             json={"url": "https://partner.example.com/hooks"})
+        self.assertEqual(r.status_code, 403)
 
     def test_urls_must_be_public_https(self):
         for bad in ("http://partner.example.com/h", "https://127.0.0.1/h", "https://10.1.2.3/h",

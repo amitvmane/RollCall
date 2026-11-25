@@ -165,6 +165,8 @@ variables:
 | `TG_LOGIN_WIDGET` | No | `true` offers Telegram's Login Widget on the group page. Run `/setdomain` in BotFather first. Also adds `'unsafe-eval'` to the page CSP, because the widget `eval()`s its callback |
 | `IDENTITY_SECRET` | No | Signing key for web/portal identity tokens. Unset = derived from the bot token (today's behaviour). Set it to decouple identity from Telegram; safe to set on a running deployment, nobody is signed out |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_FROM` / `SMTP_STARTTLS` | No | Outgoing mail for email sign-in (people without Telegram, or members adding an email). Offered only when `SMTP_HOST`, `SMTP_FROM` and `WEB_BASE_URL` are set; port 465 = implicit TLS, otherwise STARTTLS |
+| `HUMAN_CHECK` | No | CAPTCHA for guest votes and sign-in emails: `pow` (default — self-hosted proof of work, nothing external), `turnstile` (Cloudflare Turnstile, needs the two keys below) or `off` |
+| `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | No | Cloudflare Turnstile keys, used when `HUMAN_CHECK=turnstile` |
 | `GHOST_AUTOFORGIVE_DAYS` | No | Days before an unreviewed session counts as "everyone attended" (default: `7`, `0` disables) |
 | `WATCHDOG_CHAT_ID` | No | Where the watchdog sidecar DMs alerts (default: `ADMIN1`); that account must have DMed the bot once |
 | `WATCHDOG_INTERVAL_SECONDS` | No | Watchdog `/health` poll cadence (default: `300`) |

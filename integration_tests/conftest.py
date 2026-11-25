@@ -6,6 +6,11 @@ aiohttp/check_reminders (no background loops in CI).
 This file is NOT related to tests/conftest.py -- it lives in a sibling
 directory so the unit-test mocks never interfere with these tests.
 """
+import os as _os_hc
+# The human check (services/human_check) is off for the suites that post guest
+# votes and sign-in emails as plain HTTP calls; its own tests switch it on.
+_os_hc.environ.setdefault("HUMAN_CHECK", "off")
+
 import sys
 import os
 import tempfile

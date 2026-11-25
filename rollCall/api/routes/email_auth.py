@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from api.identity import identity_from_header, issue_identity_token, require_identity
+from api.routes.human import require_human
 from exceptions import incorrectParameter, insufficientPermissions, rateLimited
 from services import email_auth
 
@@ -103,7 +104,7 @@ async def email_config() -> EmailConfigResponse:
 
 @router.post("/auth/email/start", status_code=status.HTTP_202_ACCEPTED,
              summary="Email a one-time sign-in link (same answer whether or not the address has an account)")
-async def email_start(body: EmailStartRequest, request: Request) -> dict:
+async def email_start(body: EmailStartRequest, request: Request, _human: None = Depends(require_human)) -> dict:
     _require_enabled()
     await _send(email_auth.start_login(body.email, body.name, body.group_token, _ip(request)))
     return {"sent": True}

@@ -32,6 +32,9 @@ from typing import List, Optional
 import db
 
 TELEGRAM = "telegram"
+# Email is a binding like any platform account. platform_user_id holds the
+# normalised address (normalise_email), so one address is one person.
+EMAIL = "email"
 
 
 def _ph() -> str:
@@ -187,3 +190,65 @@ def backfill_from_telegram() -> int:
     if created:
         logging.warning("principals: created %d principal(s) for existing Telegram users", created)
     return created
+
+
+# ── Acting identity ───────────────────────────────────────────────────────────
+# Which user id a principal acts under in the tables keyed on tg_user_id:
+# their Telegram id if they have one (so an existing member who adds an email
+# signs in as exactly the same member, with all their history), otherwise a
+# local id outside Telegram's range (identity_space). Derived, never stored,
+# so linking Telegram later can't leave two copies of the rule disagreeing.
+
+def normalise_email(email: str) -> str:
+    return (email or "").strip().lower()
+
+
+def display_name(principal_id: int) -> Optional[str]:
+    try:
+        with db._cursor() as cursor:
+            cursor.execute(f"SELECT display_name FROM principals WHERE id={_ph()}", (principal_id,))
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            return row["display_name"] if isinstance(row, dict) else row[0]
+    except Exception:
+        logging.exception("principals.display_name failed")
+        return None
+
+
+def set_display_name(principal_id: int, name: str) -> None:
+    try:
+        with db._cursor(commit=True) as cursor:
+            cursor.execute(f"UPDATE principals SET display_name={_ph()} WHERE id={_ph()}",
+                           (name, principal_id))
+    except Exception:
+        logging.exception("principals.set_display_name failed")
+
+
+def binding_for(principal_id: int, platform: str) -> Optional[str]:
+    """This principal's account on `platform`, or None."""
+    for b in bindings(principal_id):
+        if b.get("platform") == platform:
+            return str(b.get("platform_user_id"))
+    return None
+
+
+def acting_user_id(principal_id: int) -> int:
+    from identity_space import local_user_id
+    tg = binding_for(principal_id, TELEGRAM)
+    return int(tg) if tg is not None else local_user_id(principal_id)
+
+
+def principal_for_user(user_id: int) -> Optional[int]:
+    """The principal behind an acting user id (inverse of acting_user_id).
+    A Telegram id gets its principal created on first use, like for_telegram."""
+    from identity_space import is_local_user, principal_of_local_user
+    if is_local_user(user_id):
+        pid = principal_of_local_user(user_id)
+        return pid if display_name(pid) is not None or bindings(pid) else None
+    return for_telegram(int(user_id))
+
+
+def for_email(email: str, display_name_hint: str = None) -> Optional[int]:
+    """Principal for an email address, creating one (no Telegram) if new."""
+    return get_or_create(EMAIL, normalise_email(email), display_name_hint)

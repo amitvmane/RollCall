@@ -55,6 +55,10 @@
       <div style="font-size:.85rem;color:var(--sub)">Get RollCall as an app on your phone</div>
       <button class="btn btn-primary" style="padding:8px 14px;font-size:.85rem;flex-shrink:0" data-on-click="openInstallHelp">📲 Install</button>
     </div>
+    <div style="margin-top:20px;padding:12px 14px;border:1.5px solid var(--border);border-radius:12px;display:flex;align-items:center;justify-content:space-between;gap:12px">
+      <div style="font-size:.85rem;color:var(--sub)">Start a group here — no Telegram needed</div>
+      <button class="btn btn-primary" style="padding:8px 14px;font-size:.85rem;flex-shrink:0" data-on-click="openCreateGroup">＋ Create group</button>
+    </div>
     <div style="margin-top:24px">
       <div style="font-size:.82rem;font-weight:600;color:var(--sub);margin-bottom:8px">Open a new group by pasting its link</div>
       <div style="display:flex;gap:8px">
@@ -98,6 +102,22 @@
       You can also keep voting as a guest — signing in just links your votes to
       your Telegram account on this device.
     </div>
+  </div>
+</div>
+
+<!-- Form sheet: one small dialog for short forms (add an email sign-in,
+     create a group). Same look as the sign-in sheet; app.js _openFormSheet
+     fills the fields and wires the submit button. -->
+<div id="form-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="form-title">
+  <div class="signin-backdrop" data-on-click="closeFormSheet"></div>
+  <div class="signin-sheet">
+    <div class="signin-hdr">
+      <span class="signin-title" id="form-title"></span>
+      <button class="signin-close" data-on-click="closeFormSheet" aria-label="Close">✕</button>
+    </div>
+    <div id="form-body"></div>
+    <div id="form-note" class="signin-foot"></div>
+    <button class="btn btn-primary" id="form-submit" style="width:100%;padding:11px;margin-top:12px" data-on-click="submitFormSheet"></button>
   </div>
 </div>
 
@@ -283,7 +303,22 @@
             <span class="id-picker-label">Guest</span>
           </button>
         </div>
+        <button class="id-picker-option id-picker-option-email hidden" id="picker-email-btn" style="width:100%;margin-top:8px;flex-direction:row;justify-content:center;gap:8px" data-on-click="showEmailInput">
+          <span class="id-picker-icon">✉</span>
+          <span class="id-picker-label">Sign in with email</span>
+        </button>
         <div class="id-picker-hint">No Telegram? Pick Guest and type your name — that's all you need to vote.</div>
+      </div>
+      <div id="email-input-row" class="hidden">
+        <div style="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:8px">We'll email you a sign-in link</div>
+        <input id="email-input" type="email" placeholder="you@example.com" maxlength="254" autocomplete="email" style="width:100%;margin-bottom:8px"/>
+        <input id="email-name-input" type="text" placeholder="Your name (shown to the group)" maxlength="64" autocomplete="given-name" style="width:100%;margin-bottom:8px"/>
+        <button class="btn btn-primary" id="email-send-btn" style="width:100%;padding:10px" data-on-click="sendEmailLink">Email me a link</button>
+        <div id="email-sent-note" class="id-picker-hint hidden"></div>
+        <div class="id-picker-hint">Already on Telegram in this group? Sign in with Telegram, then add your email from the account menu — so both are the same you.</div>
+        <div style="margin-top:10px;text-align:center">
+          <button class="id-change" style="font-size:.78rem;color:var(--accent)" data-on-click="showIdentityPicker">← Other ways to sign in</button>
+        </div>
       </div>
       <div id="name-input-row" class="hidden">
         <div style="font-size:.78rem;font-weight:600;color:var(--sub);margin-bottom:8px">Enter your name to vote</div>

@@ -299,6 +299,13 @@ async def vote_by_token(
                 extra_promoted = fill_waitlist_slots(rc)
                 rc.save()
 
+    # Someone without Telegram who votes as themselves is a member from now
+    # on: there's no bot in their life to notice them, so this is where the
+    # group learns who they are (name, stats, the members list).
+    from identity_space import is_local_user
+    if is_real_user and member_info is None and is_local_user(tg_user_id) and vote_result is not None:
+        db.upsert_chat_member(chat_id, tg_user_id, name)
+
     # Re-resolve so we return the updated state
     _, _, rc = _resolve_rc(token)
     out = _serialize_web_rollcall(rc)

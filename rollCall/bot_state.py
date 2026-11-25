@@ -599,8 +599,16 @@ def _get_display_name(tg_user) -> str:
     return tg_user.first_name or tg_user.last_name or str(tg_user.id)
 
 
+def _is_web_only(user_id) -> bool:
+    from identity_space import is_local_user
+    return is_local_user(user_id)
+
+
 def format_mention(user: User) -> str:
     """Real users: @username or tg:// link. Proxy users: plain name."""
+    if _is_web_only(user.user_id):
+        # No Telegram account: a tg:// link would point at nobody.
+        return user.name
     if isinstance(user.user_id, int):
         if user.username:
             return f"@{user.username}"
@@ -610,6 +618,9 @@ def format_mention(user: User) -> str:
 
 def format_mention_with_name(user: User) -> str:
     """@username (FirstName) or [FirstName](tg://...) for real users; plain name for proxies."""
+    if _is_web_only(user.user_id):
+        # No Telegram account: a tg:// link would point at nobody.
+        return user.name
     if isinstance(user.user_id, int):
         if user.username:
             return f"@{user.username} ({user.name})"
@@ -659,6 +670,9 @@ async def can_administer_chat(cid: int, uid: int) -> bool:
 
 def format_mention_with_name_md(user: User) -> str:
     """Markdown-safe version: escapes special chars in @username/name; preserves tg:// links."""
+    if _is_web_only(user.user_id):
+        # No Telegram account: a tg:// link would point at nobody.
+        return _esc_md(user.name)
     if isinstance(user.user_id, int):
         if user.username:
             return f"@{_esc_md(user.username)} ({_esc_md(user.name)})"

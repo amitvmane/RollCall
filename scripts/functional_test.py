@@ -1439,6 +1439,60 @@ async def phase_insights():
     await feed("/erc", ALICE)
 
 
+async def phase_web_only_group():
+    """A group with no Telegram chat, and a person with no Telegram account.
+
+    Their ids come from identity_space's local ranges, so the whole voting
+    path runs unchanged — and the guard in chat_outbox stops every Telegram
+    call naming them before it leaves (the fake Telegram below records
+    anything that gets through)."""
+    print("\n=== Phase: web-only group (no Telegram) ===\n")
+    from identity_space import is_local_chat, is_local_id, is_local_user
+    from services import local_groups, principals, rollcalls as rc_svc
+    from services.web import vote_by_token, _ensure_web_token
+    from api.telegram_mirror import (mirror_panel_to_telegram, send_vote_notification,
+                                     send_promotion_notification)
+
+    clock = _FakeClock()
+    tg = _ThrottlingTelegram(clock, burst=1000)
+    tg.install()
+    try:
+        asha = principals.acting_user_id(principals.for_email("asha@example.com", "Asha"))
+        ben = principals.acting_user_id(principals.for_email("ben@example.com", "Ben"))
+        g = local_groups.create_group(asha, "Asha", "Web Turf")
+        cid = g["chat_id"]
+        record("web-only: group and people get local ids",
+               is_local_chat(cid) and is_local_user(asha) and is_local_user(ben))
+        await rc_svc.start_rollcall(cid, "Web Game", asha, "Asha", limit=1)
+        rc = manager.get_rollcall(cid, 0)
+        token = _ensure_web_token(rc)
+        await vote_by_token(token, "Asha", "in", tg_user_id=asha)
+        out = await vote_by_token(token, "Ben", "in", tg_user_id=ben)
+        await mirror_panel_to_telegram(cid, 1)
+        await send_vote_notification(cid, "Ben", out["voter_status"])
+        out = await vote_by_token(token, "Asha", "out", tg_user_id=asha)
+        await send_promotion_notification(cid, out["promoted"], 1)   # DMs Ben: a local id
+        await _settle(clock)
+        rc = manager.get_rollcall(cid, 0)
+        record("web-only: votes recorded as real members (Ben promoted from the waitlist)",
+               [u.user_id for u in rc.inList] == [ben] and [u.user_id for u in rc.outList] == [asha],
+               f"in={[u.user_id for u in rc.inList]} out={[u.user_id for u in rc.outList]}")
+        # The safety net under all of that: any send naming a local id is
+        # refused by chat_outbox as "chat not found", never attempted.
+        refused = False
+        try:
+            await bot.send_message(cid, "should never leave")
+        except Exception as e:
+            refused = getattr(e, "error_code", None) == 400
+        record("web-only: a direct send to the group is refused before Telegram", refused)
+        leaked = [a for a in tg.attempted if is_local_id(a[1])]
+        record("web-only: nothing naming the group or its people reached Telegram", not leaked,
+               f"{leaked[:3]}")
+        record("web-only: no handler errors", not _errors, str(error_msgs()[:2]))
+    finally:
+        tg.uninstall()
+
+
 async def phase_teams():
     """Teams from the panel's ⚽ button: make, move (silent), lock (admin),
     publish — through the real callback router and the fake Telegram's
@@ -2802,6 +2856,7 @@ async def run_all():
     await phase_stats_season()
     await phase_insights()
     await phase_teams()
+    await phase_web_only_group()
 
     print("\n=== Phase 16: Lifecycle close (final) ===\n")
 

@@ -105,6 +105,23 @@ def main() -> int:
 
     check("Telegram request pacing installed on the real telebot", request_pacing_installed)
 
+    def local_ids_refused():
+        # Web-only groups and people (identity_space) must never reach
+        # Telegram. The guard sits in the same wrapper as pacing; prove it
+        # refuses on the real telebot, with telebot's own exception class.
+        import asyncio
+        import telebot.asyncio_helper as h
+        from identity_space import local_chat_id
+        try:
+            asyncio.run(h._process_request("0:x", "sendMessage", "post",
+                                           {"chat_id": local_chat_id(1), "text": "x"}))
+        except h.ApiTelegramException as e:
+            assert e.error_code == 400, e.error_code
+            return
+        raise AssertionError("a send to a web-only group was not refused")
+
+    check("Web-only (local) ids refused before reaching Telegram", local_ids_refused)
+
     # ── 4. Handler modules register without error ───────────────────────
     def import_handlers():
         # Importing handlers triggers @bot.message_handler / @bot.callback_query_handler

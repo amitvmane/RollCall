@@ -85,10 +85,9 @@ chat platform. A principal is a person; bindings map them to zero or more
 platform accounts (`telegram:168415137`, `discord:…`, or none at all for an
 email login). Linking two accounts is adding a second binding.
 
-**This is additive groundwork.** The 11 tables keyed on `tg_user_id` are
-untouched, and nothing authorises off a principal yet — re-keying them is a
-large migration against a live database and speculative until a second login
-method exists. This gives the stable id to migrate *to*.
+The 11 tables keyed on `tg_user_id` are **not** re-keyed. A person without
+Telegram gets an id from `identity_space.py` instead (see below), so those
+tables work unchanged; the principal is what an email login resolves to.
 
 - `services/principals.py` is the only entry point; `for_telegram()` is called
   wherever identity is established, so principals stay current.
@@ -99,6 +98,37 @@ method exists. This gives the stable id to migrate *to*.
   it would merge two people's history on a typo.
 - `backfill_from_telegram()` runs idempotently; without it "the same person"
   would mean different things either side of the deploy.
+- `acting_user_id(principal)` is the ONE rule for which user id a person acts
+  under: their Telegram id if bound (so an existing member who adds an email
+  signs in as exactly that member), else `identity_space.local_user_id()`.
+  Derived, never stored.
+
+## Web-only people and groups (identity_space)
+
+Telegram ids have at most 52 significant bits, so `identity_space.py` hands
+out this app's own ids where Telegram never will — people at `2**52 + principal_id`,
+web-only groups at `-(2**52) - n` — both under `2**53` so they survive JSON
+numbers in the browser. Consequences:
+
+- A local person is a real user everywhere (`isinstance(uid, int) and uid > 0`):
+  votes, stats, ghosts and dues key on them like any member, not as a guest.
+- **Nothing naming a local id may reach Telegram.** `chat_outbox.refuse_local_ids`
+  (inside the same wrapper as pacing) raises Telegram's own 400 "chat not
+  found" for any request whose `chat_id`/`user_id` is local, so every
+  best-effort send already copes. Mirror/announce paths also skip web-only
+  chats up front to keep logs quiet — the guard is the safety net, not the
+  mechanism. Never build a `tg://user?id=` link for a local id (bot_state's
+  `format_mention*` already don't).
+- Web-only groups are always `admin_source='local'`: `api/web_admin.check_web_admin_live`
+  reads only `web_admins` for them (and for any chat that opted into local),
+  and `services/admin.set_admin_source` refuses `platform` for them. Owners
+  grant/remove admins via `services/local_groups`.
+- Email sign-in (`services/email_auth.py`): single-use 15-minute codes, stored
+  hashed in `email_login_codes` (purged by `memory_prune_loop`), redeemed by
+  POST from the page so a mail scanner can't spend them. Linking an email to a
+  Telegram member needs a **global** identity token — a chat-bound /weblogin
+  token must never mint a login that works everywhere. An address bound to one
+  person is never re-pointed to another.
 
 ## Web-admin roles
 
@@ -148,6 +178,7 @@ which deletes and re-inserts the row — that silently reset `role` on every
 | `MINIAPP_URL` | unset | public URL of `/miniapp/` — sets Telegram menu button on startup |
 | `WEB_BASE_URL` | unset | public base URL (e.g. `https://yourdomain.com`) — enables magic-link web voting; if unset `/weblink` shows a config warning and no link is appended to panels |
 | `TG_LOGIN_WIDGET` | unset | `true`/`1` → offer Telegram's Login Widget as a sign-in option on the group page. Set this **only after** running `/setdomain` in BotFather for this deployment's domain: without that registration Telegram renders its own error ("Username invalid" / "Bot domain invalid") inside a cross-origin iframe the page cannot read, so the visitor sees a broken third sign-in option. Off by default; the deep link and guest voting are unaffected. Turning it on also adds `'unsafe-eval'` to the CSP's script-src — the widget `eval()`s its `data-onauth` string; nothing of ours evals |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_FROM` / `SMTP_STARTTLS` | unset (email sign-in off) | outgoing mail for email sign-in. Email sign-in is offered only when `SMTP_HOST`, `SMTP_FROM` **and** `WEB_BASE_URL` are set. Port 465 uses implicit TLS; any other port uses STARTTLS unless `SMTP_STARTTLS=false` |
 | `IDENTITY_SECRET` | unset (falls back to the bot token) | signing key for web/portal identity tokens. Unset keeps today's behaviour exactly — the key is derived from `TELEGRAM_TOKEN`, which means identity can't work without Telegram. Setting it decouples the two. **Verification accepts every configured key**, so setting this on a running deployment does NOT sign anyone out: existing tokens stay valid for the rest of their 30-day life while new ones are minted under the new key. Once that window passes the bot token can be rotated or removed with no user impact |
 | `APP_UID` / `APP_GID` | unset (`0` = root) | user the bot, db-backup and watchdog containers run as (compose `user:`). Switch order matters: set both, `make fix-perms` (stops containers, `chown`s `DATA_DIR` + `./logs`), then `make build`. `check-data-dir` refuses to start while anything in those dirs isn't owned by `APP_UID` — a bot that can't write its DB looks like a healthy container |
 | `MEMORY_MODE` | unset | `true`/`1` → in-memory SQLite, all data lost on restart (original v1 behaviour); overrides `DATABASE_URL` |

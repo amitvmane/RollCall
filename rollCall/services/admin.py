@@ -293,8 +293,9 @@ def set_user_status(
 # exist before a group can be switched, not after, or there is nobody with
 # standing to grant anything.
 #
-# Nothing consumes these yet: admin_source defaults to 'platform', which is
-# exactly today's behaviour.
+# admin_source defaults to 'platform' (today's behaviour). 'local' is read by
+# api/web_admin.check_web_admin_live, and web-only groups (identity_space) are
+# always local.
 
 VALID_ADMIN_SOURCES = ("platform", "local")
 
@@ -393,6 +394,10 @@ def set_admin_source(chat_id: int, source: str, *,
             f"Unknown admin source '{source}'. Use: " + ", ".join(VALID_ADMIN_SOURCES)
         )
     _require_owner(chat_id, actor_user_id)
+    from identity_space import is_local_chat
+    if source == "platform" and is_local_chat(chat_id):
+        raise incorrectParameter(
+            "This group isn't on Telegram, so there's no Telegram admin list to use.")
     if source == "local" and db.count_web_admin_owners(chat_id) < 1:
         raise insufficientPermissions(
             "This group has no owner yet, so switching off Telegram admin "

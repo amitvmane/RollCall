@@ -129,7 +129,14 @@ const GROUP_FULL = {
   }],
 };
 
+// Email sign-in: a person with no Telegram gets an id at or above 2^52.
+const EMAIL_USER = { id_token: "4503599627370500.9999999999.feedface", user_id: 4503599627370500,
+                     name: "Asha", email: "asha@example.com", purpose: "login", group_token: "testtoken123" };
+
 const ROUTES = [
+  [/\/auth\/email\/config$/, { enabled: true }],
+  [/\/auth\/email\/verify$/, EMAIL_USER],
+  [/\/web\/groups$/, { chat_id: -4503599627370497, group_token: "newgrouptoken", group_name: "Sunday Turf" }],
   [/\/web\/group\/emptytoken$/, GROUP_EMPTY],
   [/\/web\/group\/fulltoken$/, GROUP_FULL],
   [/\/web\/group\/[^/]+$/, GROUP],
@@ -1231,6 +1238,74 @@ const WIDTHS = [
     if (errs.length) failures.push(`vote status: JS error — ${errs[0]}`);
     await page.evaluate(() => localStorage.clear());
     console.log("  vote status: waitlisted guest, guest sharing a member's name");
+    await page.close();
+  }
+
+  // Sign-in without Telegram: an emailed link (?email_code=) signs in, is
+  // stripped from the URL, joins the group, and the menu says "email" —
+  // plus the Email option in the sign-in dialog and Create group.
+  {
+    const page = await browser.newPage();
+    await page.setRequestInterception(true);
+    const posts = [];
+    page.on("request", req => {
+      if (req.method() === "POST") posts.push(req.url().replace(BASE, ""));
+      return req.url().startsWith(BASE) ? req.continue()
+        : req.respond({ status: 200, contentType: "text/plain", body: "" });
+    });
+    const errs = [];
+    page.on("pageerror", e => errs.push(String(e.message)));
+    await page.goto(`${BASE}/web/group/testtoken123`, { waitUntil: "load" });
+    await page.evaluate(() => localStorage.clear());
+    await page.goto(`${BASE}/web/group/testtoken123?email_code=abc123`, { waitUntil: "load" });
+    await new Promise(r => setTimeout(r, 700));
+    let s = await page.evaluate(() => {
+      document.getElementById("acct-btn").click();
+      return { tok: localStorage.getItem("rc_identity_token"), search: location.search,
+               menu: document.getElementById("acct-menu").innerText };
+    });
+    if (s.tok !== "4503599627370500.9999999999.feedface") failures.push("email sign-in: id token not stored");
+    if (s.search.includes("email_code")) failures.push("email sign-in: code left in the URL");
+    if (!/Signed in with email/.test(s.menu)) failures.push(`email sign-in: menu should say "Signed in with email" — got "${s.menu.replace(/\n/g, " | ")}"`);
+    if (/Email sign-in/.test(s.menu)) failures.push("email sign-in: an email-only account was offered 'add email'");
+    if (!/Create a group/.test(s.menu)) failures.push("email sign-in: menu has no Create a group");
+    if (!posts.some(u => u === "/api/v1/auth/email/verify")) failures.push("email sign-in: code was not POSTed");
+    if (!posts.some(u => u === "/api/v1/web/group/testtoken123/join")) failures.push("email sign-in: did not join the group");
+
+    // Create group from the menu → form → POST /web/groups → navigates.
+    const opened = await page.evaluate(() => {
+      document.querySelector('#acct-menu [data-on-click="closeAcctMenu openCreateGroup"]').click();
+      const open = !document.getElementById("form-modal").classList.contains("hidden");
+      if (open) document.getElementById("fs-gname").value = "Sunday Turf";
+      return open;
+    });
+    if (!opened) failures.push("create group: form did not open");
+    else {
+      await Promise.all([
+        page.waitForNavigation({ timeout: 5000 }).catch(() => null),
+        page.evaluate(() => document.getElementById("form-submit").click()),
+      ]);
+      const at = await page.evaluate(() => location.pathname);
+      if (at !== "/web/group/newgrouptoken") failures.push(`create group: expected to land on the new group, at ${at}`);
+    }
+
+    // Signed out: the sign-in dialog offers email when the server does.
+    await page.evaluate(() => localStorage.clear());
+    await page.goto(`${BASE}/web/group/testtoken123`, { waitUntil: "load" });
+    await new Promise(r => setTimeout(r, 500));
+    s = await page.evaluate(() => {
+      window.openSignIn();
+      const btn = document.getElementById("picker-email-btn");
+      const shown = btn && !btn.classList.contains("hidden");
+      if (btn) btn.click();
+      const row = document.getElementById("email-input-row");
+      return { shown, rowOpen: row && !row.classList.contains("hidden") };
+    });
+    if (!s.shown) failures.push("sign-in: Email option hidden though the server offers it");
+    if (!s.rowOpen) failures.push("sign-in: Email option did not open the email form");
+    if (errs.length) failures.push(`email sign-in: JS error — ${errs[0]}`);
+    await page.evaluate(() => localStorage.clear());
+    console.log("  email sign-in: link redeemed + joined, menu, create group, sign-in option");
     await page.close();
   }
 

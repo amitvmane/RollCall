@@ -631,9 +631,14 @@ async def memory_prune_loop(interval_seconds: int = 600):
                 if _db_type == 'postgresql':
                     _cur.execute("DELETE FROM web_verify_tokens WHERE expires_at < NOW() - INTERVAL '1 hour'")
                     _cur.execute("DELETE FROM web_direct_login_tokens WHERE expires_at < NOW() - INTERVAL '30 days'")
+                    # email_login_codes — email sign-in, TTL 15 min, epoch seconds.
+                    _cur.execute("DELETE FROM email_login_codes WHERE expires_at < %s",
+                                 (int(time.time()) - 86400,))
                 else:
                     _cur.execute("DELETE FROM web_verify_tokens WHERE expires_at < datetime('now', '-1 hour')")
                     _cur.execute("DELETE FROM web_direct_login_tokens WHERE expires_at < datetime('now', '-30 days')")
+                    _cur.execute("DELETE FROM email_login_codes WHERE expires_at < ?",
+                                 (int(time.time()) - 86400,))
                 _conn.commit()
                 _cur.close()
                 if _db_type == 'postgresql':

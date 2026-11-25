@@ -75,7 +75,7 @@ class TestExpiredTokenPurge(unittest.TestCase):
         self.runner = _read("runner.py")
 
     def test_both_token_tables_are_purged(self):
-        for table in ("web_verify_tokens", "web_direct_login_tokens"):
+        for table in ("web_verify_tokens", "web_direct_login_tokens", "email_login_codes"):
             self.assertIn(
                 f"DELETE FROM {table} WHERE expires_at <",
                 self.runner,

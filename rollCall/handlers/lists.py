@@ -295,8 +295,11 @@ def _build_mention_list(users: list) -> str:
         username = u.get('username')
         name = (u.get('first_name') or username or str(uid)).strip()
         safe_name = name.replace("[", "\\[").replace("]", "\\]").replace("_", "\\_").replace("*", "\\*")
+        from identity_space import is_local_user
         if username:
             parts.append(f"@{_esc_md(username)}")
+        elif uid and is_local_user(uid):
+            parts.append(safe_name)   # no Telegram account to link to
         elif uid:
             parts.append(f"[{safe_name}](tg://user?id={uid})")
     return " ".join(parts)

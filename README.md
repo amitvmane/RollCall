@@ -164,6 +164,7 @@ variables:
 | `MINIAPP_URL` | No | Public URL the Telegram menu button opens — point it at `<WEB_BASE_URL>/web/`. The old standalone `/miniapp/` app is retired and redirects there |
 | `TG_LOGIN_WIDGET` | No | `true` offers Telegram's Login Widget on the group page. Run `/setdomain` in BotFather first. Also adds `'unsafe-eval'` to the page CSP, because the widget `eval()`s its callback |
 | `IDENTITY_SECRET` | No | Signing key for web/portal identity tokens. Unset = derived from the bot token (today's behaviour). Set it to decouple identity from Telegram; safe to set on a running deployment, nobody is signed out |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_FROM` / `SMTP_STARTTLS` | No | Outgoing mail for email sign-in (people without Telegram, or members adding an email). Offered only when `SMTP_HOST`, `SMTP_FROM` and `WEB_BASE_URL` are set; port 465 = implicit TLS, otherwise STARTTLS |
 | `GHOST_AUTOFORGIVE_DAYS` | No | Days before an unreviewed session counts as "everyone attended" (default: `7`, `0` disables) |
 | `WATCHDOG_CHAT_ID` | No | Where the watchdog sidecar DMs alerts (default: `ADMIN1`); that account must have DMed the bot once |
 | `WATCHDOG_INTERVAL_SECONDS` | No | Watchdog `/health` poll cadence (default: `300`) |

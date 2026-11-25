@@ -12,12 +12,19 @@ production logs without being fatal.
 import logging
 
 
+def _web_only(chat_id) -> bool:
+    from identity_space import is_local_chat
+    return is_local_chat(chat_id)
+
+
 async def mirror_panel_to_telegram(
     chat_id: int,
     rc_number_1based: int,
     force_new: bool = False,
 ) -> None:
     """Reflect a web/portal/REST rollcall action in the Telegram group chat."""
+    if _web_only(chat_id):
+        return   # no Telegram chat to mirror into — the web page is the group
     try:
         from handlers.lifecycle import show_panel_for_rollcall
         logging.info(
@@ -42,6 +49,8 @@ async def send_event_notification(
     Used for admin actions that mutate state but don't have a panel to mirror
     (e.g. scheduling or cancelling a future rollcall).
     """
+    if _web_only(chat_id):
+        return   # no Telegram chat to mirror into — the web page is the group
     try:
         from bot_state import bot
         logging.info("[mirror] event notification chat=%s text=%r", chat_id, text)
@@ -62,6 +71,8 @@ async def send_vote_notification(
 
     vote_type is "in", "out", "maybe", or "waitlist" (an IN on a full game).
     """
+    if _web_only(chat_id):
+        return   # no Telegram chat to mirror into — the web page is the group
     try:
         from bot_state import bot
         from rollcall_manager import manager

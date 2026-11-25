@@ -43,7 +43,10 @@ async def announce_promotions(
 
     from models import User
 
-    shh = manager.get_shh_mode(cid)
+    # A web-only group has no chat to announce in; its members hear through
+    # the push below (identity_space — chat_outbox would refuse it anyway).
+    from identity_space import is_local_chat, is_local_user
+    shh = manager.get_shh_mode(cid) or is_local_chat(cid)
 
     for p in promoted:
         try:
@@ -69,7 +72,7 @@ async def announce_promotions(
                 except Exception:
                     logging.warning("Promotion of %r saved; group message not delivered (chat=%s)",
                                     p.get("name"), cid, exc_info=True)
-            if isinstance(p_id, int):
+            if isinstance(p_id, int) and not is_local_user(p_id):
                 _t = asyncio.create_task(_dm_promoted_real_user(p_id, rc_title, rc_number_1based))
                 _t.add_done_callback(_log_task_exc)
             # Web-app twin of the DM. Both, not either: the DM fails for

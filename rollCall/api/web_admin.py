@@ -33,6 +33,9 @@ async def _has_left_chat(chat_id: int, tg_user_id: int) -> bool:
     """
     if chat_id > 0:
         return False    # a private chat with the bot has no membership to lose
+    from identity_space import is_local_chat, is_local_user
+    if is_local_chat(chat_id) or is_local_user(tg_user_id):
+        return False    # no Telegram membership to ask about
     key = (chat_id, tg_user_id)
     now = time.monotonic()
     hit = _membership_cache.get(key)
@@ -55,6 +58,18 @@ async def _has_left_chat(chat_id: int, tg_user_id: int) -> bool:
         _membership_cache.clear()
     _membership_cache[key] = (now + _MEMBERSHIP_TTL_SECONDS, gone)
     return gone
+
+
+def _uses_local_admins(chat_id: int) -> bool:
+    from identity_space import is_local_chat
+    if is_local_chat(chat_id):
+        return True
+    try:
+        from services.admin import get_admin_source
+        return get_admin_source(chat_id) == "local"
+    except Exception:
+        logging.exception("[web-admin] admin_source lookup failed chat=%s", chat_id)
+        return False
 
 
 async def check_web_admin_live(chat_id: int, tg_user_id: int) -> bool:
@@ -88,6 +103,14 @@ async def check_web_admin_live(chat_id: int, tg_user_id: int) -> bool:
     working when Telegram is down.
     """
     from rollcall_manager import manager as _mgr
+    if _uses_local_admins(chat_id):
+        # LOCAL ADMIN LIST (web-only group, or admin_source='local'). This
+        # app's web_admins rows are the whole truth; Telegram is never asked.
+        # services.admin keeps such a chat from ever being left ownerless.
+        allowed = _db.is_web_admin(chat_id, tg_user_id)
+        logging.info("[web-admin] chat=%s user=%s -> %s (local admin list)",
+                     chat_id, tg_user_id, "ALLOW" if allowed else "DENY")
+        return allowed
     if not _mgr.get_admin_rights(chat_id):
         if _db.is_web_admin(chat_id, tg_user_id):
             if await _has_left_chat(chat_id, tg_user_id):

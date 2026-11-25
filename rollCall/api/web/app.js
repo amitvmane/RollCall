@@ -68,6 +68,39 @@ let _weblogInRedeemPromise=null;
   }catch(_){}
 })();
 
+// Email sign-in link: ?email_code=<code>, mailed by /auth/email/start (or
+// /auth/email/link). Same shape as the weblogin code above, and it reuses
+// that promise so every place already waiting for a redemption waits for
+// this one too. The code is POSTed, so a mail scanner that opens the link
+// can't spend it.
+(function(){
+  try{
+    const p=new URLSearchParams(window.location.search);
+    const code=p.get("email_code");
+    if(!code)return;
+    p.delete("email_code");
+    const qs=p.toString();
+    history.replaceState(null,"",window.location.pathname+(qs?"?"+qs:""));
+    _weblogInRedeemPromise=fetch("/api/v1/auth/email/verify",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({code}),
+      signal:AbortSignal.timeout(10000),
+    }).then(async r=>{
+      const data=await r.json().catch(()=>({}));
+      if(!r.ok)throw new Error(data.detail||"That sign-in link didn't work");
+      _verifiedUserId=data.user_id;_verifiedName=data.name;_idToken=data.id_token;
+      localStorage.setItem(LS_ID_TOKEN,data.id_token);
+      localStorage.setItem(LS_TG_USER_ID,String(data.user_id));
+      localStorage.setItem(LS_TG_NAME,data.name);
+      localStorage.setItem(LS_NAME,data.name);
+      currentName=data.name;
+      setTimeout(()=>_afterEmailSignIn(data),0);
+    }).catch(e=>{
+      setTimeout(()=>toast(e.message||"That sign-in link didn't work",5000),0);
+    });
+  }catch(_){}
+})();
+
 // Admin-issued guest voting link: ?guest=<name> pre-fills and saves a guest
 // display name. This is a convenience deep link, NOT an identity grant —
 // guest voting is already open to anyone who types any name on this page
@@ -143,7 +176,7 @@ let currentVote=null, activeRcData=null, groupData=null, activeTabIdx=0, voting=
 // between headers rather than duplicated). _signinHome records where each row
 // came from, and doubles as the "dialog is open" flag; it's declared up here
 // with the other page state because renderIdentity() reads it.
-const SIGNIN_ROWS=["identity-picker-row","name-input-row","tg-deeplink-row","tg-widget-wrap"];
+const SIGNIN_ROWS=["identity-picker-row","name-input-row","email-input-row","tg-deeplink-row","tg-widget-wrap"];
 let _signinHome=null;   // [{el, parent, next}] — where each row came from
 
 // ── DOM ────────────────────────────────────────────────────────────────────
@@ -479,7 +512,7 @@ function renderAcctMenu(){
   if(who){
     html+=`<div class="acct-menu-hdr">
       <div class="acct-menu-name">${esc(who)}</div>
-      <div class="acct-menu-sub">${verified?"✅ Telegram verified":"👤 Guest on this device"}</div>
+      <div class="acct-menu-sub">${!verified?"👤 Guest on this device":_isLocalUid(_verifiedUserId)?"✉️ Signed in with email":"✅ Telegram verified"}</div>
     </div>`;
   }
   if(!verified){
@@ -500,6 +533,14 @@ function renderAcctMenu(){
   }
   if(_isWebAdmin){
     html+=`<button class="acct-menu-item" role="menuitem" data-on-click="closeAcctMenu toggleAdminPanel">⚙ Admin controls</button>`;
+  }
+  // A Telegram member can add an email as a second way in — the same
+  // account, so signing in by email later is still them.
+  if(verified&&_idToken&&_emailEnabled&&!_isLocalUid(_verifiedUserId||(TG_USER&&TG_USER.id))){
+    html+=`<button class="acct-menu-item" role="menuitem" data-on-click="closeAcctMenu acctEmail">✉️ Email sign-in</button>`;
+  }
+  if(verified&&_idToken){
+    html+=`<button class="acct-menu-item" role="menuitem" data-on-click="closeAcctMenu openCreateGroup">＋ Create a group</button>`;
   }
   // On a phone the header hides Help and Home to leave room for 44px touch
   // targets, so the menu has to carry them — otherwise they are simply gone.
@@ -530,6 +571,155 @@ fetch("/api/v1/web/version",{signal:AbortSignal.timeout(5000)})
     if(d&&/^\d+(\.\d+)*$/.test(String(d.version))){_appVersion=String(d.version);renderAcctMenu();}
   })
   .catch(()=>{});
+
+// ── Sign-in without Telegram: email ───────────────────────────────────────
+// Ids at or above 2^52 are this app's own (identity_space.py): a person who
+// signed in by email and has no Telegram account.
+function _isLocalUid(uid){return typeof uid==="number"&&uid>=4503599627370496;}
+
+let _emailEnabled=false;
+fetch("/api/v1/auth/email/config",{signal:AbortSignal.timeout(5000)})
+  .then(r=>r.ok?r.json():null)
+  .then(d=>{
+    _emailEnabled=!!(d&&d.enabled);
+    document.getElementById("picker-email-btn")?.classList.toggle("hidden",!_emailEnabled);
+    renderAcctMenu();
+  }).catch(()=>{});
+
+window.showEmailInput=function(){
+  $("identity-picker-row").classList.add("hidden");
+  $("name-input-row").classList.add("hidden");
+  $("email-input-row").classList.remove("hidden");
+  $("email-sent-note").classList.add("hidden");
+  if(currentName&&!$("email-name-input").value)$("email-name-input").value=currentName;
+  $("email-input").focus();
+};
+
+window.sendEmailLink=async function(){
+  const email=($("email-input").value||"").trim();
+  const name=($("email-name-input").value||"").replace(/\s+/g," ").trim();
+  if(!email){$("email-input").focus();return;}
+  const btn=$("email-send-btn");btn.disabled=true;
+  try{
+    const r=await fetch("/api/v1/auth/email/start",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({email,...(name?{name}:{}),...(IS_GROUP?{group_token:URL_TOKEN}:{})}),
+      signal:AbortSignal.timeout(20000),
+    });
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||"Couldn't send the email");
+    const note=$("email-sent-note");
+    note.textContent=`📬 Sent to ${email}. Open the link in it on this device — it works once, for 15 minutes.`;
+    note.classList.remove("hidden");
+  }catch(e){toast(e.message||"Couldn't send the email",4500);}
+  finally{btn.disabled=false;}
+};
+
+// After ?email_code= is redeemed (top of file).
+function _afterEmailSignIn(data){
+  if(_signinHome)closeSignIn();
+  renderIdentity();detectCurrentVote();
+  toast(data.purpose==="link"
+    ?`✉️ ${data.email} added — you can now sign in with it too.`
+    :`✅ Signed in as ${data.name}`,4500);
+  _checkWebAdmin().catch(()=>{});
+  if(!URL_TOKEN)_loadHomeGroups().catch(()=>{});
+  _relinkPushSubscription();
+  // Arriving from a group's page: someone without Telegram joins it as
+  // themselves (the bot can't see them, so nothing else would add them).
+  if(IS_GROUP&&_isLocalUid(data.user_id)){
+    fetch(`${API_GROUP}/join`,{method:"POST",
+      headers:{"Content-Type":"application/json","X-Identity-Token":data.id_token},
+      body:"{}",signal:AbortSignal.timeout(8000)}).catch(()=>{});
+  }
+}
+
+window.acctEmail=async function(){
+  try{
+    const r=await fetch("/api/v1/auth/email/me",{headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(8000)});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||"Couldn't load your account");
+    if(d.email){
+      if(!d.can_unlink){toast(`Signed in with ${d.email}`,3500);return;}
+      if(!await _confirmAction(`${d.email} is a sign-in for this account.\n\nRemove it? You'll still sign in with Telegram.`))return;
+      const u=await fetch("/api/v1/auth/email/unlink",{method:"POST",headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(8000)});
+      if(!u.ok)throw new Error((await u.json().catch(()=>({}))).detail||"Couldn't remove it");
+      toast("Email sign-in removed",3000);
+      return;
+    }
+    _openFormSheet({
+      title:"✉️ Add email sign-in",
+      fields:[{id:"fs-email",label:"Email",type:"email",placeholder:"you@example.com"}],
+      note:"We'll email a link to confirm it. After that, signing in with this email is this same account — your votes, stats and dues.",
+      submit:"Send link",
+      onSubmit:async v=>{
+        const r2=await fetch("/api/v1/auth/email/link",{method:"POST",
+          headers:{"Content-Type":"application/json","X-Identity-Token":_idToken},
+          body:JSON.stringify({email:v["fs-email"],...(IS_GROUP?{group_token:URL_TOKEN}:{})}),
+          signal:AbortSignal.timeout(20000)});
+        const d2=await r2.json().catch(()=>({}));
+        if(!r2.ok)throw new Error(d2.detail||"Couldn't send the email");
+        toast(`📬 Check ${v["fs-email"]} for the link`,4500);
+      },
+    });
+  }catch(e){toast(e.message||"Something went wrong",4000);}
+};
+
+// ── Create a group (no Telegram chat needed) ──────────────────────────────
+window.openCreateGroup=function(){
+  if(!_idToken){toast("Sign in first — then you can create a group.",3500);openSignIn();return;}
+  let tz="Asia/Kolkata";
+  try{tz=Intl.DateTimeFormat().resolvedOptions().timeZone||tz;}catch(_){}
+  _openFormSheet({
+    title:"＋ Create a group",
+    fields:[
+      {id:"fs-gname",label:"Group name",type:"text",placeholder:"Sunday Football"},
+      {id:"fs-tz",label:"Timezone",type:"text",value:tz},
+    ],
+    note:"Lives on the web: share its link, members vote here, you're its owner. You can add admins from Admin controls.",
+    submit:"Create",
+    onSubmit:async v=>{
+      const r=await fetch("/api/v1/web/groups",{method:"POST",
+        headers:{"Content-Type":"application/json","X-Identity-Token":_idToken},
+        body:JSON.stringify({name:v["fs-gname"],timezone:v["fs-tz"],...(_verifiedName?{your_name:_verifiedName}:{})}),
+        signal:AbortSignal.timeout(10000)});
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok)throw new Error(d.detail||"Couldn't create the group");
+      window.location.href=`/web/group/${d.group_token}`;
+    },
+  });
+};
+
+// ── Form sheet ────────────────────────────────────────────────────────────
+let _formSheet=null;
+function _openFormSheet(cfg){
+  _formSheet=cfg;
+  $("form-title").textContent=cfg.title;
+  $("form-body").innerHTML=cfg.fields.map(f=>
+    `<label for="${esc(f.id)}">${esc(f.label)}</label><input id="${esc(f.id)}" type="${esc(f.type||"text")}" maxlength="${f.type==="email"?254:64}" placeholder="${esc(f.placeholder||"")}" value="${esc(f.value||"")}"/>`).join("");
+  $("form-note").textContent=cfg.note||"";
+  $("form-submit").textContent=cfg.submit||"OK";
+  $("form-submit").disabled=false;
+  $("form-modal").classList.remove("hidden");
+  document.body.classList.add("modal-open");
+  const first=$("form-body").querySelector("input");if(first)first.focus();
+}
+window.closeFormSheet=function(){
+  $("form-modal").classList.add("hidden");
+  document.body.classList.remove("modal-open");
+  _formSheet=null;
+};
+window.submitFormSheet=async function(){
+  if(!_formSheet)return;
+  const v={};
+  for(const f of _formSheet.fields){
+    v[f.id]=($(f.id).value||"").trim();
+    if(!v[f.id]){$(f.id).focus();return;}
+  }
+  const btn=$("form-submit");btn.disabled=true;
+  try{await _formSheet.onSubmit(v);closeFormSheet();}
+  catch(e){toast(e.message||"Something went wrong",4500);btn.disabled=false;}
+};
 
 // Calls the flow directly. It must NOT click #name-change-btn any more —
 // that button now opens this very menu, so clicking it from a menu item
@@ -567,6 +757,8 @@ window.openSignIn=function(){
   const nameRow=document.getElementById("name-input-row");
   if(picker)picker.classList.remove("hidden");
   if(nameRow)nameRow.classList.add("hidden");
+  document.getElementById("email-input-row")?.classList.add("hidden");
+  document.getElementById("picker-email-btn")?.classList.toggle("hidden",!_emailEnabled);
   // The Login Widget is the answer to "Telegram isn't on this device", so it
   // belongs with the other choices. Load it, but leave the reveal to
   // _loadLoginWidget — it only shows the block once there's a working button
@@ -623,12 +815,14 @@ function renderAcctControl(){
 
 window.showGuestInput=function(){
   $("identity-picker-row").classList.add("hidden");
+  $("email-input-row")?.classList.add("hidden");
   $("name-input-row").classList.remove("hidden");
   $("name-back-row")?.classList.remove("hidden");
   $("name-input").focus();
 };
 window.showIdentityPicker=function(){
   $("name-input-row").classList.add("hidden");
+  $("email-input-row")?.classList.add("hidden");
   $("identity-picker-row").classList.remove("hidden");
 };
 
@@ -5230,15 +5424,56 @@ function renderAdminsPanel(){
         :lastOwner?`<span class="gr-tag">only owner</span>`
         :`<button class="btn btn-secondary" style="padding:6px 10px;font-size:.78rem"
              data-on-click="setAdminRole" data-args="${rcArgs(a.tg_user_id,isOwner?'admin':'owner')}">${
-             isOwner?"Step down":"Make owner"}</button>`;
+             isOwner?"Step down":"Make owner"}</button>`+
+          // Own admin list: an owner can also take admin away entirely.
+          (admin_source==="local"&&!isOwner
+            ?` <button class="btn btn-secondary" style="padding:6px 10px;font-size:.78rem"
+                 data-on-click="removeLocalAdmin" data-args="${rcArgs(a.tg_user_id,a.tg_name||"")}">Remove</button>`:"");
       return `<div class="gr-row" style="cursor:default">
         <span class="gr-name">${esc(a.tg_name||("User "+a.tg_user_id))}${
           a.is_you?' <span class="gr-tag">you</span>':""}</span>
         ${isOwner?'<span class="gr-tag">👑 owner</span>':""}
         ${btn}
       </div>`;
-    }).join("");
+    }).join("")+
+    (admin_source==="local"&&you_are_owner
+      ?`<button class="btn btn-primary" style="margin-top:12px;padding:8px 14px;font-size:.85rem" data-on-click="addLocalAdmin">＋ Add admin</button>
+        <div id="add-admin-picker"></div>`:"");
 }
+
+// Groups that keep their own admin list (every web-only group): the owner
+// picks who else administers it. Telegram groups take this from Telegram.
+async function _localAdminCall(path,userId){
+  const res=await fetch(`${API_GROUP}/admins/${path}`,{method:"POST",
+    headers:{"Content-Type":"application/json","X-Identity-Token":_idToken},
+    body:JSON.stringify({user_id:userId}),signal:AbortSignal.timeout(8000)});
+  if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"Failed");
+  await loadAdminsPanel();
+}
+window.addLocalAdmin=async function(){
+  const box=document.getElementById("add-admin-picker");
+  if(!box)return;
+  box.innerHTML='<div class="sched-empty">Loading members…</div>';
+  try{
+    const res=await fetch(`${API_GROUP}/members`,{headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(8000)});
+    if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"Couldn't load members");
+    const admins=new Set((_adminsData?.admins||[]).map(a=>a.tg_user_id));
+    const members=((await res.json()).members||[]).filter(m=>!admins.has(m.user_id));
+    box.innerHTML=members.length
+      ?members.map(m=>`<div class="gr-row" style="cursor:default"><span class="gr-name">${esc(m.first_name||m.username||("User "+m.user_id))}</span>
+          <button class="btn btn-secondary" style="padding:6px 10px;font-size:.78rem" data-on-click="grantLocalAdmin" data-args="${rcArgs(m.user_id)}">Make admin</button></div>`).join("")
+      :'<div class="sched-empty">Everyone in the group is already an admin — or nobody has joined yet. Share the group link.</div>';
+  }catch(e){box.innerHTML=`<div class="sched-empty">${esc(e.message)}</div>`;}
+};
+window.grantLocalAdmin=async function(userId){
+  try{await _localAdminCall("grant",userId);toast("Admin added",2500);}
+  catch(e){toast(e.message||"Couldn't add them",4000);}
+};
+window.removeLocalAdmin=async function(userId,name){
+  if(!await _confirmAction(`Remove ${name||"this person"} as an admin?`))return;
+  try{await _localAdminCall("remove",userId);toast("Admin removed",2500);}
+  catch(e){toast(e.message||"Couldn't remove them",4000);}
+};
 
 window.setAdminRole=async function(userId,role){
   if(!_idToken)return;

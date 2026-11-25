@@ -901,6 +901,27 @@ def create_tables():
                 ON principal_bindings (principal_id)
             """)
 
+        # Email sign-in codes (services/email_auth.py). Single-use, short-lived,
+        # stored only as a hash — the code itself exists in the email alone.
+        # Epoch-second integers, not TIMESTAMP, so both dialects compare alike.
+        cursor.execute(f"""
+            CREATE TABLE IF NOT EXISTS email_login_codes (
+                code_hash    TEXT PRIMARY KEY,
+                email        TEXT NOT NULL,
+                purpose      TEXT NOT NULL,
+                tg_user_id   {'BIGINT' if db_type == 'postgresql' else 'INTEGER'} DEFAULT NULL,
+                display_name TEXT DEFAULT NULL,
+                return_group TEXT DEFAULT NULL,
+                created_at   BIGINT NOT NULL,
+                expires_at   BIGINT NOT NULL,
+                used_at      BIGINT DEFAULT NULL
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS email_login_codes_email_idx
+            ON email_login_codes (email, created_at)
+        """)
+
         if db_type == 'postgresql':
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS identity_links (

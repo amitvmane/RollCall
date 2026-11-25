@@ -165,6 +165,27 @@ PACED_METHODS = frozenset({
 _orig_process_request = None    # telebot's real request function (tests swap in a fake)
 
 
+# Parameters that name a chat or a person in a Bot API call.
+_ID_PARAMS = ("chat_id", "user_id", "from_chat_id")
+
+
+def refuse_local_ids(helper, url, params) -> None:
+    """Never send a web-only group or person (identity_space) to Telegram.
+
+    Raised as Telegram's own "chat not found", so every caller handles it the
+    way it already handles a member who never started the bot or a group that
+    removed it: best-effort sends log and move on, the state change stands.
+    One check here covers every send, edit, DM and lookup, present and future
+    — the same reason pacing lives here."""
+    from identity_space import is_local_id
+    for key in _ID_PARAMS:
+        if is_local_id((params or {}).get(key)):
+            raise helper.ApiTelegramException(url, None, {
+                "error_code": 400,
+                "description": "Bad Request: chat not found (web-only group or member — not on Telegram)",
+            })
+
+
 def install_request_pacing(helper) -> bool:
     """Route every chat-posting Telegram call through deliver().
 
@@ -183,6 +204,7 @@ def install_request_pacing(helper) -> bool:
     _orig_process_request = current
 
     async def _paced(token, url, method='get', params=None, files=None, **kwargs):
+        refuse_local_ids(helper, url, params)
         chat = (params or {}).get("chat_id") if url in PACED_METHODS else None
         if chat is None:
             return await _orig_process_request(token, url, method, params, files, **kwargs)

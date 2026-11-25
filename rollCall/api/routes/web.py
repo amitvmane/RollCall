@@ -456,6 +456,11 @@ async def update_group_settings(
             f"🌦 Weather alerts {'on' if body.weather_alerts else 'off'} (by {actor_name}, via web)",
         )
 
+    if body.buzz_mute_after is not None:
+        actor_name = await _actor_display_name(chat_id, actor_user_id)
+        from services import buzz_mute
+        buzz_mute.set_threshold(chat_id, body.buzz_mute_after, actor_user_id, actor_name)
+
     if body.join_approval is not None:
         actor_name = await _actor_display_name(chat_id, actor_user_id)
         _db.update_chat_settings(chat_id, join_approval=1 if body.join_approval else 0)

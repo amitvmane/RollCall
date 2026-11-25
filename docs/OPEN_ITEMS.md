@@ -21,11 +21,9 @@ Legend: **you** = needs the owner (server, accounts, decisions) · **code** = ca
 
 | # | Item | Who | Status |
 |---|------|-----|--------|
-| 7 | **Partner API**: per-app keys with scopes, signed outbound webhooks with retries (vote changed, rollcall opened/closed, promoted, dues posted), versioned public docs. Builds on the stable rollcall ids (done 2026-11-25). | code | Not started |
-| 8 | **Retire the deprecated number-based REST paths** (`/rollcalls/{rc_number}/…`). They still work and announce `Deprecation: true` + a `Link` to the `by-id` path. Pick a sunset date once partners exist, add a `Sunset` header, then remove them. | code + you (date) | Waiting on #7 |
-| 9 | Account merge started from an email session (today it starts only from "add email" on a Telegram account), plus an admin tool to merge two people. | code | Not started |
-| 10 | Sign-in email abuse: per-IP cap (and maybe a CAPTCHA) on sending sign-in emails. Today: 3 per address per 15 min + the general per-IP limit. | code | Not started |
-| 11 | "API hits" peak stat (Telegram updates + REST requests per hour). Needs a new counter table — ask before adding it. | code | Not started |
+| 7 | Hand `docs/API.md` to the first partner; watch their webhook deliveries under Integrations. | you | Ready |
+| 8 | Old number-based REST paths: **kept, backward compatible — not being removed** (decision 2026-11-25). They answer with `Deprecation`/`Link` headers only. | — | Decided |
+| 9 | CAPTCHA on sign-in email, only if the new per-IP / hourly caps prove not enough. | code | Only if needed |
 
 ## Later / parked by you
 
@@ -43,6 +41,12 @@ Legend: **you** = needs the owner (server, accounts, decisions) · **code** = ca
 - Reaction-based voting; `/myvote`; `/ping in|out` split; the old DB-merge cutover.
 
 ## Recently done
+
+- 2026-11-25 — Partner API: app keys (Integrations; admin scope owners-only; may vote for members), signed webhooks with retries/backoff/auto-off and private-address refusal at connect time, `docs/API.md` v1.
+- 2026-11-25 — Merge from an email session (sign in with Telegram on the same device → offered), owner merge tool (email-only accounts whose history is only in that group).
+- 2026-11-25 — Sign-in email limits: 10/hour per visitor, 200/hour per deployment, on top of 3 per address per 15 min.
+- 2026-11-25 — "API hits": Telegram updates + REST requests per hour (`api_hits`, flushed each minute, 90-day retention); busiest hour on `/health`.
+- 2026-11-25 — Buzz mute: members who ignore N buzzes in a row (default 3) are skipped by /buzz, auto-buzz and reminders; any vote brings them back. `/buzz_mute`, `/buzz_unmute`, web settings. Fixed /buzz saying "no known members" when everyone had voted.
 
 - 2026-11-25 — REST rollcalls by permanent id: every rollcall route has a `/rollcalls/by-id/{rollcall_id}/…` twin, re-finds the rollcall by id inside the chat lock; number paths kept, deprecated, same errors as before. `settings/location|fee|when|reminder` now take the chat lock. Ratchet: `tests/test_rest_rollcall_ids.py`.
 - 2026-11-25 — Account merge (email-only → Telegram), link-hijack fix, join approval, quiet logs for web-only groups, guest dues alerts (2155733).

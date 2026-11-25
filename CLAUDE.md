@@ -35,6 +35,17 @@ the deprecated `/rollcalls/{rc_number}/…` one, on ONE handler. Inside the chat
 lock, use `ref.index_now()` (re-finds by id) — never the number from the URL.
 `tests/test_rest_rollcall_ids.py` fails on a number-only route.
 
+## Partner webhooks
+
+`services/webhooks.py` is fed by hooks in the db.py writers every surface uses
+(`create_rollcall`, `end_rollcall`, `add_or_update_user`, `add_or_update_proxy_user`,
+`delete_user_by_*`, `add_dues_entry`). `db._webhook` QUEUES the event and
+`_cursor` flushes it only after the outermost block commits (dropped on
+rollback) — never emit from inside an open write. Delivery is async with
+retries from the minute tick; URLs are https and the resolver refuses private
+addresses at connect time. Public contract: `docs/API.md` (v1 — add fields,
+never remove or rename).
+
 ## Chat mutations
 
 Anything that mutates a chat's rollcall state (votes, proxy adds, set_limit, end_rollcall) should run inside `async with manager.get_chat_write_lock(cid):` to serialize with concurrent operations like /erc and template auto-close. Re-fetch the rollcall *inside* the lock since /erc may have removed it while you were waiting.

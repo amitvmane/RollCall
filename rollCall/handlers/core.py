@@ -544,6 +544,11 @@ async def health_command(message):
             offsite_line,
         ]
         lines.extend(_uptime_lines())
+        try:
+            from services import traffic
+            lines.append("📈 " + traffic.summary_line())
+        except Exception:
+            logging.exception("/health traffic line failed")
         await bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
     except Exception as e:
         await reply_error(message, e)

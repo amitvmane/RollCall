@@ -129,6 +129,9 @@ def _sweep(cutoff: float) -> None:
 
 async def rate_limit_middleware(request: Request, call_next):
     """ASGI middleware: enforce per-bucket sliding window."""
+    if request.url.path.startswith("/api/"):
+        from services import traffic
+        traffic.count("rest")   # "API hits" (services/traffic.py) — an in-memory increment
     if request.url.path in _BYPASS_PATHS:
         return await call_next(request)
 

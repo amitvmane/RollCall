@@ -424,6 +424,11 @@ def note_update(kind: str) -> None:
     actual update fails to be handled.
     """
     try:
+        from services import traffic
+        traffic.count("telegram")
+    except Exception:
+        pass
+    try:
         now = time.time()
         _last_update_state[kind] = now
         if now - _last_update_persist["at"] < _UPDATE_PERSIST_EVERY:

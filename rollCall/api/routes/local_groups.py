@@ -147,3 +147,58 @@ async def decide_join_request(body: JoinDecisionRequest, group_token: str = Path
     info = _db.get_member_display_info(chat_id, uid) or {}
     return JoinDecisionResponse(**local_groups.decide_request(
         chat_id, body.user_id, body.approve, actor_user_id=uid, actor_name=info.get("first_name") or "admin"))
+
+
+
+class AccountMergeRequest(BaseModel):
+    from_user_id: int
+    into_user_id: int
+
+
+class AccountMergeResponse(BaseModel):
+    groups: int
+    dues_groups: int
+
+
+@router.post("/web/group/{group_token}/accounts/merge", response_model=AccountMergeResponse,
+             summary="Owners: merge an email-only account (only ever in this group) into another member")
+async def merge_accounts_in_group(body: AccountMergeRequest, group_token: str = Path(...),
+                                  id_token: Optional[str] = Depends(identity_from_header)) -> AccountMergeResponse:
+    from services.account_merge import merge_in_group
+    chat_id, uid = await _admin(group_token, id_token)
+    info = _db.get_member_display_info(chat_id, uid) or {}
+    r = await merge_in_group(chat_id, body.from_user_id, body.into_user_id,
+                             actor_user_id=uid, actor_name=info.get("first_name") or "owner")
+    return AccountMergeResponse(groups=r["groups"], dues_groups=r["dues_groups"])
+
+
+
+class BuzzMutedEntry(BaseModel):
+    user_id: int
+    name: str
+    unanswered: int
+
+
+class BuzzMutedResponse(BaseModel):
+    after: int
+    muted: list[BuzzMutedEntry]
+
+
+@router.get("/web/group/{group_token}/buzz-muted", response_model=BuzzMutedResponse,
+            summary="Members skipped by buzzes for not answering them (admins) — same as /buzz_mute")
+async def buzz_muted(group_token: str = Path(...),
+                     id_token: Optional[str] = Depends(identity_from_header)) -> BuzzMutedResponse:
+    from services import buzz_mute
+    chat_id, _ = await _admin(group_token, id_token)
+    return BuzzMutedResponse(after=buzz_mute.threshold(chat_id),
+                             muted=[BuzzMutedEntry(**m) for m in buzz_mute.muted_members(chat_id)])
+
+
+@router.post("/web/group/{group_token}/buzz-muted/unmute", status_code=204,
+             summary="Ping a skipped member again (admins) — same as /buzz_unmute")
+async def buzz_unmute(body: AdminChangeRequest, group_token: str = Path(...),
+                      id_token: Optional[str] = Depends(identity_from_header)) -> None:
+    from services import buzz_mute
+    chat_id, uid = await _admin(group_token, id_token)
+    info = _db.get_member_display_info(chat_id, uid) or {}
+    buzz_mute.unmute(chat_id, body.user_id, uid, info.get("first_name") or "admin")

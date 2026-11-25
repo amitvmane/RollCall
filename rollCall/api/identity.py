@@ -152,8 +152,8 @@ def _follow_merge(user_id: Optional[int]) -> Optional[int]:
     from identity_space import is_local_user
     if user_id is None or not is_local_user(user_id):
         return user_id
-    from services.account_merge import merged_into
-    return merged_into(user_id) or user_id
+    from services.account_merge import resolve_merged
+    return resolve_merged(user_id)
 
 
 def _chat_scope(chat_id: int) -> str:

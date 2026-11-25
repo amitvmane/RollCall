@@ -17,7 +17,7 @@ A feature-rich Telegram bot for tracking event attendance in group chats. Member
 - **Proxy responses** — mark attendance on behalf of non-Telegram members (`/sif`, `/sof`, `/smf`) — also available from the group web page for web admins
 - **Event details** — title, date/time, location, and fee with automatic per-person cost splitting
 - **Templates & scheduling** — save reusable configs; weekly, biweekly, or monthly auto-start; `/repeat` clones last week's game in one command
-- **Reminders** — scheduled notifications before events; auto-closes at event time; `/auto_buzz` pings only non-voters before close
+- **Reminders** — scheduled notifications before events; auto-closes at event time; `/auto_buzz` pings only non-voters before close; `/buzz_mute` stops pinging people who ignore buzz after buzz (`/buzz_unmute` brings one back)
 - **💰 Dues & Treasury** — `/settle_dues` splits the ground fee per head with a UPI QR to pay; configurable penalty tiers (late/no-show), waivers, collector flow with UPI memory, group fund, weekly dues reports & reminders — all on an append-only, tamper-evident ledger where every transaction is announced in the chat. `/new_season` resets balances for a fresh season without deleting history
 - **Ghost tracking** — record no-shows per user, show leaderboard, prompt for reconfirmation on repeat offenders
 - **Achievement badges** — streak and games-played milestones announced at close and shown on the web leaderboard
@@ -31,7 +31,7 @@ A feature-rich Telegram bot for tracking event attendance in group chats. Member
 - **User portal** — cross-group personal dashboard (`/portal/`): attendance, streaks, upcoming games, dues balance
 - **Flexible web login** — Telegram deep-link verify, Telegram Login Widget (no app needed), admin-issued single-use links (`/weblogin`), and personal login codes (`/mytoken`) that work even when Telegram itself is unreachable
 - **Telegram Mini App** — in-app voting interface via the Telegram menu button (no browser switch)
-- **REST API** — FastAPI layer with bearer-token auth; powers the web + Mini App frontends. Name a rollcall by its permanent `id` (`/api/v1/chats/{chat_id}/rollcalls/by-id/{rollcall_id}/…`, e.g. `…/votes`). The older `/rollcalls/{rc_number}/…` paths use the display number, which shifts when an earlier rollcall ends; they still work but are deprecated (responses carry `Deprecation: true`, a `Link` to the stable path, and `X-Rollcall-Id`)
+- **REST API** — FastAPI layer with bearer-token auth; powers the web + Mini App frontends. Name a rollcall by its permanent `id` (`/api/v1/chats/{chat_id}/rollcalls/by-id/{rollcall_id}/…`, e.g. `…/votes`). The older `/rollcalls/{rc_number}/…` paths use the display number, which shifts when an earlier rollcall ends; they keep working (responses carry `Deprecation: true`, a `Link` to the stable path, and `X-Rollcall-Id`). Partner apps: group admins make app keys and webhooks under Admin → 🔌 Integrations — see [docs/API.md](docs/API.md)
 - **Webhook mode** — opt-in webhook support via `WEBHOOK_URL` env var (falls back to long-polling)
 - **Dual database support** — SQLite (default) or PostgreSQL
 - **Docker-ready** — Dockerfile + Docker Compose with Cloudflare Tunnel and daily-DB-backup sidecars

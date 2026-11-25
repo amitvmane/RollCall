@@ -96,6 +96,7 @@ def reset_db():
         # kind of ordering that bites only on the other dialect.
         "principal_bindings", "principals",
         "identity_links", "email_login_codes", "join_requests",
+        "webhook_deliveries", "webhook_endpoints", "api_hits", "api_tokens", "buzz_log",
     ]:
         try:
             cur.execute(f"DELETE FROM {tbl}")

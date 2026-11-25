@@ -99,6 +99,20 @@ async def run_periodic_jobs() -> None:
         _prune_expired_config()
     except Exception:
         logging.exception("[periodic] system_config prune failed")
+    try:
+        from services import traffic as _traffic
+        _traffic.flush()
+    except Exception:
+        logging.exception("[periodic] traffic counter flush failed")
+    # Partner webhooks: retries that are due (first attempts go out at once),
+    # capped like the weather step so a slow receiver can't hold the tick.
+    try:
+        from services import webhooks as _wh
+        await asyncio.wait_for(_wh.deliver_due(), timeout=_WEATHER_TICK_BUDGET)
+    except asyncio.TimeoutError:
+        logging.warning("[periodic] webhook deliveries took over %ss — rest next tick", _WEATHER_TICK_BUDGET)
+    except Exception:
+        logging.exception("[periodic] webhook deliveries failed")
 
 
 # ── Bundled vote notices ──────────────────────────────────────────────────────
@@ -201,6 +215,21 @@ def _prune_expired_config() -> None:
     _db.set_system_config("config_prune_last", today)
     cutoff = _utc_str(datetime.now(timezone.utc) - timedelta(days=_EXPIRING_CONFIG_DAYS))
     removed = _db.delete_system_config_before(_EXPIRING_CONFIG_PREFIXES, cutoff)
+    try:
+        from services import webhooks as _wh
+        _wh.prune()
+    except Exception:
+        logging.exception("[periodic] webhook outbox prune failed")
+    try:
+        from services import traffic as _traffic
+        _traffic.prune()
+    except Exception:
+        logging.exception("[periodic] api_hits prune failed")
+    try:
+        from services import buzz_mute as _bm
+        _bm.prune()
+    except Exception:
+        logging.exception("[periodic] buzz_log prune failed")
     if removed:
         logging.info("[periodic] pruned %d expired system_config rows", removed)
 

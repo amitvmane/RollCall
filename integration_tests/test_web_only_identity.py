@@ -101,6 +101,8 @@ class _Base(unittest.TestCase):
         reset_db()
         from rollcall_manager import manager
         manager.clear_cache()      # open rollcalls live in memory too
+        from services.email_auth import reset_send_limits_for_tests
+        reset_send_limits_for_tests()
         from api.rate_limit import reset_buckets_for_tests
         reset_buckets_for_tests()
         self.enterContext(patch.dict(os.environ, EMAIL_ENV))
@@ -516,3 +518,126 @@ class TestJoinApproval(_Base):
         self.assertFalse(self.client.get(f"/api/v1/web/group/{token}").json()["join_approval"])
         r = self.client.post(f"/api/v1/web/group/{token}/join", json={}, headers=self.h(ben)).json()
         self.assertTrue(r["joined"])
+
+
+class TestMergeFromEmailSession(_Base):
+    """Signed in by email, then Telegram on the same device: the page holds
+    both tokens and can merge without another email."""
+
+    def test_merge_with_both_sign_ins(self):
+        from rollcall_manager import manager
+        from services.web import vote_by_token, _ensure_web_token
+        from services import rollcalls as rc_svc
+        self.db.upsert_chat_member(TG_CHAT, TG_MEMBER, "Ravi")
+        asyncio.run(rc_svc.start_rollcall(TG_CHAT, "Friday", TG_MEMBER, "Ravi"))
+        local = self.email_login("ravi@example.com", name="Ravi E")
+        asyncio.run(vote_by_token(_ensure_web_token(manager.get_rollcall(TG_CHAT, 0)), "Ravi E", "in",
+                                  tg_user_id=local["user_id"]))
+        body = {"local_id_token": local["id_token"]}
+        pre = self.client.post("/api/v1/auth/account/merge-local/preview", json=body, headers=self.h(TG_MEMBER))
+        self.assertEqual((pre.status_code, pre.json()["votes"]), (200, 1), pre.text)
+        r = self.client.post("/api/v1/auth/account/merge-local", json=body, headers=self.h(TG_MEMBER))
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual([u.user_id for u in manager.get_rollcall(TG_CHAT, 0).inList], [TG_MEMBER])
+        self.assertEqual(self.email_login("ravi@example.com")["user_id"], TG_MEMBER)
+        # Without a Telegram sign-in — an email account presenting itself — refused.
+        other = self.email_login("someone@example.com", name="Someone")
+        r = self.client.post("/api/v1/auth/account/merge-local", headers=self.h(other["user_id"]),
+                             json={"local_id_token": other["id_token"]})
+        self.assertEqual(r.status_code, 403)
+
+
+class TestOwnerMergeTool(_Base):
+
+    def test_owner_merges_an_account_that_lives_only_in_their_group(self):
+        asha = self.email_login("asha@example.com", name="Asha")["user_id"]
+        dup = self.email_login("asha2@example.com", name="Asha 2")["user_id"]
+        g = self.client.post("/api/v1/web/groups", json={"name": "Turf"}, headers=self.h(asha)).json()
+        gt, cid = g["group_token"], g["chat_id"]
+        self.db.upsert_chat_member(cid, dup, "Asha 2")
+        r = self.client.post(f"/api/v1/web/group/{gt}/accounts/merge", headers=self.h(asha),
+                             json={"from_user_id": dup, "into_user_id": asha})
+        self.assertEqual(r.status_code, 200, r.text)
+        from api.identity import verify_identity_token
+        self.assertEqual(verify_identity_token(self.issue(dup)), asha)
+
+    def test_refused_when_the_account_is_in_another_group_or_caller_isnt_owner(self):
+        asha = self.email_login("asha@example.com", name="Asha")["user_id"]
+        ben = self.email_login("ben@example.com", name="Ben")["user_id"]
+        g = self.client.post("/api/v1/web/groups", json={"name": "Turf"}, headers=self.h(asha)).json()
+        other = self.client.post("/api/v1/web/groups", json={"name": "Elsewhere"}, headers=self.h(ben)).json()
+        self.db.upsert_chat_member(g["chat_id"], ben, "Ben")   # Ben is also in his own group
+        r = self.client.post(f"/api/v1/web/group/{g['group_token']}/accounts/merge", headers=self.h(asha),
+                             json={"from_user_id": ben, "into_user_id": asha})
+        self.assertEqual(r.status_code, 403)
+        self.assertIn("other groups", r.json()["detail"])
+        self.db.set_web_admin(g["chat_id"], ben, "Ben")         # an admin, not an owner
+        r = self.client.post(f"/api/v1/web/group/{g['group_token']}/accounts/merge", headers=self.h(ben),
+                             json={"from_user_id": ben, "into_user_id": asha})
+        self.assertEqual(r.status_code, 403)
+        _ = other
+
+
+class TestEmailSendLimits(_Base):
+
+    def test_per_ip_limit_across_many_addresses(self):
+        from services import email_auth
+        for i in range(email_auth.MAX_SENDS_PER_IP_HOUR):
+            self.assertEqual(self.client.post("/api/v1/auth/email/start",
+                                              json={"email": f"u{i}@example.com"}).status_code, 202)
+        r = self.client.post("/api/v1/auth/email/start", json={"email": "one-more@example.com"})
+        self.assertEqual(r.status_code, 429)
+        self.assertIn("from here", r.json()["detail"])
+
+    def test_deployment_wide_ceiling(self):
+        from services import email_auth
+        with patch.object(email_auth, "MAX_SENDS_PER_IP_HOUR", 1000), \
+             patch.object(email_auth, "MAX_SENDS_PER_HOUR", 2):
+            for i in range(2):
+                self.client.post("/api/v1/auth/email/start", json={"email": f"v{i}@example.com"})
+            r = self.client.post("/api/v1/auth/email/start", json={"email": "v9@example.com"})
+        self.assertEqual(r.status_code, 429)
+
+
+class TestTraffic(_Base):
+
+    def test_hits_are_counted_flushed_and_peaked(self):
+        from services import traffic
+        traffic._counts.clear()
+        for _ in range(3):
+            self.client.get("/api/v1/auth/email/config")
+        from bot_state import note_update
+        note_update("message")
+        self.assertEqual(traffic.flush(), 2)        # one row per source this hour
+        traffic.count("rest", 5)                     # still in memory: included too
+        p = traffic.peaks()
+        self.assertGreaterEqual(p["rest"]["peak"], 8)
+        self.assertGreaterEqual(p["telegram"]["last_24h"], 1)
+        self.assertIn("busiest hour", traffic.summary_line())
+
+
+class TestBuzzMuteWeb(_Base):
+
+    def test_admin_sees_and_unmutes_skipped_members(self):
+        from services import buzz_mute, rollcalls as rc_svc
+        from rollcall_manager import manager
+        token = self.db.get_or_create_chat(TG_CHAT)["group_web_token"]
+        self.db.upsert_chat_member(TG_CHAT, TG_MEMBER, "Ravi")
+        self.db.upsert_chat_member(TG_CHAT, 7002, "Quiet")
+        self.db.set_web_admin(TG_CHAT, TG_MEMBER, "Ravi")
+        for g in range(3):
+            asyncio.run(rc_svc.start_rollcall(TG_CHAT, f"G{g}", TG_MEMBER, "Ravi"))
+            buzz_mute.record(TG_CHAT, [manager.get_rollcall(TG_CHAT, 0).id], [7002])
+            asyncio.run(rc_svc.end_rollcall(TG_CHAT, 0, TG_MEMBER, "Ravi"))
+        with patch("api.web_admin.check_web_admin_live", new=AsyncMock(return_value=True)):
+            d = self.client.get(f"/api/v1/web/group/{token}/buzz-muted", headers=self.h(TG_MEMBER)).json()
+            self.assertEqual([m["user_id"] for m in d["muted"]], [7002])
+            from services.lists import get_non_responders
+            asyncio.run(rc_svc.start_rollcall(TG_CHAT, "Now", TG_MEMBER, "Ravi"))
+            svc = get_non_responders(TG_CHAT, 0)
+            self.assertNotIn(7002, [c["user_id"] for c in svc["candidates"]])
+            self.assertIn(7002, [c["user_id"] for c in svc["muted"]])
+            r = self.client.post(f"/api/v1/web/group/{token}/buzz-muted/unmute", headers=self.h(TG_MEMBER),
+                                 json={"user_id": 7002})
+            self.assertEqual(r.status_code, 204)
+        self.assertEqual(buzz_mute.muted_ids(TG_CHAT), set())

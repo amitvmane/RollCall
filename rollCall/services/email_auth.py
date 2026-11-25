@@ -43,6 +43,10 @@ from services import principals
 
 CODE_TTL_SECONDS = 15 * 60
 MAX_CODES_PER_WINDOW = 3          # per address, per CODE_TTL window
+# Sender-side limits, so the per-address cap can't be dodged by spraying many
+# addresses (sign-in mail sent to strangers, from our domain's reputation):
+MAX_SENDS_PER_IP_HOUR = 10        # one visitor
+MAX_SENDS_PER_HOUR = 200          # the whole deployment — a ceiling on any abuse
 LOGIN, LINK = "login", "link"
 
 _EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]+\.[^@\s]{2,}$")
@@ -50,6 +54,35 @@ _EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]+\.[^@\s]{2,}$")
 
 class EmailNotConfigured(Exception):
     pass
+
+
+# ── Sender limits (in memory: one process serves the web page) ───────────────
+_sends: dict = {}   # key -> [timestamps in the last hour]
+
+
+def _take_send_slot(client_ip: Optional[str]) -> None:
+    """Reserve one email send, or raise rateLimited. Checked BEFORE the
+    per-address limit and before anything is stored or mailed."""
+    now = time.time()
+    for key, cap, msg in ((f"ip:{client_ip or 'unknown'}", MAX_SENDS_PER_IP_HOUR,
+                           "Too many sign-in emails from here — try again in an hour."),
+                          ("all", MAX_SENDS_PER_HOUR,
+                           "Sign-in email is busy right now — try again in a few minutes.")):
+        recent = [t for t in _sends.get(key, []) if now - t < 3600]
+        if len(recent) >= cap:
+            _sends[key] = recent
+            logging.warning("[email_auth] send limit hit for %s", key.split(":")[0])
+            raise rateLimited(msg)
+        _sends[key] = recent
+    for key in (f"ip:{client_ip or 'unknown'}", "all"):
+        _sends[key].append(now)
+    if len(_sends) > 10000:   # bound memory: drop idle visitors
+        for k in [k for k, v in _sends.items() if k != "all" and not any(now - t < 3600 for t in v)]:
+            _sends.pop(k, None)
+
+
+def reset_send_limits_for_tests() -> None:
+    _sends.clear()
 
 
 # ── Configuration / transport ─────────────────────────────────────────────────
@@ -157,10 +190,11 @@ def _valid_group(group_token: Optional[str]) -> Optional[str]:
 
 
 async def start_login(email: str, name: Optional[str] = None,
-                      group_token: Optional[str] = None) -> None:
+                      group_token: Optional[str] = None, client_ip: Optional[str] = None) -> None:
     """Mail a sign-in link. Same outcome whether or not the address is known,
     so this can't be used to find out who has an account."""
     email = validate_email(email)
+    _take_send_slot(client_ip)
     name = _clean_name(name)
     group = _valid_group(group_token)
     code = _store_code(email, LOGIN, display_name=name, return_group=group)
@@ -171,7 +205,8 @@ async def start_login(email: str, name: Optional[str] = None,
                     "If you didn't ask for it, ignore this email.")
 
 
-async def start_link(tg_user_id: int, email: str, group_token: Optional[str] = None) -> None:
+async def start_link(tg_user_id: int, email: str, group_token: Optional[str] = None,
+                     client_ip: Optional[str] = None) -> None:
     """A Telegram member asks to add an email sign-in to their account."""
     from identity_space import is_local_user
     if not tg_user_id or tg_user_id <= 0 or is_local_user(tg_user_id):
@@ -180,6 +215,7 @@ async def start_link(tg_user_id: int, email: str, group_token: Optional[str] = N
     pid = principals.for_telegram(tg_user_id)
     if pid is not None and principals.resolve(principals.EMAIL, email) == pid:
         raise incorrectParameter("That email is already linked to your account.")
+    _take_send_slot(client_ip)
     group = _valid_group(group_token)
     code = _store_code(email, LINK, tg_user_id=tg_user_id, return_group=group)
     await send_mail(email, "Confirm your email for RollCall",
@@ -343,6 +379,31 @@ async def merge_accounts(tg_user_id: int, local_uid: int, merge_token: str, acto
         raise insufficientPermissions("That merge offer has expired — add the email again.")
     pid_local = principals.principal_of_local(local_uid)
     email = principals.binding_for(pid_local, principals.EMAIL) if pid_local else None
+    result = await merge(local_uid, tg_user_id, actor_name)
+    if email:
+        principals.unlink(principals.EMAIL, email)
+        principals.link(principals.for_telegram(tg_user_id), principals.EMAIL, email)
+    return {**result, "email": email}
+
+
+async def merge_signed_in(tg_user_id: int, local_token: str, actor_name: str) -> dict:
+    """Merge from an email session: the person signed in by email, then signed
+    in with Telegram on the same device, so the page holds proof of BOTH —
+    the old email token and the new Telegram one."""
+    from api.identity import _verify
+    from identity_space import is_local_user
+    from services.account_merge import merge
+    local_uid = _verify(local_token, scope=None)   # raw: not followed through merges
+    if local_uid is None or not is_local_user(local_uid):
+        raise insufficientPermissions("That email sign-in has expired — sign in by email again.")
+    if is_local_user(tg_user_id):
+        raise insufficientPermissions("Sign in with Telegram to merge into your Telegram account.")
+    pid_local = principals.principal_of_local(local_uid)
+    email = principals.binding_for(pid_local, principals.EMAIL) if pid_local else None
+    owner_tg = principals.binding_for(principals.for_telegram(tg_user_id), principals.EMAIL)
+    if email and owner_tg and owner_tg != email:
+        raise incorrectParameter(
+            f"Your Telegram account already signs in with {owner_tg}. Remove it first to use {email} instead.")
     result = await merge(local_uid, tg_user_id, actor_name)
     if email:
         principals.unlink(principals.EMAIL, email)

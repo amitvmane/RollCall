@@ -546,6 +546,25 @@ COMMANDS = [
         ),
     },
     {
+        "name": "buzz_mute", "aliases": [], "scope": "admin", "category": "User Management",
+        "args": "[N | off]", "sample": "/buzz_mute 3",
+        "summary": "Stop pinging members who never answer buzzes",
+        "details": (
+            "Members who don't vote after N buzzes in a row (on finished games) are skipped "
+            "by /buzz, /auto_buzz and the vote reminders — they've likely stopped using "
+            "Telegram or the app. Any vote of theirs brings them back. Default 3; "
+            "/buzz_mute off pings everyone. Alone, shows who is skipped."
+        ),
+        "menu": False,
+    },
+    {
+        "name": "buzz_unmute", "aliases": [], "scope": "admin", "category": "User Management",
+        "args": "<name or @username>", "sample": "/buzz_unmute @ravi",
+        "summary": "Ping a skipped member again",
+        "details": "Clears their unanswered buzzes so /buzz and reminders include them again.",
+        "menu": False,
+    },
+    {
         "name": "auto_buzz", "aliases": [], "scope": "admin", "category": "User Management",
         "args": "<hours | off>", "sample": "/auto_buzz 3",
         "summary": "Auto-ping non-voters before close time",

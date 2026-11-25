@@ -399,7 +399,7 @@ body.tg-mode .comment-input{background:var(--card);color:var(--text);border-colo
 .name-row{display:flex;gap:8px}
 .name-row input{flex:1;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:.95rem;outline:none;transition:border-color .15s;-webkit-appearance:none;background:var(--card);color:var(--text);font-family:var(--font-body)}
 .name-row input:focus{border-color:var(--accent)}
-#email-input-row input,#form-body input,#form-body select{width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:.95rem;outline:none;-webkit-appearance:none;background:var(--card);color:var(--text);font-family:var(--font-body)}
+#email-input-row input,#form-body input,#form-body select,#integrations-body input[type=text],#integrations-body input[type=url],#integrations-body input[readonly],#acct-merge-box select{width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:.95rem;outline:none;-webkit-appearance:none;background:var(--card);color:var(--text);font-family:var(--font-body)}
 #email-input-row input:focus,#form-body input:focus,#form-body select:focus{border-color:var(--accent)}
 #form-body label{display:block;font-size:.78rem;font-weight:600;color:var(--sub);margin:10px 0 6px}
 .id-change{background:none;border:none;cursor:pointer;font-size:.8rem;font-weight:600;color:var(--sub);padding:4px 8px;border-radius:6px}

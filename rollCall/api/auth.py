@@ -49,6 +49,10 @@ class AuthedToken:
     scopes: List[str]
     label: Optional[str]
     issued_by_user_id: Optional[int]
+    # A partner app key (web page → Integrations): trusted to vote for any
+    # member, like an admin, while issued_by_user_id stays the admin who made
+    # it — so the issuer-still-admin re-check keeps applying.
+    app_key: bool = False
 
 
 def _unauthorized(detail: str) -> HTTPException:
@@ -84,6 +88,7 @@ def _verify_token(creds: Optional[HTTPAuthorizationCredentials]) -> AuthedToken:
         scopes=row["scopes"],
         label=row.get("label"),
         issued_by_user_id=row.get("issued_by_user_id"),
+        app_key=bool(int(row.get("app_key") or 0)),
     )
 
 

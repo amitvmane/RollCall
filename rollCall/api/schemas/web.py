@@ -84,6 +84,7 @@ class WebGroupResponse(BaseModel):
     weather_alerts: bool = False
     teams_enabled: bool = False
     join_approval: bool = False   # joining from the link needs an admin's OK
+    buzz_mute_after: int = 3      # skip members after N unanswered buzzes; 0 = never
     web_only: bool = False        # no Telegram chat behind this group
 
 
@@ -101,6 +102,8 @@ class WebGroupSettingsRequest(BaseModel):
     teams_enabled: Optional[bool] = Field(None, description="Teams on/off for the group (off by default)")
     join_approval: Optional[bool] = Field(
         None, description="Joining from the group link needs an admin's approval; web votes from members only")
+    buzz_mute_after: Optional[int] = Field(
+        None, ge=0, le=20, description="Skip members from buzzes/reminders after N unanswered buzzes; 0 = never")
 
 
 class ScheduledRollcallRequest(BaseModel):

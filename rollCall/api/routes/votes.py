@@ -38,6 +38,7 @@ async def cast_vote(
     # trusted to vote on behalf of others, same as proxy votes.
     if (
         "admin" not in _token.scopes
+        and not _token.app_key
         and _token.issued_by_user_id is not None
         and body.user_id != _token.issued_by_user_id
     ):

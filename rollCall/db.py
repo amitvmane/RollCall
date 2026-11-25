@@ -239,6 +239,59 @@ def release_connection(conn):
             _pool_in_use -= 1
 
 
+
+# ── Partner webhook hooks ────────────────────────────────────────────────────
+# The five functions every surface writes through (create/end rollcall,
+# member entries, dues) report here; services/webhooks.emit only queues an
+# outbox row, and only for groups that have a webhook. Never raises: a
+# webhook problem must never cost a vote.
+
+# Hooks fire from INSIDE the writer's `with _cursor(commit=True)` block, before
+# its commit. Emitting there would open a second write on SQLite while this one
+# is uncommitted (a lock wait in the same thread) and could report a change that
+# then rolls back. So they queue here, and _cursor flushes the queue once the
+# outermost block has committed — or drops it if the block raised.
+_hook_state = threading.local()
+
+
+def _webhook(event: str, **kw) -> None:
+    pending = getattr(_hook_state, "pending", None)
+    if pending is None:
+        pending = _hook_state.pending = []
+    pending.append((event, kw))
+    if getattr(_hook_state, "depth", 0) == 0:
+        _flush_webhooks()
+
+
+def _flush_webhooks() -> None:
+    pending, _hook_state.pending = getattr(_hook_state, "pending", None) or [], []
+    for event, kw in pending:
+        try:
+            from services.webhooks import emit
+            emit(event, **kw)
+        except Exception:
+            logging.exception("webhook hook failed for %s", event)
+
+
+def _member_ref(user_id) -> dict:
+    return ({"user_id": user_id, "guest": False} if isinstance(user_id, int)
+            else {"user_id": None, "name": user_id, "guest": True})
+
+
+def _webhook_rollcall_closed(rollcall_id) -> None:
+    try:
+        with _cursor() as cursor:
+            ph = '%s' if db_type == 'postgresql' else '?'
+            cursor.execute(f"SELECT chat_id, title, is_cancelled FROM rollcalls WHERE id = {ph}", (rollcall_id,))
+            r = cursor.fetchone()
+        if r is None:
+            return
+        r = dict(r) if isinstance(r, dict) else dict(zip(("chat_id", "title", "is_cancelled"), r))
+        _webhook("rollcall.closed", chat_id=r["chat_id"], rollcall_id=rollcall_id,
+                 data={"title": r["title"], "cancelled": bool(r["is_cancelled"])})
+    except Exception:
+        logging.exception("rollcall.closed webhook failed")
+
 @contextmanager
 def _cursor(commit: bool = False):
     """Yield a cursor with the connection lifecycle handled — replaces the
@@ -257,11 +310,14 @@ def _cursor(commit: bool = False):
     """
     conn = get_connection()
     cur = None
+    _hook_state.depth = getattr(_hook_state, "depth", 0) + 1
+    ok = False
     try:
         cur = conn.cursor()
         yield cur
         if commit:
             conn.commit()
+        ok = True
     except Exception:
         if commit:
             conn.rollback()
@@ -271,6 +327,12 @@ def _cursor(commit: bool = False):
             cur.close()
         if db_type == 'postgresql':
             release_connection(conn)
+        _hook_state.depth -= 1
+        if _hook_state.depth == 0 and getattr(_hook_state, "pending", None):
+            if ok:
+                _flush_webhooks()        # committed: report it
+            else:
+                _hook_state.pending = []  # rolled back: it never happened
 
 
 def _migrate_push_subscriptions_per_group(conn, cursor) -> None:
@@ -921,6 +983,68 @@ def create_tables():
             CREATE INDEX IF NOT EXISTS email_login_codes_email_idx
             ON email_login_codes (email, created_at)
         """)
+        # Partner webhooks (services/webhooks.py). The secret signs each
+        # delivery, so it is kept (shown to the admin once, never again).
+        big = 'BIGINT' if db_type == 'postgresql' else 'INTEGER'
+        serial = 'SERIAL PRIMARY KEY' if db_type == 'postgresql' else 'INTEGER PRIMARY KEY AUTOINCREMENT'
+        cursor.execute(f"""
+            CREATE TABLE IF NOT EXISTS webhook_endpoints (
+                id               {serial},
+                chat_id          {big} NOT NULL,
+                url              TEXT NOT NULL,
+                secret           TEXT NOT NULL,
+                events           TEXT NOT NULL,
+                active           INTEGER NOT NULL DEFAULT 1,
+                failures         INTEGER NOT NULL DEFAULT 0,
+                created_by       {big},
+                created_at       BIGINT NOT NULL,
+                last_status      TEXT DEFAULT NULL,
+                last_delivery_at BIGINT DEFAULT NULL
+            )
+        """)
+        # Outbox: one row per (event, endpoint). Written in the same moment as
+        # the change it reports (cheap, no network); sent and retried later.
+        cursor.execute(f"""
+            CREATE TABLE IF NOT EXISTS webhook_deliveries (
+                id            {serial},
+                endpoint_id   INTEGER NOT NULL,
+                event         TEXT NOT NULL,
+                payload       TEXT NOT NULL,
+                status        TEXT NOT NULL DEFAULT 'pending',
+                attempts      INTEGER NOT NULL DEFAULT 0,
+                next_attempt  BIGINT NOT NULL,
+                last_error    TEXT DEFAULT NULL,
+                created_at    BIGINT NOT NULL
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS webhook_deliveries_due
+            ON webhook_deliveries (status, next_attempt)
+        """)
+        # Who was pinged by a buzz/reminder for which rollcall, and whether they
+        # answered (services/buzz_mute). Any vote in the chat marks theirs answered.
+        cursor.execute(f"""
+            CREATE TABLE IF NOT EXISTS buzz_log (
+                chat_id     {big} NOT NULL,
+                user_id     {big} NOT NULL,
+                rollcall_id INTEGER NOT NULL,
+                buzzed_at   BIGINT NOT NULL,
+                responded   INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (chat_id, user_id, rollcall_id)
+            )
+        """)
+
+        # Hourly traffic counters (services/traffic.py): Telegram updates and
+        # REST requests, flushed from memory once a minute.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS api_hits (
+                hour    BIGINT NOT NULL,
+                source  TEXT NOT NULL,
+                n       INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (hour, source)
+            )
+        """)
+
         # Asking to join a group that approves its members (local_groups).
         # One row per (group, person); status 'pending' or 'denied'.
         cursor.execute(f"""
@@ -1115,6 +1239,9 @@ _RECONCILE_COLUMNS = {
         # come from members only (services/local_groups). INTEGER on both
         # dialects. Off for every existing group; on for new web-only groups.
         ("join_approval",          "join_approval INTEGER DEFAULT 0",          "join_approval INTEGER DEFAULT 0"),
+        # Skip members from buzzes/reminders after this many unanswered
+        # buzzes in a row (services/buzz_mute). 0 = never skip.
+        ("buzz_mute_after",        "buzz_mute_after INTEGER DEFAULT 3",        "buzz_mute_after INTEGER DEFAULT 3"),
         ("shh_mode",               "shh_mode INTEGER DEFAULT 0",               "shh_mode BOOLEAN DEFAULT FALSE"),
         ("admin_rights",           "admin_rights INTEGER DEFAULT 0",           "admin_rights BOOLEAN DEFAULT FALSE"),
         ("timezone",               "timezone TEXT DEFAULT 'Asia/Kolkata'",     "timezone VARCHAR(100) DEFAULT 'Asia/Kolkata'"),
@@ -1191,6 +1318,11 @@ _RECONCILE_COLUMNS = {
     ],
     "web_verify_tokens": [
         ("tg_username", "tg_username TEXT DEFAULT NULL", "tg_username TEXT DEFAULT NULL"),
+    ],
+    # 1 = a partner app key made from the web page (services/partner_api):
+    # may vote on behalf of members, unlike a member's own Mini App token.
+    "api_tokens": [
+        ("app_key", "app_key INTEGER DEFAULT 0", "app_key INTEGER DEFAULT 0"),
     ],
     "penalty_tiers": [
         ("late_minutes_threshold", "late_minutes_threshold INTEGER DEFAULT NULL", "late_minutes_threshold INTEGER DEFAULT NULL"),
@@ -2211,7 +2343,7 @@ _VALID_CHAT_FIELDS = {
     'collector_rotation', 'last_collector_uid', 'dues_epoch',
     'reminder_before_close_hours', 'reminder_after_open_hours',
     'admin_source', 'vote_digest_hours', 'weather_alerts', 'teams_enabled',
-    'join_approval',
+    'join_approval', 'buzz_mute_after',
 }
 
 # Columns declared BOOLEAN in the Postgres schema. SQLite has no bool type and
@@ -2287,6 +2419,7 @@ def create_rollcall(chat_id: int, title: str, timezone: str = 'Asia/Kolkata', we
                 rollcall_id = cursor.lastrowid
         
             logging.info(f"Created rollcall {rollcall_id} for chat {chat_id}: {title}")
+            _webhook("rollcall.opened", chat_id=chat_id, rollcall_id=rollcall_id, data={"title": title})
             return rollcall_id
     except Exception as e:
         logging.error(f"Error creating rollcall: {e}")
@@ -2636,7 +2769,8 @@ def end_rollcall(rollcall_id: int) -> bool:
                 )
         
             logging.info(f"Ended rollcall {rollcall_id}")
-            return True
+        _webhook_rollcall_closed(rollcall_id)
+        return True
     except Exception as e:
         # Must raise: rollcall_manager.end_rollcall pops the rollcall from the
         # in-memory cache straight after this call, so swallowing left the
@@ -2792,6 +2926,13 @@ def add_or_update_user(rollcall_id: int, user_id: int, first_name: str, username
                         updated_at = CURRENT_TIMESTAMP
                 """, (rollcall_id, user_id, first_name, username, status, comment, in_pos, out_pos, wait_pos))
 
+            # Any vote answers every buzz they had in this chat (buzz_mute).
+            cursor.execute(
+                f"UPDATE buzz_log SET responded = 1 WHERE user_id = {ph} AND responded = 0 AND "
+                f"chat_id = (SELECT chat_id FROM rollcalls WHERE id = {ph})", (user_id, rollcall_id))
+            _webhook("vote.changed", rollcall_id=rollcall_id,
+                     data={"member": {"user_id": user_id, "name": first_name, "username": username,
+                                      "guest": False}, "status": status, "comment": comment or ""})
             return True
     except Exception as e:
         logging.error(f"Error add/update user: {e}")
@@ -2876,6 +3017,9 @@ def add_or_update_proxy_user(rollcall_id: int, name: str, status: str, comment: 
                         updated_at     = excluded.updated_at
                 """, (rollcall_id, name, status, comment, proxy_owner_id, in_pos, out_pos, wait_pos))
 
+            _webhook("vote.changed", rollcall_id=rollcall_id,
+                     data={"member": {"user_id": None, "name": name, "guest": True}, "status": status,
+                           "comment": comment or ""})
             return True
     except Exception as e:
         # A dropped proxy write means the vote exists in memory but not on
@@ -3182,6 +3326,8 @@ def delete_user_by_name(rollcall_id: int, name: str) -> bool:
                             f"delete_user_by_name: '{clean_name}' matches {len(matches)} users in rollcall {rollcall_id}; refusing to delete"
                         )
 
+            if rows_deleted:
+                _webhook("vote.removed", rollcall_id=rollcall_id, data={"member": {"name": name}})
             return rows_deleted > 0
 
     except Exception as e:
@@ -3208,6 +3354,9 @@ def delete_user_by_id(rollcall_id: int, user_id) -> bool:
                     (rollcall_id, str(user_id))
                 )
                 rows_deleted = cursor.rowcount
+            if rows_deleted:
+                _webhook("vote.removed", rollcall_id=rollcall_id,
+                         data={"member": _member_ref(user_id)})
             return rows_deleted > 0
     except Exception as e:
         logging.error(f"Error deleting user by id: {e}")
@@ -5574,7 +5723,7 @@ def lookup_api_token(token_hash: str) -> Optional[Dict]:
             ph = '%s' if db_type == 'postgresql' else '?'
             cursor.execute(f"""
                 SELECT chat_id, issued_by_user_id, scopes, label,
-                       created_at, expires_at, last_used_at, revoked_at
+                       created_at, expires_at, last_used_at, revoked_at, app_key
                 FROM api_tokens
                 WHERE token_hash = {ph}
             """, (token_hash,))
@@ -5658,7 +5807,7 @@ def list_api_tokens(chat_id: int) -> List[Dict]:
             ph = '%s' if db_type == 'postgresql' else '?'
             cursor.execute(f"""
                 SELECT token_hash, issued_by_user_id, scopes, label,
-                       created_at, expires_at, last_used_at, revoked_at
+                       created_at, expires_at, last_used_at, revoked_at, app_key
                 FROM api_tokens
                 WHERE chat_id = {ph}
                 ORDER BY created_at DESC
@@ -6728,7 +6877,11 @@ def add_dues_entry(
                 cur.execute("SELECT lastval()")
             else:
                 cur.execute("SELECT last_insert_rowid()")
-            return cur.fetchone()[0]
+            entry_id = cur.fetchone()[0]
+        _webhook("dues.posted", chat_id=chat_id, rollcall_id=rollcall_id,
+                 data={"entry_id": entry_id, "member": {"user_id": user_id, "name": member_name},
+                       "entry_type": entry_type, "amount": amount, "memo": memo})
+        return entry_id
     except Exception:
         logging.exception("add_dues_entry failed")
         raise

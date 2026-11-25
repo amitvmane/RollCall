@@ -1439,6 +1439,59 @@ async def phase_insights():
     await feed("/erc", ALICE)
 
 
+async def phase_buzz_mute():
+    """Members who ignore buzz after buzz are skipped (services/buzz_mute):
+    /buzz, /buzz_mute, /buzz_unmute through the real router, and a vote
+    bringing someone back by itself."""
+    print("\n=== Phase: buzz mute (stop pinging people who never answer) ===\n")
+    from services import buzz_mute
+    for _ in manager.get_rollcalls(CHAT_ID):
+        await feed("/erc", ALICE)
+    await feed("/src Warmup", ALICE)
+    for u in (BOB, EVE):
+        bot_state._rate_limits.clear()
+        await feed("/in", u)            # both become known members
+    await feed("/erc", ALICE)
+    for g in range(3):                  # three games; Eve never answers the buzz
+        await feed(f"/src Game {g}", ALICE)
+        bot_state._rate_limits.clear()
+        await feed("/in", BOB)
+        bot_state._buzz_cooldowns.clear()
+        out = await feed("/buzz", ALICE)
+        if g == 0:
+            ok, d = contains(out, "eve")
+            record("/buzz pings a member who hasn't voted", ok, d)
+        await feed("/erc", ALICE)
+    record("three unanswered buzzes: Eve is skipped",
+           EVE[0] in buzz_mute.muted_ids(CHAT_ID) and BOB[0] not in buzz_mute.muted_ids(CHAT_ID))
+    await feed("/src Game 3", ALICE)
+    bot_state._rate_limits.clear()
+    await feed("/in", BOB)
+    bot_state._buzz_cooldowns.clear()
+    out = await feed("/buzz", ALICE)
+    ok, d = contains(out, "Not pinged:")
+    record("/buzz says who it skipped instead of pinging them", ok and "@eve" not in text_of(out), d)
+    out = await feed("/buzz_mute", ALICE)
+    ok, d = contains(out, "Skipped now:", "Eve (3)")
+    record("/buzz_mute lists who is skipped", ok and not _errors, d or error_msgs()[:2])
+    out = await feed("/buzz_unmute Eve", ALICE)
+    ok, d = contains(out, "will be pinged again")
+    record("/buzz_unmute brings a member back", ok and EVE[0] not in buzz_mute.muted_ids(CHAT_ID), d)
+    out = await feed("/buzz_mute off", ALICE)
+    ok, d = contains(out, "Everyone is pinged")
+    record("/buzz_mute off pings everyone", ok and buzz_mute.threshold(CHAT_ID) == 0, d)
+    await feed("/buzz_mute 3", ALICE)
+    # A vote of theirs answers every buzz: give Eve an unanswered buzz, then she votes.
+    buzz_mute.record(CHAT_ID, [manager.get_rollcall(CHAT_ID, 0).id], [EVE[0]])
+    bot_state._rate_limits.clear()
+    await feed("/in", EVE)
+    record("a vote clears a member's unanswered buzzes", EVE[0] not in buzz_mute.unanswered(CHAT_ID))
+    out = await feed("/buzz_mute nope", ALICE)
+    ok, d = contains(out, "number")
+    record("/buzz_mute rejects a bad value", ok, d)
+    await feed("/erc", ALICE)
+
+
 async def phase_web_only_group():
     """A group with no Telegram chat, and a person with no Telegram account.
 
@@ -2894,6 +2947,7 @@ async def run_all():
     await phase_stats_season()
     await phase_insights()
     await phase_teams()
+    await phase_buzz_mute()
     await phase_web_only_group()
 
     print("\n=== Phase 16: Lifecycle close (final) ===\n")

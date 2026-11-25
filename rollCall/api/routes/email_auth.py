@@ -9,7 +9,7 @@ who someone is in one group, and an email login works everywhere.
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from api.identity import identity_from_header, issue_identity_token, require_identity
@@ -71,6 +71,11 @@ class EmailStatusResponse(BaseModel):
     has_telegram: bool = False
 
 
+def _ip(request: Request) -> Optional[str]:
+    # The real visitor behind the proxy: uvicorn applies TRUSTED_PROXY_IPS.
+    return request.client.host if request.client else None
+
+
 def _require_enabled() -> None:
     if not email_auth.enabled():
         raise HTTPException(status_code=503, detail="Email sign-in isn't set up on this server.")
@@ -98,19 +103,19 @@ async def email_config() -> EmailConfigResponse:
 
 @router.post("/auth/email/start", status_code=status.HTTP_202_ACCEPTED,
              summary="Email a one-time sign-in link (same answer whether or not the address has an account)")
-async def email_start(body: EmailStartRequest) -> dict:
+async def email_start(body: EmailStartRequest, request: Request) -> dict:
     _require_enabled()
-    await _send(email_auth.start_login(body.email, body.name, body.group_token))
+    await _send(email_auth.start_login(body.email, body.name, body.group_token, _ip(request)))
     return {"sent": True}
 
 
 @router.post("/auth/email/link", status_code=status.HTTP_202_ACCEPTED,
              summary="Telegram members: email a link that adds this address as a sign-in")
-async def email_link(body: EmailLinkRequest,
+async def email_link(body: EmailLinkRequest, request: Request,
                      id_token: Optional[str] = Depends(identity_from_header)) -> dict:
     _require_enabled()
     uid = require_identity(id_token, detail="Sign in with Telegram on this device first.")
-    await _send(email_auth.start_link(uid, body.email, body.group_token))
+    await _send(email_auth.start_link(uid, body.email, body.group_token, _ip(request)))
     return {"sent": True}
 
 
@@ -147,3 +152,36 @@ async def email_me(id_token: Optional[str] = Depends(identity_from_header)) -> E
 async def email_unlink(id_token: Optional[str] = Depends(identity_from_header)) -> None:
     uid = require_identity(id_token, detail="Sign in first.")
     email_auth.unlink(uid)
+
+
+class MergeSignedInRequest(BaseModel):
+    local_id_token: str = Field(..., max_length=300, description="The email sign-in this device had before")
+
+
+class MergePreviewResponse(BaseModel):
+    from_user_id: int
+    votes: int
+    groups: int
+
+
+@router.post("/auth/account/merge-local/preview", response_model=MergePreviewResponse,
+             summary="What merging this device's earlier email sign-in would move")
+async def merge_local_preview(body: MergeSignedInRequest,
+                              id_token: Optional[str] = Depends(identity_from_header)) -> MergePreviewResponse:
+    require_identity(id_token, detail="Sign in with Telegram on this device first.")
+    from api.identity import _verify
+    from identity_space import is_local_user
+    from services.account_merge import summary
+    local_uid = _verify(body.local_id_token, scope=None)
+    if local_uid is None or not is_local_user(local_uid):
+        raise HTTPException(status_code=403, detail="That email sign-in has expired.")
+    return MergePreviewResponse(from_user_id=local_uid, **summary(local_uid))
+
+
+@router.post("/auth/account/merge-local", response_model=EmailMergeResponse,
+             summary="Merge this device's earlier email sign-in into the Telegram account now signed in")
+async def merge_local(body: MergeSignedInRequest,
+                      id_token: Optional[str] = Depends(identity_from_header)) -> EmailMergeResponse:
+    uid = require_identity(id_token, detail="Sign in with Telegram on this device first.")
+    return EmailMergeResponse(**await email_auth.merge_signed_in(
+        uid, body.local_id_token, email_auth.telegram_name(uid) or "member"))

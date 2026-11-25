@@ -164,8 +164,20 @@ def _move_dues(L: int, T: int, actor_name: str) -> int:
     return moved
 
 
+def resolve_merged(user_id: int) -> int:
+    """Follow merges to the account a user id now is (a few hops at most:
+    an account can be merged into one that is later merged too)."""
+    seen = 0
+    while seen < 5:
+        nxt = merged_into(user_id)
+        if not nxt:
+            return user_id
+        user_id, seen = nxt, seen + 1
+    return user_id
+
+
 def merged_into(local_uid: int) -> Optional[int]:
-    """The Telegram id a merged local account now resolves to, if any."""
+    """The account a merged local account was merged into, if any."""
     if not is_local_user(local_uid):
         return None
     try:
@@ -186,8 +198,8 @@ async def merge(local_uid: int, tg_uid: int, actor_name: str) -> dict:
     """Move everything from local_uid onto tg_uid. Caller has proven both."""
     if not is_local_user(local_uid):
         raise incorrectParameter("Only an email-only account can be merged.")
-    if tg_uid <= 0 or is_local_user(tg_uid):
-        raise insufficientPermissions("Merge into a Telegram account — sign in with Telegram first.")
+    if tg_uid <= 0 or tg_uid == local_uid:
+        raise incorrectParameter("Pick a different account to merge into.")
     if merged_into(local_uid):
         raise incorrectParameter("That account has already been merged.")
     from rollcall_manager import manager
@@ -217,3 +229,24 @@ async def merge(local_uid: int, tg_uid: int, actor_name: str) -> dict:
         db.log_admin_action(cid, tg_uid, actor_name, "account_merge", target_name=str(local_uid))
     logging.info("[account_merge] %s -> %s chats=%s dues_groups=%s", local_uid, tg_uid, chats, dues_groups)
     return {"groups": len(chats), "dues_groups": dues_groups}
+
+
+async def merge_in_group(chat_id: int, from_uid: int, into_uid: int, *, actor_user_id: int,
+                         actor_name: str) -> dict:
+    """An OWNER merges two people in their group. Only an email-only account
+    whose whole history is in THIS group: a merge is global, and an owner of
+    one group must not be able to rewrite someone's record in another."""
+    if db.get_web_admin_role(chat_id, actor_user_id) != "owner":
+        raise insufficientPermissions("Only a group owner can merge two accounts.")
+    if not is_local_user(from_uid):
+        raise incorrectParameter(
+            "Only an account without Telegram can be merged here. A Telegram member's "
+            "account is theirs to merge (account menu → Email sign-in).")
+    if db.get_member_display_info(chat_id, into_uid) is None:
+        raise incorrectParameter("Merge into a member of this group.")
+    elsewhere = [c for c in affected_chats(from_uid) if c != chat_id]
+    if elsewhere:
+        raise insufficientPermissions(
+            "That account is also in other groups, so only its owner can merge it — "
+            "they sign in with Telegram and add their email.")
+    return await merge(from_uid, into_uid, actor_name)

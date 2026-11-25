@@ -156,6 +156,8 @@ async def _dm_non_responders(chat_id: int, rc_number: int, title: str, when_phra
     )
     if not candidates:
         return
+    from services import buzz_mute
+    buzz_mute.record(chat_id, svc.get("rollcall_ids") or [], [c.get("user_id") for c in candidates])
     sent = 0
     for c in candidates:
         uid = c.get("user_id")
@@ -288,6 +290,9 @@ async def check(rollcalls, timezone, chat_id):
                                         f"[auto-buzz] pinged {len(candidates)} non-voter(s) for "
                                         f"rollcall #{rc_number} in chat {chat_id}"
                                     )
+                                    from services import buzz_mute
+                                    buzz_mute.record(chat_id, svc.get("rollcall_ids") or [],
+                                                     [c.get("user_id") for c in candidates])
                 except Exception:
                     logging.exception("Error in auto-buzz escalation")
 

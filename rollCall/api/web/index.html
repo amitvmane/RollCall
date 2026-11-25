@@ -567,6 +567,12 @@
             <span class="adm-mi-sub" id="adm-mi-joins-sub">Who can join from the group link</span></span>
           <span class="adm-mi-chev">›</span>
         </button>
+        <button class="adm-menu-item" role="menuitem" data-on-click="openAdminSection" data-args='["integrations"]'>
+          <span class="adm-mi-icon">🔌</span>
+          <span class="adm-mi-text"><span class="adm-mi-title">Integrations</span>
+            <span class="adm-mi-sub">App keys and webhooks for other apps</span></span>
+          <span class="adm-mi-chev">›</span>
+        </button>
         <button class="adm-menu-item" role="menuitem" data-on-click="openAdminSection" data-args='["admins"]'>
           <span class="adm-mi-icon">👑</span>
           <span class="adm-mi-text"><span class="adm-mi-title">Owners &amp; admins</span>
@@ -627,6 +633,16 @@
             <input type="checkbox" id="weather-toggle" data-on-change="toggleWeatherAlerts" data-args='[{"$": "checked"}]'/>
             <span class="admin-toggle-slider"></span>
           </label>
+        </div>
+        <div class="adm-row">
+          <div>
+            <div class="adm-row-t">🔕 Skip people who ignore buzzes</div>
+            <div class="adm-row-s">After this many unanswered buzzes in a row, /buzz, auto-buzz and reminders leave them out. Any vote brings them back.</div>
+            <div id="buzz-muted-list" class="adm-row-s"></div>
+          </div>
+          <select id="buzz-mute-select" data-on-change="setBuzzMute" data-args='[{"$": "value"}]'>
+            <option value="0">Never</option><option value="2">2</option><option value="3">3</option><option value="5">5</option><option value="10">10</option>
+          </select>
         </div>
         <div class="adm-row">
           <div>
@@ -783,6 +799,16 @@
           </label>
         </div>
         <div id="joins-body"></div>
+      </div>
+
+      <!-- Integrations: partner app keys + webhooks (services/partner_api,
+           services/webhooks; docs/API.md). -->
+      <div class="adm-panel hidden" id="adm-panel-integrations">
+        <div class="adm-panel-hdr">
+          <button class="adm-back" data-on-click="closeAdminSection">‹ Back</button>
+          <span class="adm-panel-title">🔌 Integrations</span>
+        </div>
+        <div id="integrations-body"></div>
       </div>
 
       <div class="adm-panel hidden" id="adm-panel-ghost">

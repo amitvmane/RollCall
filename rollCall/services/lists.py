@@ -39,6 +39,8 @@ def get_non_responders(
     Returns:
       {
         "candidates": [{"user_id": int, "first_name": str, "username": str|None}, ...],
+        "muted":      [...same shape...] — non-voters skipped for ignoring buzzes (buzz_mute),
+        "rollcall_ids": [int, ...],      # db ids of the targeted rollcall(s)
         "rollcall_titles": [str, ...],   # titles of the targeted rollcall(s)
         "has_active_rollcall": bool,
       }
@@ -51,8 +53,13 @@ def get_non_responders(
     has_active = bool(rollcalls)
 
     if not has_active:
+        from services import buzz_mute
+        muted = buzz_mute.muted_ids(chat_id)
         return {
-            "candidates": candidates or [],
+            "candidates": [u for u in (candidates or []) if u.get("user_id") not in muted],
+            "muted": [u for u in (candidates or []) if u.get("user_id") in muted],
+            "members_known": bool(candidates),
+            "rollcall_ids": [],
             "rollcall_titles": [],
             "has_active_rollcall": False,
         }
@@ -105,8 +112,17 @@ def get_non_responders(
         titles = [rc.title for rc in rollcalls]
 
     remaining = [u for u in (candidates or []) if u.get("user_id") not in voted_ids]
+    # Members who keep not answering buzzes are skipped (services/buzz_mute) —
+    # here, so /buzz, auto-buzz and the DM/push reminders all agree.
+    from services import buzz_mute
+    muted = buzz_mute.muted_ids(chat_id)
+    skipped = [u for u in remaining if u.get("user_id") in muted]
+    remaining = [u for u in remaining if u.get("user_id") not in muted]
     return {
         "candidates": remaining,
+        "muted": skipped,
+        "members_known": bool(candidates),
+        "rollcall_ids": [rc.id for rc in ([rollcalls[rc_number]] if rc_number is not None else rollcalls)],
         "rollcall_titles": titles,
         "has_active_rollcall": True,
     }

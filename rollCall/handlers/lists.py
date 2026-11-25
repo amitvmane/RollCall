@@ -197,12 +197,18 @@ async def buzz_command(message):
         svc = lists_svc.get_non_responders(cid, rc_number)
         candidates = svc["candidates"]
         rollcall_titles = svc["rollcall_titles"]
+        # Skipped for ignoring buzzes (services/buzz_mute) — said, not hidden.
+        muted = svc.get("muted") or []
+        muted_note = (f"\n\n🔕 Not pinged: {len(muted)} member(s) who didn't answer the last few buzzes "
+                      f"(/buzz\\_mute)." if muted else "")
 
         if not no_rollcall and not svc["has_active_rollcall"]:
             no_rollcall = True  # treat as no-rollcall buzz
 
-        if not candidates and not no_rollcall:
-            # Service reported no active-member candidates at all
+        # "No members known" only when the bot truly knows nobody. It used to
+        # fire whenever nobody was LEFT to ping, so "everyone has voted" below
+        # could never be reached.
+        if not svc.get("members_known", bool(candidates)):
             await bot.send_message(
                 cid,
                 "No known group members yet. Members are recorded the first time they vote in any rollcall."
@@ -210,14 +216,13 @@ async def buzz_command(message):
             return
 
         if not candidates and no_rollcall:
-            await bot.send_message(
-                cid,
-                "No known group members yet. Members are recorded the first time they vote in any rollcall."
-            )
+            await bot.send_message(cid, "Nobody left to ping." + muted_note)
             return
 
         if not no_rollcall and not candidates:
-            if rc_number is not None or len(rollcall_titles) == 1:
+            if muted:
+                msg_text = "Nobody left to ping." + muted_note
+            elif rc_number is not None or len(rollcall_titles) == 1:
                 title = rollcall_titles[0] if rollcall_titles else "this rollcall"
                 msg_text = f"✅ Everyone the bot knows has already voted on *{_esc_md(title)}*!"
             else:
@@ -280,7 +285,9 @@ async def buzz_command(message):
             else:
                 titles = ", ".join(f"*{_esc_md(t)}*" for t in rollcall_titles)
                 note = f"active rollcalls ({titles}) are open — have you voted?"
-            await bot.send_message(cid, f"👋 Hey {mentions}\n\n{note}", parse_mode="Markdown")
+            await bot.send_message(cid, f"👋 Hey {mentions}\n\n{note}{muted_note}", parse_mode="Markdown")
+            from services import buzz_mute
+            buzz_mute.record(cid, svc.get("rollcall_ids") or [], [u["user_id"] for u in to_ping])
         log_admin_action(cid, message.from_user.id, message.from_user.first_name, "buzz",
                          details=f"pinged {len(to_ping)} member(s)")
 
@@ -303,6 +310,68 @@ def _build_mention_list(users: list) -> str:
         elif uid:
             parts.append(f"[{safe_name}](tg://user?id={uid})")
     return " ".join(parts)
+
+
+# ── /buzz_mute, /buzz_unmute — stop pinging people who never answer ──────────
+
+def _buzz_mute_status(cid: int) -> str:
+    from services import buzz_mute
+    after = buzz_mute.threshold(cid)
+    if after <= 0:
+        return ("🔔 Everyone is pinged by /buzz, auto-buzz and reminders, however often they ignore it.\n"
+                "/buzz_mute 3 — skip people after 3 unanswered buzzes in a row.")
+    muted = buzz_mute.muted_members(cid)
+    lines = [f"🔕 Members who don't answer {after} buzzes in a row (on finished games) are skipped "
+             "by /buzz, auto-buzz and reminders. Any vote of theirs brings them back."]
+    lines.append("Skipped now: " + (", ".join(f"{m['name']} ({m['unanswered']})" for m in muted)
+                                   if muted else "nobody"))
+    lines.append("/buzz_mute <N> · /buzz_mute off · /buzz_unmute <name>")
+    return "\n".join(lines)
+
+
+@bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/buzz_mute")
+async def buzz_mute_command(message):
+    """Show or set how many unanswered buzzes in a row before someone is skipped."""
+    cid = message.chat.id
+    try:
+        if await admin_rights(message, manager) is False:
+            raise insufficientPermissions("Admin only: /buzz_mute")
+        from services import buzz_mute
+        args = message.text.split()[1:]
+        if args:
+            arg = args[0].lower()
+            after = 0 if arg in ("off", "0", "disable") else None
+            if after is None:
+                try:
+                    after = int(arg)
+                except ValueError:
+                    raise incorrectParameter("Use a number 1-20, or off. Example: /buzz_mute 3")
+                if after < 1:
+                    raise incorrectParameter("Use a number 1-20, or off.")
+            buzz_mute.set_threshold(cid, after, message.from_user.id, message.from_user.first_name or "admin")
+        await bot.send_message(cid, _buzz_mute_status(cid))
+    except Exception as e:
+        await reply_error(message, e)
+
+
+@bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/buzz_unmute")
+async def buzz_unmute_command(message):
+    """Ping a skipped member again (clears their unanswered buzzes)."""
+    cid = message.chat.id
+    try:
+        if await admin_rights(message, manager) is False:
+            raise insufficientPermissions("Admin only: /buzz_unmute")
+        from services import buzz_mute
+        query = " ".join(message.text.split()[1:]).strip()
+        if not query:
+            raise parameterMissing("Who? /buzz_unmute <name or @username> — /buzz_mute lists who is skipped.")
+        uid = buzz_mute.find_member(cid, query)
+        if uid is None:
+            raise incorrectParameter(f"'{query}' isn't being skipped. /buzz_mute lists who is.")
+        buzz_mute.unmute(cid, uid, message.from_user.id, message.from_user.first_name or "admin")
+        await bot.send_message(cid, f"🔔 {query.lstrip('@')} will be pinged again.")
+    except Exception as e:
+        await reply_error(message, e)
 
 
 # ── /auto_buzz — smart escalation config ─────────────────────────────────────

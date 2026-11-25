@@ -666,6 +666,61 @@ async function _offerMerge(data){
   }catch(e){toast(e.message||"Couldn't merge the accounts",5000);}
 }
 
+async function _offerMergeLocal(localTok){
+  try{
+    const pre=await fetch("/api/v1/auth/account/merge-local/preview",{method:"POST",
+      headers:{"Content-Type":"application/json","X-Identity-Token":_idToken},
+      body:JSON.stringify({local_id_token:localTok}),signal:AbortSignal.timeout(8000)});
+    if(!pre.ok)return;
+    const p=await pre.json();
+    const what=p.votes?`${p.votes} vote${p.votes===1?"":"s"} in ${p.groups} group${p.groups===1?"":"s"}`:"no votes yet";
+    if(!await _confirmAction(`You were signed in by email on this device (${what}).\n\nMerge that account into your Telegram account? Its votes, stats, dues and groups move to you, and your email then signs in as you. This can't be undone.`))return;
+    const r=await fetch("/api/v1/auth/account/merge-local",{method:"POST",
+      headers:{"Content-Type":"application/json","X-Identity-Token":_idToken},
+      body:JSON.stringify({local_id_token:localTok}),signal:AbortSignal.timeout(20000)});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||"Couldn't merge the accounts");
+    toast("✅ Merged — it's all one account now.",5000);
+    if(IS_GROUP)loadWebStats();
+  }catch(e){toast(e.message||"Couldn't merge the accounts",5000);}
+}
+
+// Owners: fold an email-only account (whose whole history is in this group)
+// into another member — services/account_merge.merge_in_group.
+window.openAccountMerge=async function(){
+  const box=document.getElementById("acct-merge-box");
+  if(!box)return;
+  box.innerHTML='<div class="sched-empty">Loading members…</div>';
+  try{
+    const res=await fetch(`${API_GROUP}/members`,{headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(8000)});
+    if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"Couldn't load members");
+    const members=(await res.json()).members||[];
+    const opt=m=>`<option value="${esc(String(m.user_id))}">${esc(m.first_name||m.username||("User "+m.user_id))}${_isLocalUid(m.user_id)?" (email)":""}</option>`;
+    const locals=members.filter(m=>_isLocalUid(m.user_id));
+    if(!locals.length){box.innerHTML='<div class="sched-empty">No email-only accounts in this group to merge.</div>';return;}
+    box.innerHTML=`<div class="adm-row-s" style="margin:8px 0">Someone joined by email and also has another account here? Move the email account into it. Only accounts that exist in this group alone.</div>
+      <label class="adm-row-s">Merge this email account</label><select id="am-from" style="width:100%;margin-bottom:6px">${locals.map(opt).join("")}</select>
+      <label class="adm-row-s">into</label><select id="am-into" style="width:100%;margin-bottom:8px">${members.map(opt).join("")}</select>
+      <button class="btn btn-primary" style="padding:8px 14px;font-size:.85rem" data-on-click="doAccountMerge">Merge</button>`;
+  }catch(e){box.innerHTML=`<div class="sched-empty">${esc(e.message)}</div>`;}
+};
+window.doAccountMerge=async function(){
+  const from=Number($("am-from").value), into=Number($("am-into").value);
+  if(from===into){toast("Pick two different people",3000);return;}
+  const name=id=>($("am-into").querySelector(`option[value="${id}"]`)||{}).textContent||"them";
+  if(!await _confirmAction(`Merge ${name(from)} into ${name(into)}? Votes, stats and dues move over. This can't be undone.`))return;
+  try{
+    const r=await fetch(`${API_GROUP}/accounts/merge`,{method:"POST",
+      headers:{"Content-Type":"application/json","X-Identity-Token":_idToken},
+      body:JSON.stringify({from_user_id:from,into_user_id:into}),signal:AbortSignal.timeout(20000)});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||"Couldn't merge");
+    toast("✅ Accounts merged",3000);
+    document.getElementById("acct-merge-box").innerHTML="";
+    loadAdminsPanel();
+  }catch(e){toast(e.message||"Couldn't merge",5000);}
+};
+
 window.acctEmail=async function(){
   try{
     const r=await fetch("/api/v1/auth/email/me",{headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(8000)});
@@ -1911,6 +1966,10 @@ window.startTgVerify=async function(){
 // end up with the same {user_id,name,username,id_token} shape from the
 // server, just via a different verification path.
 function _adoptVerifiedIdentity(data){
+  // Signed in by email on this device, now Telegram: the page holds proof of
+  // both, so it can offer to make them one account (_offerMergeLocal).
+  const prevTok=_idToken, prevUid=_verifiedUserId;
+  setTimeout(()=>{if(prevTok&&_isLocalUid(prevUid)&&!_isLocalUid(data.user_id))_offerMergeLocal(prevTok);},0);
   _verifiedUserId=data.user_id;
   _verifiedName=data.name;
   _verifiedUsername=data.username||null;
@@ -2678,7 +2737,45 @@ function _syncShhToggle(){
   if(wx)wx.checked=!!groupData.weather_alerts;
   const tm=document.getElementById("teams-toggle");
   if(tm)tm.checked=!!groupData.teams_enabled;
+  const bm=document.getElementById("buzz-mute-select");
+  if(bm){
+    const v=String(groupData.buzz_mute_after??3);
+    if(![...bm.options].some(o=>o.value===v))bm.insertAdjacentHTML("beforeend",`<option value="${esc(v)}">${esc(v)}</option>`);
+    bm.value=v;
+  }
+  _loadBuzzMuted();
 }
+
+// Members skipped by buzzes (services/buzz_mute) — same list as /buzz_mute.
+async function _loadBuzzMuted(){
+  const box=document.getElementById("buzz-muted-list");
+  if(!box||!_idToken||!_isWebAdmin)return;
+  try{
+    const r=await fetch(`${API_GROUP}/buzz-muted`,{headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(8000)});
+    if(!r.ok)return;
+    const d=await r.json();
+    box.innerHTML=d.muted.length
+      ?"Skipped now: "+d.muted.map(m=>`${esc(m.name)} (${m.unanswered}) <button class="id-change" style="color:var(--accent)" data-on-click="buzzUnmute" data-args="${rcArgs(m.user_id,m.name)}">unmute</button>`).join(" · ")
+      :(d.after?"Skipped now: nobody":"");
+  }catch(_){}
+}
+window.buzzUnmute=async function(userId,name){
+  try{
+    const r=await fetch(`${API_GROUP}/buzz-muted/unmute`,{method:"POST",
+      headers:{"Content-Type":"application/json","X-Identity-Token":_idToken},
+      body:JSON.stringify({user_id:userId}),signal:AbortSignal.timeout(8000)});
+    if(!r.ok)throw new Error((await r.json().catch(()=>({}))).detail||"Failed");
+    toast(`🔔 ${name} will be pinged again`,2500);_loadBuzzMuted();
+  }catch(e){toast(e.message,4000);}
+};
+window.setBuzzMute=async function(value){
+  const n=parseInt(value,10)||0;
+  const prev=groupData?groupData.buzz_mute_after:3;
+  const ok=await _patchGroupSetting({buzz_mute_after:n},()=>{
+    const sel=document.getElementById("buzz-mute-select");if(sel)sel.value=String(prev??3);
+  });
+  if(ok){if(groupData)groupData.buzz_mute_after=n;toast(n?`🔕 Skip after ${n} unanswered buzzes`:"🔔 Everyone is pinged",2500);_loadBuzzMuted();}
+};
 
 // Nothing running. Rather than one grey sentence in an otherwise blank
 // column, answer what the visitor came to find out — when is the next one,
@@ -2799,7 +2896,103 @@ const ADMIN_SECTIONS={
   ghost:{load:()=>loadGhostReview()},
   admins:{load:()=>loadAdminsPanel()},
   joins:{load:()=>loadJoinRequests()},
+  integrations:{load:()=>loadIntegrations()},
   health:{load:()=>loadHealthPanel()},
+};
+
+// ── Integrations: app keys + webhooks ─────────────────────────────────────
+// A key's token and a webhook's secret are shown ONCE, when made; the server
+// keeps only the key's hash. docs/API.md is what to hand the partner.
+let _integ=null;
+async function _integCall(path,opts={}){
+  const res=await fetch(`${API_GROUP}/${path}`,{...opts,
+    headers:{"Content-Type":"application/json","X-Identity-Token":_idToken},signal:AbortSignal.timeout(10000)});
+  const d=res.status===204?{}:await res.json().catch(()=>({}));
+  if(!res.ok)throw new Error(d.detail||"Failed");
+  return d;
+}
+async function loadIntegrations(){
+  const body=document.getElementById("integrations-body");
+  if(!body||!_idToken)return;
+  body.innerHTML='<div class="sched-empty">Loading…</div>';
+  try{_integ=await _integCall("integrations");renderIntegrations();}
+  catch(e){body.innerHTML=`<div class="sched-empty">${esc(e.message)}</div>`;}
+}
+function renderIntegrations(once){
+  const body=document.getElementById("integrations-body");
+  if(!body||!_integ)return;
+  const {keys=[],webhooks=[],events=[],scopes=[],you_are_owner=false}=_integ;
+  const reveal=once?`<div class="adm-row" style="display:block;border:1.5px solid var(--accent);border-radius:10px;padding:10px">
+      <div class="adm-row-t">${esc(once.title)}</div>
+      <div class="adm-row-s">Copy it now — it won't be shown again.</div>
+      <input readonly value="${esc(once.value)}" style="width:100%;margin-top:6px;font-family:monospace" data-on-click="selectAll" data-args='[{"$":"this"}]'/></div>`:"";
+  const keyRows=keys.length?keys.map(k=>`<div class="gr-row" style="cursor:default">
+      <span class="gr-name">${esc(k.label)} <span class="gr-tag">${esc(k.scopes.join(", "))}</span>${k.revoked?' <span class="gr-tag">revoked</span>':""}</span>
+      <span class="adm-row-s">${k.last_used_at?"used "+esc(String(k.last_used_at).slice(0,10)):"never used"} · ends ${esc(String(k.expires_at).slice(0,10))}</span>
+      ${k.revoked?"":`<button class="btn btn-secondary" style="padding:6px 10px;font-size:.78rem" data-on-click="revokeAppKey" data-args="${rcArgs(k.key_id,k.label)}">Revoke</button>`}</div>`).join("")
+    :'<div class="sched-empty">No app keys yet.</div>';
+  const hookRows=webhooks.length?webhooks.map(w=>`<div class="gr-row" style="cursor:default;flex-wrap:wrap">
+      <span class="gr-name" style="word-break:break-all">${esc(w.url)}</span>
+      <span class="adm-row-s">${esc(w.events.join(", "))} · ${w.active?(w.last_status?esc(w.last_status==="ok"?"✅ delivering":"⚠️ "+w.last_status):"no deliveries yet"):"⏸ off"+(w.failures?" (kept failing)":"")}</span>
+      <button class="btn btn-secondary" style="padding:6px 10px;font-size:.78rem" data-on-click="testWebhook" data-args="${rcArgs(w.id)}">Test</button>
+      <button class="btn btn-secondary" style="padding:6px 10px;font-size:.78rem" data-on-click="toggleWebhook" data-args="${rcArgs(w.id,!w.active)}">${w.active?"Turn off":"Turn on"}</button>
+      <button class="btn btn-secondary" style="padding:6px 10px;font-size:.78rem" data-on-click="deleteWebhook" data-args="${rcArgs(w.id)}">Delete</button></div>`).join("")
+    :'<div class="sched-empty">No webhooks yet.</div>';
+  const scopeBoxes=scopes.map(sc=>`<label style="margin-right:10px;font-size:.82rem"><input type="checkbox" class="ik-scope" value="${esc(sc)}" ${sc==="read"?"checked":""} ${sc==="admin"&&!you_are_owner?"disabled":""}/> ${esc(sc)}</label>`).join("");
+  const eventBoxes=events.map(ev=>`<label style="margin-right:10px;font-size:.82rem"><input type="checkbox" class="iw-event" value="${esc(ev)}" checked/> ${esc(ev)}</label>`).join("");
+  body.innerHTML=reveal+`
+    <div class="adm-row-s" style="margin:4px 0 10px">Let another app read this group, take votes, or hear about changes. Give the developer docs/API.md from the RollCall repo.</div>
+    <div class="adm-row-t" style="margin-top:6px">🔑 App keys</div>${keyRows}
+    <div style="margin:8px 0 14px">
+      <input id="ik-label" type="text" maxlength="60" placeholder="Which app? e.g. Club website" style="width:100%;margin-bottom:6px"/>
+      <div style="margin-bottom:6px">${scopeBoxes}${you_are_owner?"":'<span class="adm-row-s"> (admin scope: owners only)</span>'}</div>
+      <button class="btn btn-primary" style="padding:8px 14px;font-size:.85rem" data-on-click="createAppKey">＋ Make key</button>
+    </div>
+    <div class="adm-row-t">🪝 Webhooks</div>${hookRows}
+    <div style="margin:8px 0">
+      <input id="iw-url" type="url" maxlength="500" placeholder="https://your-app.example.com/rollcall-hook" style="width:100%;margin-bottom:6px"/>
+      <div style="margin-bottom:6px">${eventBoxes}</div>
+      <button class="btn btn-primary" style="padding:8px 14px;font-size:.85rem" data-on-click="createWebhook">＋ Add webhook</button>
+    </div>`;
+}
+window.selectAll=function(el){try{el.select();}catch(_){}};
+window.createAppKey=async function(){
+  const label=($("ik-label").value||"").trim();
+  const scopes=[...document.querySelectorAll(".ik-scope:checked")].map(x=>x.value);
+  if(!label){$("ik-label").focus();return;}
+  try{
+    const k=await _integCall("api-keys",{method:"POST",body:JSON.stringify({label,scopes,days:365})});
+    _integ=await _integCall("integrations");
+    renderIntegrations({title:`🔑 Key for ${k.label} (${k.scopes.join(", ")})`,value:k.token});
+  }catch(e){toast(e.message,4500);}
+};
+window.revokeAppKey=async function(id,label){
+  if(!await _confirmAction(`Revoke the key for ${label}? That app stops working at once.`))return;
+  try{await _integCall(`api-keys/${encodeURIComponent(id)}/revoke`,{method:"POST"});toast("Key revoked",2500);loadIntegrations();}
+  catch(e){toast(e.message,4000);}
+};
+window.createWebhook=async function(){
+  const url=($("iw-url").value||"").trim();
+  const events=[...document.querySelectorAll(".iw-event:checked")].map(x=>x.value);
+  if(!url){$("iw-url").focus();return;}
+  try{
+    const w=await _integCall("webhooks",{method:"POST",body:JSON.stringify({url,events})});
+    _integ=await _integCall("integrations");
+    renderIntegrations({title:"🪝 Signing secret — verifies X-RollCall-Signature",value:w.secret});
+  }catch(e){toast(e.message,4500);}
+};
+window.testWebhook=async function(id){
+  try{await _integCall(`webhooks/${id}/test`,{method:"POST"});toast("Test sent — refresh in a moment for the result",3500);setTimeout(loadIntegrations,4000);}
+  catch(e){toast(e.message,4000);}
+};
+window.toggleWebhook=async function(id,active){
+  try{await _integCall(`webhooks/${id}/active`,{method:"POST",body:JSON.stringify({active})});loadIntegrations();}
+  catch(e){toast(e.message,4000);}
+};
+window.deleteWebhook=async function(id){
+  if(!await _confirmAction("Delete this webhook? Undelivered events for it are dropped."))return;
+  try{await _integCall(`webhooks/${id}/delete`,{method:"POST"});toast("Webhook deleted",2500);loadIntegrations();}
+  catch(e){toast(e.message,4000);}
 };
 
 // ── Join requests ─────────────────────────────────────────────────────────
@@ -5514,7 +5707,10 @@ function renderAdminsPanel(){
     }).join("")+
     (admin_source==="local"&&you_are_owner
       ?`<button class="btn btn-primary" style="margin-top:12px;padding:8px 14px;font-size:.85rem" data-on-click="addLocalAdmin">＋ Add admin</button>
-        <div id="add-admin-picker"></div>`:"");
+        <div id="add-admin-picker"></div>`:"")+
+    (you_are_owner
+      ?`<div style="margin-top:14px"><button class="btn btn-secondary" style="padding:8px 14px;font-size:.85rem" data-on-click="openAccountMerge">🧩 Merge two accounts</button>
+        <div id="acct-merge-box"></div></div>`:"");
 }
 
 // Groups that keep their own admin list (every web-only group): the owner

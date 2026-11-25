@@ -328,6 +328,30 @@ class TestWebVoteByToken(_Base):
         self.assertEqual(self.names(self.rc(0)), ["Walk-in"])   # Bravo
         self.assertEqual(self.names(self.rc(1)), [])            # Charlie
 
+    async def test_guest_in_on_a_full_game_reports_waitlist(self):
+        # The group notice used to read "→ IN" for a guest who landed on the
+        # waitlist; the service now says where the vote actually went.
+        from services.web import vote_by_token
+        rc = await self.start_rc()
+        await self.wait_limit(self.msg("/sl 1", ADMIN_USER))
+        token = await self._token(rc)
+        first = await vote_by_token(token, "Walk-in", "in")
+        self.assertEqual((first["voter_status"], first["changed"]), ("in", True))
+        second = await vote_by_token(token, "Latecomer", "in")
+        self.assertEqual((second["voter_status"], second["changed"]), ("waitlist", True))
+        self.assertEqual(self.names(self.rc(0), "waitList"), ["Latecomer"])
+
+    async def test_guest_repeat_tap_is_not_a_change(self):
+        # A guest's double tap is swallowed as idempotent — and must not be
+        # announced to the group a second time.
+        from services.web import vote_by_token
+        rc = await self.start_rc()
+        token = await self._token(rc)
+        await vote_by_token(token, "Walk-in", "in")
+        again = await vote_by_token(token, "walk-in", "in")
+        self.assertEqual((again["voter_status"], again["changed"]), ("in", False))
+        self.assertEqual(self.names(self.rc(0)), ["Walk-in"])
+
     async def test_guest_text_cannot_carry_links_mentions_or_commands(self):
         # No sign-in is needed to vote by link, and the bot then posts the
         # name into the Telegram group, where links, @mentions and /commands

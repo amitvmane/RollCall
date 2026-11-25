@@ -60,7 +60,7 @@ async def send_vote_notification(
     """Send a brief vote-notification message to the group so the web vote
     is visible in chat history (just like the bot does for /in, /out, /maybe).
 
-    vote_type must be "in", "out", or "maybe".
+    vote_type is "in", "out", "maybe", or "waitlist" (an IN on a full game).
     """
     try:
         from bot_state import bot
@@ -69,7 +69,8 @@ async def send_vote_notification(
         if manager.get_shh_mode(chat_id):
             return
 
-        label = {"in": "IN", "out": "OUT", "maybe": "MAYBE"}.get(vote_type, vote_type.upper())
+        label = {"in": "IN", "out": "OUT", "maybe": "MAYBE",
+                 "waitlist": "WAITING (game full)"}.get(vote_type, vote_type.upper())
         text = f"{name} → {label} (via 🌐 web)"
         logging.info("[mirror] sending vote notification chat=%s name=%s vote=%s", chat_id, name, vote_type)
         await bot.send_message(chat_id, text)   # paced below (chat_outbox)

@@ -79,7 +79,7 @@ let _weblogInRedeemPromise=null;
     const p=new URLSearchParams(window.location.search);
     const g=p.get("guest");
     if(g&&!localStorage.getItem(LS_NAME)&&!localStorage.getItem(LS_NAME_OVERRIDE)){
-      localStorage.setItem(LS_NAME,g.slice(0,64));
+      localStorage.setItem(LS_NAME,g.replace(/\s+/g," ").trim().slice(0,64));
       p.delete("guest");
       const qs=p.toString();
       const clean=window.location.pathname+(qs?"?"+qs:"");
@@ -365,7 +365,9 @@ async function _doChangeName(){
 }
 
 function saveName(){
-  const val=$("name-input").value.trim();if(!val){$("name-input").focus();return;}
+  // Collapsed like the server's clean_guest_text does, or "Ravi  K" is saved
+  // as "Ravi K" and this page never recognises the vote as its own.
+  const val=$("name-input").value.replace(/\s+/g," ").trim();if(!val){$("name-input").focus();return;}
   currentName=val.slice(0,64);
   if(TG_NAME)localStorage.setItem(LS_NAME_OVERRIDE,currentName);
   else localStorage.setItem(LS_NAME,currentName);
@@ -630,24 +632,45 @@ window.showIdentityPicker=function(){
 };
 
 // ── Vote detection ─────────────────────────────────────────────────────────
+// Which list "you" are on. A signed-in member is found by their Telegram id:
+// their entry may read "Priya (@priya)" once a guest Priya exists, and a
+// name match would then show the GUEST's vote as theirs. Anyone else is
+// matched by name against guest entries only — a vote from this page without
+// a sign-in is a guest entry, so a real member's vote under the same name is
+// not "yours" (showing it made an unverified visitor think they were IN when
+// their tap would add a separate guest). The waitlist counts too: someone
+// who taps IN on a full game is WAITING, and used to see no status at all.
+function _isMyEntry(u){
+  const uid=_verifiedUserId||(TG_USER&&TG_USER.id)||null;
+  return (uid&&u.user_id===uid)||(u.is_proxy&&u.name.toLowerCase()===currentName.toLowerCase());
+}
+let currentWaitPos=0;
 function detectCurrentVote(){
-  if(!activeRcData||!currentName){currentVote=null;renderVoteUI();return;}
-  const n=currentName.toLowerCase();
-  if(activeRcData.in.some(u=>u.name.toLowerCase()===n))currentVote="in";
-  else if(activeRcData.out.some(u=>u.name.toLowerCase()===n))currentVote="out";
-  else if(activeRcData.maybe.some(u=>u.name.toLowerCase()===n))currentVote="maybe";
-  else currentVote=null;
+  currentVote=null;currentWaitPos=0;
+  if(!activeRcData||!currentName){renderVoteUI();return;}
+  const uid=_verifiedUserId||(TG_USER&&TG_USER.id)||null;
+  const lists=[["in",activeRcData.in],["waiting",activeRcData.waiting||[]],
+               ["out",activeRcData.out],["maybe",activeRcData.maybe]];
+  // A real-id match beats a leftover guest entry under the same name.
+  const hit=(uid&&lists.find(([,l])=>l.some(u=>u.user_id===uid)))
+          ||lists.find(([,l])=>l.some(_isMyEntry));
+  if(hit){
+    currentVote=hit[0];
+    if(currentVote==="waiting")currentWaitPos=hit[1].findIndex(_isMyEntry)+1;
+  }
   renderVoteUI();
 }
 
-const VOTE_ICONS={in:"✅",out:"❌",maybe:"🤔"};
+const VOTE_ICONS={in:"✅",out:"❌",maybe:"🤔",waiting:"⏳"};
 
 function renderVoteUI(){
   const hasName=!!currentName&&!!activeRcData;
   const statusRow=$("vote-status-row");
   if(currentVote&&hasName){
     statusRow.innerHTML=`<div class="vote-status ${currentVote}">
-      <span class="vs-label">${VOTE_ICONS[currentVote]} You're <strong>${currentVote.toUpperCase()}</strong></span>
+      <span class="vs-label">${VOTE_ICONS[currentVote]} ${currentVote==="waiting"
+        ?`You're on the <strong>WAITLIST</strong>${currentWaitPos?` (#${currentWaitPos})`:""}`
+        :`You're <strong>${currentVote.toUpperCase()}</strong>`}</span>
       <span class="vs-change">Change vote ↓</span>
     </div>`;
     $("vote-hint").style.display="none";

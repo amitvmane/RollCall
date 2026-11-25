@@ -302,6 +302,16 @@ async def vote_by_token(
     # Re-resolve so we return the updated state
     _, _, rc = _resolve_rc(token)
     out = _serialize_web_rollcall(rc)
+    # Where the vote actually landed, so the group notice can say WAITING
+    # for an IN on a full game (it said "→ IN" for someone on the waitlist),
+    # and whether anything changed at all: a guest's repeat tap is swallowed
+    # as idempotent above and must not be announced to the group again.
+    me = tg_user_id if is_real_user else name
+    out["voter_status"] = next(
+        (status for lst, status in ((rc.inList, "in"), (rc.waitList, "waitlist"),
+                                    (rc.outList, "out"), (rc.maybeList, "maybe"))
+         if any(u.user_id == me for u in lst)), None)
+    out["changed"] = vote_result is not None or replaced is not None
     # Carried out-of-band (the route pops it) so the caller can announce the
     # waitlist→IN promotion this vote caused. Without it a web /out frees a
     # slot and the promoted member is never told.

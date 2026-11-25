@@ -116,8 +116,22 @@ const ADMIN_GROUPS = {
   ],
 };
 
+// A full game: one real member IN, a guest on the waitlist. Drives the
+// "which list am I on" check (detectCurrentVote) below.
+const GROUP_FULL = {
+  group_name: "Test FC",
+  bot_username: "TestBot",
+  rollcalls: [{
+    num: 1, id: 2, rollcall_id: 2, title: "Full Game", status: "open", limit: 1,
+    in: [{ name: "Priya", is_proxy: false, user_id: 555 }],
+    out: [], maybe: [],
+    waiting: [{ name: "Ravi K", is_proxy: true, user_id: null }],
+  }],
+};
+
 const ROUTES = [
   [/\/web\/group\/emptytoken$/, GROUP_EMPTY],
+  [/\/web\/group\/fulltoken$/, GROUP_FULL],
   [/\/web\/group\/[^/]+$/, GROUP],
   [/admin-status/, { is_admin: true }],
   // /help — the theme check loads it; an empty {} throws in its renderer.
@@ -1186,6 +1200,37 @@ const WIDTHS = [
     if (errs.length) failures.push(`theme: JS error — ${errs[0]}`);
 
     console.log("  theme: Light/Dark/Auto cycle, live device follow, rc_dark migration, all 4 surfaces");
+    await page.close();
+  }
+
+  // Vote status for a guest (no Telegram). A guest who taps IN on a full
+  // game is on the waitlist and used to see no status at all; and a guest
+  // who types a real member's name must not be shown that member's vote —
+  // their own tap would add a separate guest entry.
+  {
+    const page = await browser.newPage();
+    await page.setRequestInterception(true);
+    page.on("request", req =>
+      req.url().startsWith(BASE) ? req.continue()
+                                 : req.respond({ status: 200, contentType: "text/plain", body: "" }));
+    const errs = [];
+    page.on("pageerror", e => errs.push(String(e.message)));
+    const statusFor = async name => {
+      await page.goto(`${BASE}/web/group/fulltoken`, { waitUntil: "load" });
+      await page.evaluate(n => { localStorage.clear(); localStorage.setItem("rollcall_name", n); }, name);
+      await page.reload({ waitUntil: "load" });
+      await new Promise(r => setTimeout(r, 500));
+      return page.evaluate(() => (document.getElementById("vote-status-row") || {}).innerText || "");
+    };
+    let t = await statusFor("Ravi K");
+    if (!/WAITLIST/.test(t) || !/#1/.test(t))
+      failures.push(`vote status: a waitlisted guest should see "on the WAITLIST (#1)", got "${t.trim()}"`);
+    t = await statusFor("priya");
+    if (/You're/.test(t))
+      failures.push(`vote status: a guest named like a real member was shown that member's vote: "${t.trim()}"`);
+    if (errs.length) failures.push(`vote status: JS error — ${errs[0]}`);
+    await page.evaluate(() => localStorage.clear());
+    console.log("  vote status: waitlisted guest, guest sharing a member's name");
     await page.close();
   }
 

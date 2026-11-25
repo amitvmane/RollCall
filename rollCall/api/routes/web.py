@@ -1579,6 +1579,8 @@ async def vote_web(
     promoted = data.pop("promoted", [])
     replaced = data.pop("replaced_guest", None)
     voter_name = data.pop("voter_name", None) or body.name
+    voter_status = data.pop("voter_status", None) or body.vote
+    changed = data.pop("changed", True)
 
     # Reflect the web vote in the Telegram group — notification so the vote is
     # visible in chat history, then panel update so the list stays current.
@@ -1592,7 +1594,8 @@ async def vote_web(
                     f"🔁 Guest entry '{replaced['name']}' removed — replaced by "
                     "their verified Telegram vote (via 🌐 web).",
                 )
-        await _send_vote_notification(loc[0], voter_name, body.vote)
+        if changed:
+            await _send_vote_notification(loc[0], voter_name, voter_status)
         await _send_promotion_notification(loc[0], promoted, loc[1])
         await _mirror_panel_to_telegram(loc[0], loc[1])
 

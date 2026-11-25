@@ -8,11 +8,12 @@ handlers' admin_rights gate and the web portal's is_web_admin gate. The
 action — these go into the audit log.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from services import proxy as proxy_svc
 
 from api.auth import AuthedToken, require_scope
+from api.rollcall_ref import RcRef, dual, rollcall_ref
 from api.schemas.proxy import ProxyVoteRequest, ProxyVoteResponse
 from api.telegram_mirror import mirror_panel_to_telegram, send_vote_notification
 
@@ -20,25 +21,22 @@ from api.telegram_mirror import mirror_panel_to_telegram, send_vote_notification
 router = APIRouter()
 
 
-@router.post(
-    "/chats/{chat_id}/rollcalls/{rc_number}/proxy-votes",
-    response_model=ProxyVoteResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Cast a proxy vote (in/out/maybe) on behalf of a non-Telegram member",
-)
+@dual(router.post, "/chats/{chat_id}/rollcalls/{rc_number}/proxy-votes",
+      response_model=ProxyVoteResponse, status_code=status.HTTP_201_CREATED,
+      summary="Cast a proxy vote (in/out/maybe) on behalf of a non-Telegram member")
 async def cast_proxy_vote(
     body: ProxyVoteRequest,
-    chat_id: int = Path(..., description="Telegram chat id"),
-    rc_number: int = Path(..., ge=1, description="1-based rollcall number"),
     _token: AuthedToken = Depends(require_scope("admin")),
+    ref: RcRef = Depends(rollcall_ref),
 ) -> ProxyVoteResponse:
+    chat_id = ref.chat_id
     common = dict(
         chat_id=chat_id,
         admin_user_id=body.admin_user_id,
         admin_name=body.admin_name,
         proxy_name=body.proxy_name,
         comment=body.comment,
-        rc_number=rc_number - 1,
+        rollcall_id=ref.rollcall_id,   # resolved inside the chat lock
     )
 
     if body.vote == "in":
@@ -54,5 +52,5 @@ async def cast_proxy_vote(
         )
 
     await send_vote_notification(chat_id, body.proxy_name, body.vote)
-    await mirror_panel_to_telegram(chat_id, rc_number)
+    await mirror_panel_to_telegram(chat_id, ref.number_now())
     return ProxyVoteResponse(**result)

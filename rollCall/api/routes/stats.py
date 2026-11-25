@@ -9,6 +9,7 @@ from services import settings as settings_svc
 from services import stats as stats_svc
 
 from api.auth import AuthedToken, require_scope
+from api.rollcall_ref import RcRef, dual, rollcall_ref
 from api.schemas.rollcalls import RollcallResponse
 from services import rollcalls as rc_svc
 
@@ -229,17 +230,14 @@ async def set_shh(
     return ChatSettingsResponse(**settings_svc.get_chat_settings(chat_id))
 
 
-@router.put(
-    "/chats/{chat_id}/rollcalls/{rc_number}/settings/limit",
-    response_model=RollcallResponse,
-    summary="Set IN-list cap on a rollcall (0 = no cap)",
-)
+@dual(router.put, "/chats/{chat_id}/rollcalls/{rc_number}/settings/limit",
+      response_model=RollcallResponse, summary="Set IN-list cap on a rollcall (0 = no cap)")
 async def set_limit(
     body: SetLimitRequest,
-    chat_id: int = Path(...),
-    rc_number: int = Path(..., ge=1),
     _token: AuthedToken = Depends(require_scope("admin")),
+    ref: RcRef = Depends(rollcall_ref),
 ) -> RollcallResponse:
+    chat_id = ref.chat_id
     # Serialise with concurrent votes — set_limit rebalances IN↔WAIT, so a
     # vote landing mid-rebalance can be placed against a stale list.
     # CLAUDE.md names set_limit explicitly; only the web route took it.
@@ -250,8 +248,9 @@ async def set_limit(
         # waitlist the panel no longer shows; clearing now promotes them all,
         # exactly as /set_limit 0 does in the chat.
         changed = settings_svc.set_wait_limit(
-            chat_id, body.limit, body.admin_user_id, body.admin_name, rc_number - 1
+            chat_id, body.limit, body.admin_user_id, body.admin_name, ref.index_now()
         )
+    rc_number = ref.number_now()
 
     # Every member moved by the change is announced, same as the bot command.
     from api.telegram_mirror import (mirror_panel_to_telegram, send_event_notification,
@@ -269,92 +268,85 @@ async def set_limit(
     return RollcallResponse(**changed["rollcall"])
 
 
-@router.put(
-    "/chats/{chat_id}/rollcalls/{rc_number}/settings/location",
-    response_model=RollcallResponse,
-    summary="Set location on a rollcall",
-)
+@dual(router.put, "/chats/{chat_id}/rollcalls/{rc_number}/settings/location",
+      response_model=RollcallResponse, summary="Set location on a rollcall")
 async def set_location(
     body: SetLocationRequest,
-    chat_id: int = Path(...),
-    rc_number: int = Path(..., ge=1),
     _token: AuthedToken = Depends(require_scope("admin")),
+    ref: RcRef = Depends(rollcall_ref),
 ) -> RollcallResponse:
-    return RollcallResponse(
-        **settings_svc.set_location(
-            chat_id, body.location, body.admin_user_id, body.admin_name, rc_number - 1
-        )
-    )
-
-
-@router.put(
-    "/chats/{chat_id}/rollcalls/{rc_number}/settings/fee",
-    response_model=RollcallResponse,
-    summary="Set event fee on a rollcall",
-)
-async def set_fee(
-    body: SetFeeRequest,
-    chat_id: int = Path(...),
-    rc_number: int = Path(..., ge=1),
-    _token: AuthedToken = Depends(require_scope("admin")),
-) -> RollcallResponse:
-    return RollcallResponse(
-        **settings_svc.set_event_fee(
-            chat_id, body.fee, body.admin_user_id, body.admin_name, rc_number - 1
-        )
-    )
-
-
-@router.put(
-    "/chats/{chat_id}/rollcalls/{rc_number}/settings/title",
-    response_model=RollcallResponse,
-    summary="Set title on a rollcall",
-)
-async def set_title(
-    body: SetTitleRequest,
-    chat_id: int = Path(...),
-    rc_number: int = Path(..., ge=1),
-    _token: AuthedToken = Depends(require_scope("admin")),
-) -> RollcallResponse:
+    chat_id = ref.chat_id
     from rollcall_manager import manager as _mgr
-    async with _mgr.get_chat_write_lock(chat_id):
+    async with _mgr.get_chat_write_lock(chat_id):   # a rollcall mutation (CLAUDE.md)
         return RollcallResponse(
-            **rc_svc.set_title(
-                chat_id, rc_number - 1, body.title, body.admin_user_id, body.admin_name
+            **settings_svc.set_location(
+                chat_id, body.location, body.admin_user_id, body.admin_name, ref.index_now()
             )
         )
 
 
-@router.put(
-    "/chats/{chat_id}/rollcalls/{rc_number}/settings/when",
-    response_model=RollcallResponse,
-    summary="Set or cancel the finalize date/time for a rollcall",
-)
+@dual(router.put, "/chats/{chat_id}/rollcalls/{rc_number}/settings/fee",
+      response_model=RollcallResponse, summary="Set event fee on a rollcall")
+async def set_fee(
+    body: SetFeeRequest,
+    _token: AuthedToken = Depends(require_scope("admin")),
+    ref: RcRef = Depends(rollcall_ref),
+) -> RollcallResponse:
+    chat_id = ref.chat_id
+    from rollcall_manager import manager as _mgr
+    async with _mgr.get_chat_write_lock(chat_id):   # a rollcall mutation (CLAUDE.md)
+        return RollcallResponse(
+            **settings_svc.set_event_fee(
+                chat_id, body.fee, body.admin_user_id, body.admin_name, ref.index_now()
+            )
+        )
+
+
+@dual(router.put, "/chats/{chat_id}/rollcalls/{rc_number}/settings/title",
+      response_model=RollcallResponse, summary="Set title on a rollcall")
+async def set_title(
+    body: SetTitleRequest,
+    _token: AuthedToken = Depends(require_scope("admin")),
+    ref: RcRef = Depends(rollcall_ref),
+) -> RollcallResponse:
+    chat_id = ref.chat_id
+    from rollcall_manager import manager as _mgr
+    async with _mgr.get_chat_write_lock(chat_id):
+        return RollcallResponse(
+            **rc_svc.set_title(
+                chat_id, ref.index_now(), body.title, body.admin_user_id, body.admin_name
+            )
+        )
+
+
+@dual(router.put, "/chats/{chat_id}/rollcalls/{rc_number}/settings/when",
+      response_model=RollcallResponse, summary="Set or cancel the finalize date/time for a rollcall")
 async def set_when(
     body: SetWhenRequest,
-    chat_id: int = Path(...),
-    rc_number: int = Path(..., ge=1),
     _token: AuthedToken = Depends(require_scope("admin")),
+    ref: RcRef = Depends(rollcall_ref),
 ) -> RollcallResponse:
-    result = settings_svc.set_rollcall_time(
-        chat_id, rc_number - 1, body.datetime_str, body.admin_user_id, body.admin_name
-    )
+    chat_id = ref.chat_id
+    from rollcall_manager import manager as _mgr
+    async with _mgr.get_chat_write_lock(chat_id):   # a rollcall mutation (CLAUDE.md)
+        result = settings_svc.set_rollcall_time(
+            chat_id, ref.index_now(), body.datetime_str, body.admin_user_id, body.admin_name
+        )
     # The reminder/auto-close loop is started by settings_svc.set_rollcall_time.
     return RollcallResponse(**result["rollcall"])
 
 
-@router.put(
-    "/chats/{chat_id}/rollcalls/{rc_number}/settings/reminder",
-    response_model=RollcallResponse,
-    summary="Set or cancel the pre-event reminder for a rollcall",
-)
+@dual(router.put, "/chats/{chat_id}/rollcalls/{rc_number}/settings/reminder",
+      response_model=RollcallResponse, summary="Set or cancel the pre-event reminder for a rollcall")
 async def set_reminder(
     body: SetReminderRequest,
-    chat_id: int = Path(...),
-    rc_number: int = Path(..., ge=1),
     _token: AuthedToken = Depends(require_scope("admin")),
+    ref: RcRef = Depends(rollcall_ref),
 ) -> RollcallResponse:
-    result = settings_svc.set_reminder(
-        chat_id, rc_number - 1, body.hours, body.admin_user_id, body.admin_name
-    )
+    chat_id = ref.chat_id
+    from rollcall_manager import manager as _mgr
+    async with _mgr.get_chat_write_lock(chat_id):   # a rollcall mutation (CLAUDE.md)
+        result = settings_svc.set_reminder(
+            chat_id, ref.index_now(), body.hours, body.admin_user_id, body.admin_name
+        )
     return RollcallResponse(**result["rollcall"])

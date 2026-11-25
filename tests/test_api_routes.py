@@ -8,6 +8,11 @@ Patching strategy:
     and bound into api.auth at import time).
   - Service functions are patched at their module path in services/*.
   - os.environ changes use patch.dict so rate-limit env reads aren't broken.
+  - Rollcall routes resolve the rollcall in the path to its permanent id
+    (api/rollcall_ref.py) before calling the service. The services are
+    mocked here, so the rollcall they'd act on is stubbed as open (id 1) —
+    the resolver itself is tested against a real DB in
+    integration_tests/test_api_rollcall_ids.py.
 """
 
 import json as _json
@@ -23,6 +28,22 @@ try:
     FASTAPI_AVAILABLE = True
 except ImportError:
     FASTAPI_AVAILABLE = False
+
+
+_RC_PATCHES = []
+
+
+def setUpModule():
+    from types import SimpleNamespace
+    _RC_PATCHES[:] = [patch("api.rollcall_ref.find_rollcall_index", return_value=0),
+                      patch("services.common.resolve_rollcall_or_raise", return_value=SimpleNamespace(id=1))]
+    for p in _RC_PATCHES:
+        p.start()
+
+
+def tearDownModule():
+    for p in _RC_PATCHES:
+        p.stop()
 
 
 # ---------------------------------------------------------------------------

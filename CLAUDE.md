@@ -1,5 +1,11 @@
 # RollCall — Claude Code Instructions
 
+## Open items
+
+`docs/OPEN_ITEMS.md` is the one maintained list of open work. When a change
+opens, closes or re-scopes an item, update that file in the same commit —
+move finished items to "Recently done" with the date and commit.
+
 ## Command registry rule
 
 `rollCall/commands_registry.py` is the **single source of truth** for every bot command. It feeds:
@@ -17,6 +23,17 @@ The menu and `/help` re-render automatically — no other files to keep in sync.
 Handlers should raise the custom exception classes from `exceptions.py` for curated user-facing messages (rollCallNotStarted, insufficientPermissions, parameterMissing, incorrectParameter, etc.) — `bot_state.reply_error()` passes those through verbatim. For anything else, let it propagate; `reply_error` logs the full traceback and sends a generic safe message so internal errors don't leak into the chat.
 
 Do not use `await bot.send_message(cid, str(e))` for caught exceptions — use `await reply_error(message_or_cid, e)`.
+
+## REST: name rollcalls by id
+
+A rollcall's display number (#1, #2…) shifts when an earlier one ends; its
+`id` never does. Every REST route about one rollcall is registered with
+`api/rollcall_ref.dual(...)` and takes `ref: RcRef = Depends(rollcall_ref)`
+(after the token dependency, so an unauthenticated caller can't probe which
+ids exist): that gives the stable `/rollcalls/by-id/{rollcall_id}/…` path plus
+the deprecated `/rollcalls/{rc_number}/…` one, on ONE handler. Inside the chat
+lock, use `ref.index_now()` (re-finds by id) — never the number from the URL.
+`tests/test_rest_rollcall_ids.py` fails on a number-only route.
 
 ## Chat mutations
 

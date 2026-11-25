@@ -31,7 +31,7 @@ A feature-rich Telegram bot for tracking event attendance in group chats. Member
 - **User portal** — cross-group personal dashboard (`/portal/`): attendance, streaks, upcoming games, dues balance
 - **Flexible web login** — Telegram deep-link verify, Telegram Login Widget (no app needed), admin-issued single-use links (`/weblogin`), and personal login codes (`/mytoken`) that work even when Telegram itself is unreachable
 - **Telegram Mini App** — in-app voting interface via the Telegram menu button (no browser switch)
-- **REST API** — FastAPI layer with bearer-token auth; powers the web + Mini App frontends
+- **REST API** — FastAPI layer with bearer-token auth; powers the web + Mini App frontends. Name a rollcall by its permanent `id` (`/api/v1/chats/{chat_id}/rollcalls/by-id/{rollcall_id}/…`, e.g. `…/votes`). The older `/rollcalls/{rc_number}/…` paths use the display number, which shifts when an earlier rollcall ends; they still work but are deprecated (responses carry `Deprecation: true`, a `Link` to the stable path, and `X-Rollcall-Id`)
 - **Webhook mode** — opt-in webhook support via `WEBHOOK_URL` env var (falls back to long-polling)
 - **Dual database support** — SQLite (default) or PostgreSQL
 - **Docker-ready** — Dockerfile + Docker Compose with Cloudflare Tunnel and daily-DB-backup sidecars

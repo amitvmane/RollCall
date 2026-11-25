@@ -218,7 +218,7 @@ def _consume(code: str) -> dict:
     return row
 
 
-def _telegram_name(tg_user_id: int) -> Optional[str]:
+def telegram_name(tg_user_id: int) -> Optional[str]:
     try:
         with db._cursor() as cursor:
             cursor.execute(
@@ -236,13 +236,43 @@ def _telegram_name(tg_user_id: int) -> Optional[str]:
 def name_for(principal_id: int, user_id: int, email: str) -> str:
     from identity_space import is_local_user
     return (principals.display_name(principal_id)
-            or (None if is_local_user(user_id) else _telegram_name(user_id))
+            or (None if is_local_user(user_id) else telegram_name(user_id))
             or email.split("@")[0])
 
 
-def redeem(code: str) -> dict:
-    """Use a mailed code. Returns {user_id, name, email, purpose, group_token}.
-    The caller mints the identity token for user_id."""
+def _peek(code: str) -> Optional[dict]:
+    if not code or len(code) > 200:
+        return None
+    with db._cursor() as cursor:
+        cursor.execute(f"SELECT purpose, tg_user_id FROM email_login_codes WHERE code_hash={_ph()}",
+                       (_hash(code),))
+        row = cursor.fetchone()
+    if row is None:
+        return None
+    return dict(row) if isinstance(row, dict) else {"purpose": row[0], "tg_user_id": row[1]}
+
+
+MERGE_TTL_SECONDS = CODE_TTL_SECONDS
+
+
+def _merge_scope(local_uid: int) -> str:
+    return f"account_merge:{int(local_uid)}"
+
+
+def redeem(code: str, caller_user_id: Optional[int] = None) -> dict:
+    """Use a mailed code. Returns {user_id, name, email, purpose, group_token}
+    and, for a link that found a duplicate account, the merge offer.
+    The caller mints the identity token for user_id.
+
+    A LINK code only works for the Telegram account that asked for it, on a
+    device signed in as them (caller_user_id). Otherwise anyone could type a
+    victim's address into their own account: the victim clicks "confirm",
+    and their email — and any account behind it — lands on the stranger's.
+    Checked before the code is spent, so the right device can still use it."""
+    peek = _peek(code)
+    if peek and peek["purpose"] == LINK and caller_user_id != int(peek["tg_user_id"] or 0):
+        raise insufficientPermissions(
+            "Open this link on the device where you asked for it, signed in with Telegram.")
     row = _consume(code)
     email = row["email"]
     if row["purpose"] == LINK:
@@ -250,9 +280,22 @@ def redeem(code: str) -> dict:
         pid = principals.for_telegram(tg)
         owner = principals.resolve(principals.EMAIL, email)
         if owner is not None and owner != pid:
-            raise incorrectParameter(
-                "That email already signs in to a different RollCall account, so it can't be "
-                "linked to this one.")
+            if principals.binding_for(owner, principals.TELEGRAM) is not None:
+                raise incorrectParameter(
+                    "That email already signs in to a different Telegram member's account, so it "
+                    "can't be linked to this one.")
+            # An email-only account — almost always this same person, who
+            # signed in by email before linking. Both identities are now
+            # proven on this device, so offer to merge (confirmed in the page).
+            from api.identity import issue_scoped_token
+            from services.account_merge import summary
+            local_uid = principals.acting_user_id(owner)
+            return {"user_id": tg, "name": name_for(pid, tg, email), "email": email,
+                    "purpose": "merge_offer", "group_token": row.get("return_group"),
+                    "merge_from_user_id": local_uid,
+                    "merge_from_name": principals.display_name(owner) or email.split("@")[0],
+                    "merge_token": issue_scoped_token(tg, _merge_scope(local_uid), MERGE_TTL_SECONDS),
+                    **{f"merge_{k}": v for k, v in summary(local_uid).items()}}
         if owner is None and not principals.link(pid, principals.EMAIL, email):
             raise incorrectParameter("Couldn't link that email — try again.")
         logging.info("[email_auth] email linked to telegram user %s", tg)
@@ -288,3 +331,20 @@ def unlink(user_id: int) -> None:
         raise insufficientPermissions(
             "Email is the only way into this account, so it can't be removed.")
     principals.unlink(principals.EMAIL, email)
+
+
+async def merge_accounts(tg_user_id: int, local_uid: int, merge_token: str, actor_name: str) -> dict:
+    """Confirm a merge offered by redeem(). The token is bound to BOTH ids, so
+    it can't be replayed for another account, and only the Telegram sign-in it
+    was issued to may use it."""
+    from api.identity import verify_scoped_token
+    from services.account_merge import merge
+    if verify_scoped_token(merge_token, _merge_scope(local_uid)) != tg_user_id:
+        raise insufficientPermissions("That merge offer has expired — add the email again.")
+    pid_local = principals.principal_of_local(local_uid)
+    email = principals.binding_for(pid_local, principals.EMAIL) if pid_local else None
+    result = await merge(local_uid, tg_user_id, actor_name)
+    if email:
+        principals.unlink(principals.EMAIL, email)
+        principals.link(principals.for_telegram(tg_user_id), principals.EMAIL, email)
+    return {**result, "email": email}

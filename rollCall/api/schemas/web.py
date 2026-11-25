@@ -83,6 +83,8 @@ class WebGroupResponse(BaseModel):
     vote_digest_hours: int = 0
     weather_alerts: bool = False
     teams_enabled: bool = False
+    join_approval: bool = False   # joining from the link needs an admin's OK
+    web_only: bool = False        # no Telegram chat behind this group
 
 
 class WebGroupSettingsRequest(BaseModel):
@@ -97,6 +99,8 @@ class WebGroupSettingsRequest(BaseModel):
     vote_digest_hours: Optional[int] = Field(None, ge=1, le=48, description="Hours between bundled summaries (with vote_notices=bundled)")
     weather_alerts: Optional[bool] = Field(None, description="Forecast heads-up before games with a location")
     teams_enabled: Optional[bool] = Field(None, description="Teams on/off for the group (off by default)")
+    join_approval: Optional[bool] = Field(
+        None, description="Joining from the group link needs an admin's approval; web votes from members only")
 
 
 class ScheduledRollcallRequest(BaseModel):

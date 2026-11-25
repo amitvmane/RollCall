@@ -921,6 +921,18 @@ def create_tables():
             CREATE INDEX IF NOT EXISTS email_login_codes_email_idx
             ON email_login_codes (email, created_at)
         """)
+        # Asking to join a group that approves its members (local_groups).
+        # One row per (group, person); status 'pending' or 'denied'.
+        cursor.execute(f"""
+            CREATE TABLE IF NOT EXISTS join_requests (
+                chat_id      {'BIGINT' if db_type == 'postgresql' else 'INTEGER'} NOT NULL,
+                user_id      {'BIGINT' if db_type == 'postgresql' else 'INTEGER'} NOT NULL,
+                name         TEXT,
+                status       TEXT NOT NULL DEFAULT 'pending',
+                requested_at BIGINT NOT NULL,
+                PRIMARY KEY (chat_id, user_id)
+            )
+        """)
 
         if db_type == 'postgresql':
             cursor.execute("""
@@ -1099,6 +1111,10 @@ _RECONCILE_COLUMNS = {
         ("teams_published_at", "teams_published_at TIMESTAMP",         "teams_published_at TIMESTAMP"),
     ],
     "chats": [
+        # 1 = joining from the group link needs an admin's OK, and web votes
+        # come from members only (services/local_groups). INTEGER on both
+        # dialects. Off for every existing group; on for new web-only groups.
+        ("join_approval",          "join_approval INTEGER DEFAULT 0",          "join_approval INTEGER DEFAULT 0"),
         ("shh_mode",               "shh_mode INTEGER DEFAULT 0",               "shh_mode BOOLEAN DEFAULT FALSE"),
         ("admin_rights",           "admin_rights INTEGER DEFAULT 0",           "admin_rights BOOLEAN DEFAULT FALSE"),
         ("timezone",               "timezone TEXT DEFAULT 'Asia/Kolkata'",     "timezone VARCHAR(100) DEFAULT 'Asia/Kolkata'"),
@@ -1159,6 +1175,12 @@ _RECONCILE_COLUMNS = {
     ],
     "ghost_events": [
         ("proxy_name", "proxy_name TEXT", "proxy_name TEXT"),
+    ],
+    # Set when an email-only account is merged into a Telegram member
+    # (services/account_merge.py); its old identity tokens then verify as them.
+    "principals": [
+        ("merged_into_user_id", "merged_into_user_id INTEGER DEFAULT NULL",
+         "merged_into_user_id BIGINT DEFAULT NULL"),
     ],
     "push_subscriptions": [
         ("tg_user_id", "tg_user_id INTEGER DEFAULT NULL", "tg_user_id BIGINT DEFAULT NULL"),
@@ -2189,6 +2211,7 @@ _VALID_CHAT_FIELDS = {
     'collector_rotation', 'last_collector_uid', 'dues_epoch',
     'reminder_before_close_hours', 'reminder_after_open_hours',
     'admin_source', 'vote_digest_hours', 'weather_alerts', 'teams_enabled',
+    'join_approval',
 }
 
 # Columns declared BOOLEAN in the Postgres schema. SQLite has no bool type and

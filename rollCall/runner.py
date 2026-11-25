@@ -97,6 +97,9 @@ def _setup_logging():
             )
 
     logging.basicConfig(level=logging.INFO, handlers=handlers, force=True)
+    # Refusals of web-only ids are by design, not failures (chat_outbox).
+    import chat_outbox
+    chat_outbox.install_log_filter()
     logging.getLogger("TeleBot").setLevel(logging.WARNING)
     logging.getLogger("aiohttp").setLevel(logging.WARNING)
     logging.getLogger("asyncio").setLevel(logging.WARNING)

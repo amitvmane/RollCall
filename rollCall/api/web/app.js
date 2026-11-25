@@ -81,8 +81,12 @@ let _weblogInRedeemPromise=null;
     p.delete("email_code");
     const qs=p.toString();
     history.replaceState(null,"",window.location.pathname+(qs?"?"+qs:""));
+    // A "confirm your email" link only works where it was asked for, signed
+    // in with Telegram — so the stored sign-in goes along with the code.
+    const hdrs={"Content-Type":"application/json"};
+    if(_idToken)hdrs["X-Identity-Token"]=_idToken;
     _weblogInRedeemPromise=fetch("/api/v1/auth/email/verify",{
-      method:"POST",headers:{"Content-Type":"application/json"},
+      method:"POST",headers:hdrs,
       body:JSON.stringify({code}),
       signal:AbortSignal.timeout(10000),
     }).then(async r=>{
@@ -619,6 +623,7 @@ window.sendEmailLink=async function(){
 function _afterEmailSignIn(data){
   if(_signinHome)closeSignIn();
   renderIdentity();detectCurrentVote();
+  if(data.purpose==="merge_offer"){_offerMerge(data);return;}
   toast(data.purpose==="link"
     ?`✉️ ${data.email} added — you can now sign in with it too.`
     :`✅ Signed in as ${data.name}`,4500);
@@ -630,8 +635,35 @@ function _afterEmailSignIn(data){
   if(IS_GROUP&&_isLocalUid(data.user_id)){
     fetch(`${API_GROUP}/join`,{method:"POST",
       headers:{"Content-Type":"application/json","X-Identity-Token":data.id_token},
-      body:"{}",signal:AbortSignal.timeout(8000)}).catch(()=>{});
+      body:"{}",signal:AbortSignal.timeout(8000)})
+      .then(r=>r.ok?r.json():null)
+      .then(j=>{if(j&&j.pending)toast("🚪 You've asked to join — an admin will approve you, then you can vote.",6000);})
+      .catch(()=>{});
   }
+}
+
+// The email being linked already has its own (email-only) account — almost
+// always this same person, who signed in by email before linking. Moving it
+// is explicit and can't be undone, so ask first.
+async function _offerMerge(data){
+  const what=data.merge_votes
+    ?`${data.merge_votes} vote${data.merge_votes===1?"":"s"} in ${data.merge_groups} group${data.merge_groups===1?"":"s"}`
+    :"no votes yet";
+  const ok=await _confirmAction(
+    `${data.email} already has its own RollCall account ("${data.merge_from_name}", ${what}).\n\n`+
+    `Merge it into your Telegram account? Its votes, stats, dues and groups move to you, and the email then signs in as you. This can't be undone.`);
+  if(!ok){toast("Nothing changed — the email still has its own account.",4000);return;}
+  try{
+    const r=await fetch("/api/v1/auth/email/merge",{method:"POST",
+      headers:{"Content-Type":"application/json","X-Identity-Token":_idToken},
+      body:JSON.stringify({from_user_id:data.merge_from_user_id,merge_token:data.merge_token}),
+      signal:AbortSignal.timeout(20000)});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||"Couldn't merge the accounts");
+    toast(`✅ Merged — ${data.email} now signs in as you.`,5000);
+    if(IS_GROUP)loadWebStats();
+    if(!URL_TOKEN)_loadHomeGroups().catch(()=>{});
+  }catch(e){toast(e.message||"Couldn't merge the accounts",5000);}
 }
 
 window.acctEmail=async function(){
@@ -2766,7 +2798,51 @@ const ADMIN_SECTIONS={
   merge:{load:()=>_ensureIdentityMergeLoaded()},
   ghost:{load:()=>loadGhostReview()},
   admins:{load:()=>loadAdminsPanel()},
+  joins:{load:()=>loadJoinRequests()},
   health:{load:()=>loadHealthPanel()},
+};
+
+// ── Join requests ─────────────────────────────────────────────────────────
+async function loadJoinRequests(){
+  const body=document.getElementById("joins-body");
+  const tog=document.getElementById("join-approval-toggle");
+  if(tog&&groupData)tog.checked=!!groupData.join_approval;
+  if(!body||!_idToken)return;
+  body.innerHTML='<div class="sched-empty">Loading…</div>';
+  try{
+    const res=await fetch(`${API_GROUP}/join-requests`,{headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(8000)});
+    if(!res.ok)throw new Error((await res.json().catch(()=>({}))).detail||"Couldn't load requests");
+    const reqs=(await res.json()).requests||[];
+    const sub=document.getElementById("adm-mi-joins-sub");
+    if(sub)sub.textContent=reqs.length?`${reqs.length} waiting`:"Who can join from the group link";
+    body.innerHTML=reqs.length
+      ?reqs.map(r=>`<div class="gr-row" style="cursor:default"><span class="gr-name">${esc(r.name||("User "+r.user_id))}</span>
+          <button class="btn btn-primary" style="padding:6px 10px;font-size:.78rem" data-on-click="decideJoin" data-args="${rcArgs(r.user_id,true)}">Approve</button>
+          <button class="btn btn-secondary" style="padding:6px 10px;font-size:.78rem" data-on-click="decideJoin" data-args="${rcArgs(r.user_id,false)}">Deny</button></div>`).join("")
+      :`<div class="sched-empty">${groupData&&groupData.join_approval?"Nobody is waiting.":"Approval is off — anyone with the link can join."}</div>`;
+  }catch(e){body.innerHTML=`<div class="sched-empty">${esc(e.message)}</div>`;}
+}
+window.decideJoin=async function(userId,approve){
+  try{
+    const res=await fetch(`${API_GROUP}/join-requests/decide`,{method:"POST",
+      headers:{"Content-Type":"application/json","X-Identity-Token":_idToken},
+      body:JSON.stringify({user_id:userId,approve}),signal:AbortSignal.timeout(8000)});
+    const d=await res.json().catch(()=>({}));
+    if(!res.ok)throw new Error(d.detail||"Failed");
+    toast(approve?`✅ ${d.name||"They"} joined`:"Request denied",2500);
+    loadJoinRequests();
+  }catch(e){toast(e.message||"Couldn't answer the request",4000);}
+};
+window.toggleJoinApproval=async function(enabled){
+  const ok=await _patchGroupSetting({join_approval:enabled},()=>{
+    const tog=document.getElementById("join-approval-toggle");
+    if(tog)tog.checked=!enabled;
+  });
+  if(ok){
+    if(groupData)groupData.join_approval=enabled;
+    toast(enabled?"🚪 New members need approval":"🚪 Anyone with the link can join",2500);
+    loadJoinRequests();
+  }
 };
 let _adminSection=null;
 

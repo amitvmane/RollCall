@@ -1303,9 +1303,36 @@ const WIDTHS = [
     });
     if (!s.shown) failures.push("sign-in: Email option hidden though the server offers it");
     if (!s.rowOpen) failures.push("sign-in: Email option did not open the email form");
+    // Linking an email that already has its own account: the page asks, and
+    // on yes posts the merge WITH the Telegram sign-in (and the code verify
+    // carried it too — a link only works where it was asked for).
+    const saved = { ...EMAIL_USER };
+    Object.assign(EMAIL_USER, { user_id: 168415137, id_token: "168415137.9999999999.deadbeef", name: "Amit",
+      purpose: "merge_offer", merge_from_user_id: 4503599627370500, merge_from_name: "Amit E",
+      merge_token: "mt", merge_votes: 3, merge_groups: 1 });
+    const heads = {};
+    page.on("request", req => { if (req.method() === "POST") heads[req.url().replace(BASE, "")] = req.headers(); });
+    let asked = "";
+    page.on("dialog", d => { asked = d.message(); d.accept(); });
+    await page.evaluate(() => {
+      localStorage.clear();
+      localStorage.setItem("rc_verified_tg_user_id", "168415137");
+      localStorage.setItem("rc_verified_tg_name", "Amit");
+      localStorage.setItem("rc_identity_token", "168415137.9999999999.deadbeef");
+    });
+    await page.goto(`${BASE}/web/group/testtoken123?email_code=mergecode`, { waitUntil: "load" });
+    await new Promise(r => setTimeout(r, 800));
+    Object.keys(EMAIL_USER).forEach(k => delete EMAIL_USER[k]);
+    Object.assign(EMAIL_USER, saved);
+    if (!/already has its own RollCall account/.test(asked)) failures.push(`merge: no confirmation asked — "${asked}"`);
+    const vh = heads["/api/v1/auth/email/verify"] || {};
+    if (vh["x-identity-token"] !== "168415137.9999999999.deadbeef") failures.push("merge: code verify didn't carry the Telegram sign-in");
+    const mh = heads["/api/v1/auth/email/merge"];
+    if (!mh || mh["x-identity-token"] !== "168415137.9999999999.deadbeef") failures.push("merge: confirmed merge was not posted with the Telegram sign-in");
+
     if (errs.length) failures.push(`email sign-in: JS error — ${errs[0]}`);
     await page.evaluate(() => localStorage.clear());
-    console.log("  email sign-in: link redeemed + joined, menu, create group, sign-in option");
+    console.log("  email sign-in: link redeemed + joined, menu, create group, sign-in option, merge offer");
     await page.close();
   }
 

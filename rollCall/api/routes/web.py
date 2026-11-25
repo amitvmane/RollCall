@@ -456,6 +456,15 @@ async def update_group_settings(
             f"🌦 Weather alerts {'on' if body.weather_alerts else 'off'} (by {actor_name}, via web)",
         )
 
+    if body.join_approval is not None:
+        actor_name = await _actor_display_name(chat_id, actor_user_id)
+        _db.update_chat_settings(chat_id, join_approval=1 if body.join_approval else 0)
+        _db.log_admin_action(chat_id, actor_user_id, actor_name, "set_join_approval",
+                             target_name="on" if body.join_approval else "off")
+        await _send_event_notification(
+            chat_id, f"🚪 Joining from the web link {'now needs admin approval' if body.join_approval else 'is open'}"
+                     f" (by {actor_name}, via web)")
+
     if body.teams_enabled is not None:
         actor_name = await _actor_display_name(chat_id, actor_user_id)
         from services import teams as teams_svc

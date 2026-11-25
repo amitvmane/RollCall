@@ -180,10 +180,52 @@ def refuse_local_ids(helper, url, params) -> None:
     from identity_space import is_local_id
     for key in _ID_PARAMS:
         if is_local_id((params or {}).get(key)):
-            raise helper.ApiTelegramException(url, None, {
+            e = helper.ApiTelegramException(url, None, {
                 "error_code": 400,
-                "description": "Bad Request: chat not found (web-only group or member — not on Telegram)",
+                "description": f"Bad Request: chat not found ({LOCAL_REFUSAL_MARKER})",
             })
+            e._rc_local = True
+            raise e
+
+
+# ── Quiet logs for web-only ids ───────────────────────────────────────────────
+# Every best-effort send logs a warning (often with a traceback) when Telegram
+# refuses it — right for a real chat, pure noise for a web-only group, where
+# EVERY send is refused by design: a scheduled rollcall, its reminders, its
+# panel. Rather than teach each of those call sites about web-only groups,
+# one filter on the log handlers drops records caused by refuse_local_ids.
+# Only those: a real Telegram error still logs exactly as before.
+
+LOCAL_REFUSAL_MARKER = "web-only group or member — not on Telegram"
+suppressed_local_refusals = 0
+
+
+class _WebOnlyRefusalFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        global suppressed_local_refusals
+        exc = record.exc_info[1] if record.exc_info else None
+        hit = getattr(exc, "_rc_local", False) is True
+        if not hit:
+            try:
+                hit = LOCAL_REFUSAL_MARKER in record.getMessage()
+            except Exception:
+                hit = False
+        if hit:
+            suppressed_local_refusals += 1
+            return False
+        return True
+
+
+_FILTER = _WebOnlyRefusalFilter()
+
+
+def install_log_filter() -> None:
+    """Attach the filter to every root handler (idempotent). Handler-level,
+    not logger-level: records logged on child loggers propagate to the root
+    HANDLERS without passing the root logger's own filters."""
+    for handler in logging.getLogger().handlers:
+        if _FILTER not in handler.filters:
+            handler.addFilter(_FILTER)
 
 
 def install_request_pacing(helper) -> bool:

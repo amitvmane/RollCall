@@ -94,7 +94,9 @@ def create_group(owner_user_id: int, owner_name: str, name: str,
         raise incorrectParameter("Couldn't create the group — try again.")
 
     chat = db.get_or_create_chat(chat_id)          # fills defaults + group_web_token
-    db.update_chat_settings(chat_id, group_name=name, timezone=tz, admin_source="local")
+    # Private by default: the link alone doesn't make someone a member.
+    db.update_chat_settings(chat_id, group_name=name, timezone=tz, admin_source="local",
+                            join_approval=1)
     db.set_web_admin(chat_id, owner_user_id, owner_name)
     db.set_web_admin_role(chat_id, owner_user_id, "owner")
     db.upsert_chat_member(chat_id, owner_user_id, owner_name)
@@ -124,8 +126,100 @@ def join(chat_id: int, user_id: int, name: Optional[str]) -> dict:
     if not is_local_chat(chat_id) and not is_local_user(user_id):
         raise incorrectParameter("You're on Telegram — say anything in the group and the bot adds you.")
     name = _clean(name, "name", 64)
+    if needs_approval(chat_id) and not db.is_web_admin(chat_id, user_id):
+        request_to_join(chat_id, user_id, name)
+        return {"joined": False, "pending": True, "name": name}
     db.upsert_chat_member(chat_id, user_id, name)
     return {"joined": True, "name": name}
+
+
+# ── Join approval ─────────────────────────────────────────────────────────────
+# With join_approval on, the group link stops being membership: joining makes
+# a request an admin approves, and web votes come from members only — guests
+# included, since a typed name is exactly the reach the link gave before.
+# Telegram members are untouched (Telegram already decided who's in the chat);
+# this governs the people only the web page can see.
+
+def needs_approval(chat_id: int) -> bool:
+    chat = db.get_or_create_chat(chat_id) or {}
+    try:
+        return bool(int(chat.get("join_approval") or 0))
+    except (TypeError, ValueError):
+        return False
+
+
+def request_to_join(chat_id: int, user_id: int, name: str) -> None:
+    """File (or refresh) a request. A denied request stays denied — asking
+    again doesn't put it back in front of the admins."""
+    import time
+    ph = _ph()
+    with db._cursor(commit=True) as cursor:
+        cursor.execute(f"SELECT status FROM join_requests WHERE chat_id={ph} AND user_id={ph}",
+                       (chat_id, user_id))
+        row = cursor.fetchone()
+        if row is None:
+            cursor.execute(f"INSERT INTO join_requests (chat_id, user_id, name, status, requested_at) "
+                           f"VALUES ({ph},{ph},{ph},'pending',{ph})",
+                           (chat_id, user_id, name, int(time.time())))
+        elif (row["status"] if isinstance(row, dict) else row[0]) == "pending":
+            cursor.execute(f"UPDATE join_requests SET name={ph} WHERE chat_id={ph} AND user_id={ph}",
+                           (name, chat_id, user_id))
+
+
+def list_requests(chat_id: int) -> list:
+    with db._cursor() as cursor:
+        cursor.execute(f"SELECT user_id, name, requested_at FROM join_requests "
+                       f"WHERE chat_id={_ph()} AND status='pending' ORDER BY requested_at", (chat_id,))
+        return [dict(r) if isinstance(r, dict) else {"user_id": r[0], "name": r[1], "requested_at": r[2]}
+                for r in cursor.fetchall()]
+
+
+def _request(chat_id: int, user_id: int) -> Optional[dict]:
+    with db._cursor() as cursor:
+        cursor.execute(f"SELECT name, status FROM join_requests WHERE chat_id={_ph()} AND user_id={_ph()}",
+                       (chat_id, user_id))
+        r = cursor.fetchone()
+    if r is None:
+        return None
+    return dict(r) if isinstance(r, dict) else {"name": r[0], "status": r[1]}
+
+
+def decide_request(chat_id: int, user_id: int, approve: bool, *, actor_user_id: int, actor_name: str) -> dict:
+    """An admin answers a join request (the caller has checked they're an admin)."""
+    req = _request(chat_id, user_id)
+    if not req or req["status"] != "pending":
+        raise incorrectParameter("No pending request from that person.")
+    ph = _ph()
+    with db._cursor(commit=True) as cursor:
+        if approve:
+            cursor.execute(f"DELETE FROM join_requests WHERE chat_id={ph} AND user_id={ph}", (chat_id, user_id))
+        else:
+            cursor.execute(f"UPDATE join_requests SET status='denied' WHERE chat_id={ph} AND user_id={ph}",
+                           (chat_id, user_id))
+    if approve:
+        db.upsert_chat_member(chat_id, user_id, req["name"] or "Member")
+    db.log_admin_action(chat_id, actor_user_id, actor_name,
+                        "approve_join" if approve else "deny_join", target_name=req["name"])
+    return {"user_id": user_id, "approved": approve, "name": req["name"]}
+
+
+def gate_web_vote(chat_id: int, user_id: Optional[int], member_info, name: str) -> None:
+    """Refuse a web vote the group's join setting doesn't allow.
+
+    user_id None = a guest typing a name. A Telegram id is always allowed —
+    their membership is Telegram's to decide. Admins are always allowed."""
+    if not needs_approval(chat_id):
+        return
+    if user_id is not None and (member_info or db.is_web_admin(chat_id, user_id)):
+        return
+    if user_id is not None and not is_local_user(user_id) and not is_local_chat(chat_id):
+        return
+    if user_id is None:
+        raise insufficientPermissions(
+            "This group takes votes from its members only — sign in and ask to join.")
+    request_to_join(chat_id, user_id, name)
+    raise insufficientPermissions(
+        "You've asked to join this group — an admin needs to approve you before you can vote.")
 
 
 def _require_local_owner(chat_id: int, actor_user_id: int) -> None:

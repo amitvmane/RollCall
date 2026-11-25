@@ -42,6 +42,8 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
+import chat_outbox as _chat_outbox_for_logs  # noqa: E402
+_chat_outbox_for_logs.install_log_filter()   # web-only refusals aren't failures
 
 # ── Bot instance & paths ──────────────────────────────────────────────────────
 

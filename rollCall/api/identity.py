@@ -140,7 +140,20 @@ def verify_identity_token(token: Optional[str], chat_id: Optional[int] = None) -
     user_id = _verify(token, scope=None)
     if user_id is None and chat_id is not None:
         user_id = _verify(token, scope=_chat_scope(chat_id))
-    return user_id
+    return _follow_merge(user_id)
+
+
+def _follow_merge(user_id: Optional[int]) -> Optional[int]:
+    """An email-only account merged into a Telegram member resolves to them.
+
+    The one DB lookup on this path, and only for local ids (identity_space):
+    tokens are stateless, so without it a device still signed in by email
+    would keep acting as the old account and split the person in two again."""
+    from identity_space import is_local_user
+    if user_id is None or not is_local_user(user_id):
+        return user_id
+    from services.account_merge import merged_into
+    return merged_into(user_id) or user_id
 
 
 def _chat_scope(chat_id: int) -> str:

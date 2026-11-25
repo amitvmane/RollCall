@@ -1467,6 +1467,16 @@ async def phase_web_only_group():
         rc = manager.get_rollcall(cid, 0)
         token = _ensure_web_token(rc)
         await vote_by_token(token, "Asha", "in", tg_user_id=asha)
+        # Web-only groups approve their members: Ben's first vote is refused
+        # and files a request; Asha approves it; then he can vote.
+        try:
+            await vote_by_token(token, "Ben", "in", tg_user_id=ben)
+            gated = False
+        except Exception as e:
+            gated = "approve" in str(e)
+        record("web-only: a non-member's vote waits for an admin's approval",
+               gated and [r["user_id"] for r in local_groups.list_requests(cid)] == [ben])
+        local_groups.decide_request(cid, ben, True, actor_user_id=asha, actor_name="Asha")
         out = await vote_by_token(token, "Ben", "in", tg_user_id=ben)
         await mirror_panel_to_telegram(cid, 1)
         await send_vote_notification(cid, "Ben", out["voter_status"])
@@ -1485,6 +1495,34 @@ async def phase_web_only_group():
         except Exception as e:
             refused = getattr(e, "error_code", None) == 400
         record("web-only: a direct send to the group is refused before Telegram", refused)
+        # Paths that post with no web-only check of their own (the panel,
+        # a DM, the vote reminders): refused by the guard and kept out of
+        # the logs — every send to a web-only group is refused by design.
+        import logging as _logging
+        import chat_outbox
+        from handlers.lifecycle import show_panel_for_rollcall
+        from bot_state import _dm_promoted_real_user
+        import check_reminders
+        seen = []
+
+        class _Capture(_logging.Handler):
+            def emit(self, record):
+                seen.append(record)
+        cap = _Capture(level=_logging.WARNING)
+        _logging.getLogger().addHandler(cap)
+        before = chat_outbox.suppressed_local_refusals
+        try:
+            chat_outbox.install_log_filter()
+            await show_panel_for_rollcall(cid, 1)
+            await _dm_promoted_real_user(ben, "Web Game", 1)
+            await check_reminders._dm_non_responders(cid, 1, "Web Game", "closes soon")
+        finally:
+            _logging.getLogger().removeHandler(cap)
+        noisy = [r.getMessage()[:80] for r in seen if r.exc_info and getattr(r.exc_info[1], "_rc_local", False)
+                 or chat_outbox.LOCAL_REFUSAL_MARKER in r.getMessage()]
+        record("web-only: refused sends don't log warnings",
+               not noisy and chat_outbox.suppressed_local_refusals > before,
+               f"noisy={noisy[:2]} suppressed={chat_outbox.suppressed_local_refusals - before}")
         leaked = [a for a in tg.attempted if is_local_id(a[1])]
         record("web-only: nothing naming the group or its people reached Telegram", not leaked,
                f"{leaked[:3]}")

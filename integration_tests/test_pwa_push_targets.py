@@ -156,3 +156,20 @@ class TestGuestPush(IntegrationBase):
             sent = await self._sent_to(
                 check_reminders._dm_non_responders(CHAT_ID, 1, "Friday Football", "closes soon"))
         self.assertEqual(sent, ["https://fcm.googleapis.com/quiet"])
+
+
+class TestGuestDuesPush(IntegrationBase):
+
+    async def test_guest_debtors_are_pushed_by_name(self):
+        # Owned or not, a debt under a guest's name reaches the guest's own
+        # device; members are still reached by id only.
+        from handlers.dues import _send_dues_dms
+        result = {"upi_vpa": "club@upi",
+                  "dm_targets": [{"user_id": ALICE, "member_name": "Alice", "balance": 300, "is_proxy": False}],
+                  "members_owed": [{"user_id": ALICE, "member_name": "Alice", "balance": 300},
+                                   {"user_id": None, "member_name": "Ravi", "balance": 150}]}
+        with patch("services.push.notify_users", new=AsyncMock()) as nu:
+            await _send_dues_dms(CHAT_ID, result)
+        self.assertEqual([c.args[1] for c in nu.await_args_list], [[ALICE], ["Ravi"]])
+        self.assertIn("₹150", nu.await_args_list[1].args[3])
+        self.assertIn("club@upi", nu.await_args_list[1].args[3])

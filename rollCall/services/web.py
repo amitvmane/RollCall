@@ -254,6 +254,10 @@ async def vote_by_token(
         # For proxy votes, normalise to canonical casing of any existing same-name entry
         name = _find_canonical_name(rc_pre, name)
 
+    # A group that approves its members only takes web votes from them.
+    from services.local_groups import gate_web_vote
+    gate_web_vote(chat_id, tg_user_id if is_real_user else None, member_info, name)
+
     from exceptions import alreadyInList, duplicateProxy, repeatlyName
     from services import voting as voting_svc
     from services.common import fill_waitlist_slots, resolve_rollcall_by_id_or_raise
@@ -343,6 +347,11 @@ def get_group_web_token(chat_id: int) -> str:
     return chat["group_web_token"]
 
 
+def _is_local_chat(chat_id) -> bool:
+    from identity_space import is_local_chat
+    return is_local_chat(chat_id)
+
+
 def get_rollcalls_by_group_token(group_token: str) -> dict:
     """
     Return all active rollcalls and upcoming scheduled templates for the group.
@@ -419,4 +428,6 @@ def get_rollcalls_by_group_token(group_token: str) -> dict:
         "vote_digest_hours": int(chat.get("vote_digest_hours") or 0),
         "weather_alerts": bool(int(chat.get("weather_alerts") or 0)),
         "teams_enabled": bool(int(chat.get("teams_enabled") or 0)),
+        "join_approval": bool(int(chat.get("join_approval") or 0)),
+        "web_only": _is_local_chat(chat.get("chat_id")),
     }

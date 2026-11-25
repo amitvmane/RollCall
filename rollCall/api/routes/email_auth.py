@@ -43,8 +43,25 @@ class EmailVerifyResponse(BaseModel):
     user_id: int
     name: str
     email: str
-    purpose: str
+    purpose: str = Field(..., description="'login', 'link', or 'merge_offer' (the email has its own account)")
     group_token: Optional[str] = None
+    # merge_offer only: the email-only account found behind this address.
+    merge_from_user_id: Optional[int] = None
+    merge_from_name: Optional[str] = None
+    merge_token: Optional[str] = None
+    merge_votes: Optional[int] = None
+    merge_groups: Optional[int] = None
+
+
+class EmailMergeRequest(BaseModel):
+    from_user_id: int
+    merge_token: str = Field(..., max_length=300)
+
+
+class EmailMergeResponse(BaseModel):
+    groups: int
+    dues_groups: int
+    email: Optional[str] = None
 
 
 class EmailStatusResponse(BaseModel):
@@ -99,9 +116,23 @@ async def email_link(body: EmailLinkRequest,
 
 @router.post("/auth/email/verify", response_model=EmailVerifyResponse,
              summary="Redeem a mailed code for an identity token")
-async def email_verify(body: EmailVerifyRequest) -> EmailVerifyResponse:
-    result = email_auth.redeem(body.code)
+async def email_verify(body: EmailVerifyRequest,
+                       id_token: Optional[str] = Depends(identity_from_header)) -> EmailVerifyResponse:
+    # Who is clicking matters only for a link code: it must be the Telegram
+    # account that asked for it (services.email_auth.redeem). Global only.
+    from api.identity import verify_identity_token
+    caller = verify_identity_token(id_token) if id_token else None
+    result = email_auth.redeem(body.code, caller)
     return EmailVerifyResponse(id_token=issue_identity_token(result["user_id"]), **result)
+
+
+@router.post("/auth/email/merge", response_model=EmailMergeResponse,
+             summary="Merge the email-only account found by a link into your Telegram account")
+async def email_merge(body: EmailMergeRequest,
+                      id_token: Optional[str] = Depends(identity_from_header)) -> EmailMergeResponse:
+    uid = require_identity(id_token, detail="Sign in with Telegram on this device first.")
+    name = email_auth.telegram_name(uid) or "member"
+    return EmailMergeResponse(**await email_auth.merge_accounts(uid, body.from_user_id, body.merge_token, name))
 
 
 @router.get("/auth/email/me", response_model=EmailStatusResponse,

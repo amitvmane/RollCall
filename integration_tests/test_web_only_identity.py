@@ -99,6 +99,8 @@ class _Base(unittest.TestCase):
 
     def setUp(self):
         reset_db()
+        from rollcall_manager import manager
+        manager.clear_cache()      # open rollcalls live in memory too
         from api.rate_limit import reset_buckets_for_tests
         reset_buckets_for_tests()
         self.enterContext(patch.dict(os.environ, EMAIL_ENV))
@@ -184,19 +186,33 @@ class TestLinkEmailToTelegram(_Base):
     def test_linked_email_signs_in_as_the_telegram_member(self):
         self.db.upsert_chat_member(TG_CHAT, TG_MEMBER, "Ravi")
         self.assertEqual(self._link(TG_MEMBER, "ravi@example.com").status_code, 202)
-        r = self.client.post("/api/v1/auth/email/verify", json={"code": self.code()})
+        r = self.client.post("/api/v1/auth/email/verify", json={"code": self.code()}, headers=self.h(TG_MEMBER))
         self.assertEqual((r.status_code, r.json()["purpose"]), (200, "link"), r.text)
         body = self.email_login("ravi@example.com")
         self.assertEqual((body["user_id"], body["name"]), (TG_MEMBER, "Ravi"))
         me = self.client.get("/api/v1/auth/email/me", headers=self.h(TG_MEMBER)).json()
         self.assertEqual((me["email"], me["can_unlink"]), ("ravi@example.com", True))
 
-    def test_an_address_owned_by_someone_else_is_not_taken(self):
-        self.email_login("asha@example.com", name="Asha")          # email-only account
-        self._link(TG_MEMBER, "asha@example.com")
-        r = self.client.post("/api/v1/auth/email/verify", json={"code": self.code()})
+    def test_an_address_owned_by_another_telegram_member_is_not_taken(self):
+        self.db.upsert_chat_member(TG_CHAT, 7002, "Other")
+        self._link(7002, "x@example.com")
+        self.client.post("/api/v1/auth/email/verify", json={"code": self.code()}, headers=self.h(7002))
+        self._link(TG_MEMBER, "x@example.com")
+        r = self.client.post("/api/v1/auth/email/verify", json={"code": self.code()}, headers=self.h(TG_MEMBER))
         self.assertEqual(r.status_code, 422)
-        self.assertIn("different RollCall account", r.json()["detail"])
+        self.assertIn("different Telegram member", r.json()["detail"])
+
+    def test_a_link_works_only_for_the_account_that_asked(self):
+        # Otherwise: a stranger types YOUR email into THEIR account, you click
+        # "confirm", and your address now signs in as them.
+        self._link(TG_MEMBER, "victim@example.com")
+        code = self.code()
+        for headers in ({}, self.h(7002)):
+            r = self.client.post("/api/v1/auth/email/verify", json={"code": code}, headers=headers)
+            self.assertEqual(r.status_code, 403, r.text)
+        # Not spent: the right device can still use it.
+        r = self.client.post("/api/v1/auth/email/verify", json={"code": code}, headers=self.h(TG_MEMBER))
+        self.assertEqual(r.status_code, 200)
 
     def test_a_group_bound_login_cannot_add_an_email(self):
         # /weblogin tokens prove identity in ONE group; an email login works
@@ -213,7 +229,7 @@ class TestLinkEmailToTelegram(_Base):
         r = self.client.post("/api/v1/auth/email/unlink", headers=self.h(body["user_id"]))
         self.assertEqual(r.status_code, 403)
         self._link(TG_MEMBER, "ravi@example.com")
-        self.client.post("/api/v1/auth/email/verify", json={"code": self.code()})
+        self.client.post("/api/v1/auth/email/verify", json={"code": self.code()}, headers=self.h(TG_MEMBER))
         r = self.client.post("/api/v1/auth/email/unlink", headers=self.h(TG_MEMBER))
         self.assertEqual(r.status_code, 204)
         self.assertIsNone(self.client.get("/api/v1/auth/email/me", headers=self.h(TG_MEMBER)).json()["email"])
@@ -257,7 +273,10 @@ class TestWebOnlyGroups(_Base):
         # Ben isn't a member yet, then joins.
         r = self.client.post(f"/api/v1/web/group/{gt}/admins/grant", json={"user_id": ben}, headers=self.h(asha))
         self.assertEqual(r.status_code, 422)
-        self.assertTrue(self.client.post(f"/api/v1/web/group/{gt}/join", json={}, headers=self.h(ben)).json()["joined"])
+        # Web-only groups approve their members: Ben asks, Asha approves.
+        self.assertTrue(self.client.post(f"/api/v1/web/group/{gt}/join", json={}, headers=self.h(ben)).json()["pending"])
+        self.client.post(f"/api/v1/web/group/{gt}/join-requests/decide", headers=self.h(asha),
+                         json={"user_id": ben, "approve": True})
         r = self.client.post(f"/api/v1/web/group/{gt}/admins/grant", json={"user_id": ben}, headers=self.h(asha))
         self.assertEqual((r.status_code, r.json()["role"]), (200, "admin"), r.text)
         # Ben (admin, not owner) can't remove Asha; Asha can't remove herself as last owner.
@@ -297,7 +316,7 @@ class TestNoTelegramMemberInTelegramGroup(_Base):
         token = self.db.get_or_create_chat(TG_CHAT)["group_web_token"]
         asha = self.email_login("asha@example.com", name="Asha")["user_id"]
         r = self.client.post(f"/api/v1/web/group/{token}/join", json={}, headers=self.h(asha))
-        self.assertEqual(r.json(), {"joined": True, "name": "Asha"})
+        self.assertEqual(r.json(), {"joined": True, "pending": False, "name": "Asha"})
         # A Telegram member is the bot's to track, not the web page's.
         r = self.client.post(f"/api/v1/web/group/{token}/join", json={"name": "Fake"}, headers=self.h(TG_MEMBER))
         self.assertEqual(r.status_code, 422)
@@ -323,3 +342,177 @@ class TestNoTelegramMemberInTelegramGroup(_Base):
         u = User("Asha", None, local_user_id(5), [])
         self.assertEqual(format_mention(u), "Asha")
         self.assertNotIn("tg://", format_mention_with_name_md(u))
+
+
+class TestQuietLogs(unittest.TestCase):
+    """Every send to a web-only group is refused by design; only those
+    refusals are kept out of the logs — a real Telegram error still logs."""
+
+    def test_filter_drops_only_local_refusals(self):
+        import logging
+        import chat_outbox
+        records = []
+
+        class Capture(logging.Handler):
+            def emit(self, record):
+                records.append(record.getMessage())
+        h = Capture()
+        root = logging.getLogger()
+        root.addHandler(h)
+        try:
+            chat_outbox.install_log_filter()
+            local = Exception("refused")
+            local._rc_local = True
+            try:
+                raise local
+            except Exception:
+                logging.warning("panel send failed", exc_info=True)
+            logging.warning("Could not DM user 1: Bad Request: chat not found (%s)",
+                            chat_outbox.LOCAL_REFUSAL_MARKER)
+            try:
+                raise RuntimeError("Bad Request: chat not found")
+            except Exception:
+                logging.warning("real failure", exc_info=True)
+        finally:
+            root.removeHandler(h)
+        self.assertEqual(records, ["real failure"])
+
+
+class TestScheduledStartInWebOnlyGroup(_Base):
+
+    def test_auto_start_creates_the_rollcall_with_every_send_refused(self):
+        # What production does to a web-only group: every Telegram call is
+        # refused (chat_outbox). The scheduled start must still happen.
+        import check_reminders
+        from rollcall_manager import manager
+        from bot_state import bot
+        asha = self.email_login("asha@example.com", name="Asha")["user_id"]
+        g = self.client.post("/api/v1/web/groups", json={"name": "Turf"}, headers=self.h(asha)).json()
+        refused = Exception("chat not found")
+        refused._rc_local = True
+        refused.error_code = 400
+        with patch.object(bot, "send_message", new=AsyncMock(side_effect=refused)):
+            ok = asyncio.run(check_reminders._auto_start_from_template(
+                g["chat_id"], {"name": "sunday", "title": "Sunday Game"}))
+        self.assertTrue(ok)
+        self.assertEqual([rc.title for rc in manager.get_rollcalls(g["chat_id"])], ["Sunday Game"])
+
+
+
+class TestMergeDuplicateAccount(_Base):
+    """An existing member signed in by email before linking it — two accounts.
+    Linking the email from the Telegram account offers to merge them."""
+
+    def _setup_duplicate(self):
+        from rollcall_manager import manager
+        from services.web import vote_by_token, _ensure_web_token
+        from services import rollcalls as rc_svc
+        self.db.upsert_chat_member(TG_CHAT, TG_MEMBER, "Ravi")
+        asyncio.run(rc_svc.start_rollcall(TG_CHAT, "Friday", TG_MEMBER, "Ravi"))
+        asyncio.run(rc_svc.start_rollcall(TG_CHAT, "Sunday", TG_MEMBER, "Ravi"))
+        fri, sun = manager.get_rollcall(TG_CHAT, 0), manager.get_rollcall(TG_CHAT, 1)
+        local = self.email_login("ravi@example.com", name="Ravi E")["user_id"]
+        asyncio.run(vote_by_token(_ensure_web_token(fri), "Ravi E", "in", tg_user_id=local))
+        asyncio.run(vote_by_token(_ensure_web_token(sun), "Ravi E", "out", tg_user_id=local))
+        asyncio.run(vote_by_token(_ensure_web_token(sun), "Ravi", "in", tg_user_id=TG_MEMBER))  # both in Sunday
+        self.db.add_dues_entry(TG_CHAT, fri.id, local, "Ravi E", "game_charge", 150, "Friday", TG_MEMBER, "Ravi")
+        return local
+
+    def _offer(self):
+        self._link(TG_MEMBER, "ravi@example.com")
+        r = self.client.post("/api/v1/auth/email/verify", json={"code": self.code()}, headers=self.h(TG_MEMBER))
+        self.assertEqual((r.status_code, r.json()["purpose"]), (200, "merge_offer"), r.text)
+        return r.json()
+
+    _link = TestLinkEmailToTelegram._link
+
+    def test_merge_moves_votes_dues_and_the_email(self):
+        from rollcall_manager import manager
+        local = self._setup_duplicate()
+        offer = self._offer()
+        self.assertEqual((offer["merge_from_user_id"], offer["merge_votes"]), (local, 2))
+        r = self.client.post("/api/v1/auth/email/merge", headers=self.h(TG_MEMBER),
+                             json={"from_user_id": local, "merge_token": offer["merge_token"]})
+        self.assertEqual(r.status_code, 200, r.text)
+        fri, sun = manager.get_rollcall(TG_CHAT, 0), manager.get_rollcall(TG_CHAT, 1)
+        self.assertEqual([u.user_id for u in fri.inList], [TG_MEMBER])       # re-keyed
+        self.assertEqual([u.user_id for u in sun.inList], [TG_MEMBER])       # Telegram vote kept
+        self.assertEqual(sun.outList, [])
+        self.assertEqual(self.db.get_dues_balance(TG_CHAT, user_id=TG_MEMBER), 150)
+        self.assertEqual(self.db.get_dues_balance(TG_CHAT, user_id=local), 0)
+        # Ledger stayed append-only: the original charge is still there.
+        with self.db._cursor() as c:
+            c.execute("SELECT COUNT(*) FROM dues_entries WHERE user_id = ? AND entry_type = 'game_charge'"
+                      .replace("?", "%s" if self.db.db_type == "postgresql" else "?"), (local,))
+            self.assertEqual(list(dict(c.fetchone()).values())[0] if self.db.db_type == "postgresql"
+                             else c.fetchone()[0], 1)
+        # The email now signs in as the Telegram member, and an old email
+        # token verifies as them too.
+        self.assertEqual(self.email_login("ravi@example.com")["user_id"], TG_MEMBER)
+        from api.identity import verify_identity_token
+        self.assertEqual(verify_identity_token(self.issue(local)), TG_MEMBER)
+
+    def test_merge_token_is_bound_to_both_accounts(self):
+        local = self._setup_duplicate()
+        offer = self._offer()
+        r = self.client.post("/api/v1/auth/email/merge", headers=self.h(7002),
+                             json={"from_user_id": local, "merge_token": offer["merge_token"]})
+        self.assertEqual(r.status_code, 403)
+        r = self.client.post("/api/v1/auth/email/merge", headers=self.h(TG_MEMBER),
+                             json={"from_user_id": local + 1, "merge_token": offer["merge_token"]})
+        self.assertEqual(r.status_code, 403)
+
+    def test_owner_role_survives_a_merge(self):
+        local = self.email_login("ravi@example.com", name="Ravi E")["user_id"]
+        g = self.client.post("/api/v1/web/groups", json={"name": "Turf"}, headers=self.h(local)).json()
+        offer = self._offer()
+        self.client.post("/api/v1/auth/email/merge", headers=self.h(TG_MEMBER),
+                         json={"from_user_id": local, "merge_token": offer["merge_token"]})
+        self.assertEqual(self.db.get_web_admin_role(g["chat_id"], TG_MEMBER), "owner")
+        self.assertIsNone(self.db.get_web_admin_role(g["chat_id"], local))
+
+
+class TestJoinApproval(_Base):
+
+    def test_web_only_groups_approve_their_members(self):
+        from services.web import vote_by_token, _ensure_web_token
+        from services import rollcalls as rc_svc
+        from rollcall_manager import manager
+        from exceptions import insufficientPermissions
+        asha = self.email_login("asha@example.com", name="Asha")["user_id"]
+        ben = self.email_login("ben@example.com", name="Ben")["user_id"]
+        g = self.client.post("/api/v1/web/groups", json={"name": "Turf"}, headers=self.h(asha)).json()
+        gt, cid = g["group_token"], g["chat_id"]
+        r = self.client.post(f"/api/v1/web/group/{gt}/join", json={}, headers=self.h(ben)).json()
+        self.assertEqual((r["joined"], r["pending"]), (False, True))
+        asyncio.run(rc_svc.start_rollcall(cid, "Game", asha, "Asha"))
+        token = _ensure_web_token(manager.get_rollcall(cid, 0))
+        with self.assertRaises(insufficientPermissions):
+            asyncio.run(vote_by_token(token, "Ben", "in", tg_user_id=ben))
+        with self.assertRaises(insufficientPermissions):
+            asyncio.run(vote_by_token(token, "Walk-in", "in"))                # guest by name
+        reqs = self.client.get(f"/api/v1/web/group/{gt}/join-requests", headers=self.h(asha)).json()["requests"]
+        self.assertEqual([q["user_id"] for q in reqs], [ben])
+        self.assertEqual(self.client.get(f"/api/v1/web/group/{gt}/join-requests",
+                                         headers=self.h(ben)).status_code, 403)
+        r = self.client.post(f"/api/v1/web/group/{gt}/join-requests/decide", headers=self.h(asha),
+                             json={"user_id": ben, "approve": True})
+        self.assertEqual(r.status_code, 200, r.text)
+        asyncio.run(vote_by_token(token, "Ben", "in", tg_user_id=ben))
+        self.assertEqual([u.user_id for u in manager.get_rollcall(cid, 0).inList], [ben])
+
+    def test_denied_stays_denied_and_telegram_groups_default_open(self):
+        asha = self.email_login("asha@example.com", name="Asha")["user_id"]
+        ben = self.email_login("ben@example.com", name="Ben")["user_id"]
+        g = self.client.post("/api/v1/web/groups", json={"name": "Turf"}, headers=self.h(asha)).json()
+        gt = g["group_token"]
+        self.client.post(f"/api/v1/web/group/{gt}/join", json={}, headers=self.h(ben))
+        self.client.post(f"/api/v1/web/group/{gt}/join-requests/decide", headers=self.h(asha),
+                         json={"user_id": ben, "approve": False})
+        self.client.post(f"/api/v1/web/group/{gt}/join", json={}, headers=self.h(ben))
+        self.assertEqual(self.client.get(f"/api/v1/web/group/{gt}/join-requests",
+                                         headers=self.h(asha)).json()["requests"], [])
+        token = self.db.get_or_create_chat(TG_CHAT)["group_web_token"]
+        self.assertFalse(self.client.get(f"/api/v1/web/group/{token}").json()["join_approval"])
+        r = self.client.post(f"/api/v1/web/group/{token}/join", json={}, headers=self.h(ben)).json()
+        self.assertTrue(r["joined"])

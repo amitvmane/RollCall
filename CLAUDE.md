@@ -128,7 +128,24 @@ numbers in the browser. Consequences:
   POST from the page so a mail scanner can't spend them. Linking an email to a
   Telegram member needs a **global** identity token — a chat-bound /weblogin
   token must never mint a login that works everywhere. An address bound to one
-  person is never re-pointed to another.
+  person is never re-pointed to another. A link code is only redeemable by the
+  Telegram sign-in that asked for it (checked before the code is spent) —
+  otherwise a stranger could bind your address to their account.
+- Duplicate accounts (`services/account_merge.py`): an email-only account found
+  while linking is offered for merge; the merge token is scoped to BOTH ids.
+  Votes/stats/teams/admin grants are re-keyed (Telegram row wins on conflict,
+  higher role wins), dues move by a pair of compensating `adjustment` entries
+  (the ledger stays append-only), and `principals.merged_into_user_id` makes the
+  old local tokens verify as the Telegram id (`api/identity._follow_merge`, the
+  one DB lookup on that path, local ids only).
+- `chats.join_approval` (on for new web-only groups, off for everyone else):
+  joining from the link files a `join_requests` row an admin approves, and web
+  votes come from members only — guests too. Telegram members are never gated
+  in Telegram groups. One rule: `services/local_groups.gate_web_vote`.
+- Quiet logs: `chat_outbox.install_log_filter()` (runner + bot_state) drops
+  log records caused by `refuse_local_ids` — handler-level, since records from
+  child loggers bypass root-logger filters. Real Telegram errors log unchanged.
+  The panel path (`_update_panel`) returns early for web-only chats.
 
 ## Web-admin roles
 

@@ -95,7 +95,7 @@ def reset_db():
         # Postgres deleting the parent first inside one transaction is the
         # kind of ordering that bites only on the other dialect.
         "principal_bindings", "principals",
-        "identity_links", "email_login_codes",
+        "identity_links", "email_login_codes", "join_requests",
     ]:
         try:
             cur.execute(f"DELETE FROM {tbl}")

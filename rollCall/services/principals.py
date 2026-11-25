@@ -252,3 +252,9 @@ def principal_for_user(user_id: int) -> Optional[int]:
 def for_email(email: str, display_name_hint: str = None) -> Optional[int]:
     """Principal for an email address, creating one (no Telegram) if new."""
     return get_or_create(EMAIL, normalise_email(email), display_name_hint)
+
+
+def principal_of_local(user_id) -> Optional[int]:
+    """The principal behind a local (email-only) user id, without creating one."""
+    from identity_space import is_local_user, principal_of_local_user
+    return principal_of_local_user(user_id) if is_local_user(user_id) else None

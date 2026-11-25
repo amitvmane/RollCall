@@ -2185,6 +2185,14 @@ async def _send_dues_dms(cid: int, result: dict) -> None:
                      else f"You owe ₹{balance} to the group.")
         await push_svc.notify_users(cid, [uid], "📢 Dues reminder", push_body, tag="dues")
 
+    # Guests (no Telegram): a debt kept under a guest's name has no DM and,
+    # unowned, no owner to tell. The device that follows the group as that
+    # guest is the one way to reach them (services.push guest matching).
+    for b in result.get("members_owed", []):
+        if b.get("user_id") is None and b.get("member_name"):
+            body = f"You owe ₹{b['balance']} to the group." + (f" Pay to {upi}." if upi else "")
+            await push_svc.notify_users(cid, [b["member_name"]], "📢 Dues reminder", body, tag="dues")
+
     if failed or sent:
         summary = f"✅ Reminders sent to {sent} member(s)."
         if failed:

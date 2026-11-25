@@ -34,6 +34,28 @@ class JoinRequest(BaseModel):
 
 class JoinResponse(BaseModel):
     joined: bool
+    pending: bool = False     # the group approves its members; an admin will decide
+    name: Optional[str] = None
+
+
+class JoinRequestEntry(BaseModel):
+    user_id: int
+    name: Optional[str] = None
+    requested_at: int
+
+
+class JoinRequestsResponse(BaseModel):
+    requests: list[JoinRequestEntry]
+
+
+class JoinDecisionRequest(BaseModel):
+    user_id: int
+    approve: bool
+
+
+class JoinDecisionResponse(BaseModel):
+    user_id: int
+    approved: bool
     name: Optional[str] = None
 
 
@@ -98,3 +120,30 @@ async def grant_admin(body: AdminChangeRequest, group_token: str = Path(...),
 async def remove_admin(body: AdminChangeRequest, group_token: str = Path(...),
                        id_token: Optional[str] = Depends(identity_from_header)) -> AdminChangeResponse:
     return await _owner_call(local_groups.remove_admin, group_token, body, id_token)
+
+
+async def _admin(group_token: str, id_token: Optional[str]) -> tuple[int, int]:
+    from api.web_admin import check_web_admin_live
+    chat_id = _chat(group_token)
+    uid = require_identity(id_token, detail="Sign in first.", chat_id=chat_id)
+    if not await check_web_admin_live(chat_id, uid):
+        raise HTTPException(status_code=403, detail="You are not a web admin for this group.")
+    return chat_id, uid
+
+
+@router.get("/web/group/{group_token}/join-requests", response_model=JoinRequestsResponse,
+            summary="People waiting to join (admins; groups that approve their members)")
+async def list_join_requests(group_token: str = Path(...),
+                             id_token: Optional[str] = Depends(identity_from_header)) -> JoinRequestsResponse:
+    chat_id, _ = await _admin(group_token, id_token)
+    return JoinRequestsResponse(requests=[JoinRequestEntry(**r) for r in local_groups.list_requests(chat_id)])
+
+
+@router.post("/web/group/{group_token}/join-requests/decide", response_model=JoinDecisionResponse,
+             summary="Approve or deny a join request (admins)")
+async def decide_join_request(body: JoinDecisionRequest, group_token: str = Path(...),
+                              id_token: Optional[str] = Depends(identity_from_header)) -> JoinDecisionResponse:
+    chat_id, uid = await _admin(group_token, id_token)
+    info = _db.get_member_display_info(chat_id, uid) or {}
+    return JoinDecisionResponse(**local_groups.decide_request(
+        chat_id, body.user_id, body.approve, actor_user_id=uid, actor_name=info.get("first_name") or "admin"))

@@ -315,7 +315,7 @@
         <input id="email-name-input" type="text" placeholder="Your name (shown to the group)" maxlength="64" autocomplete="given-name" style="width:100%;margin-bottom:8px"/>
         <button class="btn btn-primary" id="email-send-btn" style="width:100%;padding:10px" data-on-click="sendEmailLink">Email me a link</button>
         <div id="email-sent-note" class="id-picker-hint hidden"></div>
-        <div class="id-picker-hint">Already on Telegram in this group? Sign in with Telegram, then add your email from the account menu — so both are the same you.</div>
+        <div class="id-picker-hint">Already on Telegram in this group? Sign in with Telegram, then add your email from the account menu — so both are the same you. (Already used email? Adding it there offers to merge the two.)</div>
         <div style="margin-top:10px;text-align:center">
           <button class="id-change" style="font-size:.78rem;color:var(--accent)" data-on-click="showIdentityPicker">← Other ways to sign in</button>
         </div>
@@ -561,6 +561,12 @@
             <span class="adm-mi-sub">One-time rollcalls waiting to fire</span></span>
           <span class="adm-mi-chev">›</span>
         </button>
+        <button class="adm-menu-item" role="menuitem" data-on-click="openAdminSection" data-args='["joins"]'>
+          <span class="adm-mi-icon">🚪</span>
+          <span class="adm-mi-text"><span class="adm-mi-title">Join requests</span>
+            <span class="adm-mi-sub" id="adm-mi-joins-sub">Who can join from the group link</span></span>
+          <span class="adm-mi-chev">›</span>
+        </button>
         <button class="adm-menu-item" role="menuitem" data-on-click="openAdminSection" data-args='["admins"]'>
           <span class="adm-mi-icon">👑</span>
           <span class="adm-mi-text"><span class="adm-mi-title">Owners &amp; admins</span>
@@ -757,6 +763,26 @@
           <span class="adm-panel-title">👑 Owners &amp; admins</span>
         </div>
         <div id="admins-body"></div>
+      </div>
+
+      <!-- Join requests: with approval on, the group link alone doesn't make
+           someone a member (services/local_groups). -->
+      <div class="adm-panel hidden" id="adm-panel-joins">
+        <div class="adm-panel-hdr">
+          <button class="adm-back" data-on-click="closeAdminSection">‹ Back</button>
+          <span class="adm-panel-title">🚪 Join requests</span>
+        </div>
+        <div class="adm-row">
+          <div>
+            <div class="adm-row-t">Approve new members</div>
+            <div class="adm-row-s">People without Telegram who open the group link ask to join, and you approve them. Guests can't vote by typing a name. Telegram members are unaffected.</div>
+          </div>
+          <label class="admin-toggle">
+            <input type="checkbox" id="join-approval-toggle" data-on-change="toggleJoinApproval" data-args='[{"$": "checked"}]'/>
+            <span class="admin-toggle-slider"></span>
+          </label>
+        </div>
+        <div id="joins-body"></div>
       </div>
 
       <div class="adm-panel hidden" id="adm-panel-ghost">

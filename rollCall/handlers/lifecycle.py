@@ -343,6 +343,9 @@ async def _update_panel(cid: int, rc_number: int, rc, force_new: bool = False) -
     `/in ::2` failed. A rollcall that closed meanwhile isn't redrawn at all
     (that would put live buttons back on a closed panel).
     """
+    from identity_space import is_local_chat
+    if is_local_chat(cid):
+        return   # web-only group: no Telegram chat, so no panel — the web page is the list
     rc_id = _rc_db_id(rc)
     if force_new or not rc_id:
         await _render_panel(cid, rc_number, rc, force_new=force_new)

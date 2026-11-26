@@ -66,16 +66,33 @@ class TestRepeatFlag(IntegrationBase):
         self.assertEqual(tmpl["recurrence_type"], "biweekly")
         self.assertEqual(tmpl["location"], "Turf")
 
-    async def test_rerunning_repeat_flag_refreshes_not_duplicates(self):
-        """Same title, run twice across two weeks -> one template, not two,
-        with the schedule refreshed to the latest recurrence type."""
+    async def test_rerunning_repeat_flag_leaves_existing_template_alone(self):
+        """Same title, run twice: one template, and the second run must NOT
+        rewrite it — repeat= used to upsert into a same-named template,
+        silently changing the group's own template (location, fee, limit,
+        schedule). The game still starts; the reply says why it won't repeat."""
         await self.start_roll_call(self.msg("/src Friday Football repeat=weekly", ADMIN_USER))
         await self.end_roll_call(self.msg("/erc", ADMIN_USER))
+        get_mock_bot().send_message.reset_mock()
         await self.start_roll_call(self.msg("/src Friday Football repeat=biweekly", ADMIN_USER))
 
         templates = templates_svc.list_templates(CHAT_ID)
         self.assertEqual(len(templates), 1)
-        self.assertEqual(templates[0]["recurrence_type"], "biweekly")
+        self.assertEqual(templates[0]["recurrence_type"], "weekly")
+        self.assertTrue(any("already exists" in t for t in self.sent_texts()))
+        self.assertIsNotNone(self.rc(0))
+
+    async def test_repeat_flag_does_not_touch_users_own_template(self):
+        templates_svc.upsert_template(CHAT_ID, "friday-football", ADMIN_USER, "Admin",
+                                      title="Friday Football", location="Turf A", fee="200", limit=14)
+        await self.start_roll_call(self.msg("/src Friday Football repeat=weekly", ADMIN_USER))
+        await self.set_location(self.msg("/location Turf C", ADMIN_USER))
+        self.assertEqual(self.rc(0).location, "Turf C")
+
+        t = templates_svc.get_one_template(CHAT_ID, "friday-football")
+        self.assertEqual(t["location"], "Turf A")
+        self.assertEqual(t["limit"], 14)
+        self.assertFalse(t.get("schedule_enabled"))
 
 
 class TestCalendar(IntegrationBase):

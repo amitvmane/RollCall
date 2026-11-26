@@ -472,10 +472,13 @@ async def _apply_repeat_flag(cid: int, rc, repeat_type: str, admin_user_id: int,
     not undo the rollcall that's already been created and announced, so
     this never raises past its own try/except.
 
-    Template name is a slug of the title; upsert_template is idempotent
-    (services/templates.py), so re-running `repeat=weekly` under the same
-    title next week just refreshes the existing template/schedule instead
-    of erroring or creating a duplicate.
+    Template name is a slug of the title. If a template with that name
+    already exists, NOTHING is written: it used to be upserted, which
+    silently rewrote the group's own template (e.g. the weekly "friday-
+    football") with this one game's title/limit/location/fee and moved its
+    schedule. The rollcall still runs; the reply says why it won't repeat
+    and how to repeat the existing template instead. Same rule as
+    save_as_template (services/templates.check_new_template_name).
     """
     try:
         tz = pytz.timezone(rc.timezone)
@@ -486,6 +489,17 @@ async def _apply_repeat_flag(cid: int, rc, repeat_type: str, admin_user_id: int,
     slug = re.sub(r"[^a-z0-9]+", "-", (rc.title or "").lower()).strip("-")[:40] or "repeat"
 
     from services import templates as templates_svc
+
+    try:
+        existing = templates_svc.get_template(cid, slug)
+    except Exception:
+        logging.exception("[repeat] template lookup failed for chat %s", cid)
+        return None
+    if existing is not None:
+        return (f"🔁 Not set to repeat: a template named '{slug}' already exists, "
+                "and it was left unchanged. To repeat that template, use "
+                f"/schedule_template {slug} …; to repeat this game as it is, start it "
+                "with a different title.")
 
     try:
         templates_svc.upsert_template(

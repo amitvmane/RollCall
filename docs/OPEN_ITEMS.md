@@ -42,6 +42,7 @@ Legend: **you** = needs the owner (server, accounts, decisions) · **code** = ca
 
 ## Recently done
 
+- 2026-11-26 — `repeat=` (on /src and /repeat) no longer overwrites a same-named template — it used to rewrite the group's own template's location/fee/limit/title and move its schedule. Checked: `/location` only ever changes the ongoing rollcall.
 - 2026-11-25 — Human check (CAPTCHA) on guest votes and sign-in emails: self-hosted proof of work by default, Cloudflare Turnstile optional; 12-hour pass capped at 30 actions. API guide served at `/help/api`, linked from `/help` (🔌), the Integrations panel and the bot's `/help` (`/help api`).
 - 2026-11-25 — Review fixes: app keys vote for members only (no guest adds, no invented ids); webhooks owner-only; buzz mute counts buzzes, not rollcalls; merge re-checks groups after locking; webhook send tasks kept referenced.
 

@@ -175,7 +175,8 @@ class TestApplyRepeatFlag(unittest.IsolatedAsyncioTestCase):
         rc.location = "Turf"
         rc.event_fee = "500"
 
-        with patch("services.templates.upsert_template") as mock_upsert, \
+        with patch("services.templates.get_template", return_value=None), \
+             patch("services.templates.upsert_template") as mock_upsert, \
              patch("services.templates.set_schedule") as mock_set_sched:
             result = await lc._apply_repeat_flag(-100, rc, "weekly", 1, "Admin")
 
@@ -205,7 +206,8 @@ class TestApplyRepeatFlag(unittest.IsolatedAsyncioTestCase):
         rc.location = None
         rc.event_fee = None
 
-        with patch("services.templates.upsert_template"), \
+        with patch("services.templates.get_template", return_value=None), \
+             patch("services.templates.upsert_template"), \
              patch("services.templates.set_schedule") as mock_set_sched:
             await lc._apply_repeat_flag(-100, rc, "monthly", 1, "Admin")
 
@@ -222,7 +224,8 @@ class TestApplyRepeatFlag(unittest.IsolatedAsyncioTestCase):
         rc.location = None
         rc.event_fee = None
 
-        with patch("services.templates.upsert_template") as mock_upsert, \
+        with patch("services.templates.get_template", return_value=None), \
+             patch("services.templates.upsert_template") as mock_upsert, \
              patch("services.templates.set_schedule"):
             await lc._apply_repeat_flag(-100, rc, "weekly", 1, "Admin")
 
@@ -242,7 +245,8 @@ class TestApplyRepeatFlag(unittest.IsolatedAsyncioTestCase):
         rc.location = None
         rc.event_fee = None
 
-        with patch("services.templates.upsert_template", side_effect=RuntimeError("db down")):
+        with patch("services.templates.get_template", return_value=None), \
+             patch("services.templates.upsert_template", side_effect=RuntimeError("db down")):
             result = await lc._apply_repeat_flag(-100, rc, "weekly", 1, "Admin")
 
         self.assertIsNone(result)
@@ -257,12 +261,38 @@ class TestApplyRepeatFlag(unittest.IsolatedAsyncioTestCase):
         rc.location = None
         rc.event_fee = None
 
-        with patch("services.templates.upsert_template"), \
+        with patch("services.templates.get_template", return_value=None), \
+             patch("services.templates.upsert_template"), \
              patch("services.templates.set_schedule"):
             result = await lc._apply_repeat_flag(-100, rc, "weekly", 1, "Admin")
 
         self.assertIsNotNone(result)
         self.assertIn("Asia/Kolkata", result)
+
+    async def test_existing_template_is_never_overwritten(self):
+        """repeat= used to upsert into a same-named template, silently
+        rewriting the group's own weekly template (location, fee, limit,
+        title) and moving its schedule. Now it writes nothing and says so."""
+        import handlers.lifecycle as lc
+
+        rc = MagicMock()
+        rc.title = "Friday Football"
+        rc.timezone = "Asia/Kolkata"
+        rc.inListLimit = 10
+        rc.location = "Somewhere else"
+        rc.event_fee = None
+
+        with patch("services.templates.get_template",
+                   return_value={"name": "friday-football", "location": "Turf A"}), \
+             patch("services.templates.upsert_template") as mock_upsert, \
+             patch("services.templates.set_schedule") as mock_set_sched:
+            result = await lc._apply_repeat_flag(-100, rc, "weekly", 1, "Admin")
+
+        mock_upsert.assert_not_called()
+        mock_set_sched.assert_not_called()
+        self.assertIn("already exists", result)
+        self.assertIn("friday-football", result)
+        self.assertIn("/schedule_template", result)
 
 
 if __name__ == "__main__":

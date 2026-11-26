@@ -282,8 +282,10 @@ COMMANDS = [
             "Admin-only. If multiple rollcalls are active, each is numbered for ::N targeting.\n\n"
             "Add repeat=daily|weekly|biweekly|monthly to also make it auto-recur — this "
             "sets up a template scheduled for this same weekday/day-of-month and time, "
-            "skipping /set_template + /schedule_template entirely. See /calendar for "
-            "what's coming up, /schedules to manage or turn it off."
+            "skipping /set_template + /schedule_template entirely. The template is named "
+            "after the title; if one with that name already exists it is left untouched "
+            "and the game won't repeat (use a different title, or /schedule_template). "
+            "See /calendar for what's coming up, /schedules to manage or turn it off."
         ),
     },
     {

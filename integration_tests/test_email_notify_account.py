@@ -21,6 +21,7 @@ from mock_helpers import reset_db
 BOT_TOKEN = "123456789:TEST_BOT_TOKEN_FOR_UNIT_TESTS_ONLY"
 TG_CHAT = -1001777000222
 TG_MEMBER = 7002
+IDENTITY_TTL = 30 * 24 * 3600   # api.identity.IDENTITY_TOKEN_TTL_SECONDS
 EMAIL_ENV = {"TELEGRAM_TOKEN": BOT_TOKEN, "SMTP_HOST": "smtp.test", "SMTP_FROM": "bot@test",
              "WEB_BASE_URL": "https://rc.test"}
 
@@ -301,6 +302,10 @@ class TestDeleteAccount(_Base):
         self.assertEqual(self.db.get_push_subscriptions(self.token), [])
         self.assertEqual(self.client.get("/api/v1/auth/account", headers=self.h(tok)).status_code, 401)
         self.assertEqual(self.client.get("/api/v1/auth/account", headers=self.h(asha)).status_code, 401)
+        # Even a token minted well after the deletion (not just in the same
+        # second) is refused — this used to depend on the clock's second.
+        later = self.issue(asha, IDENTITY_TTL + 5)
+        self.assertEqual(self.client.get("/api/v1/auth/account", headers=self.h(later)).status_code, 401)
         # The game's record still shows her vote.
         rc = manager.get_rollcall(TG_CHAT, 0)
         self.assertEqual([u.user_id for u in rc.outList], [asha])

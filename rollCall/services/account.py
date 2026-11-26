@@ -78,13 +78,21 @@ def set_email_notify(user_id: int, pref: str) -> str:
 
 # ── Sign out everywhere ──────────────────────────────────────────────────────
 
+# A deleted account refuses every token, whenever it was issued — not just
+# those from before the deletion second (a token minted a second later from
+# a key that still verifies would otherwise pass and act as nobody).
+DELETED_CUTOFF = 2 ** 62
+
+
 def _read_cutoff(pid: int) -> int:
     with db._cursor() as cursor:
-        cursor.execute(f"SELECT tokens_valid_after FROM principals WHERE id={_ph()}", (pid,))
+        cursor.execute(f"SELECT tokens_valid_after, deleted_at FROM principals WHERE id={_ph()}", (pid,))
         row = cursor.fetchone()
     if row is None:
         return 0
-    v = row["tokens_valid_after"] if isinstance(row, dict) else row[0]
+    v, deleted = (row["tokens_valid_after"], row["deleted_at"]) if isinstance(row, dict) else (row[0], row[1])
+    if isinstance(deleted, (int, float)) and not isinstance(deleted, bool) and deleted > 0:
+        return DELETED_CUTOFF
     return int(v or 0)
 
 

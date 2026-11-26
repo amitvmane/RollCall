@@ -1075,6 +1075,22 @@ def create_tables():
             )
         """)
 
+        # Partner API usage per key, hour and endpoint (services/api_usage.py):
+        # the Integrations dashboard, /api_usage and a key's own /usage.
+        cursor.execute(f"""
+            CREATE TABLE IF NOT EXISTS api_key_usage (
+                token_hash    TEXT NOT NULL,
+                hour          BIGINT NOT NULL,
+                route         TEXT NOT NULL,
+                requests      INTEGER NOT NULL DEFAULT 0,
+                client_errors INTEGER NOT NULL DEFAULT 0,
+                server_errors INTEGER NOT NULL DEFAULT 0,
+                rate_limited  INTEGER NOT NULL DEFAULT 0,
+                total_ms      BIGINT NOT NULL DEFAULT 0,
+                PRIMARY KEY (token_hash, hour, route)
+            )
+        """)
+
         # Hourly traffic counters (services/traffic.py): Telegram updates and
         # REST requests, flushed from memory once a minute.
         cursor.execute("""

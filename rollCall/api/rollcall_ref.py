@@ -12,7 +12,8 @@ same for the REST API.
 Every rollcall route is registered twice, on ONE handler:
 
     /chats/{chat_id}/rollcalls/by-id/{rollcall_id}/...   stable (use this)
-    /chats/{chat_id}/rollcalls/{rc_number}/...           deprecated, still works
+    /chats/{chat_id}/rollcalls/{rc_number}/...           deprecated: 410 for app keys,
+                                                         removed on SUNSET_DATE
 
 `rollcall_ref` turns either into an `RcRef` carrying the permanent id. Handlers
 then re-find the rollcall BY ID inside the chat write lock (`index_now`), so
@@ -20,8 +21,8 @@ even a deprecated number-based call can only ever act on the rollcall that
 number pointed to when the request arrived — never on one that slid into its
 place while it waited for the lock.
 
-Number-based responses carry `Deprecation: true` and a `Link` to the stable
-path; every response carries `X-Rollcall-Id`, so a client can switch over
+Number-based responses carry `Deprecation: true`, `Sunset` and a `Link` to
+the stable path; every response carries `X-Rollcall-Id`, so a client can switch over
 from what it already receives.
 """
 
@@ -53,8 +54,17 @@ class RcRef:
         return idx + 1 if idx is not None else self.number_at_request
 
 
+# Number paths are on their way out (decision 2026-11-26): partner app keys
+# never get them (410 — every partner integration starts on ids), and for
+# everyone else (/gentoken scripts, CLI tokens) they answer with this Sunset
+# date (RFC 8594). On that date the paths are REMOVED by a code change —
+# docs/OPEN_ITEMS.md tracks it; nothing here switches off by itself, so CI
+# can't go red just because a date passed.
+SUNSET = "Mon, 01 Mar 2027 00:00:00 GMT"
+SUNSET_DATE = "2027-03-01"
+
 _NUMBER_DOC = ("DEPRECATED — 1-based display number; shifts when an earlier rollcall ends. "
-               "Use the /by-id/{rollcall_id} path.")
+               f"Removed on {SUNSET_DATE}; app keys can't use it. Use the /by-id/{{rollcall_id}} path.")
 _ID_DOC = "Permanent rollcall id (the `id` field of every rollcall response)"
 
 
@@ -100,12 +110,22 @@ async def rollcall_ref(request: Request, response: Response,
             raise rollCallNotStarted("No open rollcall with that id in this chat.")
         ref = RcRef(chat_id, value, idx + 1, by_number=False)
     else:
+        token = getattr(request.state, "api_token", None)
+        if token is not None and getattr(token, "app_key", False):
+            raise HTTPException(
+                status_code=410,
+                detail=(f"App keys name rollcalls by id: use /api/v1/chats/{chat_id}/rollcalls/by-id/"
+                        "{rollcall_id}/… (the `id` of every rollcall response). Number paths are "
+                        f"retired and removed on {SUNSET_DATE}."),
+                headers={"Sunset": SUNSET, "Deprecation": "true",
+                         "Link": f'</api/v1/chats/{chat_id}/rollcalls>; rel="successor-version"'})
         # Exactly the errors this path always gave (404 none open, 422 out of
         # range) — existing clients depend on them.
         from services.common import resolve_rollcall_or_raise
         rc = resolve_rollcall_or_raise(chat_id, value - 1)
         ref = RcRef(chat_id, int(rc.id), value, by_number=True)
         response.headers["Deprecation"] = "true"
+        response.headers["Sunset"] = SUNSET
         response.headers["Link"] = (f'</api/v1/chats/{chat_id}/rollcalls/by-id/{ref.rollcall_id}>; '
                                     f'rel="successor-version"')
     response.headers["X-Rollcall-Id"] = str(ref.rollcall_id)

@@ -5,13 +5,14 @@ Rules live in services/partner_api.py and services/webhooks.py.
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 
 import db as _db
 from api.identity import identity_from_header
 from api.routes.local_groups import _admin
-from services import partner_api, webhooks
+from api.auth import AuthedToken, require_scope
+from services import api_usage, partner_api, webhooks
 
 router = APIRouter()
 
@@ -204,3 +205,98 @@ async def test_webhook(group_token: str = Path(...), webhook_id: int = Path(...)
     except webhooks.WebhookRejected as e:
         raise _bad(e)
     return {"queued": queued}
+
+
+# ── Usage dashboard ──────────────────────────────────────────────────────────
+
+class UsageNumbers(BaseModel):
+    requests: int = 0
+    errors: int = Field(0, description="4xx (except 429) and 5xx answers")
+    server_errors: int = 0
+    rate_limited: int = Field(0, description="429 answers")
+    error_rate: float = Field(0.0, description="errors as a % of requests")
+    avg_ms: int = Field(0, description="average time to answer, milliseconds")
+
+
+class UsageDay(UsageNumbers):
+    date: str = Field(..., description="UTC day, YYYY-MM-DD")
+
+
+class UsageRoute(UsageNumbers):
+    route: str = Field(..., description="Method and endpoint template")
+
+
+class UsageKey(UsageNumbers):
+    key_id: str
+    kind: Optional[str] = None
+    label: Optional[str] = None
+    partner: Optional[str] = None
+    status: Optional[str] = None
+    scopes: List[str] = Field(default_factory=list)
+    expires_at: Optional[str] = None
+    last_used_at: Optional[str] = None
+    last_used_ip: Optional[str] = None
+
+
+class UsageWebhook(BaseModel):
+    id: int
+    url: str
+    active: bool
+    delivered: int = 0
+    failed: int = 0
+    pending: int = 0
+
+
+class GroupUsageResponse(BaseModel):
+    days: int
+    totals: UsageNumbers
+    daily: List[UsageDay]
+    top_routes: List[UsageRoute]
+    keys: List[UsageKey]
+    webhooks: List[UsageWebhook]
+
+
+class KeyTerms(BaseModel):
+    key_id: Optional[str] = None
+    kind: Optional[str] = None
+    label: Optional[str] = None
+    partner: Optional[str] = None
+    agreement_ref: Optional[str] = None
+    scopes: Optional[List[str]] = None
+    status: Optional[str] = None
+    expires_at: Optional[str] = None
+    allowed_ips: Optional[List[str]] = None
+    last_used_at: Optional[str] = None
+
+
+class RateLimitTerms(BaseModel):
+    requests: int
+    window_seconds: int
+
+
+class KeyUsageResponse(BaseModel):
+    days: int
+    key: KeyTerms
+    rate_limit: RateLimitTerms
+    totals: UsageNumbers
+    daily: List[UsageDay]
+    top_routes: List[UsageRoute]
+
+
+@router.get("/web/group/{group_token}/integrations/usage", response_model=GroupUsageResponse,
+            summary="API usage dashboard: requests, errors, rate limits per key and endpoint, webhook deliveries (web admins)")
+async def group_usage(group_token: str = Path(...), days: int = Query(7, ge=1, le=90),
+                      id_token: Optional[str] = Depends(identity_from_header)) -> GroupUsageResponse:
+    chat_id, _, _ = await _actor(group_token, id_token)
+    return GroupUsageResponse(**api_usage.group_usage(chat_id, days))
+
+
+@router.get("/chats/{chat_id}/usage", response_model=KeyUsageResponse,
+            summary="Your key's own usage and terms (any scope)")
+async def key_usage(chat_id: int = Path(...), days: int = Query(7, ge=1, le=90),
+                    token: AuthedToken = Depends(require_scope("any"))) -> KeyUsageResponse:
+    """What this key has done in the last 1, 7, 30 or 90 days (the nearest of
+    those to `days`), by day and by endpoint, with its expiry, scopes, IP
+    allowlist and rate limit — so a partner can watch its own integration.
+    Only ever this key: another partner's traffic is never shown."""
+    return KeyUsageResponse(**api_usage.usage_for_key(chat_id, token.token_hash, days))

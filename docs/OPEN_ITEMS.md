@@ -22,7 +22,7 @@ Legend: **you** = needs the owner (server, accounts, decisions) · **code** = ca
 | # | Item | Who | Status |
 |---|------|-----|--------|
 | 7 | Hand `docs/API.md` to the first partner under a written agreement: issue their key with the partner, contact, agreement reference and their server IPs filled in (Integrations → *Agreement & limits*); watch "last used … from" and their webhook deliveries there. | you | Ready |
-| 8 | Old number-based REST paths: **kept, backward compatible — not being removed** (decision 2026-11-25). They answer with `Deprecation`/`Link` headers only. | — | Decided |
+| 8 | Old number-based REST paths (`/rollcalls/{rc_number}/…`): **retiring** (decision 2026-11-26, replacing the 2026-11-25 "keep"). App keys already get 410; everyone else gets `Deprecation` + `Sunset: 01 Mar 2027`. **On 2027-03-01: delete the number registration in `api/rollcall_ref.dual` (and its tests), update docs/API.md §2.** Before that, check `/api_usage 90` for `/rollcalls/{rc_number}` traffic and warn whoever still uses it. | code | Scheduled 2027-03-01 |
 | 9 | Optional, stronger human check: create a Cloudflare Turnstile widget, set `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` and `HUMAN_CHECK=turnstile`. The default self-hosted proof of work needs nothing. | you | Optional |
 
 ## Later / parked by you

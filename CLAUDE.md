@@ -31,7 +31,9 @@ A rollcall's display number (#1, #2…) shifts when an earlier one ends; its
 `api/rollcall_ref.dual(...)` and takes `ref: RcRef = Depends(rollcall_ref)`
 (after the token dependency, so an unauthenticated caller can't probe which
 ids exist): that gives the stable `/rollcalls/by-id/{rollcall_id}/…` path plus
-the deprecated `/rollcalls/{rc_number}/…` one, on ONE handler. Inside the chat
+the deprecated `/rollcalls/{rc_number}/…` one, on ONE handler. Number paths
+are retiring: app keys get 410 on them, everyone else a `Sunset` header
+(`rollcall_ref.SUNSET`); they are deleted on that date (docs/OPEN_ITEMS.md #8). Inside the chat
 lock, use `ref.index_now()` (re-finds by id) — never the number from the URL.
 `tests/test_rest_rollcall_ids.py` fails on a number-only route.
 
@@ -50,7 +52,11 @@ and revocable there too.
 error `{error, detail, request_id}` (the HTTPException/validation handlers in
 `api/main.py` — keep `detail` as it was, the web page reads it), and replays
 `Idempotency-Key` writes under `/api/v1/chats/` for 24h (`api_idempotency`).
-`api/rate_limit.py` adds `X-RateLimit-*`. Public contract: `docs/API.md`.
+`api/rate_limit.py` adds `X-RateLimit-*` and counts per-key usage
+(`services/api_usage.py`: memory → `api_key_usage` each minute, app keys and
+/gentoken tokens only, 90 days) for the Integrations → Usage dashboard,
+`/api_usage` and a key's own `GET /chats/{chat_id}/usage`. Readers are always
+scoped to one chat; a partner sees only its own key. Public contract: `docs/API.md`.
 
 ## Partner webhooks
 

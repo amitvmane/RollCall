@@ -3217,6 +3217,56 @@ async function loadIntegrations(){
   try{_integ=await _integCall("integrations");renderIntegrations();}
   catch(e){body.innerHTML=`<div class="sched-empty">${esc(e.message)}</div>`;}
 }
+
+// ── Usage dashboard (services/api_usage): the same numbers /api_usage sends
+// in Telegram, plus a daily chart. One series (requests/day) in the accent
+// colour, so no legend; each bar's tooltip carries the day's details.
+let _usageDays=7;
+window.setUsageDays=function(d){_usageDays=d;loadUsage();};
+async function loadUsage(){
+  const el=document.getElementById("usage-body");
+  if(!el)return;
+  try{renderUsage(await _integCall(`integrations/usage?days=${_usageDays}`));}
+  catch(e){el.innerHTML=`<div class="sched-empty">${esc(e.message)}</div>`;}
+}
+function _fmtN(n){return n>=10000?(n/1000).toFixed(n>=100000?0:1)+"k":String(n);}
+function renderUsage(u){
+  const el=document.getElementById("usage-body");
+  if(!el)return;
+  const t=u.totals||{};
+  const chips=[1,7,30,90].map(d=>`<button class="usage-chip${d===u.days?" on":""}" aria-pressed="${d===u.days}" data-on-click="setUsageDays" data-args="${rcArgs(d)}">${d===1?"24h":d+"d"}</button>`).join("");
+  const tile=(v,l,warn)=>`<div class="usage-tile${warn?" warn":""}"><div class="usage-v">${esc(v)}</div><div class="usage-l">${esc(l)}</div></div>`;
+  const tiles=tile(_fmtN(t.requests||0),"requests")
+    +tile(`${t.error_rate||0}%`,"errors",(t.error_rate||0)>=5)
+    +tile(_fmtN(t.rate_limited||0),"rate-limited",(t.rate_limited||0)>0)
+    +tile(t.requests?`${t.avg_ms} ms`:"—","avg response");
+  const days=u.daily||[];
+  const max=Math.max(1,...days.map(d=>d.requests));
+  const bars=days.map(d=>{
+    const h=d.requests?Math.max(3,Math.round(100*d.requests/max)):0;
+    const tip=`${d.date}: ${d.requests} requests, ${d.errors} errors${d.rate_limited?`, ${d.rate_limited} rate-limited`:""}${d.requests?`, ${d.avg_ms} ms avg`:""}`;
+    return `<div class="usage-bar" title="${esc(tip)}" aria-label="${esc(tip)}" role="img"><span style="height:${h}%"></span></div>`;
+  }).join("");
+  const axis=days.length?`<div class="usage-axis"><span>${esc(days[0].date.slice(5))}</span><span>${esc(days[days.length-1].date.slice(5))}</span></div>`:"";
+  const chart=u.days>1?`<div class="usage-chart-t">Requests per day <span class="adm-row-s">· peak ${_fmtN(max)}</span></div>
+      <div class="usage-chart">${bars}</div>${axis}`:"";
+  const keys=(u.keys||[]).filter(k=>k.requests||k.status==="active");
+  const keyRows=keys.length?`<table class="usage-tbl"><thead><tr><th>App key</th><th>Requests</th><th>Errors</th><th>Last used</th></tr></thead><tbody>${
+      keys.map(k=>`<tr><td>${esc(k.partner||k.label||k.key_id)}${k.status!=="active"?` <span class="gr-tag">${esc(k.status)}</span>`:""}</td>
+        <td>${_fmtN(k.requests)}</td><td>${k.requests?esc(k.error_rate+"%"):"—"}${k.rate_limited?` · ${k.rate_limited} limited`:""}</td>
+        <td>${k.last_used_at?esc(String(k.last_used_at).slice(0,16)):"never"}</td></tr>`).join("")}</tbody></table>`
+    :'<div class="sched-empty">No app keys yet — make one below.</div>';
+  const routes=(u.top_routes||[]).slice(0,8);
+  const routeRows=routes.length?`<div class="usage-chart-t">Busiest endpoints</div><table class="usage-tbl"><tbody>${
+      routes.map(r=>`<tr><td class="usage-route">${esc(r.route)}</td><td>${_fmtN(r.requests)}</td><td>${esc(r.error_rate+"%")} err</td><td>${r.avg_ms} ms</td></tr>`).join("")}</tbody></table>`:"";
+  const hooks=(u.webhooks||[]);
+  const hookRows=hooks.length?`<div class="usage-chart-t">Webhook deliveries</div><table class="usage-tbl"><tbody>${
+      hooks.map(w=>`<tr><td class="usage-route">${esc(w.url)}${w.active?"":' <span class="gr-tag">off</span>'}</td><td>✅ ${w.delivered}</td><td>${w.failed?"⚠️ "+w.failed+" failed":"0 failed"}</td><td>${w.pending?w.pending+" retrying":""}</td></tr>`).join("")}</tbody></table>`:"";
+  el.innerHTML=`<div class="usage-hdr"><span class="adm-row-t">📊 Usage</span><span class="usage-chips" role="group" aria-label="Period">${chips}</span></div>
+    <div class="usage-tiles">${tiles}</div>${chart}
+    <div class="usage-chart-t">By key</div>${keyRows}${routeRows}${hookRows}
+    <div class="adm-row-s" style="margin-top:6px">Times are UTC. Partners see their own key's numbers at <code>GET /api/v1/chats/{chat_id}/usage</code>; in Telegram, /api_usage.</div>`;
+}
 function renderIntegrations(once){
   const body=document.getElementById("integrations-body");
   if(!body||!_integ)return;
@@ -3255,6 +3305,7 @@ function renderIntegrations(once){
   const eventBoxes=events.map(ev=>`<label style="margin-right:10px;font-size:.82rem"><input type="checkbox" class="iw-event" value="${esc(ev)}" checked/> ${esc(ev)}</label>`).join("");
   body.innerHTML=reveal+`
     <div class="adm-row-s" style="margin:4px 0 10px">Let another app read this group, take votes, or hear about changes. Send the developer the <a href="/help/api" target="_blank" rel="noopener">API guide</a>.</div>
+    <div id="usage-body" class="usage-card"><div class="sched-empty">Loading usage…</div></div>
     <div class="adm-row-t" style="margin-top:6px">🔑 App keys</div>${keyRows}
     <div style="margin:8px 0 14px">
       <input id="ik-label" type="text" maxlength="60" placeholder="Which app? e.g. Club website" style="width:100%;margin-bottom:6px"/>
@@ -3277,6 +3328,7 @@ function renderIntegrations(once){
       <div style="margin-bottom:6px">${eventBoxes}</div>
       <button class="btn btn-primary" style="padding:8px 14px;font-size:.85rem" data-on-click="createWebhook">＋ Add webhook</button>
     </div>`;
+  loadUsage();   // the usage card was just re-rendered as "Loading…"
 }
 window.selectAll=function(el){try{el.select();}catch(_){}};
 window.createAppKey=async function(){

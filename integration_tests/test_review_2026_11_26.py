@@ -239,6 +239,98 @@ class TestGateway(_Base):
         self.assertEqual(partner_gateway.prune(now=10**10), 1)
 
 
+# ── Usage dashboard and the number-path retirement ──────────────────────────
+
+class TestUsage(_Base):
+
+    def setUp(self):
+        super().setUp()
+        from services import api_usage
+        api_usage.reset_for_tests()
+
+    def test_admins_see_every_key_partners_see_only_their_own(self):
+        a = self.key(partner="Playfield Ltd")
+        b = self.key(label="Scoreboard", scopes=["read"])
+        rc_id = self.start()
+        for _ in range(3):
+            self.client.get(f"/api/v1/chats/{CHAT}/rollcalls", headers=self.bearer(a))
+        self.client.post(f"/api/v1/chats/{CHAT}/rollcalls/by-id/{rc_id}/votes", headers=self.bearer(a),
+                         json={"vote": "in", "user_id": 424242, "first_name": "X"})   # 403: not a member
+        self.client.get(f"/api/v1/chats/{CHAT}/rollcalls/by-id/{rc_id}", headers=self.bearer(b))
+        self.client.get(f"/api/v1/chats/{CHAT}/rollcalls", headers={"Authorization": "Bearer nope"})
+
+        r = self.client.get(self.url("integrations/usage?days=7"), headers=self.h(ADMIN))
+        self.assertEqual(r.status_code, 200, r.text)
+        u = r.json()
+        self.assertEqual(u["totals"]["requests"], 5)        # the bad bearer isn't anyone's
+        self.assertEqual(u["totals"]["errors"], 1)
+        keys = {k["key_id"]: k for k in u["keys"]}
+        self.assertEqual((keys[a["key_id"]]["requests"], keys[a["key_id"]]["errors"]), (4, 1))
+        self.assertEqual(keys[b["key_id"]]["requests"], 1)
+        self.assertEqual(len(u["daily"]), 7)
+        self.assertEqual(sum(d["requests"] for d in u["daily"]), 5)
+        routes = {x["route"]: x["requests"] for x in u["top_routes"]}
+        self.assertEqual(routes["GET /chats/{chat_id}/rollcalls"], 3)
+        self.assertIn("POST /chats/{chat_id}/rollcalls/by-id/{rollcall_id}/votes", routes)
+        self.assertEqual(self.client.get(self.url("integrations/usage"), headers=self.h(MEMBER)).status_code, 403)
+
+        r = self.client.get(f"/api/v1/chats/{CHAT}/usage", headers=self.bearer(b))   # read-only key: allowed
+        self.assertEqual(r.status_code, 200, r.text)
+        mine = r.json()
+        self.assertEqual(mine["key"]["key_id"], b["key_id"])
+        self.assertEqual(mine["totals"]["requests"], 1)   # its own call, not a's — the /usage call
+        self.assertEqual(mine["rate_limit"]["requests"], 60)    # itself counts from the next flush
+        self.assertEqual(self.client.get(f"/api/v1/chats/{CHAT + 1}/usage", headers=self.bearer(b)).status_code, 403)
+
+    def test_member_tokens_are_not_recorded(self):
+        import db
+        tok = db.generate_api_token()
+        db.insert_api_token(db._hash_token(tok), CHAT, "read,vote", label=f"miniapp:user={MEMBER}",
+                            issued_by_user_id=MEMBER,
+                            expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=1))
+        self.client.get(f"/api/v1/chats/{CHAT}/rollcalls", headers={"Authorization": f"Bearer {tok}"})
+        from services import api_usage
+        api_usage.flush()
+        with self.db._cursor() as c:
+            c.execute("SELECT COUNT(*) FROM api_key_usage")
+            row = c.fetchone()
+        self.assertEqual(int(list(row.values())[0] if isinstance(row, dict) else row[0]), 0)
+
+    def test_api_usage_text_matches_the_dashboard(self):
+        a = self.key(partner="Playfield Ltd")
+        self.client.get(f"/api/v1/chats/{CHAT}/rollcalls", headers=self.bearer(a))
+        from services import api_usage
+        text = api_usage.summary_text(CHAT, 7)
+        self.assertIn("1 requests", text)
+        self.assertIn("Playfield Ltd: 1 req", text)
+
+
+class TestNumberPathRetirement(_Base):
+
+    def test_app_keys_get_410_others_get_a_sunset_date(self):
+        k = self.key()
+        self.start()
+        r = self.client.get(f"/api/v1/chats/{CHAT}/rollcalls/1", headers=self.bearer(k))
+        self.assertEqual(r.status_code, 410)
+        self.assertIn("by-id", r.json()["detail"])
+        self.assertIn("Sunset", r.headers)
+        import db
+        tok = db.generate_api_token()
+        db.insert_api_token(db._hash_token(tok), CHAT, "admin,read,vote", label="x — /gentoken by Olga",
+                            issued_by_user_id=OWNER,
+                            expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=1))
+        with patch("api.auth._issuer_still_admin", new=AsyncMock(return_value=True)):
+            r = self.client.get(f"/api/v1/chats/{CHAT}/rollcalls/1", headers={"Authorization": f"Bearer {tok}"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.headers["Deprecation"], "true")
+        self.assertEqual(r.headers["Sunset"], "Mon, 01 Mar 2027 00:00:00 GMT")
+
+    def test_partner_spec_has_no_number_paths(self):
+        spec = self.client.get("/api/v1/partner/openapi.json").json()
+        self.assertFalse([p for p in spec["paths"] if "{rc_number}" in p])
+        self.assertIn("/api/v1/chats/{chat_id}/usage", spec["paths"])
+
+
 # ── Votes by app key ──────────────────────────────────────────────────────────
 
 class TestAppKeyVotes(_Base):

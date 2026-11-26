@@ -74,6 +74,11 @@ def reset_db():
         reset_membership_cache_for_tests()
     except Exception:
         pass
+    try:
+        from services.api_usage import reset_for_tests as _reset_usage
+        _reset_usage()
+    except Exception:
+        pass
     conn = _db.get_connection()
     # On Postgres a failed statement leaves the connection in an aborted
     # transaction where every subsequent command errors until it is rolled
@@ -97,6 +102,7 @@ def reset_db():
         "principal_bindings", "principals",
         "identity_links", "email_login_codes", "join_requests",
         "webhook_deliveries", "webhook_endpoints", "api_hits", "api_tokens", "buzz_log", "email_outbox", "push_subscriptions",
+        "api_idempotency", "api_key_usage",
     ]:
         try:
             cur.execute(f"DELETE FROM {tbl}")

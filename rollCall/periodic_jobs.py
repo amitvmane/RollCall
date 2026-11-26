@@ -123,12 +123,22 @@ async def run_periodic_jobs() -> None:
             _en.prune()
     except Exception:
         logging.exception("[periodic] notification emails failed")
+    try:
+        from services import api_usage as _au
+        _au.flush()
+    except Exception:
+        logging.exception("[periodic] API usage flush failed")
     if datetime.now(timezone.utc).minute == 0:
         try:
             from api import partner_gateway as _pg
             _pg.prune()
         except Exception:
             logging.exception("[periodic] idempotency prune failed")
+        try:
+            from services import api_usage as _au
+            _au.prune()
+        except Exception:
+            logging.exception("[periodic] API usage prune failed")
     # App keys close to expiring: warn the issuer and owners (14 and 3 days
     # out, once each). Once a day, from the first tick after 03:30 UTC
     # (09:00 IST) — stamped, so a missed minute doesn't skip the day.

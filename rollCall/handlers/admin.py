@@ -1,5 +1,5 @@
 """
-Admin handlers: /delete_user, /set_status, /audit_log, /gentoken, audit_pagination_callback
+Admin handlers: /delete_user, /set_status, /audit_log, /gentoken, /api_usage, audit_pagination_callback
 """
 import html
 import logging
@@ -9,7 +9,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot_state import (
     bot, _pending_deletes, _pending_overrides, _esc_md, _prune_pending, reply_error,
-    is_chat_admin,
+    is_chat_admin, send_long,
 )
 from db import generate_api_token, insert_api_token, _hash_token
 from exceptions import (
@@ -175,6 +175,28 @@ async def audit_log_command(message):
     except Exception:
         logging.exception("Error in /audit_log")
         await bot.send_message(message.chat.id, "Error fetching audit log.")
+
+
+@bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/api_usage")
+async def api_usage_command(message):
+    """The Integrations usage dashboard in Telegram (services/api_usage) —
+    the same numbers, for admins who run the group from the chat."""
+    try:
+        if await admin_rights(message, manager) is False:
+            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
+        parts = message.text.strip().split()
+        days = 7
+        if len(parts) > 1:
+            try:
+                days = int(parts[1].rstrip("d"))
+            except ValueError:
+                raise incorrectParameter("Usage: /api_usage [days] — 1, 7, 30 or 90 (default 7)")
+        from services import api_usage
+        await send_long(message.chat.id, api_usage.summary_text(message.chat.id, days))
+    except (insufficientPermissions, incorrectParameter) as e:
+        await reply_error(message, e)
+    except Exception as e:
+        await reply_error(message, e)
 
 
 @bot.message_handler(func=lambda message: message.text.split("@")[0].split(" ")[0].lower() == "/set_status")

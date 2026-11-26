@@ -352,8 +352,9 @@ def _record(d: dict, err: Optional[str]) -> None:
         logging.warning("[webhooks] delivery %s to endpoint %s gave up: %s", d["id"], d["endpoint_id"], err)
 
 
-def prune(days: int = 14) -> int:
-    """Delivered/failed rows older than `days` (the outbox mustn't grow for ever)."""
+def prune(days: int = 31) -> int:
+    """Delivered/failed rows older than `days` (the outbox mustn't grow for
+    ever). 31, not less: the usage dashboard's 30-day view counts them."""
     cutoff = int(time.time()) - days * 86400
     with db._cursor(commit=True) as cursor:
         cursor.execute(f"DELETE FROM webhook_deliveries WHERE status <> 'pending' AND created_at < {_ph()}",

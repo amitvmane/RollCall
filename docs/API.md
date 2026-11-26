@@ -64,11 +64,13 @@ Every rollcall has a permanent `id` (in every rollcall response). Use the
 | PATCH | `/chats/{chat_id}/rollcalls/by-id/{rollcall_id}/users/{name}/status` | admin |
 | PUT | `/chats/{chat_id}/rollcalls/by-id/{rollcall_id}/settings/{limit,location,fee,title,when,reminder}` | admin |
 
-The older `/rollcalls/{rc_number}/…` paths (the 1-based display number) keep
-working — they are not being removed — but that number shifts when an earlier
-rollcall ends, so a call can reach a different rollcall than the one you read.
-Their responses carry `Deprecation: true` and a `Link` to the `by-id` path.
-Every rollcall response carries `X-Rollcall-Id`.
+**Only the `by-id` paths exist for app keys.** The old `/rollcalls/{rc_number}/…`
+paths (a 1-based display number, which shifts when an earlier rollcall ends —
+so a call could reach a different rollcall than the one you read) answer an
+app key with **410 Gone** and a `Link` to the list. They remain for older
+personal tokens only, with `Deprecation: true`, `Sunset: Mon, 01 Mar 2027` and
+a `Link` to the `by-id` path, and are **removed on 1 March 2027**. Every
+rollcall response carries `X-Rollcall-Id`.
 
 ### Vote
 
@@ -87,6 +89,15 @@ webhooks or rollcall responses). With an app key, the member must currently
 belong to the group, and their name is the one the group knows — `first_name`
 in your request does not rename anyone. Votes for people with no account at
 all go through `proxy-votes` with an `admin` key.
+
+### Your own usage
+
+`GET /chats/{chat_id}/usage?days=7` (any scope) returns what **your key** has
+done over the last 1, 7, 30 or 90 days — totals, error rate, rate-limited
+calls and average response time, per UTC day and per endpoint — together with
+its terms: scopes, expiry, IP allowlist, agreement reference and the rate
+limit. Only your own key is ever shown. The group's admins see the same for
+every key, plus webhook deliveries, under **Integrations → Usage**.
 
 ## 3. Conventions on every call
 
@@ -187,9 +198,10 @@ This is **v1**, in the path. Within v1:
   or meaning.
 - New capabilities arrive as new paths, new scopes and new webhook event
   types; a key only ever gains a scope when its owner issues one with it.
-- A path being retired is marked first: `Deprecation: true` plus a `Link` to its
-  replacement, for as long as v1 exists. An incompatible change would be `/v2`,
-  run alongside v1.
+- A path being retired is marked first — `Deprecation: true`, a `Sunset` date
+  (RFC 8594) at least three months out, and a `Link` to its replacement — and
+  is removed on that date. New app keys never get retired paths. An
+  incompatible change would be `/v2`, run alongside v1.
 
 ### Building on it — e.g. bookings
 

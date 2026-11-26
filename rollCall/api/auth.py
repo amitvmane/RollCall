@@ -170,7 +170,9 @@ def require_scope(scope: str):
                     + (" — ask the group for a new key" if token.app_key else "")
                 )
 
-        if scope not in token.scopes and "admin" not in token.scopes:
+        # "any": endpoints about the key itself (its own usage) — every key
+        # may see those, whatever it is scoped to.
+        if scope != "any" and scope not in token.scopes and "admin" not in token.scopes:
             raise _forbidden(
                 f"Token lacks required scope '{scope}' "
                 f"(has: {','.join(token.scopes) or 'none'})"

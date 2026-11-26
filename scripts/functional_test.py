@@ -683,6 +683,19 @@ async def phase_remaining_surface():
     out = await feed("/gentoken", ALICE)
     record("/gentoken responds", bool(out))
 
+    # API usage: the /gentoken token just made is a tracked key; one call
+    # through the counter shows up in the admin summary.
+    from services import api_usage as _au
+    _gt_rows = [r for r in _db.list_api_tokens(CHAT_ID) if "/gentoken" in str(r.get("label") or "")]
+    if _gt_rows:
+        _au.record(_gt_rows[0]["token_hash"], "GET /chats/{chat_id}/rollcalls", 200, 12)
+    out = await feed("/api_usage", ALICE)
+    _txt = " ".join(str(c) for c in out) if out else ""
+    record("/api_usage shows the key's requests", bool(out) and "API usage" in _txt
+           and ("1 requests" in _txt or "1 req" in _txt), _txt[:300])
+    out = await feed("/api_usage 30", ALICE)
+    record("/api_usage takes a day window", bool(out) and "30 days" in " ".join(str(c) for c in out))
+
     print("\n=== Phase 24: Reporting & exports ===\n")
 
     out = await feed("/summary", ALICE)

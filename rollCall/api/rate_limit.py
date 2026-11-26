@@ -127,6 +127,19 @@ def _sweep(cutoff: float) -> None:
         del _buckets[k]
 
 
+def _record_usage(request: Request, status_code: int, started: float) -> None:
+    """Per-key usage for the Integrations dashboard (services/api_usage) —
+    counted here, the outermost API layer, so a 429 counts too."""
+    try:
+        from db import _hash_token
+        from services import api_usage
+        raw = request.headers.get("Authorization", "")[7:].strip()
+        api_usage.record(_hash_token(raw), api_usage.route_label(request), status_code,
+                         (time.monotonic() - started) * 1000)
+    except Exception:
+        pass
+
+
 async def rate_limit_middleware(request: Request, call_next):
     """ASGI middleware: enforce per-bucket sliding window."""
     if request.url.path.startswith("/api/"):
@@ -159,6 +172,8 @@ async def rate_limit_middleware(request: Request, call_next):
 
     if len(bucket) >= maxreq:
         from api.partner_gateway import request_id_for
+        if key.startswith("token:"):
+            _record_usage(request, 429, now)
         # Oldest entry in the bucket dictates how soon the client can retry.
         retry_after = max(1, int(bucket[0] + window - now) + 1)
         return JSONResponse(
@@ -180,6 +195,8 @@ async def rate_limit_middleware(request: Request, call_next):
     remaining = max(0, maxreq - len(bucket))
     reset = max(1, int(bucket[0] + window - now) + 1)
     response = await call_next(request)
+    if key.startswith("token:"):
+        _record_usage(request, response.status_code, now)
     # Partners pace themselves from these (docs/API.md): the limit, what's
     # left in the current window, and seconds until the oldest call ages out.
     if request.url.path.startswith("/api/"):

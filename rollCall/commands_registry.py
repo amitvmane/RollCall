@@ -668,6 +668,19 @@ COMMANDS = [
         "details": "Paginated list of admin actions: rollcall starts/ends, buzzes, mode toggles, timezone changes, panel ends. Default 15 per page.",
     },
     {
+        "name": "api_usage", "aliases": [], "scope": "admin", "category": "API Access",
+        "args": "[days]", "sample": "/api_usage 30", "menu": False,
+        "summary": "Partner API usage: requests, errors, rate limits per key",
+        "details": (
+            "How the apps connected to this group use the API, over the last 1, 7, 30 or 90 days "
+            "(default 7): total requests, error rate, rate-limited calls and average response time; "
+            "each app key (partner, requests, errors, last used); the busiest endpoints; and webhook "
+            "deliveries (delivered / failed / retrying).\n\n"
+            "The web page shows the same with daily charts: Admin → 🔌 Integrations → Usage. "
+            "A partner sees its own key's usage at GET /api/v1/chats/{chat_id}/usage."
+        ),
+    },
+    {
         "name": "gentoken", "aliases": [], "scope": "admin", "category": "API Access",
         "args": "", "sample": "/gentoken",
         "summary": "Generate an API token for scripted/API access",

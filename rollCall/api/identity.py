@@ -140,7 +140,29 @@ def verify_identity_token(token: Optional[str], chat_id: Optional[int] = None) -
     user_id = _verify(token, scope=None)
     if user_id is None and chat_id is not None:
         user_id = _verify(token, scope=_chat_scope(chat_id))
-    return _follow_merge(user_id)
+    if user_id is None:
+        return None
+    resolved = _follow_merge(user_id)
+    if _revoked(token, user_id, resolved):
+        return None
+    return resolved
+
+
+def _revoked(token: str, raw_id: int, resolved_id: Optional[int]) -> bool:
+    """True if the person chose "sign out everywhere" after this token was
+    issued (services/account.py). Every identity token is minted with
+    IDENTITY_TOKEN_TTL_SECONDS, so it was issued at exp - TTL. Checks the
+    account the token names AND the one it now resolves to (a merged email
+    account's tokens act as the Telegram member, whose cutoff applies)."""
+    try:
+        issued = int(token.split(".")[1]) - IDENTITY_TOKEN_TTL_SECONDS
+    except (ValueError, IndexError, AttributeError):
+        return True
+    from services.account import tokens_valid_after
+    for uid in {raw_id, resolved_id}:
+        if uid and issued < tokens_valid_after(uid):
+            return True
+    return False
 
 
 def _follow_merge(user_id: Optional[int]) -> Optional[int]:

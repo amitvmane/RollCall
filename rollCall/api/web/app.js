@@ -434,6 +434,11 @@ function _clearStoredIdentity(){
 
 window.signOut=async function(){
   if(!await _confirmAction("Sign out of RollCall on this device?\n\nYour votes stay on the group — you'll just need to sign in again to vote or manage the group."))return;
+  _signOutHere("Signed out");
+};
+
+// Sign-out without asking: shared by Sign out and by deleting the account.
+function _signOutHere(msg){
   _clearStoredIdentity();
   currentName="";
   localStorage.removeItem(LS_NAME);
@@ -452,8 +457,8 @@ window.signOut=async function(){
   }
   renderIdentity();
   if(typeof detectCurrentVote==="function")detectCurrentVote();
-  toast("Signed out",2500);
-};
+  toast(msg,3000);
+}
 
 window.toggleAcctMenu=function(ev){
   if(ev)ev.stopPropagation();
@@ -501,6 +506,7 @@ window.closeAcctMenu=function(){
 document.addEventListener("keydown",e=>{
   if(e.key!=="Escape")return;
   closeAcctMenu();
+  if(!$("account-modal").classList.contains("hidden"))closeAccount();
   if(_signinHome)closeSignIn();
   closeInstallHelp();
 });
@@ -544,6 +550,7 @@ function renderAcctMenu(){
     html+=`<button class="acct-menu-item" role="menuitem" data-on-click="closeAcctMenu acctEmail">✉️ Email sign-in</button>`;
   }
   if(verified&&_idToken){
+    html+=`<button class="acct-menu-item" role="menuitem" data-on-click="closeAcctMenu openAccount">👤 Account</button>`;
     html+=`<button class="acct-menu-item" role="menuitem" data-on-click="closeAcctMenu openCreateGroup">＋ Create a group</button>`;
   }
   // On a phone the header hides Help and Home to leave room for 44px touch
@@ -693,6 +700,8 @@ function _afterEmailSignIn(data){
   if(data.purpose==="merge_offer"){_offerMerge(data);return;}
   toast(data.purpose==="link"
     ?`✉️ ${data.email} added — you can now sign in with it too.`
+    :data.purpose==="change"
+    ?`✉️ You now sign in with ${data.email}.`
     :`✅ Signed in as ${data.name}`,4500);
   _checkWebAdmin().catch(()=>{});
   if(!URL_TOKEN)_loadHomeGroups().catch(()=>{});
@@ -818,6 +827,108 @@ window.acctEmail=async function(){
     });
   }catch(e){toast(e.message||"Something went wrong",4000);}
 };
+
+// ── Account sheet (services/account.py) ───────────────────────────────────
+// What Telegram does for its members, for everyone: the sign-in email, when
+// emails go out, ending other sessions, and (email-only) deleting the account.
+const _NOTIFY_LABELS={auto:"Only when notifications are off here (recommended)",always:"Always",off:"Never"};
+window.openAccount=async function(){
+  if(!_idToken){openSignIn();return;}
+  const modal=$("account-modal"),body=$("account-body");
+  body.innerHTML='<div class="sched-empty">Loading…</div>';
+  modal.classList.remove("hidden");document.body.classList.add("modal-open");
+  try{
+    const r=await fetch("/api/v1/auth/account",{headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(8000)});
+    const a=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(a.detail||"Couldn't load your account");
+    let h=`<div class="acct-row"><div class="acct-row-k">Signed in as</div><div class="acct-row-v">${esc(a.name||"")}${a.has_telegram?" · Telegram":""}</div></div>`;
+    h+=`<div class="acct-row"><div class="acct-row-k">Sign-in email</div><div class="acct-row-v">${a.email?esc(a.email):"None"}</div></div>`;
+    if(a.email_enabled){
+      if(a.email)h+=`<button class="btn acct-btn-wide" data-on-click="acctChangeEmail">✉️ Change email</button>`;
+      else if(!a.email_only)h+=`<button class="btn acct-btn-wide" data-on-click="closeAccount acctEmail">✉️ Add email sign-in</button>`;
+      if(a.email&&a.has_telegram)h+=`<button class="btn acct-btn-wide" data-on-click="closeAccount acctEmail">Remove email sign-in</button>`;
+    }
+    if(a.email_notify){
+      h+=`<label class="acct-row-k" for="acct-notify" style="display:block;margin-top:14px">Email me about games, waitlist, reminders and dues</label>
+        <select id="acct-notify" data-on-change="acctSetNotify">${Object.entries(_NOTIFY_LABELS).map(([k,v])=>`<option value="${k}"${a.email_notify===k?" selected":""}>${esc(v)}</option>`).join("")}</select>`;
+    }
+    h+=`<button class="btn acct-btn-wide" data-on-click="acctSignOutEverywhere">⏻ Sign out on all other devices</button>`;
+    if(a.can_delete)h+=`<button class="btn acct-btn-wide danger" data-on-click="acctDelete">Delete account</button>`;
+    body.innerHTML=h;
+  }catch(e){body.innerHTML=`<div class="sched-empty">${esc(e.message)}</div>`;}
+};
+window.closeAccount=function(){
+  $("account-modal").classList.add("hidden");document.body.classList.remove("modal-open");
+};
+window.acctSetNotify=async function(){
+  const pref=$("acct-notify").value;
+  try{
+    const r=await fetch("/api/v1/auth/account/email-notify",{method:"POST",
+      headers:{"Content-Type":"application/json","X-Identity-Token":_idToken},
+      body:JSON.stringify({pref}),signal:AbortSignal.timeout(8000)});
+    if(!r.ok)throw new Error((await r.json().catch(()=>({}))).detail||"Couldn't save");
+    toast(pref==="off"?"No more notification emails":"Saved",2500);
+  }catch(e){toast(e.message||"Couldn't save",4000);}
+};
+window.acctChangeEmail=function(){
+  closeAccount();
+  _openFormSheet({
+    title:"✉️ Change sign-in email",
+    fields:[{id:"fs-newemail",label:"New email",type:"email",placeholder:"you@example.com"}],
+    note:"We'll email a link to the new address. Open it on this device to switch — your account, votes and groups stay the same. Your old address is told when it's done.",
+    submit:"Send link",
+    onSubmit:async v=>{
+      const r=await fetch("/api/v1/auth/account/email/change",{method:"POST",
+        headers:{"Content-Type":"application/json","X-Identity-Token":_idToken},
+        body:JSON.stringify({email:v["fs-newemail"],...(IS_GROUP?{group_token:URL_TOKEN}:{})}),
+        signal:AbortSignal.timeout(20000)});
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok)throw new Error(d.detail||"Couldn't send the email");
+      toast(`📬 Check ${v["fs-newemail"]} for the link`,4500);
+    },
+  });
+};
+window.acctSignOutEverywhere=async function(){
+  if(!await _confirmAction("Sign out everywhere else?\n\nEvery other phone or browser signed in to this account is signed out. This one stays signed in."))return;
+  try{
+    const r=await fetch("/api/v1/auth/account/sign-out-everywhere",{method:"POST",
+      headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(8000)});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||"Couldn't sign out other devices");
+    _idToken=d.id_token;localStorage.setItem(LS_ID_TOKEN,_idToken);
+    closeAccount();
+    toast("✅ Signed out everywhere else",3500);
+  }catch(e){toast(e.message||"Couldn't sign out other devices",4000);}
+};
+window.acctDelete=async function(){
+  closeAccount();
+  if(!await _confirmAction("Delete your RollCall account?\n\nYour email, name and sign-ins are removed and you leave every group. Past games, stats and money records stay in each group's history. This can't be undone."))return;
+  _openFormSheet({
+    title:"Delete account",
+    fields:[{id:"fs-delete",label:"Type DELETE to confirm",type:"text",placeholder:"DELETE"}],
+    note:"After this, signing in with the same email starts a brand-new account.",
+    submit:"Delete my account",
+    onSubmit:async v=>{
+      const r=await fetch("/api/v1/auth/account/delete",{method:"POST",
+        headers:{"Content-Type":"application/json","X-Identity-Token":_idToken},
+        body:JSON.stringify({confirm:v["fs-delete"]}),signal:AbortSignal.timeout(15000)});
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok)throw new Error(d.detail||"Couldn't delete the account");
+      _signOutHere("Your account was deleted");
+    },
+  });
+};
+// ?account=1 — the "Email settings" link in notification emails.
+(function(){
+  try{
+    const p=new URLSearchParams(window.location.search);
+    if(p.get("account")!=="1")return;
+    p.delete("account");
+    const qs=p.toString();
+    history.replaceState(null,"",window.location.pathname+(qs?"?"+qs:""));
+    setTimeout(()=>{if(_idToken)openAccount();else{toast("Sign in to change your email settings",4000);openSignIn();}},400);
+  }catch(_){}
+})();
 
 // ── Create a group (no Telegram chat needed) ──────────────────────────────
 window.openCreateGroup=function(){

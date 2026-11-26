@@ -108,6 +108,17 @@
 <!-- Form sheet: one small dialog for short forms (add an email sign-in,
      create a group). Same look as the sign-in sheet; app.js _openFormSheet
      fills the fields and wires the submit button. -->
+<div id="account-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="account-title">
+  <div class="signin-backdrop" data-on-click="closeAccount"></div>
+  <div class="signin-sheet">
+    <div class="signin-hdr">
+      <span class="signin-title" id="account-title">👤 Account</span>
+      <button class="signin-close" data-on-click="closeAccount" aria-label="Close">✕</button>
+    </div>
+    <div id="account-body"></div>
+  </div>
+</div>
+
 <div id="form-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="form-title">
   <div class="signin-backdrop" data-on-click="closeFormSheet"></div>
   <div class="signin-sheet">

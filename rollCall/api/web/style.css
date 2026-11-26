@@ -940,3 +940,11 @@ body.tg-mode .brand-group-sel{background:rgba(127,127,127,.16);color:var(--text)
 .human-check-box{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:400;background:var(--card);border:1.5px solid var(--border);border-radius:12px;padding:12px 14px;box-shadow:0 8px 24px rgba(0,0,0,.18)}
 .human-check-box.hidden{display:none}
 .human-check-title{font-size:.82rem;font-weight:600;color:var(--sub);margin-bottom:8px}
+
+/* Account sheet (openAccount) */
+#account-body .acct-row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)}
+#account-body .acct-row-k{font-size:.78rem;font-weight:600;color:var(--sub)}
+#account-body .acct-row-v{font-size:.9rem;text-align:right;overflow-wrap:anywhere;min-width:0}
+#account-body select{width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:.95rem;background:var(--card);color:var(--text);margin-top:6px}
+#account-body .acct-btn-wide{display:block;width:100%;margin-top:10px;padding:11px;min-height:44px}
+#account-body .acct-btn-wide.danger{color:var(--danger,#c0392b);border-color:var(--danger,#c0392b)}

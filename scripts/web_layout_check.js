@@ -133,7 +133,13 @@ const GROUP_FULL = {
 const EMAIL_USER = { id_token: "4503599627370500.9999999999.feedface", user_id: 4503599627370500,
                      name: "Asha", email: "asha@example.com", purpose: "login", group_token: "testtoken123" };
 
+// Account sheet (services/account.py) for that email-only person.
+const ACCOUNT = { user_id: 4503599627370500, name: "Asha", email: "asha@example.com", has_telegram: false,
+                  email_only: true, email_enabled: true, email_notify: "auto", can_delete: true };
+
 const ROUTES = [
+  [/\/auth\/account\/sign-out-everywhere$/, { id_token: "4503599627370500.9999999999.fresh" }],
+  [/\/auth\/account(\/email-notify)?$/, ACCOUNT],
   [/\/auth\/email\/config$/, { enabled: true }],
   [/\/auth\/email\/verify$/, EMAIL_USER],
   [/\/web\/groups$/, { chat_id: -4503599627370497, group_token: "newgrouptoken", group_name: "Sunday Turf" }],
@@ -1333,6 +1339,71 @@ const WIDTHS = [
     if (errs.length) failures.push(`email sign-in: JS error — ${errs[0]}`);
     await page.evaluate(() => localStorage.clear());
     console.log("  email sign-in: link redeemed + joined, menu, create group, sign-in option, merge offer");
+    await page.close();
+  }
+
+  // Account sheet: from the menu and from ?account=1 (the link in emails);
+  // the email setting saves, "sign out everywhere" keeps THIS device signed
+  // in with the fresh token, and it fits a 320px phone.
+  {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 320, height: 700 });
+    await page.setRequestInterception(true);
+    const posts = {};
+    page.on("request", req => {
+      if (req.method() === "POST") posts[req.url().replace(BASE, "")] = req.postData() || "";
+      return req.url().startsWith(BASE) ? req.continue()
+        : req.respond({ status: 200, contentType: "text/plain", body: "" });
+    });
+    const errs = [];
+    page.on("pageerror", e => errs.push(String(e.message)));
+    page.on("dialog", d => d.accept());
+    await page.goto(`${BASE}/web/group/testtoken123`, { waitUntil: "load" });
+    await page.evaluate(u => {
+      localStorage.clear();
+      localStorage.setItem("rc_verified_tg_user_id", String(u.user_id));
+      localStorage.setItem("rc_verified_tg_name", u.name);
+      localStorage.setItem("rc_identity_token", u.id_token);
+    }, EMAIL_USER);
+    await page.reload({ waitUntil: "load" });
+    await new Promise(r => setTimeout(r, 500));
+    const item = await page.evaluate(() => {
+      document.getElementById("acct-btn").click();
+      const b = document.querySelector('#acct-menu [data-on-click="closeAcctMenu openAccount"]');
+      if (b) b.click();
+      return !!b;
+    });
+    if (!item) failures.push("account: menu has no Account item");
+    await new Promise(r => setTimeout(r, 400));
+    let a = await page.evaluate(() => {
+      const m = document.getElementById("account-modal");
+      const sel = document.getElementById("acct-notify");
+      if (sel) { sel.value = "off"; sel.dispatchEvent(new Event("change", { bubbles: true })); }
+      return { open: m && !m.classList.contains("hidden"), text: (document.getElementById("account-body") || {}).innerText || "",
+               sel: !!sel, wide: document.documentElement.scrollWidth > window.innerWidth };
+    });
+    if (!a.open) failures.push("account: sheet did not open");
+    if (!/asha@example\.com/.test(a.text)) failures.push(`account: email not shown — "${a.text.slice(0, 80)}"`);
+    for (const label of ["Change email", "Sign out on all other devices", "Delete account"])
+      if (!a.text.includes(label)) failures.push(`account: no "${label}" button`);
+    if (!a.sel) failures.push("account: no email-notification setting for an email-only account");
+    if (a.wide) failures.push("account: sheet overflows a 320px screen");
+    await new Promise(r => setTimeout(r, 300));
+    if (!/"pref":"off"/.test(posts["/api/v1/auth/account/email-notify"] || "")) failures.push("account: email setting was not saved");
+    await page.evaluate(() => document.querySelector('#account-body [data-on-click="acctSignOutEverywhere"]').click());
+    await new Promise(r => setTimeout(r, 400));
+    const tok = await page.evaluate(() => localStorage.getItem("rc_identity_token"));
+    if (tok !== "4503599627370500.9999999999.fresh") failures.push(`account: sign out everywhere didn't keep this device signed in (${tok})`);
+    // The "Email settings" link in a notification email.
+    await page.goto(`${BASE}/web/group/testtoken123?account=1`, { waitUntil: "load" });
+    await new Promise(r => setTimeout(r, 900));
+    a = await page.evaluate(() => ({ open: !document.getElementById("account-modal").classList.contains("hidden"),
+                                     search: location.search }));
+    if (!a.open) failures.push("account: ?account=1 did not open the sheet");
+    if (a.search.includes("account=")) failures.push("account: ?account=1 left in the URL");
+    if (errs.length) failures.push(`account: JS error — ${errs[0]}`);
+    await page.evaluate(() => localStorage.clear());
+    console.log("  account: menu + ?account=1, email setting saved, sign out everywhere keeps this device, 320px");
     await page.close();
   }
 

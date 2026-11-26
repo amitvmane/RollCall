@@ -113,6 +113,16 @@ async def run_periodic_jobs() -> None:
         logging.warning("[periodic] webhook deliveries took over %ss — rest next tick", _WEATHER_TICK_BUDGET)
     except Exception:
         logging.exception("[periodic] webhook deliveries failed")
+    # Notification emails for people without Telegram (services/email_notify).
+    try:
+        from services import email_notify as _en
+        # Its own time budget, not wait_for: cancelling mid-send would leave a
+        # sent email marked pending, and it would go out twice.
+        await _en.deliver_due(budget_seconds=_WEATHER_TICK_BUDGET)
+        if datetime.now(timezone.utc).minute == 0:
+            _en.prune()
+    except Exception:
+        logging.exception("[periodic] notification emails failed")
 
 
 # ── Bundled vote notices ──────────────────────────────────────────────────────

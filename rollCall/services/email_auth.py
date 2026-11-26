@@ -47,7 +47,7 @@ MAX_CODES_PER_WINDOW = 3          # per address, per CODE_TTL window
 # addresses (sign-in mail sent to strangers, from our domain's reputation):
 MAX_SENDS_PER_IP_HOUR = 10        # one visitor
 MAX_SENDS_PER_HOUR = 200          # the whole deployment — a ceiling on any abuse
-LOGIN, LINK = "login", "link"
+LOGIN, LINK, CHANGE = "login", "link", "change"
 
 _EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]+\.[^@\s]{2,}$")
 
@@ -94,7 +94,7 @@ def enabled() -> bool:
                 and os.environ.get("WEB_BASE_URL", "").strip())
 
 
-def _send_blocking(to: str, subject: str, text: str) -> None:
+def _send_blocking(to: str, subject: str, text: str, headers: Optional[dict] = None) -> None:
     host = os.environ["SMTP_HOST"].strip()
     port = int(os.environ.get("SMTP_PORT", "587") or 587)
     user = os.environ.get("SMTP_USER", "").strip()
@@ -103,6 +103,8 @@ def _send_blocking(to: str, subject: str, text: str) -> None:
     msg["From"] = os.environ["SMTP_FROM"].strip()
     msg["To"] = to
     msg["Subject"] = subject
+    for k, v in (headers or {}).items():
+        msg[k] = v
     msg.set_content(text)
     if port == 465:
         server = smtplib.SMTP_SSL(host, port, timeout=20)
@@ -121,11 +123,11 @@ def _send_blocking(to: str, subject: str, text: str) -> None:
             pass
 
 
-async def send_mail(to: str, subject: str, text: str) -> None:
+async def send_mail(to: str, subject: str, text: str, headers: Optional[dict] = None) -> None:
     """Send one plain-text email. Off the event loop — SMTP is blocking."""
     if not enabled():
         raise EmailNotConfigured("Email sign-in isn't set up on this server.")
-    await asyncio.to_thread(_send_blocking, to, subject, text)
+    await asyncio.to_thread(_send_blocking, to, subject, text, headers)
 
 
 # ── Codes ─────────────────────────────────────────────────────────────────────
@@ -225,6 +227,53 @@ async def start_link(tg_user_id: int, email: str, group_token: Optional[str] = N
                     "If you didn't ask for it, ignore this email — nothing changes.")
 
 
+async def start_change(user_id: int, new_email: str, group_token: Optional[str] = None,
+                       client_ip: Optional[str] = None) -> None:
+    """Move this account's email sign-in to a new address. The link goes to the
+    NEW address (proving it), and only this account, on a device signed in as
+    it, can use it (redeem). The old address is told once it's done."""
+    pid = principals.principal_for_user(user_id)
+    old = principals.binding_for(pid, principals.EMAIL) if pid else None
+    if not old:
+        raise incorrectParameter("This account has no email sign-in to change — add one instead.")
+    new_email = validate_email(new_email)
+    if new_email == old:
+        raise incorrectParameter("That's already your sign-in email.")
+    _take_send_slot(client_ip)
+    group = _valid_group(group_token)
+    code = _store_code(new_email, CHANGE, tg_user_id=user_id, return_group=group)
+    await send_mail(new_email, "Confirm your new RollCall email",
+                    "Tap to make this your RollCall sign-in email:\n\n"
+                    f"{_link_url(code, group)}\n\n"
+                    "Open it on the device where you asked for the change. The link works once "
+                    "and expires in 15 minutes. If you didn't ask for it, ignore this email.")
+
+
+def _change(user_id: int, new_email: str) -> None:
+    pid = principals.principal_for_user(user_id)
+    old = principals.binding_for(pid, principals.EMAIL) if pid else None
+    owner = principals.resolve(principals.EMAIL, new_email)
+    if owner is not None and owner != pid:
+        raise incorrectParameter("That email already signs in to a different account.")
+    if owner == pid:
+        return
+    if old:
+        principals.unlink(principals.EMAIL, old)
+    if not principals.link(pid, principals.EMAIL, new_email):
+        if old:
+            principals.link(pid, principals.EMAIL, old)
+        raise incorrectParameter("Couldn't change the email — try again.")
+    logging.info("[email_auth] sign-in email changed for principal %s", pid)
+    if old:
+        from services import email_notify
+        email_notify.queue_raw(
+            pid, old, "Your RollCall sign-in email was changed",
+            f"Your RollCall account now signs in with {new_email} instead of this address.\n\n"
+            "If you didn't do this, sign in with the new address if you can and choose "
+            "'Sign out everywhere', or ask your group's admin for help.",
+            email_notify.SECURITY)
+
+
 def _consume(code: str) -> dict:
     """Mark a code used and return its row. Atomic: of two concurrent redeems
     of one code, exactly one gets the row."""
@@ -309,8 +358,17 @@ def redeem(code: str, caller_user_id: Optional[int] = None) -> dict:
     if peek and peek["purpose"] == LINK and caller_user_id != int(peek["tg_user_id"] or 0):
         raise insufficientPermissions(
             "Open this link on the device where you asked for it, signed in with Telegram.")
+    if peek and peek["purpose"] == CHANGE and caller_user_id != int(peek["tg_user_id"] or 0):
+        raise insufficientPermissions(
+            "Open this link on the device where you asked for the change, signed in to that account.")
     row = _consume(code)
     email = row["email"]
+    if row["purpose"] == CHANGE:
+        uid = int(row["tg_user_id"])
+        _change(uid, email)
+        pid = principals.principal_for_user(uid)
+        return {"user_id": uid, "name": name_for(pid, uid, email), "email": email,
+                "purpose": CHANGE, "group_token": row.get("return_group")}
     if row["purpose"] == LINK:
         tg = int(row["tg_user_id"])
         pid = principals.for_telegram(tg)

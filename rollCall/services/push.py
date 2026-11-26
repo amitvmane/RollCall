@@ -332,6 +332,10 @@ async def notify_users(chat_id: int, user_ids, title: str, body: str, tag: str) 
     """
     wanted = {u for u in user_ids if isinstance(u, int)}
     guests = {_guest_key(u) for u in user_ids if isinstance(u, str) and _guest_key(u)}
+    # People with no Telegram and (by default) no push here get it by email
+    # instead — services/email_notify decides who; queued, never sent inline.
+    from services import email_notify
+    email_notify.queue_for_users(chat_id, wanted, title, body, tag)
     if not wanted and not guests:
         return 0
     try:

@@ -175,6 +175,36 @@ numbers in the browser. Consequences:
   child loggers bypass root-logger filters. Real Telegram errors log unchanged.
   The panel path (`_update_panel`) returns early for web-only chats.
 
+## Email-only people: notices and their account
+
+- **Notification emails** (`services/email_notify.py`): an email-only member
+  (local id, no Telegram binding) gets by email what Telegram members get in
+  Telegram — the per-person notices that go through `push.notify_users`
+  (waitlist promotion, not-voted reminders, dues) plus "a rollcall opened".
+  `principals.email_notify`: `auto` (default — only when they have no web push
+  on for that group, so nobody hears twice), `always`, `off`. Never emailed:
+  Telegram members, even with a linked email. Queued in `email_outbox` (no
+  network at the call site), sent from the minute tick with its own time budget
+  (never `wait_for` — a cancel mid-send would send twice), 4 attempts with
+  backoff. Caps: 10/person/day, 300/hour overall, same message not repeated
+  within 6h; `security` notices (email changed) skip prefs and caps. Every mail
+  carries RFC 8058 one-click unsubscribe; the token never expires, and GET only
+  shows a button (mail scanners open links) — POST unsubscribes.
+- **Account** (`services/account.py`, `/auth/account*`, global tokens only):
+  change email (link to the NEW address, usable only by this account on its
+  device; old address told), sign out everywhere, delete (email-only accounts).
+- **Sign out everywhere** = `principals.tokens_valid_after`, checked in
+  `api.identity.verify_identity_token` (`_revoked`). A token's issue time is
+  `exp - IDENTITY_TOKEN_TTL_SECONDS`, so **every identity token must be minted
+  with the default TTL** — a shorter one would look issued earlier and be
+  refused after a sign-out. Cached per user id for 30s; fails open on a DB
+  error (signature + expiry still apply).
+- **Delete** keeps the groups' records (votes, stats, the append-only ledger)
+  under the id; removes email, name, memberships, admin grants (through
+  `services.admin.revoke_admin`), push, queued mail, codes, sessions. Refused
+  while they're IN/MAYBE/waiting on an open rollcall, or the only owner of a
+  group that has other members.
+
 ## Web-admin roles
 
 `web_admins.role` is `owner` or `admin`, and `chats.admin_source` is `platform`

@@ -202,11 +202,21 @@ async def start_rollcall(
     from check_reminders import ensure_reminder_loop
     ensure_reminder_loop(chat_id, tzname)
 
-    # Fire web-push notifications to subscribers — non-blocking, best-effort
-    from bot_state import _log_task_exc
-    asyncio.create_task(_push_rollcall_started(chat_id, clean_title)).add_done_callback(_log_task_exc)
+    announce_opened(chat_id, clean_title)
 
     return serialize_rollcall(rc, rc_index)
+
+
+def announce_opened(chat_id: int, title: str) -> None:
+    """Web push + email that a rollcall opened — background, best-effort.
+    The one call for every way a rollcall starts (here and
+    services.templates.build_rollcall_from_template)."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return   # no event loop (a sync script): nothing to notify from
+    from bot_state import _log_task_exc
+    loop.create_task(_push_rollcall_started(chat_id, title)).add_done_callback(_log_task_exc)
 
 
 async def _push_rollcall_started(chat_id: int, title: str) -> None:
@@ -216,6 +226,9 @@ async def _push_rollcall_started(chat_id: int, title: str) -> None:
         group_token, url = push_svc.group_link(chat_id)
         if group_token:
             await push_svc.notify_rollcall_started(group_token, title, url)
+        # Email-only members without push hear about it by email.
+        from services import email_notify
+        email_notify.queue_rollcall_opened(chat_id, title)
     except Exception:
         logging.exception("[push] _push_rollcall_started failed chat=%s", chat_id)
 

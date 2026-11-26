@@ -11,7 +11,7 @@ Legend: **you** = needs the owner (server, accounts, decisions) · **code** = ca
 | # | Item | Who | Status |
 |---|------|-----|--------|
 | 1 | **Rotate the production bot token.** It is in public git history (found in the 2026-11-09 security audit) and can forge web logins. Set `IDENTITY_SECRET` first so nobody is signed out, then `/revoke` in BotFather and update `TELEGRAM_TOKEN`. | you | Open — last confirmed still live 2026-11-12 |
-| 2 | **Deploy 11.1** — prod runs 11.0 (`f3414fc`, 23 Nov); 11.1 is everything since: email sign-in, web-only groups, merge, join approval, REST ids, partner API, human check, buzz mute, `repeat=` fix. Set `DeployedDatetime` in `version.json` to the real deploy time. Add `SMTP_HOST`/`SMTP_FROM` (+ `SMTP_USER`/`SMTP_PASSWORD`) to `.env`, `make build`, compare live `/web/` assets with the repo, try one real email sign-in, check `/health`. Schema changes are additive and apply on boot. | you | Open — CI green on main |
+| 2 | **Deploy 11.1** — prod runs 11.0 (`f3414fc`, 23 Nov); 11.1 is everything since: email sign-in, web-only groups, merge, join approval, REST ids, partner API, human check, buzz mute, `repeat=` fix. Set `DeployedDatetime` in `version.json` to the real deploy time. Add `SMTP_HOST`/`SMTP_FROM` (+ `SMTP_USER`/`SMTP_PASSWORD`) to `.env`, `make build`, compare live `/web/` assets with the repo, try one real email sign-in, check `/health`. Give the `SMTP_FROM` domain SPF, DKIM and DMARC records, or sign-in and notification emails land in spam. Set `IDENTITY_SECRET` before rotating the bot token (#1), or every email user is signed out. Schema changes are additive and apply on boot. | you | Open — CI green on main |
 | 3 | Install the Renovate GitHub app (config already in `renovate.json`). | you | Open |
 | 4 | Run the server as non-root: `APP_UID`/`APP_GID=10001` in `.env` → `make fix-perms` → `make build`. | you | Open |
 | 5 | Run `make watchdog-test` once on the server, to prove alerts reach you. | you | Open |
@@ -42,6 +42,7 @@ Legend: **you** = needs the owner (server, accounts, decisions) · **code** = ca
 
 ## Recently done
 
+- 2026-11-26 — Email-only people: notification emails (waitlist, reminders, dues, new games; only when web push is off by default; capped, de-duplicated, retried, one-click unsubscribe) and an Account page (change email, sign out everywhere, delete account).
 - 2026-11-26 — Changelog split: 11.0 entry restored to what's live; 25–26 Nov work is 11.1.
 - 2026-11-26 — `repeat=` (on /src and /repeat) no longer overwrites a same-named template — it used to rewrite the group's own template's location/fee/limit/title and move its schedule. Checked: `/location` only ever changes the ongoing rollcall.
 - 2026-11-25 — Human check (CAPTCHA) on guest votes and sign-in emails: self-hosted proof of work by default, Cloudflare Turnstile optional; 12-hour pass capped at 30 actions. API guide served at `/help/api`, linked from `/help` (🔌), the Integrations panel and the bot's `/help` (`/help api`).

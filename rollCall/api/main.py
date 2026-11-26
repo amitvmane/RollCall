@@ -36,7 +36,7 @@ from exceptions import (
 )
 from api.rate_limit import rate_limit_middleware
 from api.security_headers import security_headers_middleware
-from api.routes import admin, auth, commands as commands_routes, dues as dues_routes, email_auth as email_auth_routes, groups, human as human_routes, integrations as integrations_routes, local_groups as local_groups_routes, health, portal, proxy_votes, rollcalls, stats, templates, tg_verify, votes, web as web_routes
+from api.routes import account as account_routes, admin, auth, commands as commands_routes, dues as dues_routes, email_auth as email_auth_routes, groups, human as human_routes, integrations as integrations_routes, local_groups as local_groups_routes, health, portal, proxy_votes, rollcalls, stats, templates, tg_verify, votes, web as web_routes
 from api.schemas.common import ErrorResponse
 
 
@@ -188,6 +188,7 @@ def create_app() -> FastAPI:
     app.include_router(groups.router, prefix=API_PREFIX, tags=["admin", "groups"])
     app.include_router(human_routes.router, prefix=API_PREFIX, tags=["auth"])
     app.include_router(email_auth_routes.router, prefix=API_PREFIX, tags=["auth"])
+    app.include_router(account_routes.router, prefix=API_PREFIX, tags=["auth"])
     # Before web_routes: its catch-all /web/{token} must not shadow these.
     app.include_router(local_groups_routes.router, prefix=API_PREFIX, tags=["web-groups"])
     app.include_router(integrations_routes.router, prefix=API_PREFIX, tags=["integrations"])

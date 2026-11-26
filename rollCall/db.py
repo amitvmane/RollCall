@@ -1034,6 +1034,31 @@ def create_tables():
             )
         """)
 
+        # Notification emails for people without Telegram (services/email_notify).
+        # Queued where the event happens, sent and retried from the minute tick.
+        cursor.execute(f"""
+            CREATE TABLE IF NOT EXISTS email_outbox (
+                id            {serial},
+                principal_id  INTEGER NOT NULL,
+                email         TEXT NOT NULL,
+                chat_id       {big},
+                tag           TEXT NOT NULL,
+                subject       TEXT NOT NULL,
+                body          TEXT NOT NULL,
+                status        TEXT NOT NULL DEFAULT 'pending',
+                attempts      INTEGER NOT NULL DEFAULT 0,
+                next_attempt  BIGINT NOT NULL,
+                last_error    TEXT DEFAULT NULL,
+                created_at    BIGINT NOT NULL
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS email_outbox_due ON email_outbox (status, next_attempt)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS email_outbox_principal ON email_outbox (principal_id, created_at)
+        """)
+
         # Hourly traffic counters (services/traffic.py): Telegram updates and
         # REST requests, flushed from memory once a minute.
         cursor.execute("""
@@ -1308,6 +1333,14 @@ _RECONCILE_COLUMNS = {
     "principals": [
         ("merged_into_user_id", "merged_into_user_id INTEGER DEFAULT NULL",
          "merged_into_user_id BIGINT DEFAULT NULL"),
+        # Account settings (services/account.py, services/email_notify.py):
+        # when notification emails go out ('auto' = only without web push in
+        # that group, 'always', 'off'); identity tokens issued before
+        # tokens_valid_after are refused ("sign out everywhere"); deleted_at
+        # marks an account its owner deleted.
+        ("email_notify", "email_notify TEXT DEFAULT 'auto'", "email_notify TEXT DEFAULT 'auto'"),
+        ("tokens_valid_after", "tokens_valid_after INTEGER DEFAULT NULL", "tokens_valid_after BIGINT DEFAULT NULL"),
+        ("deleted_at", "deleted_at INTEGER DEFAULT NULL", "deleted_at BIGINT DEFAULT NULL"),
     ],
     "push_subscriptions": [
         ("tg_user_id", "tg_user_id INTEGER DEFAULT NULL", "tg_user_id BIGINT DEFAULT NULL"),

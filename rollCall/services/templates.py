@@ -608,6 +608,11 @@ def build_rollcall_from_template(chat_id: int, tmpl: dict, title: str):
             )
 
     rc.save()
+    # "A game opened" web push + email — the same notice start_rollcall sends.
+    # Here, because every template start (scheduled, /start_template, web,
+    # one-off schedules) comes through this helper and none of them sent it.
+    from services.rollcalls import announce_opened
+    announce_opened(chat_id, title)
     return rc
 
 

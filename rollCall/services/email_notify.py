@@ -160,6 +160,9 @@ def queue_raw(principal_id: int, email: str, subject: str, body: str, tag: str,
     """Queue one email as-is. Callers have decided it should go."""
     if not _enabled():
         return False
+    # One line: a rollcall title can hold a newline, and the email library
+    # refuses a header with one — the mail would fail all four attempts.
+    subject = " ".join(str(subject or "").split())[:200] or "RollCall"
     now = int(time.time())
     ph = _ph()
     try:
@@ -262,16 +265,22 @@ async def deliver_due(budget_seconds: float = 20) -> int:
             logging.warning("[email_notify] hourly cap reached — the rest wait")
             return 0
         cursor.execute(
-            f"SELECT id, principal_id, email, subject, body, attempts FROM email_outbox "
+            f"SELECT id, principal_id, email, subject, body, attempts, tag FROM email_outbox "
             f"WHERE status='pending' AND next_attempt<={ph} ORDER BY id LIMIT {ph}",
             (now, min(BATCH, room)))
         rows = [dict(r) if isinstance(r, dict) else dict(zip(
-            ("id", "principal_id", "email", "subject", "body", "attempts"), r)) for r in cursor.fetchall()]
+            ("id", "principal_id", "email", "subject", "body", "attempts", "tag"), r))
+            for r in cursor.fetchall()]
     sent = 0
     deadline = time.monotonic() + budget_seconds
     for r in rows:
         if time.monotonic() > deadline:
             break
+        # Unsubscribed (or switched off) after this was queued: honour it now.
+        if r.get("tag") != SECURITY and get_pref(int(r["principal_id"])) == OFF:
+            with db._cursor(commit=True) as cursor:
+                cursor.execute(f"UPDATE email_outbox SET status='skipped' WHERE id={ph}", (r["id"],))
+            continue
         try:
             await send_mail(r["email"], r["subject"], r["body"], headers={
                 "List-Unsubscribe": f"<{unsubscribe_url(r['principal_id'])}>",

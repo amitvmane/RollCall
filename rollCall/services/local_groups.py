@@ -121,16 +121,123 @@ def join(chat_id: int, user_id: int, name: Optional[str]) -> dict:
     if not user_id or user_id <= 0:
         raise insufficientPermissions("Sign in first to join.")
     existing = db.get_member_display_info(chat_id, user_id)
-    if existing:
+    if existing and db.is_active_chat_member(chat_id, user_id):
         return {"joined": False, "name": existing.get("first_name")}
     if not is_local_chat(chat_id) and not is_local_user(user_id):
         raise incorrectParameter("You're on Telegram — say anything in the group and the bot adds you.")
-    name = _clean(name, "name", 64)
+    # Someone who left (or was removed) comes back under the name they had.
+    name = _clean(name or (existing or {}).get("first_name"), "name", 64)
     if needs_approval(chat_id) and not db.is_web_admin(chat_id, user_id):
+        req = _request(chat_id, user_id)
+        if req and req["status"] == "denied":
+            return {"joined": False, "pending": False, "denied": True, "name": name}
         request_to_join(chat_id, user_id, name)
         return {"joined": False, "pending": True, "name": name}
     db.upsert_chat_member(chat_id, user_id, name)
     return {"joined": True, "name": name}
+
+
+def membership(chat_id: int, user_id: int) -> dict:
+    """Where this person stands in the group — what the page shows them."""
+    info = db.get_member_display_info(chat_id, user_id)
+    active = bool(info) and db.is_active_chat_member(chat_id, user_id)
+    req = None if active else _request(chat_id, user_id)
+    local = is_local_user(user_id)
+    return {
+        "member": active,
+        "pending": bool(req and req["status"] == "pending"),
+        "denied": bool(req and req["status"] == "denied"),
+        "needs_approval": needs_approval(chat_id),
+        # Only people the bot can't see join from the page (see join()).
+        "can_join": not active and (local or is_local_chat(chat_id)),
+        "can_leave": active and (local or is_local_chat(chat_id)),
+        "name": (info or {}).get("first_name"),
+    }
+
+
+def on_open_rollcall(chat_id: int, user_id: int) -> Optional[str]:
+    """Title of an open rollcall this person is IN / MAYBE / waiting on, if
+    any — leaving, removal and account deletion all refuse while they are
+    (it would leave a game short without anyone noticing)."""
+    from rollcall_manager import manager
+    for rc in manager.get_rollcalls(chat_id):
+        if any(getattr(u, "user_id", None) == user_id for u in rc.inList + rc.maybeList + rc.waitList):
+            return rc.title
+    return None
+
+
+def _end_membership(chat_id: int, user_id: int) -> None:
+    """What leaving and being removed share: no longer a member, no admin
+    grant (through the last-owner rule), no group notifications. Past votes,
+    stats and the dues ledger stay — history, as when a Telegram member leaves."""
+    from services.admin import revoke_admin
+    db.mark_member_inactive(chat_id, user_id)
+    if db.get_web_admin_role(chat_id, user_id) is not None:
+        revoke_admin(chat_id, user_id)
+    chat = db.get_or_create_chat(chat_id) or {}
+    token = chat.get("group_web_token")
+    if token:
+        ph = _ph()
+        with db._cursor(commit=True) as cursor:
+            cursor.execute(f"DELETE FROM push_subscriptions WHERE group_token={ph} AND tg_user_id={ph}",
+                           (token, user_id))
+
+
+def leave(chat_id: int, user_id: int) -> dict:
+    """A person without Telegram leaves a group (a Telegram member leaves the
+    Telegram chat instead — the bot sees that)."""
+    if not (is_local_user(user_id) or is_local_chat(chat_id)):
+        raise incorrectParameter("Leave the Telegram group to leave this group.")
+    if not db.is_active_chat_member(chat_id, user_id):
+        raise incorrectParameter("You're not a member of this group.")
+    title = on_open_rollcall(chat_id, user_id)
+    if title:
+        raise incorrectParameter(f"You're on '{title}' — vote OUT first, then leave.")
+    if db.get_web_admin_role(chat_id, user_id) == "owner" and db.count_web_admin_owners(chat_id) <= 1:
+        raise insufficientPermissions("You're this group's only owner — make someone else owner first.")
+    _end_membership(chat_id, user_id)
+    info = db.get_member_display_info(chat_id, user_id) or {}
+    db.log_admin_action(chat_id, user_id, info.get("first_name") or "member", "leave_group",
+                        target_name=info.get("first_name") or str(user_id))
+    return {"left": True}
+
+
+def remove_member(chat_id: int, target_user_id: int, *, actor_user_id: int, actor_name: str) -> dict:
+    """An admin removes someone the page let in: a person without Telegram, or
+    anyone in a web-only group. Telegram members of a Telegram group are
+    removed in Telegram. They can ask to join again; with join approval on,
+    an admin decides."""
+    if target_user_id == actor_user_id:
+        raise incorrectParameter("To leave the group yourself, use Leave group.")
+    if not (is_local_user(target_user_id) or is_local_chat(chat_id)):
+        raise incorrectParameter("This member is in the Telegram group — remove them in Telegram.")
+    if not db.is_active_chat_member(chat_id, target_user_id):
+        raise incorrectParameter("That person isn't a member of this group.")
+    role = db.get_web_admin_role(chat_id, target_user_id)
+    if role == "owner" and db.get_web_admin_role(chat_id, actor_user_id) != "owner":
+        raise insufficientPermissions("Only an owner can remove an owner.")
+    if role == "owner" and db.count_web_admin_owners(chat_id) <= 1:
+        raise insufficientPermissions("That's the group's only owner — they can't be removed.")
+    title = on_open_rollcall(chat_id, target_user_id)
+    if title:
+        raise incorrectParameter(f"They're on '{title}' — take them off it first.")
+    _end_membership(chat_id, target_user_id)
+    info = db.get_member_display_info(chat_id, target_user_id) or {}
+    db.log_admin_action(chat_id, actor_user_id, actor_name, "remove_member",
+                        target_name=info.get("first_name") or str(target_user_id))
+    return {"user_id": target_user_id, "removed": True, "name": info.get("first_name")}
+
+
+def removable_members(chat_id: int) -> list:
+    """Members an admin may remove from the page (see remove_member)."""
+    local_chat = is_local_chat(chat_id)
+    out = []
+    for m in db.get_active_members(chat_id):
+        uid = m.get("user_id")
+        if isinstance(uid, int) and (local_chat or is_local_user(uid)):
+            out.append({"user_id": uid, "name": m.get("first_name") or "Member",
+                        "role": db.get_web_admin_role(chat_id, uid)})
+    return out
 
 
 # ── Join approval ─────────────────────────────────────────────────────────────
@@ -157,13 +264,39 @@ def request_to_join(chat_id: int, user_id: int, name: str) -> None:
         cursor.execute(f"SELECT status FROM join_requests WHERE chat_id={ph} AND user_id={ph}",
                        (chat_id, user_id))
         row = cursor.fetchone()
-        if row is None:
+        new = row is None
+        if new:
             cursor.execute(f"INSERT INTO join_requests (chat_id, user_id, name, status, requested_at) "
                            f"VALUES ({ph},{ph},{ph},'pending',{ph})",
                            (chat_id, user_id, name, int(time.time())))
         elif (row["status"] if isinstance(row, dict) else row[0]) == "pending":
             cursor.execute(f"UPDATE join_requests SET name={ph} WHERE chat_id={ph} AND user_id={ph}",
                            (name, chat_id, user_id))
+    if new:
+        _tell_admins_of_request(chat_id, name)
+
+
+def _tell_admins_of_request(chat_id: int, name: str) -> None:
+    """A web-only group has no chat to see "X wants to join" in — tell its
+    admins (web push, or email for those without Telegram). Fire and forget."""
+    try:
+        import asyncio
+        admins = {int(a["tg_user_id"]) for a in db.list_web_admins(chat_id)}
+        if not admins:
+            return
+        from services.push import notify_users
+        coro = notify_users(chat_id, admins, "🚪 Someone wants to join",
+                            f"{name} asked to join. Approve or deny under Admin → Members & joining.", "join")
+        try:
+            asyncio.get_running_loop().create_task(coro)
+        except RuntimeError:
+            coro.close()
+            from services import email_notify
+            email_notify.queue_for_users(chat_id, admins, "🚪 Someone wants to join",
+                                         f"{name} asked to join. Approve or deny under Admin → Members & joining.",
+                                         "join")
+    except Exception:
+        logging.exception("[local_groups] join-request notice failed chat=%s", chat_id)
 
 
 def list_requests(chat_id: int) -> list:
@@ -210,7 +343,9 @@ def gate_web_vote(chat_id: int, user_id: Optional[int], member_info, name: str) 
     their membership is Telegram's to decide. Admins are always allowed."""
     if not needs_approval(chat_id):
         return
-    if user_id is not None and (member_info or db.is_web_admin(chat_id, user_id)):
+    # An ACTIVE member: someone who left or was removed keeps their row.
+    if user_id is not None and ((member_info and db.is_active_chat_member(chat_id, user_id))
+                                or db.is_web_admin(chat_id, user_id)):
         return
     if user_id is not None and not is_local_user(user_id) and not is_local_chat(chat_id):
         return
@@ -234,7 +369,7 @@ def grant_admin(chat_id: int, target_user_id: int, *, actor_user_id: int, actor_
     """Make a member an admin, in a group that keeps its own admin list."""
     _require_local_owner(chat_id, actor_user_id)
     info = db.get_member_display_info(chat_id, target_user_id)
-    if not info:
+    if not info or not db.is_active_chat_member(chat_id, target_user_id):
         raise incorrectParameter("Only a member of the group can be made an admin.")
     if db.get_web_admin_role(chat_id, target_user_id) is None:
         db.set_web_admin(chat_id, target_user_id, info.get("first_name") or "Member")

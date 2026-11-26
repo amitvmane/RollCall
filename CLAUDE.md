@@ -35,6 +35,23 @@ the deprecated `/rollcalls/{rc_number}/…` one, on ONE handler. Inside the chat
 lock, use `ref.index_now()` (re-finds by id) — never the number from the URL.
 `tests/test_rest_rollcall_ids.py` fails on a number-only route.
 
+## Partner API keys and gateway
+
+App keys (`services/partner_api.py`, Admin → Integrations) are issued like a
+bank's partner credentials: partner, contact, agreement reference, optional IP
+allowlist (enforced in `api/auth`), 1–730 day expiry with reminders at 14 and
+3 days (`notify_expiring`, daily), rotation with a 7-day overlap. **Every app
+key — any scope — is re-checked against its issuer's admin standing** (a vote
+key votes for anyone, an admin's power). App-key votes are for *current*
+members only, under the group's name for them. `/gentoken` tokens are listed
+and revocable there too.
+
+`api/partner_gateway.py` gives every `/api/` call `X-Request-Id` and every
+error `{error, detail, request_id}` (the HTTPException/validation handlers in
+`api/main.py` — keep `detail` as it was, the web page reads it), and replays
+`Idempotency-Key` writes under `/api/v1/chats/` for 24h (`api_idempotency`).
+`api/rate_limit.py` adds `X-RateLimit-*`. Public contract: `docs/API.md`.
+
 ## Partner webhooks
 
 `services/webhooks.py` is fed by hooks in the db.py writers every surface uses
@@ -201,7 +218,16 @@ numbers in the browser. Consequences:
   error (signature + expiry still apply).
 - **Delete** keeps the groups' records (votes, stats, the append-only ledger)
   under the id; removes email, name, memberships, admin grants (through
-  `services.admin.revoke_admin`), push, queued mail, codes, sessions. Refused
+  `services.admin.revoke_admin`), API keys they issued, push, queued mail,
+  codes, sessions.
+- **Membership** for people the bot can't see (local ids anywhere, everyone in
+  a web-only group): `services/local_groups` — `membership`, `join`, `leave`,
+  `remove_member`. A member is an **active** `chat_members` row
+  (`db.is_active_chat_member`): leaving/removal keeps the row for history, so
+  never treat "has a row" as "is a member" in a gate. Leave/remove/delete are
+  refused while the person is on an open rollcall (`on_open_rollcall`).
+- Merge routes take the email token **unfollowed** but still revocable:
+  `api.identity.verify_identity_token_unfollowed`, never a raw `_verify`. Refused
   while they're IN/MAYBE/waiting on an open rollcall, or the only owner of a
   group that has other members.
 

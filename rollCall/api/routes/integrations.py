@@ -18,12 +18,21 @@ router = APIRouter()
 
 class AppKey(BaseModel):
     key_id: str
+    kind: str = Field("app", description="'app' (made here) or 'personal' (an admin's /gentoken)")
     label: str
     scopes: List[str]
     created_at: str = ""
     expires_at: str = ""
     last_used_at: Optional[str] = None
+    last_used_ip: Optional[str] = None
     revoked: bool = False
+    status: str = Field("active", description="'active', 'expired' or 'revoked'")
+    partner: Optional[str] = None
+    contact: Optional[str] = None
+    agreement_ref: Optional[str] = None
+    allowed_ips: List[str] = Field(default_factory=list)
+    issued_by_user_id: Optional[int] = None
+    rotated_to: Optional[str] = None
 
 
 class Webhook(BaseModel):
@@ -46,9 +55,14 @@ class IntegrationsResponse(BaseModel):
 
 
 class CreateKeyRequest(BaseModel):
-    label: str = Field(..., max_length=60)
+    label: str = Field(..., max_length=60, description="The app this key is for")
     scopes: List[str]
     days: int = Field(365, ge=1, le=partner_api.MAX_DAYS)
+    partner: Optional[str] = Field(None, max_length=100, description="The organisation the key is issued to")
+    contact: Optional[str] = Field(None, max_length=254, description="Who to contact there (email or phone)")
+    agreement_ref: Optional[str] = Field(None, max_length=100,
+                                         description="Reference of the agreement made off the platform")
+    allowed_ips: Optional[List[str]] = Field(None, description="Only these addresses / CIDR ranges may use the key")
 
 
 class CreateKeyResponse(BaseModel):
@@ -57,6 +71,20 @@ class CreateKeyResponse(BaseModel):
     label: str
     scopes: List[str]
     expires_at: str
+    partner: Optional[str] = None
+    contact: Optional[str] = None
+    agreement_ref: Optional[str] = None
+    allowed_ips: List[str] = Field(default_factory=list)
+
+
+class RotateKeyRequest(BaseModel):
+    days: Optional[int] = Field(None, ge=1, le=partner_api.MAX_DAYS,
+                                description="Lifetime of the new key (default: same as the old one)")
+
+
+class RotateKeyResponse(CreateKeyResponse):
+    previous_key_id: str
+    previous_expires_at: str = Field(..., description="The old key keeps working until then")
 
 
 class CreateWebhookRequest(BaseModel):
@@ -99,7 +127,18 @@ async def list_integrations(group_token: str = Path(...),
 async def create_key(body: CreateKeyRequest, group_token: str = Path(...),
                      id_token: Optional[str] = Depends(identity_from_header)) -> CreateKeyResponse:
     chat_id, uid, name = await _actor(group_token, id_token)
-    return CreateKeyResponse(**partner_api.create_key(chat_id, uid, name, body.label, body.scopes, body.days))
+    return CreateKeyResponse(**partner_api.create_key(
+        chat_id, uid, name, body.label, body.scopes, body.days, partner=body.partner,
+        contact=body.contact, agreement_ref=body.agreement_ref, allowed_ips=body.allowed_ips))
+
+
+@router.post("/web/group/{group_token}/api-keys/{key_id}/rotate", response_model=RotateKeyResponse,
+             summary="Rotate an app key: a new key on the same terms; the old one works for 7 more days")
+async def rotate_key(body: RotateKeyRequest, group_token: str = Path(...),
+                     key_id: str = Path(..., max_length=32),
+                     id_token: Optional[str] = Depends(identity_from_header)) -> RotateKeyResponse:
+    chat_id, uid, name = await _actor(group_token, id_token)
+    return RotateKeyResponse(**partner_api.rotate_key(chat_id, key_id, uid, name, body.days))
 
 
 @router.post("/web/group/{group_token}/api-keys/{key_id}/revoke", status_code=204,
@@ -143,7 +182,12 @@ async def delete_webhook(group_token: str = Path(...), webhook_id: int = Path(..
              summary="Switch a webhook on or off")
 async def webhook_active(body: WebhookActiveRequest, group_token: str = Path(...), webhook_id: int = Path(...),
                          id_token: Optional[str] = Depends(identity_from_header)) -> None:
-    chat_id, _, _ = await _actor(group_token, id_token)
+    chat_id, uid, _ = await _actor(group_token, id_token)
+    # Any admin may switch one OFF (less goes out); switching one back ON
+    # resumes streaming to an outside address, which is an owner's call — the
+    # same rule as adding it.
+    if body.active and _db.get_web_admin_role(chat_id, uid) != "owner":
+        raise HTTPException(status_code=403, detail="Only a group owner can switch a webhook back on.")
     try:
         webhooks.set_active(chat_id, webhook_id, body.active)
     except webhooks.WebhookRejected as e:

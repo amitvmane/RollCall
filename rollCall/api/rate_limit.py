@@ -158,6 +158,7 @@ async def rate_limit_middleware(request: Request, call_next):
         bucket.popleft()
 
     if len(bucket) >= maxreq:
+        from api.partner_gateway import request_id_for
         # Oldest entry in the bucket dictates how soon the client can retry.
         retry_after = max(1, int(bucket[0] + window - now) + 1)
         return JSONResponse(
@@ -166,9 +167,23 @@ async def rate_limit_middleware(request: Request, call_next):
                 "error": "rateLimitExceeded",
                 "detail": f"Rate limit: {maxreq} requests / {window}s. "
                           f"Retry after {retry_after}s.",
+                "request_id": request_id_for(request),
             },
-            headers={"Retry-After": str(retry_after)},
+            headers={"Retry-After": str(retry_after),
+                     "X-Request-Id": request_id_for(request),
+                     "X-RateLimit-Limit": str(maxreq),
+                     "X-RateLimit-Remaining": "0",
+                     "X-RateLimit-Reset": str(retry_after)},
         )
 
     bucket.append(now)
-    return await call_next(request)
+    remaining = max(0, maxreq - len(bucket))
+    reset = max(1, int(bucket[0] + window - now) + 1)
+    response = await call_next(request)
+    # Partners pace themselves from these (docs/API.md): the limit, what's
+    # left in the current window, and seconds until the oldest call ages out.
+    if request.url.path.startswith("/api/"):
+        response.headers["X-RateLimit-Limit"] = str(maxreq)
+        response.headers["X-RateLimit-Remaining"] = str(remaining)
+        response.headers["X-RateLimit-Reset"] = str(reset)
+    return response

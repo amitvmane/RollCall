@@ -948,3 +948,12 @@ body.tg-mode .brand-group-sel{background:rgba(127,127,127,.16);color:var(--text)
 #account-body select{width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:.95rem;background:var(--card);color:var(--text);margin-top:6px}
 #account-body .acct-btn-wide{display:block;width:100%;margin-top:10px;padding:11px;min-height:44px}
 #account-body .acct-btn-wide.danger{color:var(--danger,#c0392b);border-color:var(--danger,#c0392b)}
+
+/* Membership card (people without Telegram): join / waiting / not approved */
+#membership-card{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border:1.5px solid var(--accent)}
+#membership-card.hidden{display:none}
+#membership-card .mc-text{flex:1 1 200px;min-width:0}
+#membership-card .mc-title{font-weight:700;font-size:.95rem}
+#membership-card .mc-sub{font-size:.82rem;color:var(--sub);margin-top:2px}
+#membership-card .btn{padding:9px 16px;flex-shrink:0}
+.home-welcome{padding:14px;border:1.5px solid var(--accent);border-radius:12px;background:var(--card)}

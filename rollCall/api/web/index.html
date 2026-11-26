@@ -248,6 +248,11 @@
          only seen by someone who already went looking. Filled by
          _syncAdminTodo() in app.js; hidden when there is nothing to do. -->
     <div id="admin-todo-card" class="card hidden" role="status"></div>
+    <!-- Membership, for people the bot can't see (no Telegram, or a web-only
+         group): join / waiting for approval / not approved. Without it a
+         signed-in visitor of an approval group only found out on their first
+         vote. Filled by _renderMembership() in app.js; hidden for members. -->
+    <div id="membership-card" class="card hidden" role="status"></div>
     <!-- Tabs (multi-rollcall group mode) -->
     <div id="tab-card" class="card hidden">
       <div id="tab-bar" class="tab-bar"></div>
@@ -574,7 +579,7 @@
         </button>
         <button class="adm-menu-item" role="menuitem" data-on-click="openAdminSection" data-args='["joins"]'>
           <span class="adm-mi-icon">🚪</span>
-          <span class="adm-mi-text"><span class="adm-mi-title">Join requests</span>
+          <span class="adm-mi-text"><span class="adm-mi-title">Members &amp; joining</span>
             <span class="adm-mi-sub" id="adm-mi-joins-sub">Who can join from the group link</span></span>
           <span class="adm-mi-chev">›</span>
         </button>
@@ -797,7 +802,7 @@
       <div class="adm-panel hidden" id="adm-panel-joins">
         <div class="adm-panel-hdr">
           <button class="adm-back" data-on-click="closeAdminSection">‹ Back</button>
-          <span class="adm-panel-title">🚪 Join requests</span>
+          <span class="adm-panel-title">🚪 Members &amp; joining</span>
         </div>
         <div class="adm-row">
           <div>

@@ -1059,6 +1059,22 @@ def create_tables():
             CREATE INDEX IF NOT EXISTS email_outbox_principal ON email_outbox (principal_id, created_at)
         """)
 
+        # Idempotency-Key replays for partner writes (api/partner_gateway.py):
+        # a retried POST with the same key gets the first answer back instead
+        # of starting a second rollcall. status 0 = still running. Kept 24h.
+        cursor.execute(f"""
+            CREATE TABLE IF NOT EXISTS api_idempotency (
+                token_hash    TEXT NOT NULL,
+                idem_key      TEXT NOT NULL,
+                request_hash  TEXT NOT NULL,
+                status        INTEGER NOT NULL DEFAULT 0,
+                content_type  TEXT DEFAULT NULL,
+                response      TEXT DEFAULT NULL,
+                created_at    BIGINT NOT NULL,
+                PRIMARY KEY (token_hash, idem_key)
+            )
+        """)
+
         # Hourly traffic counters (services/traffic.py): Telegram updates and
         # REST requests, flushed from memory once a minute.
         cursor.execute("""
@@ -1356,6 +1372,18 @@ _RECONCILE_COLUMNS = {
     # may vote on behalf of members, unlike a member's own Mini App token.
     "api_tokens": [
         ("app_key", "app_key INTEGER DEFAULT 0", "app_key INTEGER DEFAULT 0"),
+        # The agreement an app key was issued under (services/partner_api):
+        # who the partner is, who to call, the off-platform agreement's
+        # reference, and the addresses the key may be used from (comma-
+        # separated CIDRs; empty = anywhere). expiry_notice = the last
+        # "expires in N days" warning sent (14, 3), so each goes once.
+        ("partner", "partner TEXT DEFAULT NULL", "partner TEXT DEFAULT NULL"),
+        ("contact", "contact TEXT DEFAULT NULL", "contact TEXT DEFAULT NULL"),
+        ("agreement_ref", "agreement_ref TEXT DEFAULT NULL", "agreement_ref TEXT DEFAULT NULL"),
+        ("allowed_ips", "allowed_ips TEXT DEFAULT NULL", "allowed_ips TEXT DEFAULT NULL"),
+        ("last_used_ip", "last_used_ip TEXT DEFAULT NULL", "last_used_ip TEXT DEFAULT NULL"),
+        ("expiry_notice", "expiry_notice INTEGER DEFAULT NULL", "expiry_notice INTEGER DEFAULT NULL"),
+        ("rotated_to", "rotated_to TEXT DEFAULT NULL", "rotated_to TEXT DEFAULT NULL"),
     ],
     "penalty_tiers": [
         ("late_minutes_threshold", "late_minutes_threshold INTEGER DEFAULT NULL", "late_minutes_threshold INTEGER DEFAULT NULL"),
@@ -5756,7 +5784,8 @@ def lookup_api_token(token_hash: str) -> Optional[Dict]:
             ph = '%s' if db_type == 'postgresql' else '?'
             cursor.execute(f"""
                 SELECT chat_id, issued_by_user_id, scopes, label,
-                       created_at, expires_at, last_used_at, revoked_at, app_key
+                       created_at, expires_at, last_used_at, revoked_at, app_key,
+                       allowed_ips
                 FROM api_tokens
                 WHERE token_hash = {ph}
             """, (token_hash,))
@@ -5811,6 +5840,7 @@ def lookup_api_token(token_hash: str) -> Optional[Dict]:
                         parsed = expires_at
                     if parsed is not None and parsed < now:
                         return None
+                    d["expires_at_parsed"] = parsed
                 except Exception:
                     logging.exception("api_token expiry parse failed; treating as expired")
                     return None
@@ -5840,7 +5870,9 @@ def list_api_tokens(chat_id: int) -> List[Dict]:
             ph = '%s' if db_type == 'postgresql' else '?'
             cursor.execute(f"""
                 SELECT token_hash, issued_by_user_id, scopes, label,
-                       created_at, expires_at, last_used_at, revoked_at, app_key
+                       created_at, expires_at, last_used_at, revoked_at, app_key,
+                       partner, contact, agreement_ref, allowed_ips, last_used_ip,
+                       rotated_to
                 FROM api_tokens
                 WHERE chat_id = {ph}
                 ORDER BY created_at DESC

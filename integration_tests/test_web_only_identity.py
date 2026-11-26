@@ -318,7 +318,7 @@ class TestNoTelegramMemberInTelegramGroup(_Base):
         token = self.db.get_or_create_chat(TG_CHAT)["group_web_token"]
         asha = self.email_login("asha@example.com", name="Asha")["user_id"]
         r = self.client.post(f"/api/v1/web/group/{token}/join", json={}, headers=self.h(asha))
-        self.assertEqual(r.json(), {"joined": True, "pending": False, "name": "Asha"})
+        self.assertEqual(r.json(), {"joined": True, "pending": False, "denied": False, "name": "Asha"})
         # A Telegram member is the bot's to track, not the web page's.
         r = self.client.post(f"/api/v1/web/group/{token}/join", json={"name": "Fake"}, headers=self.h(TG_MEMBER))
         self.assertEqual(r.status_code, 422)

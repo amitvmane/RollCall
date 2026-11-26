@@ -148,6 +148,18 @@ def verify_identity_token(token: Optional[str], chat_id: Optional[int] = None) -
     return resolved
 
 
+def verify_identity_token_unfollowed(token: Optional[str]) -> Optional[int]:
+    """A GLOBAL token's own user id, NOT followed through a merge — for the
+    merge routes, which need the email account itself — but still refused
+    after "sign out everywhere" or account deletion. A raw _verify() there
+    let a token stolen before a sign-out still merge the victim's account
+    (and its email) into the thief's Telegram account."""
+    user_id = _verify(token, scope=None)
+    if user_id is None or _revoked(token, user_id, None):
+        return None
+    return user_id
+
+
 def _revoked(token: str, raw_id: int, resolved_id: Optional[int]) -> bool:
     """True if the person chose "sign out everywhere" after this token was
     issued (services/account.py). Every identity token is minted with

@@ -11,6 +11,10 @@ const LS_TG_USER_ID="rc_verified_tg_user_id";
 const LS_TG_NAME="rc_verified_tg_name";
 const LS_TG_USERNAME="rc_verified_tg_username";
 const LS_ID_TOKEN="rc_identity_token";
+const LS_AFTER_SIGNIN="rc_after_signin";   // what to do once signed in (_resumeAfterSignIn)
+// This visitor's standing in the group, for people the bot can't see
+// (_loadMembership). Declared up here: renderAcctMenu reads it early.
+let _membership=null, _membershipFor=null;
 
 // Verified Telegram identity from deep-link verification (persists across sessions)
 let _verifiedUserId=parseInt(localStorage.getItem(LS_TG_USER_ID))||null;
@@ -440,6 +444,8 @@ window.signOut=async function(){
 // Sign-out without asking: shared by Sign out and by deleting the account.
 function _signOutHere(msg){
   _clearStoredIdentity();
+  _membership=null;_membershipFor=null;
+  const mc=document.getElementById("membership-card");if(mc)mc.classList.add("hidden");
   currentName="";
   localStorage.removeItem(LS_NAME);
   localStorage.removeItem(LS_NAME_OVERRIDE);
@@ -548,6 +554,9 @@ function renderAcctMenu(){
   // account, so signing in by email later is still them.
   if(verified&&_idToken&&_emailEnabled&&!_isLocalUid(_verifiedUserId||(TG_USER&&TG_USER.id))){
     html+=`<button class="acct-menu-item" role="menuitem" data-on-click="closeAcctMenu acctEmail">✉️ Email sign-in</button>`;
+  }
+  if(IS_GROUP&&_membership&&_membership.can_leave){
+    html+=`<button class="acct-menu-item" role="menuitem" data-on-click="closeAcctMenu leaveThisGroup">🚪 Leave this group</button>`;
   }
   if(verified&&_idToken){
     html+=`<button class="acct-menu-item" role="menuitem" data-on-click="closeAcctMenu openAccount">👤 Account</button>`;
@@ -706,6 +715,7 @@ function _afterEmailSignIn(data){
   _checkWebAdmin().catch(()=>{});
   if(!URL_TOKEN)_loadHomeGroups().catch(()=>{});
   _relinkPushSubscription();
+  _resumeAfterSignIn();
   // Arriving from a group's page: someone without Telegram joins it as
   // themselves (the bot can't see them, so nothing else would add them).
   if(IS_GROUP&&_isLocalUid(data.user_id)){
@@ -714,7 +724,8 @@ function _afterEmailSignIn(data){
       body:"{}",signal:AbortSignal.timeout(8000)})
       .then(r=>r.ok?r.json():null)
       .then(j=>{if(j&&j.pending)toast("🚪 You've asked to join — an admin will approve you, then you can vote.",6000);})
-      .catch(()=>{});
+      .catch(()=>{})
+      .finally(()=>_loadMembership(true));
   }
 }
 
@@ -918,6 +929,21 @@ window.acctDelete=async function(){
     },
   });
 };
+// ?welcome=1 — a group was just created here: say what to do next.
+// ?create=1 — "Create your own group" from another group's page.
+(function(){
+  try{
+    const p=new URLSearchParams(window.location.search);
+    const welcome=p.get("welcome")==="1", create=p.get("create")==="1";
+    if(!welcome&&!create)return;
+    p.delete("welcome");p.delete("create");
+    const qs=p.toString();
+    history.replaceState(null,"",window.location.pathname+(qs?"?"+qs:""));
+    if(welcome&&IS_GROUP)setTimeout(()=>toast("🎉 Your group is ready. Invite people with 🔗 Invite people, then start your first rollcall.",7000),600);
+    if(create&&!URL_TOKEN)setTimeout(()=>openCreateGroup(),400);
+  }catch(_){}
+})();
+
 // ?account=1 — the "Email settings" link in notification emails.
 (function(){
   try{
@@ -931,8 +957,18 @@ window.acctDelete=async function(){
 })();
 
 // ── Create a group (no Telegram chat needed) ──────────────────────────────
+// Something the visitor asked for that needed a sign-in first: done once
+// they're signed in (the email link reopens the page, so it's remembered).
+function _resumeAfterSignIn(){
+  let want=null;
+  try{want=localStorage.getItem(LS_AFTER_SIGNIN);localStorage.removeItem(LS_AFTER_SIGNIN);}catch(_){}
+  if(want==="create_group"&&!URL_TOKEN&&_idToken)setTimeout(()=>openCreateGroup(),300);
+}
 window.openCreateGroup=function(){
-  if(!_idToken){toast("Sign in first — then you can create a group.",3500);openSignIn();return;}
+  if(!_idToken){
+    try{localStorage.setItem(LS_AFTER_SIGNIN,"create_group");}catch(_){}
+    toast("Sign in first — then you'll create your group.",3500);openSignIn();return;
+  }
   let tz="Asia/Kolkata";
   try{tz=Intl.DateTimeFormat().resolvedOptions().timeZone||tz;}catch(_){}
   _openFormSheet({
@@ -950,7 +986,7 @@ window.openCreateGroup=function(){
         signal:AbortSignal.timeout(10000)});
       const d=await r.json().catch(()=>({}));
       if(!r.ok)throw new Error(d.detail||"Couldn't create the group");
-      window.location.href=`/web/group/${d.group_token}`;
+      window.location.href=`/web/group/${d.group_token}?welcome=1`;
     },
   });
 };
@@ -1662,14 +1698,85 @@ function renderGroup(){
   const sb=document.getElementById("share-btn");
   if(sb&&navigator.share)sb.style.display="";
   renderGroupCta();
+  _loadMembership();
 }
+
+// ── Membership (people the bot can't see) ─────────────────────────────────
+// A Telegram member of a Telegram group is a member because Telegram says so;
+// everyone else — no Telegram, or any web-only group — joins from this page.
+function _membershipRelevant(){
+  return IS_GROUP&&_idToken&&(_isLocalUid(_verifiedUserId)||(groupData&&groupData.web_only));
+}
+async function _loadMembership(force){
+  if(!_membershipRelevant()){_membership=null;_renderMembership();return;}
+  if(!force&&_membershipFor===_idToken){_renderMembership();return;}
+  _membershipFor=_idToken;
+  try{
+    const r=await fetch(`${API_GROUP}/membership`,{headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(8000)});
+    _membership=r.ok?await r.json():null;
+  }catch(_){_membership=null;}
+  _renderMembership();
+  renderAcctMenu();
+}
+function _renderMembership(){
+  const el=document.getElementById("membership-card");
+  if(!el)return;
+  const m=_membership;
+  if(!m||m.member||_isWebAdmin){el.classList.add("hidden");el.innerHTML="";return;}
+  let title,sub,btn="";
+  if(m.pending){
+    title="⏳ Waiting for an admin to let you in";
+    sub="You asked to join. Once an admin approves you, you can vote — you'll get a notification.";
+  }else if(m.denied){
+    title="This group's admins didn't approve your request";
+    sub="Ask the person who shared the link if you think that's a mistake.";
+  }else if(m.can_join){
+    title="👋 You're not in this group yet";
+    sub=m.needs_approval?"Ask to join — an admin approves new members, then you can vote."
+                        :"Join to vote and get notified when a new game opens.";
+    btn=`<button class="btn btn-primary" data-on-click="joinThisGroup">${m.needs_approval?"Ask to join":"Join group"}</button>`;
+  }else{el.classList.add("hidden");return;}
+  el.innerHTML=`<div class="mc-text"><div class="mc-title">${esc(title)}</div><div class="mc-sub">${esc(sub)}</div></div>${btn}`;
+  el.classList.remove("hidden");
+}
+window.joinThisGroup=async function(){
+  try{
+    const r=await fetch(`${API_GROUP}/join`,{method:"POST",
+      headers:{"Content-Type":"application/json","X-Identity-Token":_idToken},
+      body:JSON.stringify(currentName?{name:currentName}:{}),signal:AbortSignal.timeout(8000)});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||"Couldn't join");
+    toast(d.pending?"🚪 Asked — an admin will approve you":d.denied?"The admins didn't approve your request":"✅ You're in",4000);
+    _loadMembership(true);
+    if(typeof loadWebStats==="function")loadWebStats();
+  }catch(e){toast(e.message||"Couldn't join",4000);}
+};
+window.leaveThisGroup=async function(){
+  const name=(groupData&&groupData.group_name)||"this group";
+  if(!await _confirmAction(`Leave ${name}?\n\nYou stop getting its notifications and can't vote there. Your past games and money records stay in the group's history.`))return;
+  try{
+    const r=await fetch(`${API_GROUP}/leave`,{method:"POST",headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(8000)});
+    if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||"Couldn't leave");}
+    toast(`You left ${name}`,3500);
+    _loadMembership(true);
+  }catch(e){toast(e.message||"Couldn't leave",4500);}
+};
+// Invite: the share sheet where there is one, the clipboard otherwise.
+window.inviteToGroup=function(){
+  const url=window.location.origin+`/web/group/${URL_TOKEN}`;
+  const name=(groupData&&groupData.group_name)||"our group";
+  if(navigator.share){
+    navigator.share({title:`Join ${name} on RollCall`,text:`Vote in/out for ${name}'s games here:`,url}).catch(()=>{});
+  }else{copyGroupLink();}
+};
 
 // "Create your own group" footer — the viral loop for guests who arrived via
 // a shared link. Deep-links to the bot with ?startgroup so Telegram prompts
 // them to pick a group to add it to. Names and the username only — no tokens.
 function renderGroupCta(){
   const u=groupData&&groupData.bot_username;
-  if(!u)return;
+  const webFirst=(groupData&&groupData.web_only)||_isLocalUid(_verifiedUserId);
+  if(!u&&!webFirst)return;
   let el=document.getElementById("group-cta");
   if(!el){
     el=document.createElement("div");
@@ -1683,7 +1790,11 @@ function renderGroupCta(){
     if(!container)return;
     container.appendChild(el);
   }
-  el.innerHTML=`⚡ Made with <strong>RollCall</strong> · <a href="https://t.me/${esc(u)}?startgroup=true" target="_blank" rel="noopener">Create your own group →</a>`;
+  // Two ways to start one: on the web (no Telegram needed) or in Telegram.
+  // Someone who came without Telegram sees the web way first.
+  const web=`<a href="/web/?create=1">Create your own group →</a>`;
+  const tg=u?`<a href="https://t.me/${esc(u)}?startgroup=true" target="_blank" rel="noopener">${webFirst?"or add it to Telegram":"Create your own group →"}</a>`:"";
+  el.innerHTML=`⚡ Made with <strong>RollCall</strong> · `+(webFirst?web+(tg?" · "+tg:""):tg+` · <a href="/web/?create=1">or start one on the web</a>`);
 }
 
 // ── Auto-refresh ───────────────────────────────────────────────────────────
@@ -2174,6 +2285,8 @@ function _adoptVerifiedIdentity(data){
   if(!URL_TOKEN)_loadHomeGroups().catch(()=>{});
   // Re-link any existing push subscription with the now-known user ID
   _relinkPushSubscription();
+  _resumeAfterSignIn();
+  _loadMembership(true);
 }
 
 async function _pollVerify(){
@@ -2708,7 +2821,13 @@ function renderHomeScreen(){
   if(!groups.length){
     container.innerHTML=_homeGroupsLoading
       ?'<p style="color:var(--sub);font-size:.85rem">Loading your groups…</p>'
-      :'<p style="color:var(--sub);font-size:.85rem">No groups yet. Visit a group rollcall link and it\'ll appear here automatically — or paste one below.</p>';
+      :(_idToken
+        ?'<p style="color:var(--sub);font-size:.85rem">No groups yet. Open the link your organiser shared and it\'ll appear here — or create your own below.</p>'
+        :`<div class="home-welcome">
+            <div style="font-weight:700;font-size:1rem;margin-bottom:4px">👋 Welcome to RollCall</div>
+            <div style="color:var(--sub);font-size:.85rem;margin-bottom:10px">Got a link from your organiser? Just open it. Running a group? Sign in with Telegram or your email — your groups show up here.</div>
+            <button class="btn btn-primary" style="padding:9px 16px" data-on-click="openSignIn">Sign in</button>
+          </div>`);
     return;
   }
   container.innerHTML=groups.map(g=>{
@@ -2829,6 +2948,7 @@ async function _checkWebAdmin(){
 
 function _applyAdminStatus(isAdmin){
   _isWebAdmin=isAdmin;
+  _renderMembership();
   const card=document.getElementById("admin-card");
   if(card)card.classList.toggle("hidden",!_isWebAdmin);
   const warn=document.getElementById("admin-check-warning");
@@ -2986,6 +3106,7 @@ function renderEmptyState(){
   let html="";
   if(_isWebAdmin){
     html+=`<button class="btn btn-primary" data-on-click="openNewRollcallModal">＋ New Rollcall</button>`;
+    html+=`<button class="btn btn-secondary" data-on-click="inviteToGroup">🔗 Invite people</button>`;
     html+=`<button class="btn btn-secondary" data-on-click="showView" data-args="${rcArgs("admin")}">⚙ Admin controls</button>`;
   }else if(_pushSupported()){
     html+=`<button class="btn btn-primary" data-on-click="toggleNotifications">🔔 Notify me when one opens</button>`;
@@ -3104,10 +3225,24 @@ function renderIntegrations(once){
       <div class="adm-row-t">${esc(once.title)}</div>
       <div class="adm-row-s">Copy it now — it won't be shown again.</div>
       <input readonly value="${esc(once.value)}" style="width:100%;margin-top:6px;font-family:monospace" data-on-click="selectAll" data-args='[{"$":"this"}]'/></div>`:"";
-  const keyRows=keys.length?keys.map(k=>`<div class="gr-row" style="cursor:default">
-      <span class="gr-name">${esc(k.label)} <span class="gr-tag">${esc(k.scopes.join(", "))}</span>${k.revoked?' <span class="gr-tag">revoked</span>':""}</span>
-      <span class="adm-row-s">${k.last_used_at?"used "+esc(String(k.last_used_at).slice(0,10)):"never used"} · ends ${esc(String(k.expires_at).slice(0,10))}</span>
-      ${k.revoked?"":`<button class="btn btn-secondary" style="padding:6px 10px;font-size:.78rem" data-on-click="revokeAppKey" data-args="${rcArgs(k.key_id,k.label)}">Revoke</button>`}</div>`).join("")
+  const keyRows=keys.length?keys.map(k=>{
+      const st=k.status||(k.revoked?"revoked":"active");
+      const tags=`<span class="gr-tag">${esc(k.scopes.join(", "))}</span>`
+        +(k.kind==="personal"?' <span class="gr-tag">/gentoken</span>':"")
+        +(st!=="active"?` <span class="gr-tag">${esc(st)}</span>`:"")
+        +(k.rotated_to?' <span class="gr-tag">rotated</span>':"");
+      const terms=[k.partner,k.agreement_ref?"ref "+k.agreement_ref:"",k.contact].filter(Boolean).map(esc).join(" · ");
+      const ips=(k.allowed_ips||[]).length?` · only from ${esc(k.allowed_ips.join(", "))}`:"";
+      const used=k.last_used_at?"used "+esc(String(k.last_used_at).slice(0,10))+(k.last_used_ip?" from "+esc(k.last_used_ip):""):"never used";
+      const btns=st!=="active"?"":
+        (k.kind==="app"&&!k.rotated_to?`<button class="btn btn-secondary" style="padding:6px 10px;font-size:.78rem" data-on-click="rotateAppKey" data-args="${rcArgs(k.key_id,k.label)}">Rotate</button>`:"")
+        +`<button class="btn btn-secondary" style="padding:6px 10px;font-size:.78rem" data-on-click="revokeAppKey" data-args="${rcArgs(k.key_id,k.label)}">Revoke</button>`;
+      return `<div class="gr-row" style="cursor:default;flex-wrap:wrap">
+      <span class="gr-name">${esc(k.label)} ${tags}</span>
+      ${terms?`<span class="adm-row-s" style="flex-basis:100%">${terms}</span>`:""}
+      <span class="adm-row-s">${used} · ends ${esc(String(k.expires_at).slice(0,10))}${ips}</span>
+      ${btns}</div>`;
+    }).join("")
     :'<div class="sched-empty">No app keys yet.</div>';
   const hookRows=webhooks.length?webhooks.map(w=>`<div class="gr-row" style="cursor:default;flex-wrap:wrap">
       <span class="gr-name" style="word-break:break-all">${esc(w.url)}</span>
@@ -3124,6 +3259,15 @@ function renderIntegrations(once){
     <div style="margin:8px 0 14px">
       <input id="ik-label" type="text" maxlength="60" placeholder="Which app? e.g. Club website" style="width:100%;margin-bottom:6px"/>
       <div style="margin-bottom:6px">${scopeBoxes}${you_are_owner?"":'<span class="adm-row-s"> (admin scope: owners only)</span>'}</div>
+      <details style="margin-bottom:8px"><summary class="adm-row-s" style="cursor:pointer">Agreement &amp; limits (for a partner organisation)</summary>
+        <input id="ik-partner" type="text" maxlength="100" placeholder="Organisation, e.g. Playfield Ltd" style="width:100%;margin:6px 0"/>
+        <input id="ik-contact" type="text" maxlength="254" placeholder="Their contact (email or phone)" style="width:100%;margin-bottom:6px"/>
+        <input id="ik-agreement" type="text" maxlength="100" placeholder="Agreement reference, e.g. AGR-2026-014" style="width:100%;margin-bottom:6px"/>
+        <input id="ik-ips" type="text" maxlength="600" placeholder="Only from these IPs (optional), e.g. 203.0.113.0/24" style="width:100%;margin-bottom:6px"/>
+        <label class="adm-row-s" for="ik-days">Expires after</label>
+        <select id="ik-days" style="margin-left:6px"><option value="30">30 days</option><option value="90">90 days</option><option value="180">6 months</option><option value="365" selected>1 year</option><option value="730">2 years</option></select>
+        <div class="adm-row-s" style="margin-top:6px">You and the owners are reminded 14 and 3 days before it expires. Rotate gives the partner a new key while the old one keeps working for 7 days.</div>
+      </details>
       <button class="btn btn-primary" style="padding:8px 14px;font-size:.85rem" data-on-click="createAppKey">＋ Make key</button>
     </div>
     <div class="adm-row-t">🪝 Webhooks</div>${hookRows}
@@ -3139,10 +3283,25 @@ window.createAppKey=async function(){
   const label=($("ik-label").value||"").trim();
   const scopes=[...document.querySelectorAll(".ik-scope:checked")].map(x=>x.value);
   if(!label){$("ik-label").focus();return;}
+  const val=id=>(($(id)&&$(id).value)||"").trim();
+  const ips=val("ik-ips").split(/[\s,;]+/).filter(Boolean);
+  const body={label,scopes,days:parseInt(val("ik-days")||"365",10)||365,
+    ...(val("ik-partner")?{partner:val("ik-partner")}:{}),
+    ...(val("ik-contact")?{contact:val("ik-contact")}:{}),
+    ...(val("ik-agreement")?{agreement_ref:val("ik-agreement")}:{}),
+    ...(ips.length?{allowed_ips:ips}:{})};
   try{
-    const k=await _integCall("api-keys",{method:"POST",body:JSON.stringify({label,scopes,days:365})});
+    const k=await _integCall("api-keys",{method:"POST",body:JSON.stringify(body)});
     _integ=await _integCall("integrations");
-    renderIntegrations({title:`🔑 Key for ${k.label} (${k.scopes.join(", ")})`,value:k.token});
+    renderIntegrations({title:`🔑 Key for ${k.label} (${k.scopes.join(", ")}) — expires ${k.expires_at}`,value:k.token});
+  }catch(e){toast(e.message,4500);}
+};
+window.rotateAppKey=async function(id,label){
+  if(!await _confirmAction(`Rotate the key for ${label}?\n\nYou get a new key with the same access. The old one keeps working for 7 more days, then stops — give the partner the new key before then.`))return;
+  try{
+    const k=await _integCall(`api-keys/${encodeURIComponent(id)}/rotate`,{method:"POST",body:"{}"});
+    _integ=await _integCall("integrations");
+    renderIntegrations({title:`🔑 New key for ${k.label} — the old one works until ${k.previous_expires_at}`,value:k.token});
   }catch(e){toast(e.message,4500);}
 };
 window.revokeAppKey=async function(id,label){
@@ -3192,8 +3351,35 @@ async function loadJoinRequests(){
           <button class="btn btn-primary" style="padding:6px 10px;font-size:.78rem" data-on-click="decideJoin" data-args="${rcArgs(r.user_id,true)}">Approve</button>
           <button class="btn btn-secondary" style="padding:6px 10px;font-size:.78rem" data-on-click="decideJoin" data-args="${rcArgs(r.user_id,false)}">Deny</button></div>`).join("")
       :`<div class="sched-empty">${groupData&&groupData.join_approval?"Nobody is waiting.":"Approval is off — anyone with the link can join."}</div>`;
+    body.innerHTML+=await _removableMembersHtml();
   }catch(e){body.innerHTML=`<div class="sched-empty">${esc(e.message)}</div>`;}
 }
+// Members the page let in (people without Telegram; everyone in a web-only
+// group) — Telegram members are removed in Telegram.
+async function _removableMembersHtml(){
+  try{
+    const res=await fetch(`${API_GROUP}/members/removable`,{headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(8000)});
+    if(!res.ok)return "";
+    const ms=((await res.json()).members||[]).filter(m=>m.user_id!==_verifiedUserId);
+    const rows=ms.length?ms.map(m=>`<div class="gr-row" style="cursor:default"><span class="gr-name">${esc(m.name)}${m.role?` <span class="gr-tag">${esc(m.role)}</span>`:""}</span>
+        <button class="btn btn-secondary" style="padding:6px 10px;font-size:.78rem" data-on-click="removeMember" data-args="${rcArgs(m.user_id,m.name)}">Remove</button></div>`).join("")
+      :'<div class="sched-empty">Nobody to manage here yet — share the group link to invite people.</div>';
+    return `<div class="adm-row-t" style="margin-top:14px">👥 Members without Telegram</div>
+      <div class="adm-row-s" style="margin-bottom:6px">${groupData&&groupData.web_only?"Everyone in this group.":"Telegram members are managed in the Telegram group."} Removing keeps their past games and money records.</div>${rows}`;
+  }catch(_){return "";}
+}
+window.removeMember=async function(userId,name){
+  if(!await _confirmAction(`Remove ${name} from this group?\n\nThey stop getting its notifications and can't vote. Their past games and money records stay. They can ask to join again.`))return;
+  try{
+    const res=await fetch(`${API_GROUP}/members/remove`,{method:"POST",
+      headers:{"Content-Type":"application/json","X-Identity-Token":_idToken},
+      body:JSON.stringify({user_id:userId}),signal:AbortSignal.timeout(8000)});
+    const d=await res.json().catch(()=>({}));
+    if(!res.ok)throw new Error(d.detail||"Couldn't remove them");
+    toast(`${name} was removed`,2500);
+    loadJoinRequests();
+  }catch(e){toast(e.message||"Couldn't remove them",4500);}
+};
 window.decideJoin=async function(userId,approve){
   try{
     const res=await fetch(`${API_GROUP}/join-requests/decide`,{method:"POST",

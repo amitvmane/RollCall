@@ -1407,6 +1407,82 @@ const WIDTHS = [
     await page.close();
   }
 
+  // Membership card for someone without Telegram who isn't in the group yet:
+  // "Ask to join" → waiting; once a member, the card goes and the menu
+  // offers "Leave this group". Fits 320px.
+  {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 320, height: 700 });
+    await page.setRequestInterception(true);
+    let ms = { member: false, can_join: true, needs_approval: true, pending: false, denied: false };
+    const posts = [];
+    page.on("request", req => {
+      const u = req.url();
+      if (/\/admin-status/.test(u)) return req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ is_admin: false }) });
+      if (/\/membership$/.test(u)) return req.respond({ status: 200, contentType: "application/json", body: JSON.stringify(ms) });
+      if (/\/join$/.test(u) && req.method() === "POST") {
+        posts.push(u); ms = { ...ms, pending: true, can_join: true };
+        return req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ joined: false, pending: true }) });
+      }
+      return u.startsWith(BASE) ? req.continue() : req.respond({ status: 200, contentType: "text/plain", body: "" });
+    });
+    const errs = [];
+    page.on("pageerror", e => errs.push(String(e.message)));
+    await page.goto(`${BASE}/web/group/testtoken123`, { waitUntil: "load" });
+    await page.evaluate(u => {
+      localStorage.clear();
+      localStorage.setItem("rc_verified_tg_user_id", String(u.user_id));
+      localStorage.setItem("rc_verified_tg_name", u.name);
+      localStorage.setItem("rc_identity_token", u.id_token);
+    }, EMAIL_USER);
+    await page.reload({ waitUntil: "load" });
+    await new Promise(r => setTimeout(r, 700));
+    let c = await page.evaluate(() => {
+      const el = document.getElementById("membership-card");
+      return { shown: el && !el.classList.contains("hidden"), text: el ? el.innerText : "",
+               wide: document.documentElement.scrollWidth > window.innerWidth };
+    });
+    if (!c.shown) failures.push("membership: card not shown to a non-member without Telegram");
+    if (!/Ask to join/.test(c.text)) failures.push(`membership: no "Ask to join" — "${c.text.slice(0, 80)}"`);
+    if (c.wide) failures.push("membership: card overflows a 320px screen");
+    await page.evaluate(() => document.querySelector('#membership-card [data-on-click="joinThisGroup"]').click());
+    await new Promise(r => setTimeout(r, 500));
+    c = await page.evaluate(() => document.getElementById("membership-card").innerText);
+    if (!posts.length) failures.push("membership: Ask to join did not POST /join");
+    if (!/Waiting for an admin/.test(c)) failures.push(`membership: not shown as waiting after asking — "${c.slice(0, 80)}"`);
+    ms = { member: true, can_join: false, can_leave: true };
+    await page.reload({ waitUntil: "load" });
+    await new Promise(r => setTimeout(r, 700));
+    c = await page.evaluate(() => {
+      document.getElementById("acct-btn").click();
+      return { hidden: document.getElementById("membership-card").classList.contains("hidden"),
+               leave: !!document.querySelector('#acct-menu [data-on-click="closeAcctMenu leaveThisGroup"]') };
+    });
+    if (!c.hidden) failures.push("membership: card still shown to a member");
+    if (!c.leave) failures.push("membership: member without Telegram has no 'Leave this group' in the menu");
+    if (errs.length) failures.push(`membership: JS error — ${errs[0]}`);
+    await page.evaluate(() => localStorage.clear());
+    console.log("  membership: ask to join → waiting, member gets Leave this group, 320px");
+    await page.close();
+  }
+
+  // Landing page: both ways in (Telegram, and the web without it), at 320px.
+  {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 320, height: 700 });
+    await page.goto(`${BASE}/index/index.html`, { waitUntil: "load" });
+    const l = await page.evaluate(() => ({
+      web: !!document.querySelector('a.cta[href="/web/?create=1"]'),
+      tg: !!document.querySelector("a.cta:not(.cta-alt)"),
+      wide: document.documentElement.scrollWidth > window.innerWidth,
+    }));
+    if (!l.web) failures.push("landing: no 'Start on the web' way in for people without Telegram");
+    if (!l.tg) failures.push("landing: no 'Add to a Telegram group' button");
+    if (l.wide) failures.push("landing: overflows a 320px screen");
+    console.log("  landing: Telegram and web-only ways in, 320px");
+    await page.close();
+  }
+
   // shared/actions.js — the one listener every button now goes through.
   {
     const page = await browser.newPage();

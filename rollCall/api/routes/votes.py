@@ -50,19 +50,27 @@ async def cast_vote(
     # A partner app key votes for MEMBERS: an int id the group already knows.
     # Not a name (adding a guest is admin-only — routes/proxy_votes.py) and not
     # an invented id, which would plant a phantom member in the group.
+    # Only CURRENT members: one who left, was removed or deleted their account
+    # keeps a chat_members row (history), but an outside app must not vote
+    # for them. And the name is the group's, not the partner's — a typo'd
+    # first_name in a partner's payload must not rename a member.
+    first_name, username = body.first_name, body.username
     if _token.app_key and "admin" not in _token.scopes:
         import db as _db
-        if not isinstance(body.user_id, int) or _db.get_member_display_info(chat_id, body.user_id) is None:
+        info = _db.get_member_display_info(chat_id, body.user_id) if isinstance(body.user_id, int) else None
+        if info is None or not _db.is_active_chat_member(chat_id, body.user_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="An app key votes for members of this group only (guests need an admin key's proxy-votes)",
+                detail="An app key votes for current members of this group only (guests need an admin key's proxy-votes)",
             )
+        first_name = info.get("first_name") or first_name
+        username = info.get("username") or username
 
     common_args = dict(
         chat_id=chat_id,
         user_id=body.user_id,
-        first_name=body.first_name,
-        username=body.username,
+        first_name=first_name,
+        username=username,
         comment=body.comment,
         # By id: the service resolves it inside the chat lock.
         rollcall_id=ref.rollcall_id,
@@ -82,6 +90,6 @@ async def cast_vote(
             detail=f"Unknown vote choice: {body.vote!r}",
         )
 
-    await send_vote_notification(chat_id, body.first_name, body.vote)
+    await send_vote_notification(chat_id, first_name, body.vote)
     await mirror_panel_to_telegram(chat_id, ref.number_now())
     return VoteResponse(**result)

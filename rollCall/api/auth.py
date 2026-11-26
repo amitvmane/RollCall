@@ -53,6 +53,9 @@ class AuthedToken:
     # member, like an admin, while issued_by_user_id stays the admin who made
     # it — so the issuer-still-admin re-check keeps applying.
     app_key: bool = False
+    token_hash: Optional[str] = None
+    expires_at: Optional[object] = None      # naive UTC datetime, or None
+    allowed_ips: Optional[str] = None        # app keys: comma-separated CIDRs
 
 
 def _unauthorized(detail: str) -> HTTPException:
@@ -77,7 +80,8 @@ def _verify_token(creds: Optional[HTTPAuthorizationCredentials]) -> AuthedToken:
     if creds.scheme.lower() != "bearer":
         raise _unauthorized("Authorization scheme must be 'Bearer'")
 
-    row = lookup_api_token(_hash_token(creds.credentials))
+    token_hash = _hash_token(creds.credentials)
+    row = lookup_api_token(token_hash)
     if row is None:
         # Don't distinguish "unknown" from "expired" from "revoked" — same
         # 401 for all so clients can't probe token state.
@@ -89,6 +93,9 @@ def _verify_token(creds: Optional[HTTPAuthorizationCredentials]) -> AuthedToken:
         label=row.get("label"),
         issued_by_user_id=row.get("issued_by_user_id"),
         app_key=bool(int(row.get("app_key") or 0)),
+        token_hash=token_hash,
+        expires_at=row.get("expires_at_parsed"),
+        allowed_ips=row.get("allowed_ips"),
     )
 
 
@@ -141,14 +148,26 @@ def require_scope(scope: str):
     ) -> AuthedToken:
         token = _verify_token(creds)
 
-        # Admin-scope tokens only stay admin while their issuer does. Tokens
-        # with no issuer (CLI-minted) or the global chat_id=0 token have no
-        # person to re-check; non-admin scopes are untouched.
-        if ("admin" in token.scopes and token.issued_by_user_id
+        # A partner app key may be limited to the partner's own addresses
+        # (services/partner_api). Checked before anything else is revealed.
+        if token.app_key and token.allowed_ips:
+            from services.partner_api import ip_allowed
+            client_ip = request.client.host if request.client else None
+            if not ip_allowed(token.allowed_ips, client_ip):
+                raise _forbidden("This key can't be used from this address")
+
+        # Admin-scope tokens only stay admin while their issuer does — and so
+        # does EVERY app key: a vote key votes for any member, which is an
+        # admin's power, and a read key shows the group to an outside app on
+        # an admin's say-so. Tokens with no issuer (CLI-minted) or the global
+        # chat_id=0 token have no person to re-check; a member's own
+        # (non-app, non-admin) token is untouched.
+        if (("admin" in token.scopes or token.app_key) and token.issued_by_user_id
                 and token.chat_id != 0):
             if not await _issuer_still_admin(token.chat_id, int(token.issued_by_user_id)):
                 raise _forbidden(
                     "The admin who issued this token is no longer an admin of this chat"
+                    + (" — ask the group for a new key" if token.app_key else "")
                 )
 
         if scope not in token.scopes and "admin" not in token.scopes:
@@ -178,6 +197,9 @@ def require_scope(scope: str):
         # Attach the token to the request so middleware (e.g. rate-limit)
         # can read it without a second DB lookup.
         request.state.api_token = token
+        if token.app_key and token.token_hash:
+            from services.partner_api import record_use
+            record_use(token.token_hash, request.client.host if request.client else None)
         return token
 
     return _dep

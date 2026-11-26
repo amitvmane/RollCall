@@ -170,10 +170,10 @@ class MergePreviewResponse(BaseModel):
 async def merge_local_preview(body: MergeSignedInRequest,
                               id_token: Optional[str] = Depends(identity_from_header)) -> MergePreviewResponse:
     require_identity(id_token, detail="Sign in with Telegram on this device first.")
-    from api.identity import _verify
+    from api.identity import verify_identity_token_unfollowed
     from identity_space import is_local_user
     from services.account_merge import summary
-    local_uid = _verify(body.local_id_token, scope=None)
+    local_uid = verify_identity_token_unfollowed(body.local_id_token)
     if local_uid is None or not is_local_user(local_uid):
         raise HTTPException(status_code=403, detail="That email sign-in has expired.")
     return MergePreviewResponse(from_user_id=local_uid, **summary(local_uid))

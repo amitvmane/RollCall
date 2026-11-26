@@ -35,6 +35,33 @@ class JoinRequest(BaseModel):
 class JoinResponse(BaseModel):
     joined: bool
     pending: bool = False     # the group approves its members; an admin will decide
+    denied: bool = False      # an admin already said no; asking again changes nothing
+    name: Optional[str] = None
+
+
+class MembershipResponse(BaseModel):
+    member: bool
+    pending: bool = False
+    denied: bool = False
+    needs_approval: bool = False
+    can_join: bool = False
+    can_leave: bool = False
+    name: Optional[str] = None
+
+
+class RemovableMember(BaseModel):
+    user_id: int
+    name: str
+    role: Optional[str] = None
+
+
+class RemovableMembersResponse(BaseModel):
+    members: list[RemovableMember]
+
+
+class RemoveMemberResponse(BaseModel):
+    user_id: int
+    removed: bool
     name: Optional[str] = None
 
 
@@ -100,6 +127,24 @@ async def join_group(body: JoinRequest, group_token: str = Path(...),
     return JoinResponse(**local_groups.join(chat_id, uid, body.name or _name_of(uid, None)))
 
 
+@router.get("/web/group/{group_token}/membership", response_model=MembershipResponse,
+            summary="Where you stand in this group: member, waiting for approval, or able to join")
+async def get_membership(group_token: str = Path(...),
+                         id_token: Optional[str] = Depends(identity_from_header)) -> MembershipResponse:
+    chat_id = _chat(group_token)
+    uid = require_identity(id_token, detail="Sign in first.", chat_id=chat_id)
+    return MembershipResponse(**local_groups.membership(chat_id, uid))
+
+
+@router.post("/web/group/{group_token}/leave", status_code=204,
+             summary="Leave this group (people without Telegram; Telegram members leave the Telegram chat)")
+async def leave_group(group_token: str = Path(...),
+                      id_token: Optional[str] = Depends(identity_from_header)) -> None:
+    chat_id = _chat(group_token)
+    uid = require_identity(id_token, detail="Sign in first.", chat_id=chat_id)
+    local_groups.leave(chat_id, uid)
+
+
 async def _owner_call(fn, group_token: str, body: AdminChangeRequest, id_token: Optional[str]):
     chat_id = _chat(group_token)
     uid = require_identity(id_token, detail="Sign in first.", chat_id=chat_id)
@@ -148,6 +193,24 @@ async def decide_join_request(body: JoinDecisionRequest, group_token: str = Path
     return JoinDecisionResponse(**local_groups.decide_request(
         chat_id, body.user_id, body.approve, actor_user_id=uid, actor_name=info.get("first_name") or "admin"))
 
+
+
+@router.get("/web/group/{group_token}/members/removable", response_model=RemovableMembersResponse,
+            summary="Members an admin can remove from the page (people without Telegram; everyone in a web-only group)")
+async def removable_members(group_token: str = Path(...),
+                            id_token: Optional[str] = Depends(identity_from_header)) -> RemovableMembersResponse:
+    chat_id, _ = await _admin(group_token, id_token)
+    return RemovableMembersResponse(members=[RemovableMember(**m) for m in local_groups.removable_members(chat_id)])
+
+
+@router.post("/web/group/{group_token}/members/remove", response_model=RemoveMemberResponse,
+             summary="Remove a member (admins) — past votes and money records stay in the group's history")
+async def remove_member(body: AdminChangeRequest, group_token: str = Path(...),
+                        id_token: Optional[str] = Depends(identity_from_header)) -> RemoveMemberResponse:
+    chat_id, uid = await _admin(group_token, id_token)
+    info = _db.get_member_display_info(chat_id, uid) or {}
+    return RemoveMemberResponse(**local_groups.remove_member(
+        chat_id, body.user_id, actor_user_id=uid, actor_name=info.get("first_name") or "admin"))
 
 
 class AccountMergeRequest(BaseModel):

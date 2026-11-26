@@ -11,7 +11,7 @@ Legend: **you** = needs the owner (server, accounts, decisions) · **code** = ca
 | # | Item | Who | Status |
 |---|------|-----|--------|
 | 1 | **Rotate the production bot token.** It is in public git history (found in the 2026-11-09 security audit) and can forge web logins. Set `IDENTITY_SECRET` first so nobody is signed out, then `/revoke` in BotFather and update `TELEGRAM_TOKEN`. | you | Open — last confirmed still live 2026-11-12 |
-| 2 | **Deploy 11.1** — prod runs 11.0 (`f3414fc`, 23 Nov); 11.1 is everything since: email sign-in, web-only groups, merge, join approval, REST ids, partner API, human check, buzz mute, `repeat=` fix. Set `DeployedDatetime` in `version.json` to the real deploy time. Add `SMTP_HOST`/`SMTP_FROM` (+ `SMTP_USER`/`SMTP_PASSWORD`) to `.env`, `make build`, compare live `/web/` assets with the repo, try one real email sign-in, check `/health`. Give the `SMTP_FROM` domain SPF, DKIM and DMARC records, or sign-in and notification emails land in spam. Set `IDENTITY_SECRET` before rotating the bot token (#1), or every email user is signed out. Schema changes are additive and apply on boot. | you | Open — CI green on main |
+| 2 | **Deploy 11.1** — prod runs 11.0 (`f3414fc`, 23 Nov); 11.1 is everything since: email sign-in, web-only groups, merge, join approval, REST ids, partner API (key lifecycle, idempotency), human check, buzz mute, notification emails, Account page, membership/leave/remove, `repeat=` fix. Set `DeployedDatetime` in `version.json` to the real deploy time. Add `SMTP_HOST`/`SMTP_FROM` (+ `SMTP_USER`/`SMTP_PASSWORD`) to `.env`, `make build`, compare live `/web/` assets with the repo, try one real email sign-in, check `/health`. Give the `SMTP_FROM` domain SPF, DKIM and DMARC records, or sign-in and notification emails land in spam. Set `IDENTITY_SECRET` before rotating the bot token (#1), or every email user is signed out. Schema changes are additive and apply on boot. | you | Open — CI green on main |
 | 3 | Install the Renovate GitHub app (config already in `renovate.json`). | you | Open |
 | 4 | Run the server as non-root: `APP_UID`/`APP_GID=10001` in `.env` → `make fix-perms` → `make build`. | you | Open |
 | 5 | Run `make watchdog-test` once on the server, to prove alerts reach you. | you | Open |
@@ -21,7 +21,7 @@ Legend: **you** = needs the owner (server, accounts, decisions) · **code** = ca
 
 | # | Item | Who | Status |
 |---|------|-----|--------|
-| 7 | Hand `docs/API.md` to the first partner; watch their webhook deliveries under Integrations. | you | Ready |
+| 7 | Hand `docs/API.md` to the first partner under a written agreement: issue their key with the partner, contact, agreement reference and their server IPs filled in (Integrations → *Agreement & limits*); watch "last used … from" and their webhook deliveries there. | you | Ready |
 | 8 | Old number-based REST paths: **kept, backward compatible — not being removed** (decision 2026-11-25). They answer with `Deprecation`/`Link` headers only. | — | Decided |
 | 9 | Optional, stronger human check: create a Cloudflare Turnstile widget, set `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` and `HUMAN_CHECK=turnstile`. The default self-hosted proof of work needs nothing. | you | Optional |
 
@@ -34,6 +34,8 @@ Legend: **you** = needs the owner (server, accounts, decisions) · **code** = ca
 | Ground suggestions / booking monitoring (admin-driven grounds list first). | Parked 2026-11-17 |
 | Late drops: a penalty ("teeth"). Late drops are recorded and shown since 738dfed, deliberately with no charge. | Watch the data first |
 | Embeddable voting widget and SDK for other sites. | After #7 |
+| Activity feed for web-only groups (Telegram groups see every change in the chat; a web-only group has only push/email per person). | Not built — ask first |
+| `_ph()` placeholder helper is copied in ~15 modules; fold into one `db.ph()` when those files are next touched (not worth a churn-only change). | Refactor, low |
 
 ## Dropped — don't resurrect
 
@@ -41,6 +43,8 @@ Legend: **you** = needs the owner (server, accounts, decisions) · **code** = ca
 - Reaction-based voting; `/myvote`; `/ping in|out` split; the old DB-merge cutover.
 
 ## Recently done
+
+- 2026-11-26 — Review (security / function / UX / API): every app key now dies with its issuer's admin standing (was admin-scope only); app-key votes only for current members, under the group's name for them; signed-out or deleted email sessions can't be merged; deleting an account revokes the API keys it issued; only owners switch a webhook back on; a multi-line title no longer breaks a notification email, and unsubscribing stops mail already queued. People without Telegram: membership card (join / waiting / not approved), leave a group, admins remove members, admins notified of join requests; removed/left members no longer count as members. Partner API: agreement fields + IP allowlist on keys, rotation with a 7-day overlap, 14/3-day expiry reminders, `/gentoken` tokens listed and revocable, request ids, rate-limit headers, one error shape, `Idempotency-Key`, key-expiry header; `docs/API.md` rewritten (issuance, lifecycle, obligations, versioning, how future booking APIs will look). Onboarding: landing page has a no-Telegram way in, first-visit welcome, sign-in resumes "create group", 🔗 Invite people, web-first "create your own group". `/weblink` and `/gentoken` help updated.
 
 - 2026-11-26 — Email-only people: notification emails (waitlist, reminders, dues, new games; only when web push is off by default; capped, de-duplicated, retried, one-click unsubscribe) and an Account page (change email, sign out everywhere, delete account).
 - 2026-11-26 — Changelog split: 11.0 entry restored to what's live; 25–26 Nov work is 11.1.

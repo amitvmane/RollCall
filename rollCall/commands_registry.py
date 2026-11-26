@@ -234,7 +234,13 @@ COMMANDS = [
             "🔗 Per-rollcall links — direct links for each active rollcall. "
             "Expire when the rollcall ends.\n\n"
             "Anyone with a link can vote via their browser — no Telegram account needed. "
-            "Requires WEB_BASE_URL to be configured on the server."
+            "People without Telegram can also sign in with their email on the page and join "
+            "as themselves (their votes, stats and dues count like a member's, and they get "
+            "notices by email or web push). Turn on Admin → Members & joining → 'Approve new "
+            "members' to approve each one; admins can remove them there too.\n\n"
+            "No Telegram group at all? Anyone can create a web-only group from the web page "
+            "(＋ Create group).\n\n"
+            "Requires WEB_BASE_URL to be configured on the server (and SMTP_* for email sign-in)."
         ),
     },
     {
@@ -671,8 +677,14 @@ COMMANDS = [
             "Only Telegram group admins (administrator or creator) can run this command.\n\n"
             "For everyday admin tasks, your group's web page (/weblink) now does everything this "
             "token can — no token needed there, just sign in with Telegram. This token is for "
-            "scripted/API access only.\n\n"
-            "When your token expires, run /gentoken again to get a fresh one."
+            "your own scripts only.\n\n"
+            "Giving access to another app or organisation? Don't share this token — make an app "
+            "key instead: web page → Admin → 🔌 Integrations. App keys are scoped (read / vote / "
+            "admin), record the partner and agreement, can be limited to the partner's IPs, expire "
+            "(you're reminded 14 and 3 days before), can be rotated with a 7-day overlap, and are "
+            "revoked on that screen. Developer guide: /help/api on the web.\n\n"
+            "Owners can see and revoke /gentoken tokens on the Integrations screen too. When your "
+            "token expires, run /gentoken again to get a fresh one."
         ),
     },
 

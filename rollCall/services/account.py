@@ -19,8 +19,8 @@ Mini App simply signs in again from Telegram.
 Delete keeps the groups' records: past votes, stats and the dues ledger
 (append-only — CLAUDE.md) stay under the person's id, as a Telegram member's
 past votes stay when they leave a group. What goes: the email, the name on
-the account, group memberships and admin grants, push subscriptions, queued
-emails, sign-in codes, and every session. Refused while it would leave a
+the account, group memberships and admin grants, API keys they issued, push
+subscriptions, queued emails, sign-in codes, and every session. Refused while it would leave a
 group with members and no owner, or leave a game short (they're IN, MAYBE or
 waiting on an open rollcall).
 """
@@ -140,15 +140,13 @@ def _member_chats(user_id: int) -> list:
 
 
 def _blockers(user_id: int) -> list:
-    from rollcall_manager import manager
+    from services.local_groups import on_open_rollcall
     out = []
     for cid in _member_chats(user_id):
         name = (db.get_or_create_chat(cid) or {}).get("group_name") or "a group"
-        for rc in manager.get_rollcalls(cid):
-            lists = rc.inList + rc.maybeList + rc.waitList
-            if any(getattr(u, "user_id", None) == user_id for u in lists):
-                out.append(f"you're on '{rc.title}' in {name} — vote OUT first")
-                break
+        title = on_open_rollcall(cid, user_id)
+        if title:
+            out.append(f"you're on '{title}' in {name} — vote OUT first")
         if db.get_web_admin_role(cid, user_id) == "owner" and db.count_web_admin_owners(cid) <= 1:
             if _other_members(cid, user_id):
                 out.append(f"you're the only owner of {name} — make someone else owner first")
@@ -156,12 +154,7 @@ def _blockers(user_id: int) -> list:
 
 
 def _other_members(chat_id: int, user_id: int) -> list:
-    ph = _ph()
-    active = True if db.db_type == "postgresql" else 1
-    with db._cursor() as cursor:
-        cursor.execute(f"SELECT user_id FROM chat_members WHERE chat_id={ph} AND is_active={ph} AND user_id<>{ph}",
-                       (chat_id, active, user_id))
-        return cursor.fetchall()
+    return [m for m in db.get_active_members(chat_id) if m.get("user_id") != user_id]
 
 
 def delete(user_id: int) -> dict:
@@ -194,6 +187,10 @@ def delete(user_id: int) -> dict:
             f"UPDATE principals SET display_name=NULL, deleted_at={ph}, tokens_valid_after={ph}, "
             f"email_notify='off' WHERE id={ph}", (now, now + 1, pid))   # +1: same-second tokens too
     email_notify.forget(pid)
+    # App keys / API tokens they issued die with the account: a partner key
+    # stays tied to the admin who vouched for it (services/partner_api).
+    from services.partner_api import revoke_issued_by
+    revoke_issued_by(user_id)
     for b in principals.bindings(pid):
         principals.unlink(b["platform"], b["platform_user_id"])
     _cutoffs.clear()

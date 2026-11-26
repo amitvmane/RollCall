@@ -448,10 +448,11 @@ async def merge_signed_in(tg_user_id: int, local_token: str, actor_name: str) ->
     """Merge from an email session: the person signed in by email, then signed
     in with Telegram on the same device, so the page holds proof of BOTH —
     the old email token and the new Telegram one."""
-    from api.identity import _verify
+    from api.identity import verify_identity_token_unfollowed
     from identity_space import is_local_user
     from services.account_merge import merge
-    local_uid = _verify(local_token, scope=None)   # raw: not followed through merges
+    # Not followed through merges, but refused after sign-out-everywhere/delete.
+    local_uid = verify_identity_token_unfollowed(local_token)
     if local_uid is None or not is_local_user(local_uid):
         raise insufficientPermissions("That email sign-in has expired — sign in by email again.")
     if is_local_user(tg_user_id):

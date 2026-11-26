@@ -123,6 +123,34 @@ async def run_periodic_jobs() -> None:
             _en.prune()
     except Exception:
         logging.exception("[periodic] notification emails failed")
+    if datetime.now(timezone.utc).minute == 0:
+        try:
+            from api import partner_gateway as _pg
+            _pg.prune()
+        except Exception:
+            logging.exception("[periodic] idempotency prune failed")
+    # App keys close to expiring: warn the issuer and owners (14 and 3 days
+    # out, once each). Once a day, from the first tick after 03:30 UTC
+    # (09:00 IST) — stamped, so a missed minute doesn't skip the day.
+    try:
+        await asyncio.wait_for(_key_expiry_daily(), timeout=_WEATHER_TICK_BUDGET)
+    except asyncio.TimeoutError:
+        logging.warning("[periodic] key-expiry notices took over %ss", _WEATHER_TICK_BUDGET)
+    except Exception:
+        logging.exception("[periodic] key-expiry notices failed")
+
+
+async def _key_expiry_daily() -> None:
+    import db as _db
+    now_utc = datetime.now(timezone.utc)
+    if (now_utc.hour, now_utc.minute) < (3, 30):
+        return
+    today = now_utc.strftime("%Y-%m-%d")
+    if _db.get_system_config("key_expiry_last") == today:
+        return
+    _db.set_system_config("key_expiry_last", today)
+    from services import partner_api as _pa
+    await _pa.notify_expiring()
 
 
 # ── Bundled vote notices ──────────────────────────────────────────────────────

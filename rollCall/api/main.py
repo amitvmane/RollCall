@@ -34,6 +34,7 @@ from exceptions import (
     rollCallNotStarted,
     timeError,
 )
+from api.partner_gateway import add_request_id, partner_gateway_middleware
 from api.rate_limit import rate_limit_middleware
 from api.security_headers import security_headers_middleware
 from api.routes import account as account_routes, admin, auth, commands as commands_routes, dues as dues_routes, email_auth as email_auth_routes, groups, human as human_routes, integrations as integrations_routes, local_groups as local_groups_routes, health, portal, proxy_votes, rollcalls, stats, templates, tg_verify, votes, web as web_routes
@@ -133,10 +134,38 @@ def create_app() -> FastAPI:
         status = _exception_map.get(type(exc), 400)
         return JSONResponse(
             status_code=status,
-            content=ErrorResponse(
+            content=add_request_id(ErrorResponse(
                 error=type(exc).__name__,
                 detail=str(exc) or type(exc).__name__,
-            ).model_dump(),
+            ).model_dump(), request),
+        )
+
+    # Every other error answers in the same shape — {"error", "detail",
+    # "request_id"} — which docs/API.md promises partners. FastAPI's own
+    # handlers gave a bare {"detail"}; detail is kept exactly as it was
+    # (a string, or the validation error list), so the web page is unaffected.
+    from fastapi.exceptions import RequestValidationError
+    from starlette.exceptions import HTTPException as _StarletteHTTPException
+    _status_names = {400: "badRequest", 401: "unauthorized", 403: "forbidden", 404: "notFound",
+                     405: "methodNotAllowed", 409: "conflict", 410: "gone", 413: "tooLarge",
+                     422: "invalidInput", 428: "humanCheckRequired", 429: "rateLimitExceeded",
+                     503: "unavailable"}
+
+    @app.exception_handler(_StarletteHTTPException)
+    async def _http_exception_handler(request: Request, exc: _StarletteHTTPException):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=add_request_id({"error": _status_names.get(exc.status_code, "httpError"),
+                                    "detail": exc.detail}, request),
+            headers=getattr(exc, "headers", None),
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_exception_handler(request: Request, exc: RequestValidationError):
+        from fastapi.encoders import jsonable_encoder
+        return JSONResponse(
+            status_code=422,
+            content=add_request_id({"error": "invalidInput", "detail": jsonable_encoder(exc.errors())}, request),
         )
 
     # CORS — allow cross-origin requests from browser-based clients.
@@ -161,8 +190,17 @@ def create_app() -> FastAPI:
         allow_origins=_cors_origins,
         allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-Identity-Token"],
+        allow_headers=["Authorization", "Content-Type", "X-Identity-Token", "Idempotency-Key", "X-Request-Id"],
+        expose_headers=["X-Request-Id", "Retry-After", "X-RateLimit-Limit", "X-RateLimit-Remaining",
+                        "X-RateLimit-Reset", "X-RollCall-Key-Expires", "Idempotent-Replayed",
+                        "Deprecation", "Link", "X-Rollcall-Id"],
     )
+
+    # Request ids, Idempotency-Key replays and the key-expiry header for
+    # partners (api/partner_gateway.py). INSIDE the rate limiter (registered
+    # first = wraps less), so a replay still counts against the limit; the
+    # limiter's own 429 gets its request id from the same helper.
+    app.middleware("http")(partner_gateway_middleware)
 
     # Rate-limit middleware. Runs before routes; skips /health.
     app.middleware("http")(rate_limit_middleware)
@@ -205,10 +243,10 @@ def create_app() -> FastAPI:
     async def _proxy_exception_handler(request, exc):
         return JSONResponse(
             status_code=_status.HTTP_409_CONFLICT,
-            content=ErrorResponse(
+            content=add_request_id(ErrorResponse(
                 error=type(exc).__name__,
                 detail=str(exc) or type(exc).__name__,
-            ).model_dump(),
+            ).model_dump(), request),
         )
 
     # Public landing page at the site root. Introduces the bot and offers an

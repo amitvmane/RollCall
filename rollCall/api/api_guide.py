@@ -3,7 +3,8 @@
 
 docs/API.md stays the one copy: this renders it on request (cached by mtime),
 so the page and the file can't drift. The renderer handles exactly the subset
-the guide uses — headings, paragraphs, lists, tables, fenced code, `code`,
+the guide uses — headings, paragraphs, lists (bulleted and numbered), tables,
+fenced code, `code`,
 **bold**, [links](url) — and escapes everything first, so nothing in the
 file can inject markup or script.
 """
@@ -81,6 +82,18 @@ def render(md: str) -> str:
                 i += 1
             out.append("<ul>" + "".join(f"<li>{_inline(x)}</li>" for x in items) + "</ul>")
             continue
+        elif re.match(r"^\d+\. ", line):
+            flush()
+            items = []
+            while i < len(lines) and (re.match(r"^\d+\. ", lines[i]) or
+                                      (items and lines[i].startswith("   ") and lines[i].strip())):
+                if re.match(r"^\d+\. ", lines[i]):
+                    items.append(re.sub(r"^\d+\. ", "", lines[i]))
+                else:
+                    items[-1] += " " + lines[i].strip()
+                i += 1
+            out.append("<ol>" + "".join(f"<li>{_inline(x)}</li>" for x in items) + "</ol>")
+            continue
         elif not line.strip():
             flush()
         else:
@@ -153,6 +166,38 @@ def _refs(node, found: set) -> None:
             _refs(v, found)
 
 
+_RESPONSE_HEADERS = {
+    "X-Request-Id": {"description": "This call's id — echoed if you sent one", "schema": {"type": "string"}},
+    "X-RateLimit-Limit": {"description": "Requests allowed per window", "schema": {"type": "integer"}},
+    "X-RateLimit-Remaining": {"description": "Requests left in this window", "schema": {"type": "integer"}},
+    "X-RateLimit-Reset": {"description": "Seconds until the oldest request leaves the window",
+                          "schema": {"type": "integer"}},
+    "X-RollCall-Key-Expires": {"description": "When this app key stops working (UTC, RFC 3339)",
+                               "schema": {"type": "string", "format": "date-time"}},
+}
+
+
+def _add_conventions(paths: dict) -> None:
+    """The gateway's headers (api/partner_gateway.py) on every operation, and
+    Idempotency-Key on every write — so Swagger shows and sends them."""
+    for ops in paths.values():
+        for method, op in ops.items():
+            params = op.setdefault("parameters", [])
+            names = {p.get("name") for p in params if isinstance(p, dict)}
+            if "X-Request-Id" not in names:
+                params.append({"name": "X-Request-Id", "in": "header", "required": False,
+                               "description": "Your id for this call (1–64 of A–Z a–z 0–9 . _ : -); echoed back",
+                               "schema": {"type": "string", "maxLength": 64}})
+            if method in ("post", "put", "patch", "delete") and "Idempotency-Key" not in names:
+                params.append({"name": "Idempotency-Key", "in": "header", "required": False,
+                               "description": "Makes a retry safe: the same key and request get the first "
+                                              "answer back for 24h (Idempotent-Replayed: true)",
+                               "schema": {"type": "string", "maxLength": 255}})
+            for resp in (op.get("responses") or {}).values():
+                if isinstance(resp, dict):
+                    resp.setdefault("headers", {}).update(copy.deepcopy(_RESPONSE_HEADERS))
+
+
 def partner_spec(full: dict) -> dict:
     paths = {}
     for path, ops in full.get("paths", {}).items():
@@ -169,16 +214,29 @@ def partner_spec(full: dict) -> dict:
         _refs({k: schemas[k] for k in needed if k in schemas}, needed)
         if len(needed) == before:
             break
+    paths = copy.deepcopy(paths)
+    _add_conventions(paths)
     return {
         "openapi": full.get("openapi", "3.1.0"),
         "info": {"title": "RollCall partner API", "version": "v1",
-                 "description": "Rollcalls, votes and settings for ONE group, with an app key made under "
-                                "Admin → Integrations on the group's web page. Guide: /help/api"},
-        "paths": copy.deepcopy(paths),
+                 "description": (
+                     "Rollcalls, votes and settings for ONE group.\n\n"
+                     "**Access** is issued by the group's owner under an agreement made off the platform: "
+                     "an app key (Admin → Integrations on the group's web page) with scopes, an expiry "
+                     "(1–730 days, reminders at 14 and 3 days), an optional IP allowlist, rotation with a "
+                     "7-day overlap, and instant revocation. Every response to an app key carries "
+                     "`X-RollCall-Key-Expires`.\n\n"
+                     "**Conventions:** errors are `{error, detail, request_id}`; every response has "
+                     "`X-Request-Id` and `X-RateLimit-*`; send `Idempotency-Key` on writes to make retries "
+                     "safe (replayed for 24h). Within v1 fields are only ever added.\n\n"
+                     "Guide: [/help/api](/help/api)")},
+        "paths": paths,
         "components": {
             "schemas": {k: copy.deepcopy(schemas[k]) for k in sorted(needed) if k in schemas},
             "securitySchemes": {"appKey": {"type": "http", "scheme": "bearer",
-                                           "description": "An app key (rc_…) from Admin → Integrations"}},
+                                           "description": "An app key (rc_…) issued by the group's owner "
+                                                          "from Admin → Integrations. Bound to one group; "
+                                                          "expires; may be limited to your IP addresses."}},
         },
         "security": [{"appKey": []}],
     }

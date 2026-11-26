@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RollCall — attendance for your group, made simple</title>
-<meta name="description" content="RollCall is a Telegram bot for running attendance rollcalls in your group — vote in/out/maybe, track streaks and stats, and vote from the web.">
+<meta name="description" content="RollCall runs attendance for your group — in Telegram or on the web, no Telegram needed. Vote in/out/maybe, track streaks, stats and dues.">
 <link rel="icon" href="/web/logo.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" sizes="180x180" href="/web/apple-touch-icon.png">
 <script src="/shared/theme-init.js"></script>
@@ -111,6 +111,17 @@
     border-top: 1px solid var(--border);
   }
   footer a { color: var(--accent-dark); }
+  .cta-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 28px; }
+  .cta-row .cta { margin-top: 0; }
+  .cta-alt { background: rgba(255,255,255,.14); color: #fff; box-shadow: none; border: 1.5px solid rgba(255,255,255,.6); }
+  .cta-note { font-size: .88rem !important; margin-top: 16px !important; opacity: .85 !important; }
+  .cta-note a { color: #fff; }
+  .paths { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 640px) { .paths { grid-template-columns: 1fr; } .cta-row .cta { width: 100%; text-align: center; } }
+  .path h3 { margin: 0 0 6px; font-size: 1.02rem; }
+  .path a { color: var(--accent-dark); }
+  .mix { color: var(--muted); font-size: .92rem; margin: 18px 0 0; }
+  section p a { color: var(--accent-dark); }
 </style>
 </head>
 <body>
@@ -122,8 +133,12 @@
     </nav>
     <div class="logo">📋</div>
     <h1>RollCall</h1>
-    <p>Attendance for your Telegram group, made simple. Open a rollcall, let everyone vote <b>in</b>, <b>out</b> or <b>maybe</b>, and track who shows up.</p>
-    <a class="cta" href="{{ADD_URL}}">➕ Add to a Telegram group</a>
+    <p>Attendance for your group, made simple. Open a rollcall, let everyone vote <b>in</b>, <b>out</b> or <b>maybe</b>, and track who shows up — in Telegram or right here on the web.</p>
+    <div class="cta-row">
+      <a class="cta" href="{{ADD_URL}}">➕ Add to a Telegram group</a>
+      <a class="cta cta-alt" href="/web/?create=1">🌐 Start on the web — no Telegram</a>
+    </div>
+    <p class="cta-note">Already in a group? Open the link your organiser shared, or <a href="/web/">see your groups</a>.</p>
   </header>
 
   <main class="wrap">
@@ -155,18 +170,38 @@
 
     <section>
       <h2>Get started in 30 seconds</h2>
-      <ol class="steps">
-        <li>Add <b>@{{BOT_USERNAME}}</b> to your group.</li>
-        <li>An admin runs <code>/src</code> to start a rollcall.</li>
-        <li>Everyone votes with <code>/in</code>, <code>/out</code> or <code>/maybe</code>.</li>
-        <li>Run <code>/erc</code> to close it and record the stats.</li>
-      </ol>
+      <div class="paths">
+        <div class="path">
+          <h3>✈️ With Telegram</h3>
+          <ol class="steps">
+            <li>Add <b>@{{BOT_USERNAME}}</b> to your group.</li>
+            <li>An admin runs <code>/src</code> to start a rollcall.</li>
+            <li>Everyone votes with <code>/in</code>, <code>/out</code> or <code>/maybe</code> — or taps the buttons.</li>
+            <li>Run <code>/erc</code> to close it and record the stats.</li>
+          </ol>
+        </div>
+        <div class="path">
+          <h3>🌐 Without Telegram</h3>
+          <ol class="steps">
+            <li><a href="/web/?create=1">Sign in with your email</a> and create a group.</li>
+            <li>Tap <b>🔗 Invite people</b> and share the link anywhere.</li>
+            <li>People sign in by email and join; you approve them.</li>
+            <li>Start a rollcall — everyone votes on the page and gets an email or a notification.</li>
+          </ol>
+        </div>
+      </div>
+      <p class="mix">Mixed group? People without Telegram can join a Telegram group's web page by email and vote as themselves.</p>
+    </section>
+
+    <section>
+      <h2>For developers &amp; partners</h2>
+      <p>Connect a booking site, club app or ground system to a group with an expiring, revocable <b>app key</b> issued by the group's owner, plus signed webhooks. <a href="/help/api">Read the API guide</a> · <a href="/help/api/reference">API reference</a></p>
     </section>
   </main>
 
   <footer>
-    Run <code>/help</code> in your group for the full command list.<br>
-    RollCall · attendance bot for Telegram
+    Run <code>/help</code> in your group, or see the <a href="/help">command reference</a>.<br>
+    RollCall · attendance for Telegram groups and the web
   </footer>
 </body>
 </html>

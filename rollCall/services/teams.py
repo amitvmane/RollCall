@@ -49,7 +49,8 @@ EMOJI = ["🔴", "🔵", "🟢", "🟡"]
 _AUTO, _LOCKED, _UNLOCKED = 0, 1, -1
 
 
-OFF_MESSAGE = "Teams are off for this group — an admin can turn them on with /teams on."
+OFF_MESSAGE = ("Teams are off for this group — an admin can turn them on with /teams on "
+               "(or /sport game, /sport football, /sport cricket).")
 
 
 def enabled(chat_id: int) -> bool:

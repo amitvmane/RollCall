@@ -81,15 +81,16 @@ COMMANDS = [
         "args": "[::N] | on | off", "sample": "/teams ::2",
         "summary": "Make and view teams for the game",
         "details": (
-            "Teams are OFF until an admin turns them on: /teams on (or the Teams switch in "
-            "the web page's group settings); /teams off hides them again.\n\n"
+            "Teams are OFF until an admin turns them on: /teams on, or /sport game | football | "
+            "cricket (also 🎯 What the group does in the web page's group settings); /teams off "
+            "or /sport event hides them again.\n\n"
             "Once on, /teams shows the team sheet for an open rollcall, with buttons - the "
             "same as the panel's Teams button and the Teams card on the web page. Pick 2-4 "
             "teams and the players IN right now (guests included) are split at random. "
             "Anyone can pick the number of teams, reshuffle, or use Swap players to trade "
             "two players (or just move one) until the teams are locked. Lock/unlock and "
             "Publish (post the teams to the "
-            "group) are admin-only, and teams lock on their own at game time.\n\n"
+            "group, with the game's date, time, place, IN count and fee) are admin-only, and teams lock on their own at game time.\n\n"
             "Teams follow the IN list, locked or not: someone who drops out is taken off "
             "without a reshuffle, and the next person IN - by vote, /sif or the waitlist, "
             "however much later - takes that empty spot on the same team. With no empty "
@@ -110,7 +111,8 @@ COMMANDS = [
             "For groups with a sport set (/sport) and 2, 3 or 4 teams. Football: who plays where "
             "(GK, DEF, MID, FWD) and the subs. Cricket: each player's role - 🧤 WK, 🏏 BAT, "
             "⭐ AR (all-rounder), 🎯 BOWL - set on the web page (no pitch or formation for "
-            "cricket). /lineup pic sends a picture.\n\n"
+            "cricket). /lineup pic sends a picture. Both show the game's date, time, place, "
+            "IN count and fee under the title.\n\n"
             "Football details:\n"
             "Players per side starts at the IN list split by the number of teams (16 or 17 IN "
             "in 2 teams: 8-a-side; 20 IN in 3 teams: 6-a-side) and can be lowered for more subs. "
@@ -120,7 +122,8 @@ COMMANDS = [
             "Teams are filled into positions when they're made; someone IN later is a sub, "
             "and someone who drops leaves an empty spot.\n\n"
             "Same lock as teams. When publishing, admins choose 📣 Post text (easy to copy "
-            "into a forum) or 🖼 Post picture."
+            "into a forum) or 🖼 Post picture. On the web, 📋 Copy text copies it with the "
+            "game details too."
         ),
     },
     {

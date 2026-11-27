@@ -449,7 +449,9 @@ async def lineup_cmd(message):
             markup.add(InlineKeyboardButton("🏟 Arrange on web", url=url))
         if as_picture:   # showing it, not publishing it — no webhook, no publish stamp
             await bot.send_photo(cid, lineup_svc.render_png(rc, lv),
-                                 caption=f"{lineup_svc.SPORTS[lv['sport']]['emoji']} {'Lineup' if lv.get('kind') == 'pitch' else 'Teams'} — {rc.title}",
+                                 caption=lineup_svc.credit_caption(
+                                     f"{lineup_svc.SPORTS[lv['sport']]['emoji']} "
+                                     f"{'Lineup' if lv.get('kind') == 'pitch' else 'Teams'} — {rc.title}"),
                                  reply_markup=markup)
             return
         await bot.send_message(cid, lineup_svc.render_text(rc, lv), reply_markup=markup)

@@ -172,6 +172,26 @@ class TestLineupRules(_Base):
         png = _lu().render_png(self._rc(), lv).getvalue()
         self.assertEqual(png[:8], b"\x89PNG\r\n\x1a\n")
 
+    async def test_shared_picture_says_made_with_rollcall(self):
+        from PIL import Image
+        rc = await self._game(8)
+        lv = _lu().view(self._rc())
+        with patch.dict(os.environ, {"WEB_BASE_URL": "https://rc.example/"}):
+            self.assertEqual(_lu().made_with(), ("Made with RollCall · rc.example", "https://rc.example/"))
+            self.assertTrue(_lu().credit_caption("⚽ Lineup").endswith("\nMade with RollCall — https://rc.example/"))
+            content = _lu().publish_content(self._rc(), __import__("services.teams", fromlist=["x"]).view(self._rc()),
+                                            "", as_picture=True)
+            self.assertIn("https://rc.example/", content["caption"], "the picture can't be tapped — the caption links")
+            # the credit sits in its own strip under the pitch: the bottom rows are not pitch green
+            img = Image.open(content["photo"]).convert("RGB")
+            self.assertNotEqual(img.getpixel((img.width // 2, img.height - 5)), (47, 138, 74))
+        with patch.dict(os.environ, {"WEB_BASE_URL": ""}):
+            self.assertEqual(_lu().made_with(), ("Made with RollCall", None))
+            self.assertEqual(_lu().credit_caption("⚽ Lineup"), "⚽ Lineup", "no page, no dangling link")
+        db.update_chat_settings(CHAT_ID, sport="cricket")
+        png = _lu().render_png(self._rc(), _lu().view(self._rc())).getvalue()
+        self.assertEqual(png[:8], b"\x89PNG\r\n\x1a\n")
+
     async def test_setting_the_sport_places_teams_already_made(self):
         db.update_chat_settings(CHAT_ID, sport=None)
         rc = await self._game(8)

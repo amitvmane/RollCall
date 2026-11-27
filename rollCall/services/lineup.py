@@ -33,8 +33,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from io import BytesIO
 from typing import Optional
+from urllib.parse import urlparse
 
 import db
 from exceptions import incorrectParameter
@@ -464,6 +466,29 @@ def pitch_xy(team_index: int, pos: str, formation: str) -> tuple[float, float]:
 
 # Pitch picture (Pillow — already a dependency via utils/card_gen).
 _TEAM_RGB = {1: (229, 72, 77), 2: (62, 99, 221)}
+_FOOT_H = 44
+
+
+def made_with() -> tuple[str, str | None]:
+    """The credit under a shared picture: ("Made with RollCall · host", url).
+    Text inside a picture can't be tapped, so the caption carries the url;
+    without WEB_BASE_URL there is no page to send anyone to, just the name."""
+    base = os.environ.get("WEB_BASE_URL", "").strip().rstrip("/")
+    host = urlparse(base).netloc if base else ""
+    return (f"Made with RollCall · {host}" if host else "Made with RollCall"), (base + "/" if host else None)
+
+
+def credit_caption(caption: str) -> str:
+    url = made_with()[1]
+    return f"{caption}\nMade with RollCall — {url}" if url else caption
+
+
+def _draw_footer(d, W: int, H: int) -> None:
+    from utils.card_gen import _font, _text_w
+    f = _font(20)
+    label = made_with()[0]
+    d.line([40, H - _FOOT_H, W - 40, H - _FOOT_H], fill=(51, 65, 85), width=1)
+    d.text(((W - _text_w(d, label, f)) / 2, H - _FOOT_H + 11), label, font=f, fill=(148, 163, 184))
 
 
 def _render_roles_png(rc, lv: dict) -> BytesIO:
@@ -475,7 +500,7 @@ def _render_roles_png(rc, lv: dict) -> BytesIO:
                      for t in lv["teams"]]
     names_h = max([sum(len(s["name"]) // 22 + 1 for s in t["slots"]) + len(t["subs"]) // 3 + 1
                    for t in lv["teams"]] + [1])
-    H = 170 + 64 * max(rows_per_team + [1]) + 30 * names_h + 60
+    H = 170 + 64 * max(rows_per_team + [1]) + 30 * names_h + 60 + _FOOT_H
     img = Image.new("RGB", (W, H), (15, 23, 42))
     d = ImageDraw.Draw(img)
     f_title, f_sub, f_role, f_name = _font(38, True), _font(24), _font(22, True), _font(22)
@@ -505,6 +530,7 @@ def _render_roles_png(rc, lv: dict) -> BytesIO:
                     line += piece
             d.text((x + 86, ly), line, font=f_name, fill=(226, 232, 240))
             y = ly + 44
+    _draw_footer(d, W, H)
     return _to_bytes(img)
 
 
@@ -516,7 +542,7 @@ def render_png(rc, lv: dict) -> BytesIO:
 
     W, PH, HEAD = 900, 1240, 120
     subs_lines = [t for t in lv["teams"] if t["subs"]]
-    H = HEAD + PH + 40 + 46 * len(subs_lines) + 30
+    H = HEAD + PH + 40 + 46 * len(subs_lines) + 30 + _FOOT_H
     img = Image.new("RGB", (W, H), (15, 23, 42))
     d = ImageDraw.Draw(img)
     f_title, f_sub = _font(38, True), _font(24)
@@ -587,6 +613,7 @@ def render_png(rc, lv: dict) -> BytesIO:
                _sanitize(_ellipsize(", ".join(s["name"] for s in t["subs"]), 50)), font=f_name,
                fill=(226, 232, 240))
         y += 46
+    _draw_footer(d, W, H)
     return _to_bytes(img)
 
 
@@ -606,7 +633,7 @@ def publish_content(rc, tv: dict, teams_text: str, as_picture: bool = False) -> 
     try:
         caption = (f"{SPORTS[lv['sport']]['emoji']} Lineup — {_title(rc)} · {lv['side']}-a-side"
                    if lv.get("kind") == "pitch" else f"{SPORTS[lv['sport']]['emoji']} Teams — {_title(rc)}")
-        return {"text": text, "photo": render_png(rc, lv), "caption": caption}
+        return {"text": text, "photo": render_png(rc, lv), "caption": credit_caption(caption)}
     except Exception:
         logging.exception("lineup picture failed for rollcall %s — posting text", rc_db_id(rc))
         return {"text": text, "photo": None, "caption": None}

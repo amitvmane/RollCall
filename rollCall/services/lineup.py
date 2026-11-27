@@ -766,7 +766,7 @@ def render_png(rc, lv: dict) -> BytesIO:
     return _to_bytes(img)
 
 
-def _with_details_band(png: BytesIO, line: str) -> BytesIO:
+def with_details_band(png: BytesIO, line: str) -> BytesIO:
     """Add the game details (when · where · IN · fee) as a line under the
     picture's title, so a forwarded picture still says when and where.
     Every picture keeps its title and subtitle above y=112."""
@@ -804,7 +804,7 @@ def publish_content(rc, tv: dict, teams_text: str, as_picture: bool = False) -> 
                    if lv.get("kind") == "pitch" else f"{SPORTS[lv['sport']]['emoji']} Teams — {_title(rc)}")
         caption = f"{caption}\n{teams_svc.details_text(rc)}"
         plain = " · ".join(t for _e, t in teams_svc.game_details(rc))
-        return {"text": text, "photo": _with_details_band(render_png(rc, lv), plain),
+        return {"text": text, "photo": with_details_band(render_png(rc, lv), plain),
                 "caption": credit_caption(caption)}
     except Exception:
         logging.exception("lineup picture failed for rollcall %s — posting text", rc_db_id(rc))

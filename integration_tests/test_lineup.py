@@ -340,6 +340,31 @@ class TestLineupSurfaces(_Base):
         for want in ("🗓 Sun 29 Nov, 07:00 PM", "📍 Turf 3", "👥 8/12 IN", "💰 Fee 200", "Published by"):
             self.assertIn(want, cap)
 
+    async def test_lineup_command_and_copy_text_carry_the_details(self):
+        from handlers.teams import lineup_cmd
+        await self._game(8)
+        rc = await self._details()
+        want = ("🗓 Sun 29 Nov, 07:00 PM", "📍 Turf 3", "👥 8/12 IN", "💰 Fee 200")
+        get_mock_bot().reset_mock()
+        await lineup_cmd(self.msg("/lineup", USERS[0]))
+        text = " ".join(self.sent_texts())
+        for w in want:
+            self.assertIn(w, text)
+        get_mock_bot().reset_mock()
+        await lineup_cmd(self.msg("/lineup pic", USERS[0]))
+        cap = get_mock_bot().send_photo.call_args.kwargs["caption"]
+        for w in want:
+            self.assertIn(w, cap)
+        page = self.client.get(f"/api/v1/web/group/{self.token}").json()
+        copy = page["rollcalls"][0]["teams"]["lineup"]["text"]
+        for w in want:
+            self.assertIn(w, copy)
+        self.assertEqual(copy.count("📍"), 1)
+        # Publishing adds them once, not twice.
+        get_mock_bot().reset_mock()
+        self._post(rc.id, {"action": "publish", "post_as": "text"}, ADMIN_USER["id"])
+        self.assertEqual(get_mock_bot().send_message.call_args.args[1].count("📍 Turf 3"), 1)
+
     async def test_plain_team_sheet_publish_carries_the_details_too(self):
         db.update_chat_settings(CHAT_ID, sport=None)
         await self._game(8)

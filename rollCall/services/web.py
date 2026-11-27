@@ -55,7 +55,8 @@ def with_lineup(rc, v: dict) -> dict:
         from services import lineup
         lv = lineup.view(rc, v)
         if lv["available"]:
-            lv["text"] = lineup.render_text(rc, lv)
+            from services.teams import with_details
+            lv["text"] = with_details(lineup.render_text(rc, lv), rc)   # Copy text: with when / where
         return {**v, "lineup": lv}
     except Exception:
         logging.exception("lineup view failed for rollcall %s", getattr(rc, "id", None))

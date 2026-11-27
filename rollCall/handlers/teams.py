@@ -434,13 +434,16 @@ async def lineup_cmd(message):
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("🏟 Arrange on web", url=url))
         if as_picture:   # showing it, not publishing it — no webhook, no publish stamp
-            await bot.send_photo(cid, lineup_svc.render_png(rc, lv),
+            plain = " · ".join(t for _e, t in teams_svc.game_details(rc))
+            await bot.send_photo(cid, lineup_svc.with_details_band(lineup_svc.render_png(rc, lv), plain),
                                  caption=lineup_svc.credit_caption(
                                      f"{lineup_svc.SPORTS[lv['sport']]['emoji']} "
-                                     f"{'Lineup' if lv.get('kind') == 'pitch' else 'Teams'} — {rc.title}"),
+                                     f"{'Lineup' if lv.get('kind') == 'pitch' else 'Teams'} — {rc.title}\n"
+                                     + teams_svc.details_text(rc)),
                                  reply_markup=markup)
             return
-        await bot.send_message(cid, lineup_svc.render_text(rc, lv), reply_markup=markup)
+        await bot.send_message(cid, teams_svc.with_details(lineup_svc.render_text(rc, lv), rc),
+                               reply_markup=markup)
     except Exception as e:
         await reply_error(message, e)
 

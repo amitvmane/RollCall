@@ -1264,22 +1264,30 @@ class TestSetLocation(HandlerTestBase):
         self.rc.save.assert_called()
         self.assertIn("Central Park", self._sent_text())
 
-    async def test_missing_location_sends_error(self):
+    async def test_alone_shows_the_current_place(self):
+        self.rc.location = "Central Park"
         msg = self._make_message("/location")
         with self._rc_started(), self._patch_manager():
             await self.set_location(msg)
-        self.assertGreater(self._sent_count(), 0)
+        self.rc.save.assert_not_called()
+        self.assertIn("Central Park", self._sent_text())
 
-    async def test_suffix_only_location_rejected(self):
-        # Regression: "/location ::1" has a raw arg (the "::1" token) so the
-        # pre-suffix-strip missing-arg check used to pass; stripping ::N left
-        # an empty place string, which set_location() then silently saved as
-        # None instead of erroring with the usage message.
+    async def test_alone_says_when_no_place_is_set(self):
+        self.rc.location = None
+        msg = self._make_message("/location")
+        with self._rc_started(), self._patch_manager():
+            await self.set_location(msg)
+        self.assertIn("No location set", self._sent_text())
+
+    async def test_suffix_only_shows_and_never_clears(self):
+        # Regression: "/location ::1" once saved an empty place (None). Now it
+        # shows rollcall 1's place and must never write.
+        self.rc.location = "Turf 3"
         msg = self._make_message("/location ::1")
         with self._rc_started(), self._patch_manager():
             await self.set_location(msg)
         self.rc.save.assert_not_called()
-        self.assertIn("format", self._sent_text().lower())
+        self.assertIn("Turf 3", self._sent_text())
 
     async def test_no_rollcall_sends_error(self):
         msg = self._make_message("/location Park")

@@ -97,8 +97,8 @@ all go through `proxy-votes` with an `admin` key.
 returns who plays where — for a booking or turf screen, a scoring or stats
 app, a league table or a stream overlay. It has content when the group has set
 a sport and the game has 2, 3 or 4 teams; otherwise `available` is `false`.
-`teams` has one entry per team. With 3 or 4 teams the group usually rotates
-(two play, the rest wait), so draw each team on its own half-pitch.
+`teams` has one entry per team, each with its own formation. How the teams
+play each other is up to the group's admin — the lineup doesn't say.
 
 ```json
 {

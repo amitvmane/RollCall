@@ -8,7 +8,7 @@ import ssl
 import unittest
 from unittest.mock import patch
 
-from helpers import IntegrationBase, ADMIN_USER
+from helpers import IntegrationBase, ADMIN_USER, CHAT_ID, USERS
 from mock_helpers import get_mock_bot, reset_db
 
 EMAIL_ENV = {"TELEGRAM_TOKEN": "123456789:TEST_BOT_TOKEN_FOR_UNIT_TESTS_ONLY", "SMTP_HOST": "smtp.test",
@@ -116,6 +116,25 @@ class TestHandlersNeverGoSilent(IntegrationBase):
         self.assertIn("/src", text)
         self.assertIn("/weblink", text)
         self.assertNotIn("im RollCall", text)
+
+
+
+class TestLocationAlone(IntegrationBase):
+
+    async def test_anyone_sees_the_place_only_admins_change_it(self):
+        await self.start_rc("Sunday Game")
+        get_mock_bot().reset_mock()
+        await self.set_location(self.msg("/location", USERS[0]))
+        self.assertIn("No location set for 'Sunday Game'", " ".join(self.sent_texts()))
+        await self.set_location(self.msg("/location Turf 3", ADMIN_USER))
+        self.mgr.set_admin_rights(CHAT_ID, True)
+        get_mock_bot().get_chat_member.return_value.status = "member"
+        get_mock_bot().reset_mock()
+        await self.set_location(self.msg("/location", USERS[0]))
+        self.assertIn("is at: Turf 3", " ".join(self.sent_texts()))
+        await self.set_location(self.msg("/location Somewhere Else", USERS[0]))
+        self.assertEqual(self.mgr.get_rollcalls(CHAT_ID)[0].location, "Turf 3",
+                         "a member can look, not change it")
 
 
 if __name__ == "__main__":

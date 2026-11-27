@@ -114,8 +114,8 @@ COMMANDS = [
             "Football details:\n"
             "Players per side starts at the IN list split by the number of teams (16 or 17 IN "
             "in 2 teams: 8-a-side; 20 IN in 3 teams: 6-a-side) and can be lowered for more subs. "
-            "2 teams face each other on one pitch; 3 or 4 teams get a half-pitch each (two play, "
-            "the rest wait). Each team picks its own formation. Drag players into "
+            "Each team picks its own formation (with 3 or 4 teams, each gets its own "
+            "half-pitch); how the teams play is up to the admin. Drag players into "
             "positions on the group's web page (🏟 Arrange on web): drop one on another to swap. "
             "Teams are filled into positions when they're made; someone IN later is a sub, "
             "and someone who drops leaves an empty spot.\n\n"
@@ -130,8 +130,8 @@ COMMANDS = [
         "details": (
             "event: a gathering - no teams, just who's coming. "
             "game: split the IN list into 2, 3 or 4 teams (numbered lists). "
-            "football: the teams are shown on a pitch with positions and formations - 2 teams "
-            "face each other, 3 or 4 get a half-pitch each. "
+            "football: each team's formation is shown on a pitch with positions (2, 3 or 4 "
+            "teams). "
             "cricket: each player gets a role - wicket-keeper, batter, all-rounder, bowler "
             "(cricket doesn't need a formation view). See /teams and /lineup. "
             "/sport off drops the sport and keeps teams as they are. Alone, shows the current "
@@ -424,9 +424,13 @@ COMMANDS = [
     },
     {
         "name": "location", "aliases": ["loc"], "scope": "admin", "category": "Settings",
-        "args": "place", "sample": "/loc Indiranagar Turf 3",
-        "summary": "Set event location",
-        "details": "Stores a location string shown in panels and reminders.",
+        "args": "[place] [::N]", "sample": "/loc Indiranagar Turf 3",
+        "summary": "Set or show the event location",
+        "details": (
+            "With a place (admin): stores it, shown in panels and reminders. "
+            "Alone (anyone): shows where the rollcall is, or says no location is set yet. "
+            "::N picks the rollcall, as in /rollcalls."
+        ),
     },
     {
         "name": "shh", "aliases": [], "scope": "admin", "category": "Settings",

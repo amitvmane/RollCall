@@ -240,13 +240,8 @@ async def set_location(message):
     try:
         if roll_call_not_started(message, manager) is False:
             raise rollCallNotStarted("Roll call is not active")
-        if await admin_rights(message, manager) is False:
-            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
-        if len(message.text.split(" ")) < 2:
-            raise incorrectParameter("The correct format is /location <place>")
 
-        msg = message.text
-        pmts = msg.split(" ")[1:]
+        pmts = [p for p in message.text.split(" ")[1:] if p]
         rc_number = 0
 
         if len(pmts) > 0 and "::" in pmts[-1]:
@@ -259,7 +254,16 @@ async def set_location(message):
 
         place = " ".join(pmts)
         if not place.strip():
-            raise incorrectParameter("The correct format is /location <place>")
+            # No place given: anyone can ask where the game is.
+            rc = manager.get_rollcall(cid, rc_number)
+            where = (rc.location or "").strip()
+            await bot.send_message(cid, (
+                f"📍 '{rc.title}' (ID: {rc_number + 1}) is at: {where}" if where else
+                f"📍 No location set for '{rc.title}' (ID: {rc_number + 1}) yet. "
+                "An admin can set it: /location <place>"))
+            return
+        if await admin_rights(message, manager) is False:
+            raise insufficientPermissions("Error - user does not have sufficient permissions for this operation")
         settings_svc.set_location(cid, place, message.from_user.id, message.from_user.first_name, rc_number)
         rc = manager.get_rollcall(cid, rc_number)
 

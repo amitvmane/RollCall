@@ -1690,7 +1690,7 @@ async def phase_teams():
     ok, d = contains(out, "No sport set")
     record("/lineup without a sport says how to set one", ok and not _errors, d)
     out = await feed("/sport football", ALICE)
-    ok, d = contains(out, "⚽ Football", "3 or 4 get a half-pitch")
+    ok, d = contains(out, "⚽ Football", "up to the admin")
     lv = _lineup.view(rc)
     record("/sport football (admin) sets it and places the players of open games",
            ok and lv["available"] and lv["placed"] == 4 and not _errors, d or str(lv)[:200])
@@ -1978,6 +1978,9 @@ async def run_all():
     out = await feed("/location Stadium A", ALICE)
     ok = len(out) >= 1
     record("/location responds", ok)
+    out = await feed("/location", CAROL)
+    ok, d = contains(out, "Stadium A")
+    record("/location alone shows the current place to anyone", ok and not _errors, d)
 
     out = await feed("/when", ALICE)
     ok, d = contains(out, "Coming up")

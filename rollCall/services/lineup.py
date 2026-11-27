@@ -4,9 +4,10 @@ Lineup — the teams drawn on a pitch, each player in a position.
 Built on services/teams.py (the sheet, its lock and its publish rules are
 unchanged); this only adds WHERE each player stands. Available when the
 group has picked a sport (chats.sport) and the game has 2–4 teams —
-otherwise teams stay the numbered list. Two teams face each other on one
-pitch ("faceoff"); three or four get a half-pitch each ("boards") — usually
-a rotation where two play and one waits.
+otherwise teams stay the numbered list. This shows each team's formation
+only — how the teams play (winner stays on, the rest as subs, anything else)
+is the admin's call. Two teams share one pitch ("faceoff"); three or four
+get a half-pitch each ("boards").
 
 What a group does is its "activity" (activity()/set_activity()): an event
 or gathering has no teams, a game has team lists, football and cricket add
@@ -149,8 +150,8 @@ def activity_note(v: str) -> str:
     return {
         "event": "🎉 Event / gathering — no teams, just who's coming.",
         "game": "🔢 Game — split the IN list into 2, 3 or 4 teams (/teams); teams are numbered lists.",
-        "football": "⚽ Football — make 2, 3 or 4 teams and they're drawn on a pitch with positions (/lineup). "
-                    "2 teams face each other; 3 or 4 get a half-pitch each.",
+        "football": "⚽ Football — make 2, 3 or 4 teams and each one's formation is drawn on a pitch "
+                    "(/lineup). How the teams play is up to the admin.",
         "cricket": "🏏 Cricket — cricket doesn't need a pitch or formation, so instead each player gets a role: "
                    "🧤 wicket-keeper, 🏏 batter, ⭐ all-rounder or 🎯 bowler "
                    "(set them on the group's web page; /lineup shows them).",

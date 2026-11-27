@@ -1506,8 +1506,8 @@ function _lineupHtml(lu,canEdit){
       (canEdit?` data-on-click="lineupTapChip" data-args="${rcArgs(p.key,tm.no,RC_EVENT)}"`:"")+`>${esc(p.name)}</button>`).join("")
       :`<span class="teams-sub">none</span>`)+`</div>`;
   if(board){
-    // 3–4 teams: a half-pitch each, every team attacking up — usually a
-    // rotation where two play and the others wait.
+    // 3–4 teams: each team's formation on its own half-pitch, attacking up.
+    // How the teams play is the admin's call — nothing here assumes a rotation.
     h+=`<div class="lu-boards lu-n${lu.teams.length}">`+lu.teams.map((tm,ti)=>
       `<div class="lu-board lu-t${tm.no}"><div class="lu-bhead"><span class="lu-btag">Team ${esc(tm.label)} · ${tm.slots.filter(sl=>sl.key).length+tm.subs.length}</span>`+
       `<span class="teams-sub">${esc(tm.formation)}</span></div>`+

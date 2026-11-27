@@ -96,8 +96,42 @@ COMMANDS = [
             "spot, a newcomer joins the smallest team. Waitlist and MAYBE are not on teams. "
             "When the game ends, the summary lists the teams in place of the IN list.\n\n"
             "Each rollcall has its own teams. ::N picks the rollcall (as in /rollcalls); "
-            "without it, rollcall #1."
+            "without it, rollcall #1.\n\n"
+            "Plays football or cricket? An admin sets /sport and 2 teams are shown on a pitch "
+            "(football) or by role (cricket) - see /lineup."
         ),
+    },
+    {
+        "name": "lineup", "aliases": [], "scope": "user", "category": "View Lists",
+        "args": "[pic] [::N]", "sample": "/lineup pic",
+        "summary": "Show the 2 teams by position (football) or role (cricket)",
+        "details": (
+            "For groups with a sport set (/sport) and 2 teams. Football: who plays where "
+            "(GK, DEF, MID, FWD) and the subs. Cricket: each player's role - 🧤 WK, 🏏 BAT, "
+            "⭐ AR (all-rounder), 🎯 BOWL - set on the web page (no pitch or formation for "
+            "cricket). /lineup pic sends a picture.\n\n"
+            "Football details:\n"
+            "Players per side starts at half the IN list (16 or 17 IN: 8-a-side) and can be "
+            "lowered for more subs. Each team picks its own formation. Drag players into "
+            "positions on the group's web page (🏟 Arrange on web): drop one on another to swap. "
+            "Teams are filled into positions when they're made; someone IN later is a sub, "
+            "and someone who drops leaves an empty spot.\n\n"
+            "Same lock as teams. When publishing, admins choose 📣 Post text (easy to copy "
+            "into a forum) or 🖼 Post picture."
+        ),
+    },
+    {
+        "name": "sport", "aliases": [], "scope": "admin", "category": "Settings",
+        "args": "[football | cricket | off]", "sample": "/sport football",
+        "summary": "Set the sport the group plays",
+        "details": (
+            "football: 2 teams are shown on a pitch with positions and formations. "
+            "cricket: each player in 2 teams gets a role - wicket-keeper, batter, "
+            "all-rounder, bowler (cricket doesn't need a formation view). See /lineup. "
+            "/sport off goes back to plain team lists. Alone, shows the current sport. "
+            "Also in the web page's group settings."
+        ),
+        "menu": False,
     },
     {
         "name": "whos_in", "aliases": ["wi"], "scope": "user", "category": "View Lists",

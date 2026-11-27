@@ -1398,7 +1398,9 @@ function renderTeams(rc){
     }else h+=`<p class="teams-sub">Sign in with Telegram to make teams.</p>`;
     card.innerHTML=h;return;
   }
-  h+=`<div class="teams-grid">`+t.teams.map(team=>`<div class="team-col"><div class="team-name">${team.emoji} Team ${esc(team.label)} <span class="team-n">${team.players.length}</span></div>`+
+  const lu=t.lineup&&t.lineup.available?t.lineup:null;
+  if(lu)h+=_lineupHtml(lu,canEdit);
+  else h+=`<div class="teams-grid">`+t.teams.map(team=>`<div class="team-col"><div class="team-name">${team.emoji} Team ${esc(team.label)} <span class="team-n">${team.players.length}</span></div>`+
     (team.players.length?team.players.map((p,i)=>`<div class="team-player"><span class="team-pname"><span class="team-pnum">${i+1}.</span> ${esc(p.name)}</span>`+
       (canEdit?`<select class="team-move" aria-label="Move or swap ${esc(p.name)}" data-on-change="teamsMove" data-args="${rcArgs(p.key,RC_VALUE)}">`+
         `<optgroup label="Move to">`+t.teams.map(o=>`<option value="t${o.no}"${o.no===team.no?" selected":""}>${esc(o.label)}</option>`).join("")+`</optgroup>`+
@@ -1412,16 +1414,175 @@ function renderTeams(rc){
     const n=t.count%4+1<2?2:t.count%4+1;
     acts.push(formBtn(`🔢 Make ${n} teams`,n));
   }
+  if(lu&&canEdit&&lu.kind==="pitch"){
+    acts.push(`<button class="btn btn-secondary teams-btn" data-on-click="lineupFill">⤵ Fill empty spots</button>`);
+  }
+  if(lu&&canEdit)acts.push(`<button class="btn btn-secondary teams-btn" data-on-click="lineupClear">${lu.kind==="roles"?"Clear roles":"All to subs"}</button>`);
+  if(lu)acts.push(`<button class="btn btn-secondary teams-btn" data-on-click="lineupCopy">📋 Copy text</button>`);
   if(_idToken&&_isWebAdmin){
+    if(lu)acts.push(`<select id="lu-post-as" class="lu-post-as" aria-label="Post as"><option value="picture">🖼 Picture</option><option value="text">📝 Text</option></select>`);
     acts.push(`<button class="btn btn-secondary teams-btn" data-on-click="teamsPublish">📣 Publish</button>`);
     acts.push(t.locked?`<button class="btn btn-secondary teams-btn" data-on-click="teamsUnlock">🔓 Unlock</button>`
                       :`<button class="btn btn-secondary teams-btn" data-on-click="teamsLock">🔒 Lock</button>`);
   }
   if(acts.length)h+=`<div class="teams-actions">${acts.join("")}</div>`;
   if(!_idToken)h+=`<p class="teams-sub">Sign in with Telegram to move players.</p>`;
+  else if(canEdit&&lu&&lu.kind==="roles")h+=`<p class="teams-sub">Pick a role for each player; use 🔀 Reshuffle or the team sheet in Telegram to change teams.</p>`;
+  else if(canEdit&&lu)h+=`<p class="teams-sub">Drag a player onto a spot, or tap a player and then a spot. Drop on someone to swap; drop on Subs to bench them.</p>`;
   else if(canEdit)h+=`<p class="teams-sub">Use the menu next to a name to swap that player with someone, or move them.</p>`;
   card.innerHTML=h;
 }
+
+// ── Lineup (services/lineup.py) — the two teams on a pitch. A player is
+// placed by dragging (pointer events: mouse and touch) or by tapping them,
+// then a spot. Every change is one server call and the reply redraws the
+// card, so the page, Telegram and the API never disagree.
+const _LU_LINES=`<svg class="lu-lines" viewBox="0 0 68 100" preserveAspectRatio="none" aria-hidden="true">`+
+  `<rect x="2" y="2" width="64" height="96"/><line x1="2" y1="50" x2="66" y2="50"/><circle cx="34" cy="50" r="8"/>`+
+  `<rect x="16" y="2" width="36" height="14"/><rect x="25" y="2" width="18" height="5"/>`+
+  `<rect x="16" y="84" width="36" height="14"/><rect x="25" y="93" width="18" height="5"/></svg>`;
+// Same numbers as services/lineup.pitch_xy, so the page matches the picture.
+function _lineupXY(ti,pos,formation){
+  const lines=[1].concat(String(formation).split("-").map(Number));
+  const [li,i]=String(pos).split(":").map(Number);
+  const ys=lines.length===4?[91,79.5,68,56.5]:[91,75,59];
+  return [(i+1)/(lines[li]+1)*100,ti===0?ys[li]:100-ys[li]];
+}
+function _luInitials(n){return String(n||"?").trim().slice(0,2).toUpperCase();}
+let _luSel=null;            // {key, team} — a tapped player waiting for a spot
+let _luDrag=null, _luSuppress=false;
+
+// Cricket: no pitch — each player gets a role (WK/BAT/AR/BOWL) from a menu.
+function _rolesHtml(lu,canEdit){
+  const opts=sel=>`<option value=""${sel?"":" selected"}>No role</option>`+
+    lu.roles.map(r=>`<option value="${esc(r.code)}"${sel===r.code?" selected":""}>${esc(r.emoji+" "+r.label)}</option>`).join("");
+  const row=(p,role,tm)=>`<div class="team-player"><span class="team-pname">${esc(p.name)}</span>`+
+    (canEdit?`<select class="team-move" aria-label="Role for ${esc(p.name)}" data-on-change="lineupRole" data-args="${rcArgs(p.key,tm.no,RC_VALUE)}">${opts(role)}</select>`
+            :`<span class="teams-sub">${esc(role||"—")}</span>`)+`</div>`;
+  return `<div class="teams-grid">`+lu.teams.map(tm=>`<div class="team-col"><div class="team-name">${tm.emoji} Team ${esc(tm.label)} <span class="team-n">${tm.slots.length+tm.subs.length}</span></div>`+
+    tm.slots.map(sl=>row(sl,sl.role,tm)).join("")+tm.subs.map(p=>row(p,"",tm)).join("")+`</div>`).join("")+`</div>`+
+    `<p class="teams-sub">🧤 WK wicket-keeper · 🏏 BAT batter · ⭐ AR all-rounder · 🎯 BOWL bowler</p>`;
+}
+window.lineupRole=function(key,team,role){_teamsAction({action:"lineup_place",who_key:key,team_no:Number(team),position:role||""});};
+
+function _lineupHtml(lu,canEdit){
+  if(lu.kind==="roles")return _rolesHtml(lu,canEdit);
+  const drag=canEdit?" lu-drag":"";
+  let h="";
+  if(canEdit){
+    h+=`<div class="lu-controls"><span class="lu-step" role="group" aria-label="Players per side">`+
+      `<button type="button" class="btn btn-secondary" data-on-click="lineupSide" data-args="${rcArgs(lu.side-1)}"${lu.side<=4?" disabled":""} aria-label="Fewer per side">−</button>`+
+      `<b>${lu.side}-a-side</b>`+
+      `<button type="button" class="btn btn-secondary" data-on-click="lineupSide" data-args="${rcArgs(lu.side+1)}"${lu.side>=11?" disabled":""} aria-label="More per side">+</button></span>`+
+      lu.teams.map(tm=>`<label class="lu-form"><span class="lu-dot lu-t${tm.no}"></span>${esc(tm.label)} `+
+        `<select data-on-change="lineupFormation" data-args="${rcArgs(tm.no,RC_VALUE)}" aria-label="Team ${esc(tm.label)} formation">`+
+        lu.options.map(f=>`<option value="${esc(f)}"${f===tm.formation?" selected":""}>${esc(f)}</option>`).join("")+`</select></label>`).join("")+
+      `</div>`;
+  }else{
+    h+=`<p class="teams-sub">${lu.side}-a-side · ${lu.teams.map(tm=>`Team ${esc(tm.label)} ${esc(tm.formation)}`).join(" vs ")}</p>`;
+  }
+  h+=`<div class="lu-pitch" role="group" aria-label="Pitch">${_LU_LINES}`;
+  lu.teams.forEach((tm,ti)=>{
+    h+=`<span class="lu-tag lu-tag${ti} lu-t${tm.no}">Team ${esc(tm.label)}</span>`;
+    tm.slots.forEach(sl=>{
+      const [x,y]=_lineupXY(ti,sl.pos,tm.formation);
+      const sel=_luSel&&sl.key&&_luSel.key===sl.key?" lu-sel":"";
+      const target=_luSel&&!sl.key?" lu-target":"";
+      h+=`<button type="button" class="lu-slot lu-t${tm.no}${sl.key?" lu-filled"+drag:""}${sel}${target}" style="left:${x.toFixed(2)}%;top:${y.toFixed(2)}%"`+
+        ` data-lu-team="${tm.no}" data-lu-pos="${esc(sl.pos)}"${sl.key?` data-lu-key="${esc(sl.key)}"`:""}`+
+        (canEdit?` data-on-click="lineupTapSlot" data-args="${rcArgs(tm.no,sl.pos,sl.key||"")}"`:"")+
+        ` aria-label="Team ${esc(tm.label)} ${esc(sl.role)}: ${sl.name?esc(sl.name):"empty"}">`+
+        `<span class="lu-disc">${sl.key?esc(_luInitials(sl.name)):esc(sl.role)}</span>${sl.name?`<span class="lu-nm">${esc(sl.name)}</span>`:""}</button>`;
+    });
+  });
+  h+=`</div><div class="lu-subs">`+lu.teams.map(tm=>
+    `<div class="lu-subrow" data-lu-team="${tm.no}" data-lu-subs="1"${canEdit?` data-on-click="lineupTapSubs" data-args="${rcArgs(tm.no)}"`:""}>`+
+    `<span class="lu-sublbl"><span class="lu-dot lu-t${tm.no}"></span>Subs ${esc(tm.label)}</span>`+
+    (tm.subs.length?tm.subs.map(p=>`<button type="button" class="lu-chip${drag}${_luSel&&_luSel.key===p.key?" lu-sel":""}" data-lu-key="${esc(p.key)}" data-lu-team="${tm.no}"`+
+      (canEdit?` data-on-click="lineupTapChip" data-args="${rcArgs(p.key,tm.no,RC_EVENT)}"`:"")+`>${esc(p.name)}</button>`).join("")
+      :`<span class="teams-sub">none</span>`)+`</div>`).join("")+`</div>`;
+  return h;
+}
+
+function _luRedraw(){if(activeRcData)renderTeams(activeRcData);}
+function _luPlace(key,team,pos){
+  _luSel=null;
+  _teamsAction({action:"lineup_place",who_key:key,team_no:Number(team),position:pos||""});
+}
+window.lineupSide=function(n){_luSel=null;_teamsAction({action:"lineup_side",side:Number(n)});};
+window.lineupFormation=function(no,f){_luSel=null;_teamsAction({action:"lineup_formation",team_no:Number(no),formation:String(f)});};
+window.lineupFill=function(){_luSel=null;_teamsAction({action:"lineup_fill"});};
+window.lineupClear=function(){_luSel=null;_teamsAction({action:"lineup_clear"});};
+window.lineupTapSlot=function(team,pos,key){
+  if(_luSuppress)return;
+  if(_luSel){
+    if(_luSel.key===key){_luSel=null;_luRedraw();return;}
+    _luPlace(_luSel.key,team,pos);return;
+  }
+  if(key){_luSel={key,team:Number(team)};_luRedraw();}
+  else toast("Tap a player first, then the spot.",2200);
+};
+window.lineupTapChip=function(key,team,ev){
+  if(ev&&ev.stopPropagation)ev.stopPropagation();   // not also "drop on Subs"
+  if(_luSuppress)return;
+  _luSel=_luSel&&_luSel.key===key?null:{key,team:Number(team)};
+  _luRedraw();
+};
+window.lineupTapSubs=function(team){
+  if(_luSuppress||!_luSel)return;
+  _luPlace(_luSel.key,team,"");
+};
+window.lineupCopy=function(){
+  const lu=activeRcData&&activeRcData.teams&&activeRcData.teams.lineup;
+  if(!lu||!lu.text)return;
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(lu.text).then(()=>toast("Copied — paste it into any chat or forum.",2400),
+      ()=>toast("Couldn't copy here — use /lineup in the group.",3000));
+  }else toast("Couldn't copy here — use /lineup in the group.",3000);
+};
+
+// Drag: one set of listeners for the page; only elements marked .lu-drag
+// (drawn only while the teams can be edited) start a drag.
+function _luDropTarget(x,y){
+  const el=document.elementFromPoint(x,y);
+  return el&&(el.closest("[data-lu-pos]")||el.closest("[data-lu-subs]"));
+}
+document.addEventListener("pointerdown",e=>{
+  const src=e.target.closest&&e.target.closest(".lu-drag");
+  if(!src||!_idToken)return;
+  _luDrag={key:src.dataset.luKey,x:e.clientX,y:e.clientY,moved:false,ghost:null,
+    name:(src.querySelector(".lu-nm")||src).textContent};
+});
+document.addEventListener("pointermove",e=>{
+  if(!_luDrag)return;
+  if(!_luDrag.moved&&Math.hypot(e.clientX-_luDrag.x,e.clientY-_luDrag.y)<6)return;
+  if(!_luDrag.moved){
+    _luDrag.moved=true;
+    const g=document.createElement("div");g.className="lu-ghost";g.textContent=_luDrag.name;
+    document.body.appendChild(g);_luDrag.ghost=g;
+  }
+  e.preventDefault();
+  _luDrag.ghost.style.left=e.clientX+"px";_luDrag.ghost.style.top=e.clientY+"px";
+  document.querySelectorAll(".lu-over").forEach(n=>n.classList.remove("lu-over"));
+  const t=_luDropTarget(e.clientX,e.clientY);
+  if(t)t.classList.add("lu-over");
+},{passive:false});
+function _luEndDrag(e,drop){
+  const d=_luDrag;_luDrag=null;
+  document.querySelectorAll(".lu-over").forEach(n=>n.classList.remove("lu-over"));
+  if(!d||!d.moved)return;
+  if(d.ghost)d.ghost.remove();
+  _luSuppress=true;setTimeout(()=>{_luSuppress=false;},0);   // the click that follows a drop
+  if(!drop)return;
+  const t=_luDropTarget(e.clientX,e.clientY);
+  if(!t)return;
+  if(t.dataset.luPos){
+    if(t.dataset.luKey===d.key)return;                // dropped where it started
+    _luPlace(d.key,t.dataset.luTeam,t.dataset.luPos);
+  }else _luPlace(d.key,t.dataset.luTeam,"");
+}
+document.addEventListener("pointerup",e=>_luEndDrag(e,true));
+document.addEventListener("pointercancel",e=>_luEndDrag(e,false));
 
 async function _teamsAction(body){
   if(!_idToken){toast("Sign in with Telegram first.",3000);return;}
@@ -1452,7 +1613,10 @@ window.teamsMove=function(key,choice){
 };
 window.teamsLock=function(){_teamsAction({action:"lock"});};
 window.teamsUnlock=function(){_teamsAction({action:"unlock"});};
-window.teamsPublish=function(){_teamsAction({action:"publish"});};
+window.teamsPublish=function(){
+  const as=document.getElementById("lu-post-as");
+  _teamsAction(as?{action:"publish",post_as:as.value}:{action:"publish"});
+};
 
 // Admin-only per-row controls (move to another list / remove) — web parity
 // for the admin console's Rollcalls-tab actions. "waiting" has no manual
@@ -3035,6 +3199,8 @@ function _syncShhToggle(){
   if(wx)wx.checked=!!groupData.weather_alerts;
   const tm=document.getElementById("teams-toggle");
   if(tm)tm.checked=!!groupData.teams_enabled;
+  const sp=document.getElementById("sport-select");
+  if(sp)sp.value=groupData.sport||"none";
   const bm=document.getElementById("buzz-mute-select");
   if(bm){
     const v=String(groupData.buzz_mute_after??3);
@@ -3667,6 +3833,19 @@ window.toggleTeamsEnabled=async function(enabled){
   if(ok){
     if(groupData)groupData.teams_enabled=enabled;
     toast(enabled?"⚽ Teams ON":"⚽ Teams OFF",2000);
+    loadGroup().catch(()=>{});
+  }
+};
+
+window.setSport=async function(value){
+  const prev=(groupData&&groupData.sport)||"none";
+  const ok=await _patchGroupSetting({sport:value},()=>{
+    const sel=document.getElementById("sport-select");
+    if(sel)sel.value=prev;
+  });
+  if(ok){
+    if(groupData)groupData.sport=value==="none"?null:value;
+    toast(value==="football"?"⚽ Football: 2 teams show on a pitch":value==="cricket"?"🏏 Cricket: give each player a role":"Sport off — teams are lists",2400);
     loadGroup().catch(()=>{});
   }
 };

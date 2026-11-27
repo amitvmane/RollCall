@@ -49,6 +49,19 @@ def _weather_line(rc):
         return None
 
 
+def with_lineup(rc, v: dict) -> dict:
+    """The teams view plus its lineup (services.lineup), for the web page."""
+    try:
+        from services import lineup
+        lv = lineup.view(rc, v)
+        if lv["available"]:
+            lv["text"] = lineup.render_text(rc, lv)
+        return {**v, "lineup": lv}
+    except Exception:
+        logging.exception("lineup view failed for rollcall %s", getattr(rc, "id", None))
+        return v
+
+
 def _teams(rc):
     """The rollcall's team sheet (services.teams.view — read-only), or None
     while teams are off for the group (the page then shows no Teams card)."""
@@ -58,7 +71,7 @@ def _teams(rc):
         from services.teams import enabled, view
         if not enabled(rc.chat_id):
             return None
-        return view(rc)
+        return with_lineup(rc, view(rc))
     except Exception:
         logging.exception("teams view failed for rollcall %s", getattr(rc, "id", None))
         return None
@@ -428,6 +441,7 @@ def get_rollcalls_by_group_token(group_token: str) -> dict:
         "vote_digest_hours": int(chat.get("vote_digest_hours") or 0),
         "weather_alerts": bool(int(chat.get("weather_alerts") or 0)),
         "teams_enabled": bool(int(chat.get("teams_enabled") or 0)),
+        "sport": chat.get("sport") or None,
         "join_approval": bool(int(chat.get("join_approval") or 0)),
         "buzz_mute_after": 3 if chat.get("buzz_mute_after") is None else int(chat.get("buzz_mute_after") or 0),
         "web_only": _is_local_chat(chat.get("chat_id")),

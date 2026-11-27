@@ -1681,6 +1681,49 @@ async def phase_teams():
     ok, d = contains(out, "Teams — Teams Game", "Published by Bob")
     record("📣 Publish posts the teams to the group", ok and has_call(out, "send_message"), d)
 
+    # ── Lineup: the same two teams on a pitch once the group has a sport ──
+    # (This harness answers every admin check yes — admin-only refusals are
+    # asserted in integration_tests/test_lineup.py.)
+    from services import lineup as _lineup
+    await feed_cb(f"tm:unlock:{rc.id}", ALICE)
+    out = await feed("/lineup", BOB)
+    ok, d = contains(out, "No sport set")
+    record("/lineup without a sport says how to set one", ok and not _errors, d)
+    out = await feed("/sport football", ALICE)
+    ok, d = contains(out, "Sport set to Football")
+    lv = _lineup.view(rc)
+    record("/sport football (admin) sets it and places the players of open games",
+           ok and lv["available"] and lv["placed"] == 4 and not _errors, d or str(lv)[:200])
+    out = await feed("/sport", CAROL)
+    ok, d = contains(out, "plays Football")
+    record("/sport alone shows the group's sport", ok, d)
+    out = await feed("/lineup", CAROL)
+    ok, d = contains(out, "Lineup — Teams Game", "4-a-side", "GK", "DEF")
+    record("/lineup posts the lineup by position", ok and not _errors, d or error_msgs()[:2])
+    out = await feed("/lineup pic", CAROL)
+    record("/lineup pic sends a picture of the pitch", has_call(out, "send_photo") and not _errors,
+           error_msgs()[:2] or str(out)[:200])
+    out = await feed("/teams", BOB)
+    ok, d = contains(out, "Lineup — Teams Game", "Arrange positions")
+    labels = button_labels(out)
+    record("with a sport the team sheet is the lineup, with Post text / Post picture",
+           ok and f"tm:pubpic:{rc.id}" in labels and f"tm:pub:{rc.id}" in labels, d or str(labels)[:200])
+    await feed_cb(f"tm:lock:{rc.id}", ALICE)
+    out = await feed_cb(f"tm:pubpic:{rc.id}", ALICE)
+    photos = [kw for n, _a, kw in out if n == "send_photo"]
+    record("🖼 Post picture (admin) posts the pitch picture to the group",
+           bool(photos) and "Published by" in str(photos[0].get("caption", "")) and not _errors,
+           error_msgs()[:2] or str(out)[:200])
+    out = await feed("/sport cricket", ALICE)
+    ok, d = contains(out, "Sport set to Cricket", "doesn't need a pitch", "wicket-keeper")
+    record("/sport cricket explains roles instead of a pitch", ok and not _errors, d)
+    out = await feed("/lineup", CAROL)
+    ok, d = contains(out, "Teams — Teams Game", "No role yet", "WK wicket-keeper")
+    record("/lineup for cricket lists the teams by role", ok and not _errors, d or error_msgs()[:2])
+    out = await feed("/sport off", ALICE)
+    ok, d = contains(out, "Sport off")
+    record("/sport off goes back to plain team lists", ok and _lineup.sport(CHAT_ID) is None, d)
+
     out = await feed_cb(f"tm:back:{rc.id}", BOB)
     record("🔙 Back returns to the vote panel", has_call(out, "edit_message_text") and not _errors,
            error_msgs()[:2])

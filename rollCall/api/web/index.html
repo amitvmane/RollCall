@@ -672,6 +672,15 @@
         </div>
         <div class="adm-row">
           <div>
+            <div class="adm-row-t">🏟 Sport</div>
+            <div class="adm-row-s">Football: 2 teams on a pitch with positions. Cricket: a role per player (/lineup)</div>
+          </div>
+          <select id="sport-select" data-on-change="setSport" data-args='[{"$": "value"}]'>
+            <option value="none">None (lists)</option><option value="football">⚽ Football</option><option value="cricket">🏏 Cricket</option>
+          </select>
+        </div>
+        <div class="adm-row">
+          <div>
             <div class="adm-row-t">👻 Ghost tracking</div>
             <div class="adm-row-s">Track members who RSVP IN but don't show up</div>
           </div>

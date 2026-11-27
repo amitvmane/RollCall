@@ -67,3 +67,31 @@ class EndRollcallResponse(BaseModel):
     ended_by: EndedByPayload
     remaining: List[RollcallResponse]
     renumbered: List[RenumberEntry]
+
+
+class LineupPlayer(BaseModel):
+    user_id: Optional[int] = Field(None, description="Member's id; null for a guest without an account")
+    name: str
+    guest: bool
+
+
+class LineupPosition(BaseModel):
+    position: str = Field(..., description='"<line>:<index>"; line 0 is the keeper, then back to front')
+    role: str = Field(..., description="GK, DEF, MID or FWD")
+    player: Optional[LineupPlayer] = Field(None, description="null = an empty spot")
+
+
+class LineupTeam(BaseModel):
+    label: str = Field(..., description="A or B")
+    formation: str = Field(..., description="Outfield lines back to front, e.g. 2-3-1")
+    positions: List[LineupPosition]
+    subs: List[LineupPlayer]
+
+
+class LineupResponse(BaseModel):
+    rollcall_id: int
+    available: bool = Field(..., description="False when the group has no sport set or the game doesn't have 2 teams")
+    sport: Optional[str] = Field(None, description="e.g. football")
+    players_per_side: Optional[int] = None
+    locked: bool
+    teams: List[LineupTeam] = Field(default_factory=list)

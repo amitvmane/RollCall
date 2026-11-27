@@ -933,6 +933,42 @@ body.tg-mode .brand-group-sel{background:rgba(127,127,127,.16);color:var(--text)
 .team-player{display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:.84rem;padding:3px 0}
 .team-pname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .team-pnum{color:var(--sub);font-variant-numeric:tabular-nums;display:inline-block;min-width:1.4em}
+/* Lineup (services/lineup.py): the two teams on a pitch. Team colours are
+   fixed (red A, blue B) — they're the team's identity on the picture too. */
+.lu-t1{--lu-c:#e5484d}.lu-t2{--lu-c:#3e63dd}
+.lu-controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:4px 0 10px}
+.lu-step{display:inline-flex;align-items:center;gap:6px}
+.lu-step .btn{padding:4px 11px;min-width:34px}
+.lu-step b{font-size:.84rem;font-variant-numeric:tabular-nums;min-width:5.4em;text-align:center}
+.lu-form{display:inline-flex;align-items:center;gap:5px;font-size:.82rem;font-weight:600}
+.lu-form select,.lu-post-as{padding:5px 8px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg);color:var(--text);font-size:.82rem}
+.lu-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--lu-c)}
+.lu-pitch{position:relative;width:100%;max-width:440px;margin:0 auto;aspect-ratio:68/115;border-radius:12px;overflow:hidden;
+  background:repeating-linear-gradient(180deg,#2f8a4a 0 10%,#2a7d43 10% 20%);user-select:none;-webkit-user-select:none}
+.lu-lines{position:absolute;inset:0;width:100%;height:100%}
+.lu-lines *{fill:none;stroke:rgba(255,255,255,.8);stroke-width:.35}
+.lu-tag{position:absolute;left:8px;font-size:.66rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#fff;
+  background:var(--lu-c);padding:2px 8px;border-radius:999px}
+.lu-tag0{bottom:8px}.lu-tag1{top:8px}
+.lu-slot{position:absolute;transform:translate(-50%,-17px);display:flex;flex-direction:column;align-items:center;gap:2px;
+  width:74px;border:0;background:none;padding:0;color:#fff;font:inherit;cursor:pointer}
+.lu-disc{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-size:.72rem;font-weight:700;
+  border:2px dashed rgba(255,255,255,.7);background:rgba(255,255,255,.14);transition:transform .12s}
+.lu-filled .lu-disc{border:2px solid #fff;background:var(--lu-c);font-size:.8rem}
+.lu-nm{font-size:.68rem;font-weight:600;max-width:74px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 2px rgba(0,0,0,.65)}
+.lu-sel .lu-disc,.lu-over .lu-disc,.lu-target .lu-disc{transform:scale(1.14);border-color:#ffe066}
+.lu-slot:focus-visible .lu-disc,.lu-chip:focus-visible{outline:3px solid #ffe066;outline-offset:2px}
+.lu-drag{touch-action:none;cursor:grab}
+.lu-subs{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.lu-subrow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:6px;border-radius:10px;border:1.5px dashed transparent;min-height:40px}
+.lu-subrow.lu-over{border-color:var(--accent)}
+.lu-sublbl{font-size:.76rem;font-weight:600;color:var(--sub);display:inline-flex;align-items:center;gap:5px;min-width:5.6em}
+.lu-chip{border:1px solid var(--border);border-left:4px solid var(--lu-c);background:var(--bg);color:var(--text);border-radius:999px;
+  padding:5px 10px;font-size:.8rem;font-weight:500;cursor:pointer}
+.lu-chip.lu-sel{box-shadow:0 0 0 2px var(--accent)}
+.lu-ghost{position:fixed;z-index:1000;pointer-events:none;transform:translate(-50%,-70%);padding:6px 12px;border-radius:999px;
+  background:var(--accent);color:#fff;font-size:.82rem;font-weight:600;box-shadow:0 6px 18px rgba(0,0,0,.25)}
+@media (prefers-reduced-motion:reduce){.lu-disc{transition:none}}
 .team-move{flex-shrink:0;padding:2px 4px;border-radius:6px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.78rem}
 .teams-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 .teams-btn{padding:6px 12px;font-size:.8rem}

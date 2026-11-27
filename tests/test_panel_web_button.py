@@ -69,9 +69,17 @@ class TestNoCallSiteCanOmitTheLink(unittest.TestCase):
         for path in sorted(_ROOT.rglob("*.py")):
             if "__pycache__" in str(path) or path.name == "lifecycle.py":
                 continue
-            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"), str(path))):
-                if isinstance(node, ast.Call) and ast.unparse(node.func).endswith("_group_web_url"):
-                    callers.append(f"{path.relative_to(_ROOT)}:{node.lineno}")
+            tree = ast.parse(path.read_text(encoding="utf-8"), str(path))
+            for fn in ast.walk(tree):
+                if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                # handlers/teams._web_url is the team sheet's own single
+                # derivation (its 🏟 Arrange button) — not a panel call site.
+                if path.name == "teams.py" and fn.name == "_web_url":
+                    continue
+                for node in ast.walk(fn):
+                    if isinstance(node, ast.Call) and ast.unparse(node.func).endswith("_group_web_url"):
+                        callers.append(f"{path.relative_to(_ROOT)}:{node.lineno}")
         self.assertEqual(callers, [], f"should let the keyboard derive the URL: {callers}")
 
 

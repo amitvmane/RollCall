@@ -286,8 +286,12 @@ Append `::N` to most commands to target a specific rollcall when multiple are ac
 | `/whos_waiting [::N]` | `/ww` | Show waitlist |
 | `/teams [::N]` | | Team sheet with buttons — make, reshuffle, move, lock, publish (see **Teams** below) |
 | `/teams on\|off` | | Admin: turn teams on or off for the group (off by default) |
+| `/lineup [pic] [::N]` | | The 2 teams by position (football: GK/DEF/MID/FWD, subs) or role (cricket: WK/BAT/AR/BOWL); `pic` sends a picture (see **Lineup** below) |
+| `/sport [football\|cricket\|off]` | | Admin: the sport the group plays — football draws 2 teams on a pitch, cricket gives each player a role |
 
 **Teams** — off by default; an admin turns them on with `/teams on` or the ⚽ Teams switch in the web page's group settings. Then the ⚽ Teams button on the rollcall panel (and the Teams card on the group web page) splits the IN list, guests included, into 2–4 random teams. Anyone can reshuffle or move a player until the teams are locked; changing the number of teams and lock/unlock are admin-only, and teams lock on their own at game time. Moves are silent; 📣 Publish posts the teams to the group. Someone who drops is taken off with no reshuffle, and the next person IN — by vote, `/sif` or the waitlist, however much later, locked or not — takes that empty spot on the same team; with no empty spot a newcomer joins the smallest team. When the game ends, the summary lists the teams in place of the IN list.
+
+**Lineup** — for groups that set a sport (`/sport football`, or 🏟 Sport in the web page's group settings) and make 2 teams. Players per side starts at half the IN list (16 or 17 IN → 8-a-side, 4–11) and can be lowered for more subs; each team picks its own formation. On the group web page, drag players onto spots (or tap a player, then a spot); drop on someone to swap, on Subs to bench them. Teams are placed in order when they're made; someone IN later is a sub, someone who drops leaves an empty spot. Same lock as teams. Publishing asks for 🖼 a picture of the pitch or 📝 text that pastes cleanly into any chat or forum. **Cricket** (`/sport cricket`) has no pitch or formation: each player in the 2 teams gets a role — 🧤 wicket-keeper, 🏏 batter, ⭐ all-rounder or 🎯 bowler — from a menu on the web page; `/lineup` lists the teams by role. Partner apps read it at `GET …/rollcalls/by-id/{id}/lineup` and can subscribe to `lineup.published`.
 
 ### Event Settings (admin only)
 

@@ -11,8 +11,12 @@ Callback data: tm:<op>:<rollcall db id>[:<arg>]
   sx:<tok>:<tok>[:<team>]  swap those two (<team>: where the second one was shown)
   mt:<tok>:<team>    just move one
   mv:<tok>  move a player on (sheets posted before the picker existed)
-  lock / unlock / pub (admin)     back      return to the panel
+  lock / unlock / pub / pubpic (admin)   back   return to the panel
   view      redraw
+
+With a sport set and 2 teams, the sheet is the lineup (services/lineup):
+positions are arranged on the web page (🏟 button); publish posts the
+text (pub) or a picture of the pitch (pubpic).
 
 The sheet itself carries at most six buttons; the picker shows one team's
 names at a time, three to a row, so an 8v8 stays readable.
@@ -29,6 +33,7 @@ from bot_state import bot, best_effort, reply_error, safe_edit_text
 from exceptions import incorrectParameter, insufficientPermissions, rollCallNotStarted
 from functions import admin_rights
 from rollcall_manager import manager
+from services import lineup as lineup_svc
 from services import teams as teams_svc
 from services.common import find_rollcall_index
 from utils.text import parse_rc_suffix
@@ -61,7 +66,16 @@ def _cb(op: str, rc_id: int, arg: str = "") -> str:
     return f"tm:{op}:{rc_id}" + (f":{arg}" if arg else "")
 
 
-def teams_keyboard(rc_id: int, v: dict) -> InlineKeyboardMarkup:
+def _publish_buttons(rc_id: int, lv) -> list:
+    if lv and lv.get("available"):
+        return [InlineKeyboardButton("📣 Post text", callback_data=_cb("pub", rc_id)),
+                InlineKeyboardButton("🖼 Post picture", callback_data=_cb("pubpic", rc_id))]
+    return [InlineKeyboardButton("📣 Publish", callback_data=_cb("pub", rc_id))]
+
+
+def teams_keyboard(rc_id: int, v: dict, lv: dict | None = None, web_url: str = "") -> InlineKeyboardMarkup:
+    """lv: the lineup view (services.lineup) when the group plays a sport;
+    web_url: the group's page, for the 🏟 Arrange button."""
     markup = InlineKeyboardMarkup(row_width=2)
     if not v["formed"]:
         markup.add(*[InlineKeyboardButton(f"⚽ {n} teams", callback_data=_cb("form", rc_id, str(n)))
@@ -72,10 +86,17 @@ def teams_keyboard(rc_id: int, v: dict) -> InlineKeyboardMarkup:
             markup.row(shuffle, InlineKeyboardButton("🔁 Swap players", callback_data=_cb("sw", rc_id, "1")))
         else:
             markup.row(shuffle)
-        markup.row(
-            InlineKeyboardButton("🔒 Lock", callback_data=_cb("lock", rc_id)),
-            InlineKeyboardButton("📣 Publish", callback_data=_cb("pub", rc_id)),
-        )
+        if lv and lv.get("available"):
+            row = [InlineKeyboardButton("🔒 Lock", callback_data=_cb("lock", rc_id))]
+            if web_url:
+                row.append(InlineKeyboardButton("🏟 Arrange on web", url=web_url))
+            markup.row(*row)
+            markup.row(*_publish_buttons(rc_id, lv))
+        else:
+            markup.row(
+                InlineKeyboardButton("🔒 Lock", callback_data=_cb("lock", rc_id)),
+                InlineKeyboardButton("📣 Publish", callback_data=_cb("pub", rc_id)),
+            )
         nxt_count = v["count"] % teams_svc.MAX_TEAMS + 1
         if nxt_count < teams_svc.MIN_TEAMS:
             nxt_count = teams_svc.MIN_TEAMS
@@ -85,15 +106,20 @@ def teams_keyboard(rc_id: int, v: dict) -> InlineKeyboardMarkup:
         )
         return markup
     else:
-        markup.add(
-            InlineKeyboardButton("📣 Publish", callback_data=_cb("pub", rc_id)),
-            InlineKeyboardButton("🔓 Unlock", callback_data=_cb("unlock", rc_id)),
-        )
+        markup.row(*_publish_buttons(rc_id, lv))
+        markup.row(InlineKeyboardButton("🔓 Unlock", callback_data=_cb("unlock", rc_id)))
     markup.add(InlineKeyboardButton("🔙 Back", callback_data=_cb("back", rc_id)))
     return markup
 
 
-def _sheet_text(rc, v: dict) -> str:
+def _sheet_text(rc, v: dict, lv: dict | None = None) -> str:
+    if lv and lv.get("available"):
+        text = lineup_svc.render_text(rc, lv)
+        if not v["locked"]:
+            text += ("\n\n🏟 Arrange positions and formations on the group's web page."
+                     if lv.get("kind") == "pitch" else
+                     "\n\n🏏 Give each player a role (WK, BAT, AR, BOWL) on the group's web page.")
+        return text
     text = teams_svc.render_text(rc, v)
     if v["formed"] and not v["locked"]:
         text += ("\n\n🔁 Swap players trades two players, so the teams stay even." if _move_buttons_fit(v)
@@ -167,8 +193,9 @@ async def show_teams(call, cid: int, rc) -> None:
         return
     await bot.answer_callback_query(call.id)
     v = teams_svc.view(rc)
-    await safe_edit_text(cid, call.message.message_id, _sheet_text(rc, v),
-                         reply_markup=teams_keyboard(rc.id, v))
+    lv = lineup_svc.view(rc, v)
+    await safe_edit_text(cid, call.message.message_id, _sheet_text(rc, v, lv),
+                         reply_markup=teams_keyboard(rc.id, v, lv, _web_url(cid)))
 
 
 @bot.message_handler(func=lambda m: bool(m.text) and m.text.split()[0].split("@")[0].lower() == "/teams")
@@ -199,7 +226,8 @@ async def teams_cmd(message):
             raise incorrectParameter(f"There is no rollcall ::{idx + 1}.")
         rc = rollcalls[idx]
         v = teams_svc.view(rc)
-        await bot.send_message(cid, _sheet_text(rc, v), reply_markup=teams_keyboard(rc.id, v))
+        lv = lineup_svc.view(rc, v)
+        await bot.send_message(cid, _sheet_text(rc, v, lv), reply_markup=teams_keyboard(rc.id, v, lv, _web_url(cid)))
     except Exception as e:
         await reply_error(message, e)
 
@@ -257,7 +285,7 @@ async def teams_callback(call):
             await bot.answer_callback_query(call.id, teams_svc.OFF_MESSAGE, show_alert=True)
             return
 
-        is_admin = await _is_admin(call) if op in ("lock", "unlock", "pub") else False
+        is_admin = await _is_admin(call) if op in ("lock", "unlock", "pub", "pubpic") else False
         actor = _actor(call)
         toast, post, screen = "", None, None
         async with manager.get_chat_write_lock(cid):
@@ -302,7 +330,7 @@ async def teams_callback(call):
                 elif op in ("lock", "unlock"):
                     v = teams_svc.set_locked(rc, op == "lock", is_admin)
                     toast = "Teams locked" if op == "lock" else "Teams unlocked"
-                elif op == "pub":
+                elif op in ("pub", "pubpic"):
                     v, post = teams_svc.publish(rc, is_admin)
                     toast = "Published"
                 else:
@@ -316,17 +344,117 @@ async def teams_callback(call):
         elif screen:
             text, markup = partner_screen(rc, v, screen[1], screen[2])
         else:
-            text, markup = _sheet_text(rc, v), teams_keyboard(rc_id, v)
+            lv = lineup_svc.view(rc, v)
+            text, markup = _sheet_text(rc, v, lv), teams_keyboard(rc_id, v, lv, _web_url(cid))
         await best_effort(bot.answer_callback_query(call.id, toast or None), "teams tap", cid)
         await safe_edit_text(cid, call.message.message_id, text, reply_markup=markup)
         if post:
-            await best_effort(bot.send_message(cid, post + f"\n\n📣 Published by {actor}"),
-                              "teams publish", cid)
+            await post_published(cid, rc, v, post, actor, as_picture=(op == "pubpic"))
     except (incorrectParameter, insufficientPermissions) as e:
         await best_effort(bot.answer_callback_query(call.id, str(e), show_alert=True), "teams refusal", cid)
     except Exception:
         logging.exception("teams callback failed (%s)", call.data)
         await best_effort(bot.answer_callback_query(call.id, "⚠️ Something went wrong."), "teams error", cid)
+
+
+def _web_url(cid: int) -> str:
+    from handlers.lifecycle import _group_web_url
+    return _group_web_url(cid)
+
+
+async def post_published(cid: int, rc, v: dict, teams_text: str, actor: str,
+                         as_picture: bool = False, via: str = "") -> None:
+    """Post a publish to the group — the lineup's text or picture when the
+    group plays a sport, else the team sheet. Outside the chat lock."""
+    content = lineup_svc.publish_content(rc, v, teams_text, as_picture)
+    by = f"📣 Published by {actor}{via}"
+    if content["photo"] is not None:
+        await best_effort(bot.send_photo(cid, content["photo"], caption=f"{content['caption']}\n{by}"),
+                          "lineup picture", cid)
+    else:
+        await best_effort(bot.send_message(cid, content["text"] + f"\n\n{by}"), "teams publish", cid)
+
+
+@bot.message_handler(func=lambda m: bool(m.text) and m.text.split()[0].split("@")[0].lower() == "/sport")
+async def sport_cmd(message):
+    """/sport — show the group's sport; /sport football | off (admin)."""
+    cid = message.chat.id
+    try:
+        args = message.text.split()[1:]
+        if not args:
+            cur = lineup_svc.sport(cid)
+            await bot.send_message(cid, (
+                f"{lineup_svc.SPORTS[cur]['emoji']} This group plays {lineup_svc.SPORTS[cur]['label']} — "
+                + ("2 teams are shown on a pitch." if lineup_svc.kind(cur) == "pitch"
+                   else "players in 2 teams get a role (WK, BAT, AR, BOWL).")
+                + " /sport off goes back to plain team lists."
+                if cur else
+                "No sport set — teams are plain lists. An admin can set one: /sport football or /sport cricket"))
+            return
+        if not await admin_rights(message, manager):
+            raise insufficientPermissions("Only an admin can set the group's sport.")
+        actor = message.from_user.first_name or message.from_user.username or "Admin"
+        async with manager.get_chat_write_lock(cid):
+            new = lineup_svc.set_sport(cid, args[0], message.from_user.id, actor)
+            if new:
+                lineup_svc.autofill_open(cid, actor)
+        if new:
+            hint = "" if teams_svc.enabled(cid) else " Turn teams on with /teams on."
+            if lineup_svc.kind(new) == "pitch":
+                what = "make 2 teams and they're drawn on a pitch (/lineup)."
+            else:
+                what = ("cricket doesn't need a pitch or formation, so instead each player in "
+                        "2 teams gets a role: 🧤 wicket-keeper, 🏏 batter, ⭐ all-rounder or 🎯 bowler "
+                        "(set them on the group's web page; /lineup shows them).")
+            await bot.send_message(cid, f"{lineup_svc.SPORTS[new]['emoji']} Sport set to "
+                                        f"{lineup_svc.SPORTS[new]['label']} — {what}{hint}")
+        else:
+            await bot.send_message(cid, "Sport off — teams are plain lists again.")
+    except Exception as e:
+        await reply_error(message, e)
+
+
+@bot.message_handler(func=lambda m: bool(m.text) and m.text.split()[0].split("@")[0].lower() == "/lineup")
+async def lineup_cmd(message):
+    """/lineup [pic] [::N] — post the lineup (text, or the pitch picture)."""
+    cid = message.chat.id
+    try:
+        args = message.text.split()[1:]
+        as_picture = any(a.lower() in ("pic", "picture", "photo") for a in args)
+        args = [a for a in args if a.lower() not in ("pic", "picture", "photo")]
+        if not teams_svc.enabled(cid):
+            await bot.send_message(cid, teams_svc.OFF_MESSAGE)
+            return
+        if lineup_svc.sport(cid) is None:
+            await bot.send_message(cid, "No sport set for this group — an admin can set one with "
+                                        "/sport football (a pitch with positions) or /sport cricket "
+                                        "(roles: WK, BAT, AR, BOWL).")
+            return
+        idx, _rest = parse_rc_suffix(args)
+        rollcalls = manager.get_rollcalls(cid)
+        if not rollcalls:
+            raise rollCallNotStarted("No rollcall is open — the lineup is made from an open game's teams.")
+        if idx >= len(rollcalls):
+            raise incorrectParameter(f"There is no rollcall ::{idx + 1}.")
+        rc = rollcalls[idx]
+        v = teams_svc.view(rc)
+        lv = lineup_svc.view(rc, v)
+        if not lv["available"]:
+            await bot.send_message(cid, "The lineup needs exactly 2 teams — make them with /teams.")
+            return
+        url = _web_url(cid)
+        markup = None
+        if url and not lv["locked"]:
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("🏟 Arrange on web", url=url))
+        if as_picture:   # showing it, not publishing it — no webhook, no publish stamp
+            await bot.send_photo(cid, lineup_svc.render_png(rc, lv),
+                                 caption=f"{lineup_svc.SPORTS[lv['sport']]['emoji']} {'Lineup' if lv.get('kind') == 'pitch' else 'Teams'} — {rc.title}",
+                                 reply_markup=markup)
+            return
+        await bot.send_message(cid, lineup_svc.render_text(rc, lv), reply_markup=markup)
+    except Exception as e:
+        await reply_error(message, e)
 
 
 async def _back_to_panel(call, cid: int, rc_id: int) -> None:

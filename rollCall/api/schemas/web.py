@@ -22,6 +22,42 @@ class WebTeam(BaseModel):
     players: list[WebTeamPlayer] = Field(default_factory=list)
 
 
+class WebLineupSlot(BaseModel):
+    pos: str = Field(..., description='"<line>:<index>"; line 0 is the keeper')
+    role: str = Field(..., description="GK, DEF, MID or FWD")
+    key: Optional[str] = None
+    name: Optional[str] = None
+
+
+class WebLineupTeam(BaseModel):
+    no: int
+    label: str
+    emoji: str
+    formation: str
+    slots: list[WebLineupSlot] = Field(default_factory=list)
+    subs: list[WebTeamPlayer] = Field(default_factory=list)
+
+
+class WebLineupRole(BaseModel):
+    code: str
+    label: str
+    emoji: str
+
+
+class WebLineup(BaseModel):
+    available: bool = False
+    sport: Optional[str] = None
+    kind: Optional[str] = Field(None, description="'pitch' (football: spots and formations) or 'roles' (cricket)")
+    roles: list[WebLineupRole] = Field(default_factory=list, description="Cricket: the roles a player can have")
+    side: Optional[int] = Field(None, description="Players per side")
+    side_auto: bool = True
+    options: list[str] = Field(default_factory=list, description="Formations for this side size")
+    locked: bool = False
+    placed: int = 0
+    teams: list[WebLineupTeam] = Field(default_factory=list)
+    text: str = Field("", description="Copy-ready text of the lineup")
+
+
 class WebTeams(BaseModel):
     formed: bool = False
     count: int = 2
@@ -30,6 +66,7 @@ class WebTeams(BaseModel):
     published_at: Optional[str] = None
     players_in: int = 0
     teams: list[WebTeam] = Field(default_factory=list)
+    lineup: Optional[WebLineup] = Field(None, description="The pitch view, when the group plays a sport and has 2 teams")
 
 
 class WebRollcallResponse(BaseModel):
@@ -83,6 +120,7 @@ class WebGroupResponse(BaseModel):
     vote_digest_hours: int = 0
     weather_alerts: bool = False
     teams_enabled: bool = False
+    sport: Optional[str] = None   # services/lineup.SPORTS key; None = plain team lists
     join_approval: bool = False   # joining from the link needs an admin's OK
     buzz_mute_after: int = 3      # skip members after N unanswered buzzes; 0 = never
     web_only: bool = False        # no Telegram chat behind this group
@@ -100,6 +138,8 @@ class WebGroupSettingsRequest(BaseModel):
     vote_digest_hours: Optional[int] = Field(None, ge=1, le=48, description="Hours between bundled summaries (with vote_notices=bundled)")
     weather_alerts: Optional[bool] = Field(None, description="Forecast heads-up before games with a location")
     teams_enabled: Optional[bool] = Field(None, description="Teams on/off for the group (off by default)")
+    sport: Optional[Literal["football", "cricket", "none"]] = Field(
+        None, description="football: 2 teams on a pitch; cricket: a role per player; none: plain lists")
     join_approval: Optional[bool] = Field(
         None, description="Joining from the group link needs an admin's approval; web votes from members only")
     buzz_mute_after: Optional[int] = Field(
@@ -744,11 +784,16 @@ class WebWeatherResponse(BaseModel):
 
 
 class WebTeamsActionRequest(BaseModel):
-    action: Literal["form", "reshuffle", "move", "swap", "lock", "unlock", "publish"]
+    action: Literal["form", "reshuffle", "move", "swap", "lock", "unlock", "publish",
+                    "lineup_side", "lineup_formation", "lineup_place", "lineup_fill", "lineup_clear"]
     count: Optional[int] = Field(None, ge=2, le=4, description="form: number of teams")
     who_key: Optional[str] = Field(None, max_length=200, description="move/swap: the player")
     with_key: Optional[str] = Field(None, max_length=200, description="swap: the player on another team")
-    team_no: Optional[int] = Field(None, ge=1, le=4, description="move: destination team")
+    team_no: Optional[int] = Field(None, ge=1, le=4, description="move / lineup_place / lineup_formation: the team")
+    side: Optional[int] = Field(None, ge=4, le=11, description="lineup_side: players per side")
+    formation: Optional[str] = Field(None, max_length=12, description="lineup_formation: e.g. 2-3-1")
+    position: Optional[str] = Field(None, max_length=8, description='lineup_place: "<line>:<index>" (football) or WK/BAT/AR/BOWL (cricket); empty = sub / no role')
+    post_as: Optional[Literal["text", "picture"]] = Field(None, description="publish: text (default) or a picture of the pitch")
 
 
 class WebTeamsResponse(WebTeams):

@@ -10,6 +10,9 @@ Events (docs/API.md has the payloads):
   vote.removed      a member was taken off the rollcall
   dues.posted       a dues ledger entry was added (charges, payments,
                     adjustments — the ledger is append-only, so this is all)
+  lineup.published  an admin published the lineup (services/lineup: both
+                    teams by position, formations, subs) — not a db hook;
+                    emitted by lineup.publish_content after the publish
   ping              sent by the "Test" button
 
 How it stays cheap and safe:
@@ -45,7 +48,8 @@ from urllib.parse import urlsplit
 
 import db
 
-EVENTS = ("rollcall.opened", "rollcall.closed", "vote.changed", "vote.removed", "dues.posted")
+EVENTS = ("rollcall.opened", "rollcall.closed", "vote.changed", "vote.removed", "dues.posted",
+          "lineup.published")
 MAX_ATTEMPTS = 8
 DISABLE_AFTER_FAILURES = 20
 MAX_ENDPOINTS_PER_CHAT = 5

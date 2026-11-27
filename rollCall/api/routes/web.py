@@ -470,6 +470,20 @@ async def update_group_settings(
             chat_id, f"🚪 Joining from the web link {'now needs admin approval' if body.join_approval else 'is open'}"
                      f" (by {actor_name}, via web)")
 
+    if body.sport is not None:
+        actor_name = await _actor_display_name(chat_id, actor_user_id)
+        from services import lineup as lineup_svc
+        from rollcall_manager import manager as _mgr
+        async with _mgr.get_chat_write_lock(chat_id):
+            new_sport = lineup_svc.set_sport(chat_id, body.sport, actor_user_id, actor_name)
+            if new_sport:
+                lineup_svc.autofill_open(chat_id, actor_name)
+        await _send_event_notification(
+            chat_id, (f"{lineup_svc.SPORTS[new_sport]['emoji']} Sport set to {lineup_svc.SPORTS[new_sport]['label']}"
+                      + (" — each player in 2 teams gets a role (WK, BAT, AR, BOWL)"
+                         if lineup_svc.kind(new_sport) == "roles" else "")
+                      if new_sport else "Sport off — teams are plain lists") + f" (by {actor_name}, via web)")
+
     if body.teams_enabled is not None:
         actor_name = await _actor_display_name(chat_id, actor_user_id)
         from services import teams as teams_svc
@@ -1864,7 +1878,9 @@ async def web_rollcall_teams(
     chat_id, uid = _member_of(group_token, id_token or "")
     from rollcall_manager import manager as _mgr
     from services import teams as teams_svc
+    from services import lineup as lineup_svc
     from services.common import find_rollcall_index
+    from services.web import with_lineup
     from exceptions import incorrectParameter, insufficientPermissions
     if find_rollcall_index(chat_id, rollcall_id, _mgr) is None:
         raise HTTPException(status_code=404, detail="That rollcall isn't open in this group.")
@@ -1899,6 +1915,27 @@ async def web_rollcall_teams(
             elif body.action in ("lock", "unlock"):
                 v = teams_svc.set_locked(rc, body.action == "lock", is_admin)
                 message = "Teams locked." if body.action == "lock" else "Teams unlocked."
+            elif body.action == "lineup_side":
+                lineup_svc.set_side(rc, body.side, actor)
+                v = teams_svc.view(rc)
+                message = f"{body.side}-a-side."
+            elif body.action == "lineup_formation":
+                lineup_svc.set_formation(rc, body.team_no, body.formation or "", actor)
+                v = teams_svc.view(rc)
+                message = f"Formation {body.formation}."
+            elif body.action == "lineup_place":
+                if not body.who_key or not body.team_no:
+                    raise incorrectParameter("Pick a player and a spot.")
+                lineup_svc.place(rc, body.who_key, body.team_no, body.position or None, actor)
+                v = teams_svc.view(rc)
+            elif body.action == "lineup_fill":
+                lineup_svc.fill(rc, actor)
+                v = teams_svc.view(rc)
+                message = "Empty spots filled from the subs."
+            elif body.action == "lineup_clear":
+                lineup_svc.clear(rc, actor)
+                v = teams_svc.view(rc)
+                message = "Everyone moved to subs."
             else:
                 v, post = teams_svc.publish(rc, is_admin)
                 message = "Posted to the group."
@@ -1907,9 +1944,15 @@ async def web_rollcall_teams(
     except incorrectParameter as e:
         raise HTTPException(status_code=409, detail=str(e))
     if post:
-        await _send_event_notification(chat_id, post + f"\n\n📣 Published by {actor} (via web)")
+        from handlers.teams import post_published
+        from identity_space import is_local_chat
+        if is_local_chat(chat_id):
+            lineup_svc.publish_content(rc, v, post)   # no chat to post to — still tells webhooks
+        else:
+            await post_published(chat_id, rc, v, post, actor,
+                                 as_picture=(body.post_as == "picture"), via=" (via web)")
     v.pop("moved", None)
-    return WebTeamsResponse(**v, message=message)
+    return WebTeamsResponse(**with_lineup(rc, v), message=message)
 
 
 @router.post(

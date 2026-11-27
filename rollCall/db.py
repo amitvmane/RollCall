@@ -884,6 +884,7 @@ def create_tables():
                 name TEXT,
                 team_no INTEGER NOT NULL,
                 moved_by TEXT,
+                position TEXT,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (rollcall_id, who_key),
                 FOREIGN KEY (rollcall_id) REFERENCES rollcalls(id) ON DELETE CASCADE
@@ -1290,6 +1291,9 @@ _RECONCILE_COLUMNS = {
         ("teams_count",        "teams_count INTEGER DEFAULT 0",        "teams_count INTEGER DEFAULT 0"),
         ("teams_locked",       "teams_locked INTEGER DEFAULT 0",       "teams_locked INTEGER DEFAULT 0"),
         ("teams_published_at", "teams_published_at TIMESTAMP",         "teams_published_at TIMESTAMP"),
+        # The lineup on the pitch (services/lineup.py): JSON
+        # {"side": 7, "formations": {"1": "2-3-1", "2": "3-2-1"}}. NULL = defaults.
+        ("lineup",             "lineup TEXT",                          "lineup TEXT"),
     ],
     "chats": [
         # 1 = joining from the group link needs an admin's OK, and web votes
@@ -1337,6 +1341,14 @@ _RECONCILE_COLUMNS = {
         # Teams (services/teams.py) are opt-in per group: off until an admin
         # turns them on with /teams on or the web setting.
         ("teams_enabled",          "teams_enabled INTEGER DEFAULT 0",          "teams_enabled INTEGER DEFAULT 0"),
+        # The sport the group plays (services/lineup.SPORTS). NULL = none:
+        # teams stay a numbered list; 'football' draws them on a pitch.
+        ("sport",                  "sport TEXT",                               "sport TEXT"),
+    ],
+    "rollcall_teams": [
+        # A player's spot in their team's formation, "<line>:<index>" (line 0
+        # is the keeper). NULL = a sub / not placed yet (services/lineup.py).
+        ("position", "position TEXT", "position TEXT"),
     ],
     "users": [
         ("in_pos",   "in_pos INTEGER DEFAULT NULL",   "in_pos INTEGER DEFAULT NULL"),
@@ -2420,7 +2432,7 @@ _VALID_CHAT_FIELDS = {
     'collector_rotation', 'last_collector_uid', 'dues_epoch',
     'reminder_before_close_hours', 'reminder_after_open_hours',
     'admin_source', 'vote_digest_hours', 'weather_alerts', 'teams_enabled',
-    'join_approval', 'buzz_mute_after',
+    'join_approval', 'buzz_mute_after', 'sport',
 }
 
 # Columns declared BOOLEAN in the Postgres schema. SQLite has no bool type and
@@ -2619,7 +2631,7 @@ _VALID_ROLLCALL_FIELDS = {
     'collector_uid', 'collector_name', 'collector_paid_ground', 'collector_upi',
     'auto_buzz_sent',
     'reminder_before_close_sent', 'reminder_after_open_sent',
-    'teams_count', 'teams_locked', 'teams_published_at',
+    'teams_count', 'teams_locked', 'teams_published_at', 'lineup',
 }
 
 # The rollcalls columns that are BOOLEAN on Postgres — same int-vs-bool trap as
@@ -8016,11 +8028,12 @@ def get_top_teammates(chat_id: int, user_id: int, limit: int = 3) -> List[Dict]:
 # ── Teams ──────────────────────────────────────────────────────────────────
 
 def get_team_rows(rollcall_id: int) -> List[Dict]:
-    """Every player placed on a team for this rollcall: who_key, name, team_no."""
+    """Every player placed on a team for this rollcall: who_key, name, team_no,
+    position (their spot on the pitch, or None — services/lineup.py)."""
     with _cursor() as cursor:
         ph = "%s" if db_type == "postgresql" else "?"
         cursor.execute(
-            f"SELECT who_key, name, team_no FROM rollcall_teams WHERE rollcall_id = {ph} "
+            f"SELECT who_key, name, team_no, position FROM rollcall_teams WHERE rollcall_id = {ph} "
             f"ORDER BY team_no, updated_at, who_key",
             (rollcall_id,))
         return [dict(r) for r in cursor.fetchall()]
@@ -8046,19 +8059,24 @@ def set_team_player(rollcall_id: int, who_key: str, name: str, team_no: int, mov
 
 def set_team_players(rollcall_id: int, rows: List[Dict], moved_by: str) -> None:
     """set_team_player for several players in one transaction — a swap must
-    never land half-done. rows: [{who_key, name, team_no}]."""
+    never land half-done. rows: [{who_key, name, team_no}], plus "position"
+    when the caller sets the pitch spot too (absent = leave it as it is)."""
     with _cursor(commit=True) as cursor:
         ph = "%s" if db_type == "postgresql" else "?"
         for r in rows:
+            has_pos = "position" in r
+            pos_sql = f", position = {ph}" if has_pos else ""
+            pos_val = (r["position"],) if has_pos else ()
             cursor.execute(
-                f"UPDATE rollcall_teams SET team_no = {ph}, name = {ph}, moved_by = {ph}, "
+                f"UPDATE rollcall_teams SET team_no = {ph}, name = {ph}, moved_by = {ph}{pos_sql}, "
                 f"updated_at = CURRENT_TIMESTAMP WHERE rollcall_id = {ph} AND who_key = {ph}",
-                (int(r["team_no"]), r["name"], moved_by, rollcall_id, r["who_key"]))
+                (int(r["team_no"]), r["name"], moved_by, *pos_val, rollcall_id, r["who_key"]))
             if cursor.rowcount == 0:
                 cursor.execute(
-                    f"INSERT INTO rollcall_teams (rollcall_id, who_key, name, team_no, moved_by) "
-                    f"VALUES ({ph}, {ph}, {ph}, {ph}, {ph})",
-                    (rollcall_id, r["who_key"], r["name"], int(r["team_no"]), moved_by))
+                    f"INSERT INTO rollcall_teams (rollcall_id, who_key, name, team_no, moved_by, position) "
+                    f"VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph})",
+                    (rollcall_id, r["who_key"], r["name"], int(r["team_no"]), moved_by,
+                     r.get("position")))
 
 
 def remove_team_players(rollcall_id: int, who_keys) -> None:

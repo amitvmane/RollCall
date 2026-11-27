@@ -58,6 +58,21 @@ error `{error, detail, request_id}` (the HTTPException/validation handlers in
 `/api_usage` and a key's own `GET /chats/{chat_id}/usage`. Readers are always
 scoped to one chat; a partner sees only its own key. Public contract: `docs/API.md`.
 
+## Lineup (teams on a pitch / by role)
+
+`services/lineup.py` sits on top of `services/teams.py` (same sheet, lock and
+publish rules) when `chats.sport` is set and a game has exactly 2 teams.
+Football (`kind: pitch`): `rollcall_teams.position` = `"<line>:<index>"`,
+NULL = sub; `rollcalls.lineup` JSON holds players per side (default half the
+IN list, 4–11) and each team's formation (presets in `FORMATIONS`). Cricket
+(`kind: roles`): the same column holds WK/BAT/AR/BOWL, never guessed. A team
+move makes a player a sub, a swap trades spots; teams are auto-placed when
+made (`autofill_new_teams`) or when the sport is set. `pitch_xy` and app.js
+`_lineupXY` must stay the same numbers (picture = page). Publish posts text or
+a Pillow picture (`publish_content`, outside the lock) and emits the
+`lineup.published` webhook; partners read `GET …/by-id/{id}/lineup` (by id
+only — new routes never get a number path).
+
 ## Partner webhooks
 
 `services/webhooks.py` is fed by hooks in the db.py writers every surface uses

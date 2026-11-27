@@ -218,6 +218,8 @@ def form(rc, count, actor: str, rng=random) -> dict:
     count = _validate_count(count)
     _require_open(rc)
     _split(rc, count, actor, rng)
+    from services import lineup
+    lineup.autofill_new_teams(rc, actor)
     return view(rc)
 
 
@@ -226,6 +228,8 @@ def reshuffle(rc, actor: str, rng=random) -> dict:
     if meta["count"] < MIN_TEAMS:
         raise incorrectParameter("No teams yet — make teams first.")
     _split(rc, meta["count"], actor, rng)
+    from services import lineup
+    lineup.autofill_new_teams(rc, actor)
     return view(rc)
 
 
@@ -248,7 +252,11 @@ def move(rc, key: str, team_no, actor: str) -> dict:
         raise incorrectParameter("Unknown team.")
     if not 1 <= team_no <= count:
         raise incorrectParameter("Unknown team.")
-    db.set_team_player(rc_db_id(rc), key, row["name"], team_no, actor)
+    # Changing team drops their spot on the pitch: they're a sub on the new
+    # team (services/lineup). Same team = nothing changes.
+    db.set_team_players(rc_db_id(rc), [dict(
+        {"who_key": key, "name": row["name"], "team_no": team_no},
+        **({"position": None} if team_no != int(row["team_no"]) else {}))], actor)
     result = view(rc)
     result["moved"] = {"name": row["name"], "team": LABELS[team_no - 1]}
     return result
@@ -265,9 +273,10 @@ def swap(rc, key_a: str, key_b: str, actor: str) -> dict:
         raise incorrectParameter("That player isn't IN any more.")
     if int(a["team_no"]) == int(b["team_no"]):
         raise incorrectParameter("Those two are on the same team.")
+    # A swap trades their spots on the pitch too (services/lineup).
     db.set_team_players(rc_db_id(rc), [
-        {"who_key": key_a, "name": a["name"], "team_no": int(b["team_no"])},
-        {"who_key": key_b, "name": b["name"], "team_no": int(a["team_no"])},
+        {"who_key": key_a, "name": a["name"], "team_no": int(b["team_no"]), "position": b.get("position")},
+        {"who_key": key_b, "name": b["name"], "team_no": int(a["team_no"]), "position": a.get("position")},
     ], actor)
     result = view(rc)
     result["swapped"] = (a["name"], b["name"])

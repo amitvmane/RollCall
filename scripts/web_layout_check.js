@@ -1466,6 +1466,125 @@ const WIDTHS = [
     await page.close();
   }
 
+  // Lineup: the two teams on a pitch (services/lineup.py). At 320px the pitch
+  // fits, every spot sits inside it, a drag from Subs onto an empty spot and
+  // a tap-then-tap both send lineup_place, and nothing overflows.
+  {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 320, height: 1000 });
+    await page.setRequestInterception(true);
+    const slots = (form, team, names) => {
+      const lines = [1].concat(form.split("-").map(Number));
+      const roles = lines.length === 4 ? ["GK", "DEF", "MID", "FWD"] : ["GK", "DEF", "FWD"];
+      const out = []; let k = 0;
+      lines.forEach((n, li) => { for (let i = 0; i < n; i++) {
+        const name = names[k++] || null;
+        out.push({ pos: `${li}:${i}`, role: roles[li], key: name ? `u${team}${k}` : null, name });
+      } });
+      return out;
+    };
+    const lineup = {
+      available: true, sport: "football", side: 7, side_auto: true, options: ["2-3-1", "3-2-1", "2-2-2"],
+      locked: false, placed: 13, text: "⚽ Lineup — Lineup Game · 7-a-side",
+      teams: [
+        { no: 1, label: "A", emoji: "🔴", formation: "2-3-1",
+          slots: slots("2-3-1", 1, ["Ravi", "Priya", "Sam", "Amit", "Kiran", "Leo"]),   // FWD empty
+          subs: [{ key: "pdev", name: "Dev" }] },
+        { no: 2, label: "B", emoji: "🔵", formation: "3-2-1",
+          slots: slots("3-2-1", 2, ["Arjun", "Zaid", "Neha", "Omar", "Tanvi", "Vikram", "Joel Fernandes-Long"]),
+          subs: [] },
+      ],
+    };
+    const teams = { formed: true, count: 2, locked: false, locked_by: null, players_in: 14,
+                    teams: [{ no: 1, label: "A", emoji: "🔴", players: [] }, { no: 2, label: "B", emoji: "🔵", players: [] }],
+                    lineup };
+    const group = { group_name: "Test FC", bot_username: "TestBot", teams_enabled: true, sport: "football",
+                    rollcalls: [{ num: 1, id: 7, rollcall_id: 7, title: "Lineup Game", status: "open",
+                                  in: [], out: [], maybe: [], waiting: [], teams }] };
+    const posts = [];
+    page.on("request", req => {
+      const u = req.url();
+      if (/\/api\/v1\/web\/group\/testtoken123$/.test(u.split("?")[0]))
+        return req.respond({ status: 200, contentType: "application/json", body: JSON.stringify(group) });
+      if (/\/teams$/.test(u) && req.method() === "POST") {
+        posts.push(JSON.parse(req.postData() || "{}"));
+        return req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ ...teams, message: "" }) });
+      }
+      if (/\/admin-status/.test(u)) return req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ is_admin: false }) });
+      return u.startsWith(BASE) ? req.continue() : req.respond({ status: 200, contentType: "text/plain", body: "" });
+    });
+    const errs = [];
+    page.on("pageerror", e => errs.push(String(e.message)));
+    await page.goto(`${BASE}/web/group/testtoken123`, { waitUntil: "load" });
+    await page.evaluate(u => {
+      localStorage.clear();
+      localStorage.setItem("rc_verified_tg_user_id", String(u.user_id));
+      localStorage.setItem("rc_verified_tg_name", u.name);
+      localStorage.setItem("rc_identity_token", u.id_token);
+    }, EMAIL_USER);
+    await page.reload({ waitUntil: "load" });
+    await new Promise(r => setTimeout(r, 800));
+    const g = await page.evaluate(() => {
+      const card = document.getElementById("teams-card");
+      const pitch = card && card.querySelector(".lu-pitch");
+      if (!pitch) return { pitch: false };
+      const pr = pitch.getBoundingClientRect();
+      const discs = [...pitch.querySelectorAll(".lu-disc")].map(d => d.getBoundingClientRect());
+      const inside = discs.every(r => r.left >= pr.left - 1 && r.right <= pr.right + 1 && r.top >= pr.top - 1 && r.bottom <= pr.bottom + 1);
+      let overlap = 0;
+      for (let i = 0; i < discs.length; i++) for (let j = i + 1; j < discs.length; j++) {
+        const a = discs[i], b = discs[j];
+        if (a.left < b.right - 2 && b.left < a.right - 2 && a.top < b.bottom - 2 && b.top < a.bottom - 2) overlap++;
+      }
+      const labels = [...pitch.querySelectorAll(".lu-nm")].map(n => n.getBoundingClientRect());
+      let covers = 0;
+      for (const l of labels) for (const d of discs)
+        if (l.left < d.right - 2 && d.left < l.right - 2 && l.top < d.bottom - 2 && d.top < l.bottom - 2) covers++;
+      overlap += covers;
+      return { pitch: true, spots: discs.length, inside, overlap, w: pr.width,
+               wide: document.documentElement.scrollWidth > window.innerWidth,
+               formSelects: card.querySelectorAll(".lu-form select").length,
+               copy: !!card.querySelector('[data-on-click="lineupCopy"]') };
+    });
+    if (!g.pitch) failures.push("lineup: no pitch drawn for a group with a sport and 2 teams");
+    else {
+      if (g.spots !== 14) failures.push(`lineup: expected 14 spots on the pitch, got ${g.spots}`);
+      if (!g.inside) failures.push("lineup: a spot is drawn outside the pitch at 320px");
+      if (g.overlap) failures.push(`lineup: ${g.overlap} spot/name overlap(s) at 320px`);
+      if (g.wide) failures.push("lineup: the card overflows a 320px screen");
+      if (g.formSelects !== 2) failures.push("lineup: each team should have its own formation picker");
+      if (!g.copy) failures.push("lineup: no Copy text button");
+    }
+    // Drag Dev (a sub) onto Team A's empty forward spot.
+    await page.evaluate(() => document.querySelector("#teams-card .lu-pitch").scrollIntoView({ block: "start" }));
+    await new Promise(r => setTimeout(r, 200));
+    const box = async sel => page.evaluate(s => { const r = document.querySelector(s).getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }, sel);
+    if (g.pitch) {
+      const from = await box('.lu-chip[data-lu-key="pdev"]');
+      const to = await box('.lu-slot[data-lu-team="1"][data-lu-pos="3:0"] .lu-disc');
+      await page.mouse.move(from.x, from.y); await page.mouse.down();
+      await page.mouse.move(from.x + 10, from.y - 10, { steps: 3 });
+      await page.mouse.move(to.x, to.y, { steps: 8 }); await page.mouse.up();
+      await new Promise(r => setTimeout(r, 400));
+      const drop = posts.find(p => p.action === "lineup_place");
+      if (!drop || drop.who_key !== "pdev" || drop.team_no !== 1 || drop.position !== "3:0")
+        failures.push(`lineup: dragging a sub onto an empty spot sent ${JSON.stringify(drop)}`);
+      // Tap a player, then a spot on the other team.
+      posts.length = 0;
+      await page.evaluate(() => document.querySelector('.lu-slot[data-lu-key="u11"]').click());
+      await page.evaluate(() => document.querySelector('.lu-slot[data-lu-team="2"][data-lu-pos="1:0"]').click());
+      await new Promise(r => setTimeout(r, 400));
+      const tap = posts.find(p => p.action === "lineup_place");
+      if (!tap || tap.who_key !== "u11" || tap.team_no !== 2 || tap.position !== "1:0")
+        failures.push(`lineup: tap-then-tap sent ${JSON.stringify(tap)}`);
+    }
+    if (errs.length) failures.push(`lineup: JS error — ${errs[0]}`);
+    await page.evaluate(() => localStorage.clear());
+    console.log(`  lineup: 14 spots inside a ${Math.round(g.w || 0)}px pitch, no overlaps, drag + tap place, 320px`);
+    await page.close();
+  }
+
   // Landing page: both ways in (Telegram, and the web without it), at 320px.
   {
     const page = await browser.newPage();

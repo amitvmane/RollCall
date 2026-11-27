@@ -15,11 +15,12 @@ from fastapi import APIRouter, Depends, Path, status
 from services import rollcalls as rc_svc
 
 from api.auth import AuthedToken, require_scope
-from api.rollcall_ref import RcRef, dual, rollcall_ref
+from api.rollcall_ref import BY_ID, RcRef, dual, rollcall_ref, stable_path
 from api.telegram_mirror import mirror_panel_to_telegram, send_event_notification
 from api.schemas.rollcalls import (
     EndRollcallRequest,
     EndRollcallResponse,
+    LineupResponse,
     RollcallResponse,
     StartRollcallRequest,
 )
@@ -75,6 +76,20 @@ async def get_rollcall(
     ref: RcRef = Depends(rollcall_ref),
 ) -> RollcallResponse:
     return RollcallResponse(**rc_svc.get_rollcall(ref.chat_id, ref.index_now()))
+
+
+# By id only: new routes never get a (retiring) number path.
+@router.get(stable_path("/chats/{chat_id}/rollcalls/{rc_number}/lineup"), dependencies=BY_ID,
+            response_model=LineupResponse,
+            summary="The lineup: both teams by position and formation, and their subs")
+async def get_lineup(
+    _token: AuthedToken = Depends(require_scope("read")),
+    ref: RcRef = Depends(rollcall_ref),
+) -> LineupResponse:
+    from rollcall_manager import manager as _mgr
+    from services import lineup as lineup_svc
+    rc = _mgr.get_rollcall(ref.chat_id, ref.index_now())
+    return LineupResponse(**lineup_svc.api_payload(rc, lineup_svc.view(rc)))
 
 
 @dual(router.delete, "/chats/{chat_id}/rollcalls/{rc_number}",

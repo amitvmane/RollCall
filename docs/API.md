@@ -63,6 +63,7 @@ Every rollcall has a permanent `id` (in every rollcall response). Use the
 | DELETE | `/chats/{chat_id}/rollcalls/by-id/{rollcall_id}/users/{name}` | admin |
 | PATCH | `/chats/{chat_id}/rollcalls/by-id/{rollcall_id}/users/{name}/status` | admin |
 | PUT | `/chats/{chat_id}/rollcalls/by-id/{rollcall_id}/settings/{limit,location,fee,title,when,reminder}` | admin |
+| GET | `/chats/{chat_id}/rollcalls/by-id/{rollcall_id}/lineup` | read — the teams by position (see below) |
 
 **Only the `by-id` paths exist for app keys.** The old `/rollcalls/{rc_number}/…`
 paths (a 1-based display number, which shifts when an earlier rollcall ends —
@@ -89,6 +90,38 @@ webhooks or rollcall responses). With an app key, the member must currently
 belong to the group, and their name is the one the group knows — `first_name`
 in your request does not rename anyone. Votes for people with no account at
 all go through `proxy-votes` with an `admin` key.
+
+### Lineup
+
+`GET /chats/{chat_id}/rollcalls/by-id/{rollcall_id}/lineup` (scope `read`)
+returns who plays where — for a booking or turf screen, a scoring or stats
+app, a league table or a stream overlay. It has content when the group has set
+a sport and the game has two teams; otherwise `available` is `false`.
+
+```json
+{
+  "rollcall_id": 42, "available": true, "sport": "football",
+  "players_per_side": 7, "locked": true,
+  "teams": [{
+    "label": "A", "formation": "2-3-1",
+    "positions": [
+      {"position": "0:0", "role": "GK",  "player": {"user_id": 168415137, "name": "Priya", "guest": false}},
+      {"position": "1:0", "role": "DEF", "player": null}
+    ],
+    "subs": [{"user_id": null, "name": "Ravi K", "guest": true}]
+  }]
+}
+```
+
+- **Football:** `position` is `"<line>:<index>"` — line 0 is the keeper, then
+  back to front, index left to right as seen from that team's goal; `formation`
+  is the outfield lines (`2-3-1`). `player: null` is an empty spot.
+- **Cricket:** no pitch. `formation` is `""`; each entry in `positions` is a
+  player with `role` `WK` (wicket-keeper), `BAT`, `AR` (all-rounder) or `BOWL`,
+  and `position` is `"<role>:<n>"`, listed WK, BAT, AR, BOWL. `subs` are the
+  players who don't have a role yet.
+- Treat `locked: false` as provisional — the group can still move people.
+  The `lineup.published` webhook tells you when an admin publishes it.
 
 ### Your own usage
 
@@ -132,6 +165,7 @@ webhook off; only an owner can switch it back on.
 | `vote.changed` | a member's entry was written (`in`/`out`/`maybe`/`waitlist`). Also sent for a rename or a new comment, so the same status can repeat — treat it as "this entry is now X" |
 | `vote.removed` | a member was taken off the rollcall |
 | `dues.posted` | a dues ledger entry was added (charge, payment, adjustment) |
+| `lineup.published` | an admin published the lineup; `data` is the same object as `GET …/lineup` (without `rollcall_id`, which is on `data` as for every event). Opt in: existing webhooks don't get new event types until the owner ticks them |
 | `ping` | the Test button |
 
 Each delivery is a `POST` with a JSON body:

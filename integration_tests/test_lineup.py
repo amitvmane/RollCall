@@ -310,6 +310,50 @@ class TestLineupSurfaces(_Base):
         self._post(rc.id, {"action": "publish", "post_as": "text"}, ADMIN_USER["id"])
         self.assertIn("Lineup — Sunday Game", get_mock_bot().send_message.call_args.args[1])
 
+    async def _details(self):
+        from datetime import datetime as _dt
+        rc = self._rc()
+        rc.location = "Turf 3"
+        rc.inListLimit = 12
+        rc.event_fee = "200"
+        rc.finalizeDate = _dt(2026, 11, 29, 19, 0)
+        rc.timezone = "Asia/Kolkata"
+        rc.save()
+        return self._rc()
+
+    async def test_publish_carries_the_game_details(self):
+        await self._game(8)
+        rc = await self._details()
+        get_mock_bot().reset_mock()
+        r = self._post(rc.id, {"action": "publish", "post_as": "text"}, ADMIN_USER["id"])
+        self.assertEqual(r.status_code, 200, r.text)
+        text = get_mock_bot().send_message.call_args.args[1]
+        lines = text.split("\n")
+        self.assertTrue(lines[0].startswith("⚽ Lineup — Sunday Game"), lines[0])
+        for want in ("🗓 Sun 29 Nov, 07:00 PM", "📍 Turf 3", "👥 8/12 IN", "💰 Fee 200"):
+            self.assertIn(want, text)
+        self.assertLess(text.index("📍 Turf 3"), text.index("Team A"), "details sit under the title")
+
+        get_mock_bot().reset_mock()
+        self._post(rc.id, {"action": "publish", "post_as": "picture"}, ADMIN_USER["id"])
+        cap = get_mock_bot().send_photo.call_args.kwargs["caption"]
+        for want in ("🗓 Sun 29 Nov, 07:00 PM", "📍 Turf 3", "👥 8/12 IN", "💰 Fee 200", "Published by"):
+            self.assertIn(want, cap)
+
+    async def test_plain_team_sheet_publish_carries_the_details_too(self):
+        db.update_chat_settings(CHAT_ID, sport=None)
+        await self._game(8)
+        rc = await self._details()
+        rc.event_fee = None
+        rc.location = None
+        rc.save()
+        get_mock_bot().reset_mock()
+        self._post(rc.id, {"action": "publish"}, ADMIN_USER["id"])
+        text = get_mock_bot().send_message.call_args.args[1]
+        self.assertTrue(text.startswith("⚽ Teams — Sunday Game\n🗓 Sun 29 Nov, 07:00 PM\n👥 8/12 IN"), text[:120])
+        self.assertNotIn("📍", text, "only details that are set")
+        self.assertNotIn("💰", text)
+
     async def test_sport_setting_is_admin_only_on_the_web(self):
         from api.identity import issue_identity_token
         db.update_chat_settings(CHAT_ID, sport=None)

@@ -766,23 +766,46 @@ def render_png(rc, lv: dict) -> BytesIO:
     return _to_bytes(img)
 
 
+def _with_details_band(png: BytesIO, line: str) -> BytesIO:
+    """Add the game details (when · where · IN · fee) as a line under the
+    picture's title, so a forwarded picture still says when and where.
+    Every picture keeps its title and subtitle above y=112."""
+    if not line:
+        return png
+    from PIL import Image, ImageDraw
+    from utils.card_gen import _font, _sanitize, _ellipsize, _to_bytes
+    src = Image.open(png).convert("RGB")
+    split, band = 112, 40
+    out = Image.new("RGB", (src.width, src.height + band), (15, 23, 42))
+    out.paste(src.crop((0, 0, src.width, split)), (0, 0))
+    out.paste(src.crop((0, split, src.width, src.height)), (0, split + band))
+    d = ImageDraw.Draw(out)
+    d.text((40, split + 2), _sanitize(_ellipsize(line, max(40, src.width // 13)), bold=True), font=_font(24, True),
+           fill=(226, 232, 240))
+    return _to_bytes(out)
+
+
 def publish_content(rc, tv: dict, teams_text: str, as_picture: bool = False) -> dict:
     """What a publish posts, after teams.publish() recorded it.
 
     {"text": str, "photo": BytesIO|None, "caption": str|None}. With no pitch
     (no sport, or not 2 teams) it is the team sheet's text, as before. Call
     it AFTER leaving the chat lock — drawing the picture takes a moment."""
+    from services import teams as teams_svc
     lv = view(rc, tv)
     if not lv["available"]:
-        return {"text": teams_text, "photo": None, "caption": None}
+        return {"text": teams_svc.with_details(teams_text, rc), "photo": None, "caption": None}
     emit_published(rc, lv)
-    text = render_text(rc, lv)
+    text = teams_svc.with_details(render_text(rc, lv), rc)
     if not as_picture:
         return {"text": text, "photo": None, "caption": None}
     try:
         caption = (f"{SPORTS[lv['sport']]['emoji']} Lineup — {_title(rc)} · {lv['side']}-a-side"
                    if lv.get("kind") == "pitch" else f"{SPORTS[lv['sport']]['emoji']} Teams — {_title(rc)}")
-        return {"text": text, "photo": render_png(rc, lv), "caption": credit_caption(caption)}
+        caption = f"{caption}\n{teams_svc.details_text(rc)}"
+        plain = " · ".join(t for _e, t in teams_svc.game_details(rc))
+        return {"text": text, "photo": _with_details_band(render_png(rc, lv), plain),
+                "caption": credit_caption(caption)}
     except Exception:
         logging.exception("lineup picture failed for rollcall %s — posting text", rc_db_id(rc))
         return {"text": text, "photo": None, "caption": None}

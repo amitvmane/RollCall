@@ -356,6 +356,46 @@ def button_token(key: str) -> str:
     return key if key.startswith("u") else "g" + callback_key(key)
 
 
+def game_details(rc) -> list[tuple[str, str]]:
+    """What a published team sheet says about the game, beside the title:
+    [(emoji, text)] for when, where, how many are IN (of the limit) and the
+    fee — only the ones that are set. One list for the text, the caption
+    and the picture, so they never disagree."""
+    from services.common import game_time
+    out = []
+    when = game_time(rc)
+    if when is not None:
+        import pytz
+        local = when.astimezone(pytz.timezone(getattr(rc, "timezone", None) or "Asia/Kolkata"))
+        out.append(("🗓", local.strftime("%a %d %b, %I:%M %p")))
+    loc = (getattr(rc, "location", None) or "").strip()
+    if loc:
+        out.append(("📍", loc))
+    limit = getattr(rc, "inListLimit", None)
+    n_in = len(getattr(rc, "inList", None) or [])
+    waiting = len(getattr(rc, "waitList", None) or [])
+    out.append(("👥", f"{n_in}/{limit} IN" if limit else f"{n_in} IN")
+               if not waiting else ("👥", (f"{n_in}/{limit} IN" if limit else f"{n_in} IN") + f" · {waiting} waiting"))
+    fee = getattr(rc, "event_fee", None)
+    if fee not in (None, ""):
+        out.append(("💰", f"Fee {fee}"))
+    return out
+
+
+def details_text(rc) -> str:
+    """The details as lines for a Telegram message or caption."""
+    return "\n".join(f"{e} {t}" for e, t in game_details(rc))
+
+
+def with_details(text: str, rc) -> str:
+    """Put the game details under the first (title) line of a sheet."""
+    det = details_text(rc)
+    if not det:
+        return text
+    head, _sep, rest = text.partition("\n")
+    return f"{head}\n{det}" + (f"\n{rest}" if rest else "")
+
+
 def render_text(rc, v: dict) -> str:
     title = rc.title if rc.title and rc.title != "<Empty>" else "this game"
     if not v["formed"]:

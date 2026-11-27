@@ -932,6 +932,7 @@ body.tg-mode .brand-group-sel{background:rgba(127,127,127,.16);color:var(--text)
 .team-n{font-family:var(--font-mono);color:var(--sub);font-weight:500;margin-left:4px}
 .team-player{display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:.84rem;padding:3px 0}
 .team-pname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.team-pnum{color:var(--sub);font-variant-numeric:tabular-nums;display:inline-block;min-width:1.4em}
 .team-move{flex-shrink:0;padding:2px 4px;border-radius:6px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.78rem}
 .teams-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 .teams-btn{padding:6px 12px;font-size:.8rem}

@@ -127,6 +127,8 @@ def set_in_for_locked(chat_id, admin_user_id, admin_name, proxy_name, comment=No
         "sif", target_name=proxy_name,
         rollcall_id=getattr(rc, "id", None), details=rc.title,
     )
+    from services import buzz_mute
+    buzz_mute.answer_for_proxy(chat_id, proxy_name)
 
     if result in ("AB", "AW"):
         raise duplicateProxy("No duplicate proxy please :-), Thanks!")
@@ -187,6 +189,8 @@ def set_out_for_locked(chat_id, admin_user_id, admin_name, proxy_name, comment=N
         "sof", target_name=proxy_name,
         rollcall_id=getattr(rc, "id", None), details=rc.title,
     )
+    from services import buzz_mute
+    buzz_mute.answer_for_proxy(chat_id, proxy_name)
 
     if result == "AB":
         raise duplicateProxy("No duplicate proxy please :-), Thanks!")
@@ -251,6 +255,8 @@ def set_maybe_for_locked(chat_id, admin_user_id, admin_name, proxy_name, comment
         "smf", target_name=proxy_name,
         rollcall_id=getattr(rc, "id", None), details=rc.title,
     )
+    from services import buzz_mute
+    buzz_mute.answer_for_proxy(chat_id, proxy_name)
 
     if result == "AB":
         raise duplicateProxy("No duplicate proxy please :-), Thanks!")

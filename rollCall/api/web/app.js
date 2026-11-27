@@ -1399,7 +1399,7 @@ function renderTeams(rc){
     card.innerHTML=h;return;
   }
   h+=`<div class="teams-grid">`+t.teams.map(team=>`<div class="team-col"><div class="team-name">${team.emoji} Team ${esc(team.label)} <span class="team-n">${team.players.length}</span></div>`+
-    (team.players.length?team.players.map(p=>`<div class="team-player"><span class="team-pname">${esc(p.name)}</span>`+
+    (team.players.length?team.players.map((p,i)=>`<div class="team-player"><span class="team-pname"><span class="team-pnum">${i+1}.</span> ${esc(p.name)}</span>`+
       (canEdit?`<select class="team-move" aria-label="Move or swap ${esc(p.name)}" data-on-change="teamsMove" data-args="${rcArgs(p.key,RC_VALUE)}">`+
         `<optgroup label="Move to">`+t.teams.map(o=>`<option value="t${o.no}"${o.no===team.no?" selected":""}>${esc(o.label)}</option>`).join("")+`</optgroup>`+
         t.teams.filter(o=>o.no!==team.no&&o.players.length).map(o=>`<optgroup label="Swap with (Team ${esc(o.label)})">`+

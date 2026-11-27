@@ -126,6 +126,57 @@ def get_canonical_map(chat_id: int) -> dict[str, dict]:
     return result
 
 
+def proxy_member_resolver(chat_id: int, members: Optional[list] = None):
+    """fn(proxy_name) -> the current member a proxy name stands for, or None.
+
+    The one rule for "this /sif name IS that member" — used by /buzz (skip
+    them, they're on the list) and by proxy votes (their vote answers their
+    buzzes). A name is a member when:
+      * it is merged into that member (identity_links, canonical user), or
+      * it is "@username" of a current member (usernames are unique), or
+      * it is merged with other names (either side of the merge) and exactly
+        one name in that group is "@username" of a current member.
+    Plain names never match a member by spelling alone — two people called
+    "Rahul" stay two people until an admin merges them. Two different
+    @usernames in one group → no match (ambiguous, so nobody is skipped).
+
+    Built once (two queries), then each lookup is in memory.
+    """
+    canonical_map = get_canonical_map(chat_id)
+    if members is None:
+        members = db.get_active_members(chat_id)
+    by_username: dict[str, int] = {}
+    for m in members or []:
+        un = (m.get("username") or "").strip().lstrip("@").lower()
+        uid = m.get("user_id")
+        if un and isinstance(uid, int) and not isinstance(uid, bool):
+            by_username[un] = uid
+    groups: dict[str, set] = {}   # lower(canonical proxy) -> lower(aliases)
+    for alias, canon in canonical_map.items():
+        if canon["kind"] == "proxy" and canon["proxy_name"]:
+            groups.setdefault(canon["proxy_name"].lower(), set()).add(alias)
+
+    def _username_hit(name: str) -> Optional[int]:
+        name = name.strip()
+        return by_username.get(name[1:].lower()) if name.startswith("@") and len(name) > 1 else None
+
+    def resolve(proxy_name) -> Optional[int]:
+        key = str(proxy_name or "").strip().lower()
+        if not key:
+            return None
+        canon = canonical_map.get(key)
+        if canon and canon["kind"] == "user":
+            return canon["user_id"]
+        direct = _username_hit(key)
+        if direct is not None:
+            return direct
+        head = canon["proxy_name"].lower() if canon else key
+        hits = {h for h in (_username_hit(n) for n in {head} | groups.get(head, set())) if h is not None}
+        return hits.pop() if len(hits) == 1 else None
+
+    return resolve
+
+
 def get_alias_group(chat_id: int, *, user_id: Optional[int] = None,
                      proxy_name: Optional[str] = None) -> dict:
     """Resolve to canonical, then collect every alias pointing at it.

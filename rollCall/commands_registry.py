@@ -425,9 +425,14 @@ COMMANDS = [
     },
     {
         "name": "set_in_for", "aliases": ["sif"], "scope": "admin", "category": "Proxy",
-        "args": "name [::N]", "sample": "/sif Alex ::1",
+        "args": "name | @username [::N]", "sample": "/sif Alex ::1",
         "summary": "Mark a non-Telegram member as IN",
-        "details": "Adds a proxy member to the IN list. Useful for members without Telegram. Their attendance is tracked.",
+        "details": (
+            "Adds a proxy member to the IN list. Useful for members without Telegram. Their attendance is tracked.\n\n"
+            "Adding someone who IS in this Telegram group? Use /sif @username — /buzz and the "
+            "reminders then know they're in and don't ping them. A plain name counts as that "
+            "member once it's merged with them (web page → Admin → 🧬 Merge identities)."
+        ),
     },
     {
         "name": "set_out_for", "aliases": ["sof"], "scope": "admin", "category": "Proxy",
@@ -549,6 +554,7 @@ COMMANDS = [
         "summary": "Ping members who haven't voted",
         "details": (
             "Pings everyone the bot has seen who hasn't voted on ANY currently-active rollcall. "
+            "Members an admin added with /sif @username, or under a name merged with them, count as voted. "
             "Optional custom message replaces the default. ::N narrows to a specific rollcall. "
             "30-second per-chat cooldown."
         ),

@@ -356,7 +356,7 @@ def render_text(rc, v: dict) -> str:
     for team in v["teams"]:
         lines.append("")
         lines.append(f"{team['emoji']} Team {team['label']} ({len(team['players'])})")
-        lines.extend(f"• {p['name']}" for p in team["players"]) if team["players"] \
+        lines.extend(f"{i}. {p['name']}" for i, p in enumerate(team["players"], 1)) if team["players"] \
             else lines.append("—")
     if v["locked"]:
         lines.append("")

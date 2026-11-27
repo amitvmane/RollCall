@@ -1637,6 +1637,9 @@ async def phase_teams():
     record("a member can make 2 teams; guests are included", ok and not _errors, d or error_msgs()[:2])
     v = _teams.view(rc)
     record("...split evenly", sorted(len(t["players"]) for t in v["teams"]) == [2, 2], str(v["teams"])[:200])
+    _sheet = text_of(out)
+    record("players are numbered within each team (1. 2.), not bulleted",
+           "1. " in _sheet and "2. " in _sheet and "• " not in _sheet, _sheet[:200])
 
     # Swap picker: the sheet never lists players; the picker shows one team,
     # three names to a row, and a swap keeps the sizes.
@@ -2009,6 +2012,17 @@ async def run_all():
            "@bob" not in text.lower(), f"buzz text: {text[:300]!r}")
     record("/buzz DOES still ping Carol -- neither she nor any alias of hers voted",
            "@carol" in text.lower(), f"buzz text: {text[:300]!r}")
+
+    # /sif @username names that member outright (usernames are unique).
+    await feed("/sif @Carol", ALICE)
+    bot_state._buzz_cooldowns.pop(CHAT_ID, None)
+    out = await feed("/buzz", ALICE)
+    text = text_of(out)
+    record("/buzz does NOT ping Carol once added with /sif @carol",
+           "@carol" not in text.lower() and not _errors, f"buzz text: {text[:300]!r}")
+    out = await feed("/help sif", ALICE)
+    ok, d = contains(out, "/sif @username")
+    record("/help sif tells admins to use /sif @username for group members", ok, d)
 
     await feed("/erc", ALICE)
     record("Phase 5a -- no ERROR-level logs emitted", len(_errors) == 0,

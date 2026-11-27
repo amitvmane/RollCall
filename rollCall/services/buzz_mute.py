@@ -124,10 +124,28 @@ def muted_members(chat_id: int) -> list:
     return out
 
 
-def unmute(chat_id: int, user_id: int, actor_user_id: int, actor_name: str) -> None:
+def mark_answered(chat_id: int, user_id: int) -> None:
+    """Their buzzes in this chat are answered (a vote, or an admin's /sif for them)."""
     with db._cursor(commit=True) as cursor:
-        cursor.execute(f"UPDATE buzz_log SET responded = 1 WHERE chat_id = {_ph()} AND user_id = {_ph()}",
-                       (chat_id, user_id))
+        cursor.execute(f"UPDATE buzz_log SET responded = 1 WHERE chat_id = {_ph()} AND user_id = {_ph()} "
+                       f"AND responded = 0", (chat_id, user_id))
+
+
+def answer_for_proxy(chat_id: int, proxy_name: str) -> None:
+    """A proxy vote for a name that stands for a member answers that member's
+    buzzes — same as if they had voted themselves. Best-effort: never costs
+    the vote."""
+    try:
+        from services.identity import proxy_member_resolver
+        uid = proxy_member_resolver(chat_id)(proxy_name)
+        if uid is not None:
+            mark_answered(chat_id, uid)
+    except Exception:
+        logging.exception("buzz_mute.answer_for_proxy failed")
+
+
+def unmute(chat_id: int, user_id: int, actor_user_id: int, actor_name: str) -> None:
+    mark_answered(chat_id, user_id)
     db.log_admin_action(chat_id, actor_user_id, actor_name, "buzz_unmute", target_name=str(user_id))
 
 

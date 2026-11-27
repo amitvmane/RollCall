@@ -755,3 +755,19 @@ class TestVacancies(_Base):
         _svc().reshuffle(self._rc(), "Admin", rng=random.Random(2))
         keys = [r["who_key"] for r in db.get_team_rows(self._rc().id)]
         self.assertNotIn(f"u{USERS[0]['id']}", keys)
+
+
+def test_team_sheet_numbers_players_per_team():
+    """Players are numbered 1, 2, 3… within each team — not bulleted."""
+    from types import SimpleNamespace
+    teams = _svc()
+    v = {"formed": True, "locked": False, "locked_by": None, "teams": [
+        {"emoji": "🔴", "label": "A", "players": [{"name": "Ravi"}, {"name": "Priya"}]},
+        {"emoji": "🔵", "label": "B", "players": [{"name": "Sam"}]},
+        {"emoji": "🟢", "label": "C", "players": []},
+    ]}
+    text = teams.render_text(SimpleNamespace(title="Sunday"), v)
+    assert "1. Ravi\n2. Priya" in text
+    assert "Team B (1)\n1. Sam" in text       # numbering restarts per team
+    assert "Team C (0)\n—" in text
+    assert "•" not in text

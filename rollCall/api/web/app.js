@@ -1311,7 +1311,7 @@ function renderRcMeta(rc){
 }
 
 window.checkRcWeather=async function(rcId){
-  if(!_idToken){toast("Sign in with Telegram first.",3000);return;}
+  if(!_idToken){toast("Sign in first (top right) — with Telegram or email.",3000);return;}
   try{
     const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/rollcalls/${encodeURIComponent(rcId)}/weather`,
       {headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(20000)});
@@ -1395,7 +1395,7 @@ function renderTeams(rc){
     h+=`<p class="teams-sub">No teams yet · ${t.players_in} IN. Players are split at random.</p>`;
     if(_idToken){
       h+=`<div class="teams-actions">${formBtn("Make 2 teams",2)}${formBtn("3 teams",3)}${formBtn("4 teams",4)}</div>`;
-    }else h+=`<p class="teams-sub">Sign in with Telegram to make teams.</p>`;
+    }else h+=`<p class="teams-sub">Sign in (Telegram or email) to make teams.</p>`;
     card.innerHTML=h;return;
   }
   const lu=t.lineup&&t.lineup.available?t.lineup:null;
@@ -1426,7 +1426,7 @@ function renderTeams(rc){
                       :`<button class="btn btn-secondary teams-btn" data-on-click="teamsLock">🔒 Lock</button>`);
   }
   if(acts.length)h+=`<div class="teams-actions">${acts.join("")}</div>`;
-  if(!_idToken)h+=`<p class="teams-sub">Sign in with Telegram to move players.</p>`;
+  if(!_idToken)h+=`<p class="teams-sub">Sign in (Telegram or email) to move players.</p>`;
   else if(canEdit&&lu&&lu.kind==="roles")h+=`<p class="teams-sub">Pick a role for each player; use 🔀 Reshuffle or the team sheet in Telegram to change teams.</p>`;
   else if(canEdit&&lu)h+=`<p class="teams-sub">Drag a player onto a spot, or tap a player and then a spot. Drop on someone to swap; drop on Subs to bench them.</p>`;
   else if(canEdit)h+=`<p class="teams-sub">Use the menu next to a name to swap that player with someone, or move them.</p>`;
@@ -1585,7 +1585,7 @@ document.addEventListener("pointerup",e=>_luEndDrag(e,true));
 document.addEventListener("pointercancel",e=>_luEndDrag(e,false));
 
 async function _teamsAction(body){
-  if(!_idToken){toast("Sign in with Telegram first.",3000);return;}
+  if(!_idToken){toast("Sign in first (top right) — with Telegram or email.",3000);return;}
   const rc=activeRcData;
   if(!rc)return;
   try{
@@ -1654,7 +1654,7 @@ function _wireRowAdminActs(){
 }
 
 window.doMoveUser=async function(name,newStatus,who){
-  if(!_idToken){toast("Verify with Telegram first.",3000);return;}
+  if(!_idToken){toast("Sign in first (top right) — with Telegram or email.",3000);return;}
   try{
     const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/rollcalls/move-user`,{
       method:"POST",headers:{"Content-Type":"application/json"},
@@ -1673,7 +1673,7 @@ window.doMoveUser=async function(name,newStatus,who){
 };
 
 window.doRemoveUser=async function(name,who){
-  if(!_idToken){toast("Verify with Telegram first.",3000);return;}
+  if(!_idToken){toast("Sign in first (top right) — with Telegram or email.",3000);return;}
   try{
     const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/rollcalls/remove-user`,{
       method:"POST",headers:{"Content-Type":"application/json"},
@@ -2043,7 +2043,7 @@ async function loadWebStats(){
 
 let _lastStats=null,_lookedUp=null;
 window.showMemberStats=async function(uid,guest){
-  if(!_idToken){toast("Sign in with Telegram to see members' stats.",3000);return;}
+  if(!_idToken){toast("Sign in (Telegram or email) to see members' stats.",3000);return;}
   const q=new URLSearchParams(uid?{user_id:String(uid)}:{name:String(guest||"")});
   try{
     const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/stats/member?${q}`,{headers:{"X-Identity-Token":_idToken},signal:AbortSignal.timeout(8000)});
@@ -2281,7 +2281,7 @@ function renderStats(d){
   </div>
   ${trendHtml}
   ${personalHtml}
-  ${lbRows?`<div class="stats-section-hdr">🏆 Leaderboard</div><div class="rt-note">${_idToken?"Tap a name to see their stats.":"Sign in with Telegram to tap a name and see their stats."}</div><div class="slb-list">${lbRows}</div>`:""}
+  ${lbRows?`<div class="stats-section-hdr">🏆 Leaderboard</div><div class="rt-note">${_idToken?"Tap a name to see their stats.":"Sign in to tap a name and see their stats."}</div><div class="slb-list">${lbRows}</div>`:""}
   ${shistRows?`<div class="stats-section-hdr">🗓 Session History</div><div class="shist-list">${shistRows}</div>`:""}
   ${rtRows?`<div class="stats-section-hdr">⚡ Fastest Voters</div>${rtRecord}${rtNote}<div class="rt-list">${rtRows}</div>`:""}
   ${fillHtml}
@@ -3683,7 +3683,7 @@ function _syncTimezoneDisplay(){
 }
 
 window.doDetectTimezone=async function(){
-  if(!_idToken){toast("Verify with Telegram first.",3000);return;}
+  if(!_idToken){toast("Sign in first (top right) — with Telegram or email.",3000);return;}
   let detected;
   try{
     detected=Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -3744,7 +3744,7 @@ window.onWebloginSelectChange=function(){
 };
 
 window.doIssueWeblogin=async function(){
-  if(!_idToken){toast("Verify with Telegram first.",3000);return;}
+  if(!_idToken){toast("Sign in first (top right) — with Telegram or email.",3000);return;}
   const sel=document.getElementById("weblogin-member-select");
   const resultEl=document.getElementById("weblogin-result");
   const nameOut=document.getElementById("weblogin-result-name");
@@ -3851,7 +3851,7 @@ window.setSport=async function(value){
 };
 
 async function _patchGroupSetting(fields,revert){
-  if(!_idToken){toast("Verify with Telegram first.",3000);revert();return;}
+  if(!_idToken){toast("Sign in first (top right) — with Telegram or email.",3000);revert();return;}
   try{
     const res=await fetch(`/api/v1/web/group/${URL_TOKEN}/settings`,{
       method:"PATCH",headers:{"Content-Type":"application/json"},
@@ -4707,7 +4707,7 @@ function copyVpa(vpa){
 }
 
 function doSelfPaid(amount){
-  if(!_idToken){toast("Verify with Telegram first.",3000);return;}
+  if(!_idToken){toast("Sign in first (top right) — with Telegram or email.",3000);return;}
   _showDuesModal(
     "Record payment",
     `Confirm the amount you paid (₹):`,
@@ -4810,7 +4810,7 @@ window.updateClosePreview=function(){
 };
 
 window.doCloseGame=async function(){
-  if(!_idToken){toast("Verify with Telegram first.",3000);return;}
+  if(!_idToken){toast("Sign in first (top right) — with Telegram or email.",3000);return;}
   const subsidy=parseInt(document.getElementById("close-subsidy")?.value||0)||0;
   const ph=document.getElementById("preview-per-head")?.textContent||"?";
   _showDuesModal(

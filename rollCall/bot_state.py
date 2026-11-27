@@ -229,6 +229,19 @@ async def best_effort(awaitable, what: str, cid: int) -> bool:
         return False
 
 
+def guarded(handler):
+    """For a message handler with no try/except of its own: any exception
+    becomes reply_error (a curated message, or a safe generic one with the
+    traceback logged) instead of the command going silent."""
+    @_wraps(handler)
+    async def run(message):
+        try:
+            return await handler(message)
+        except Exception as e:
+            await reply_error(message, e)
+    return run
+
+
 async def reply_error(target, e):
     """Reply with an error message that's safe to expose to users.
 

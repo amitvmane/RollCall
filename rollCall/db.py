@@ -134,7 +134,7 @@ def init_postgresql():
         _pool_max = maxconn
         logging.info(f"PostgreSQL connection pool created (min={minconn}, max={maxconn})")
     except Exception as e:
-        logging.error(f"Failed to create PostgreSQL connection pool: {e}")
+        logging.exception(f"Failed to create PostgreSQL connection pool: {e}")
         raise
 
 def _enable_wal(conn) -> None:
@@ -172,7 +172,7 @@ def init_sqlite():
         _enable_wal(db_conn)
         logging.debug(f"SQLite database connected: {db_path}")
     except Exception as e:
-        logging.error(f"Failed to connect to SQLite database: {e}")
+        logging.exception(f"Failed to connect to SQLite database: {e}")
         raise
 
 _thread_local = threading.local()
@@ -1243,7 +1243,7 @@ def create_tables():
 
     except Exception as e:
         conn.rollback()
-        logging.error(f"Error creating tables: {e}")
+        logging.exception(f"Error creating tables: {e}")
         raise
     finally:
         if cursor is not None:
@@ -1484,7 +1484,7 @@ def _reconcile_columns(conn, cursor):
                 logging.warning(f"Schema reconcile: added missing column {table}.{name}")
             except Exception as e:
                 conn.rollback()
-                logging.error(f"Schema reconcile: could not add {table}.{name}: {e}")
+                logging.exception(f"Schema reconcile: could not add {table}.{name}: {e}")
 
 
 def _run_migrations(conn, cursor):
@@ -1610,7 +1610,7 @@ def _run_migrations(conn, cursor):
                 conn.commit()
                 logging.info("Migrated ghost_records: removed UNIQUE constraint on user_id")
         except Exception as e:
-            logging.error(f"Error migrating ghost_records: {e}")
+            logging.exception(f"Error migrating ghost_records: {e}")
             conn.rollback()
 
     # Add schedule columns to templates (new feature — safe to run repeatedly)
@@ -2373,7 +2373,7 @@ def get_or_create_chat(chat_id: int) -> Dict:
         return result
     except Exception as e:
         conn.rollback()
-        logging.error(f"Error in get_or_create_chat: {e}")
+        logging.exception(f"Error in get_or_create_chat: {e}")
         raise
     finally:
         if cursor is not None:
@@ -2418,7 +2418,7 @@ def get_chat_by_group_web_token(token: str) -> Optional[Dict]:
             row = cursor.fetchone()
             return dict(row) if row else None
     except Exception as e:
-        logging.error(f"Error in get_chat_by_group_web_token: {e}")
+        logging.exception(f"Error in get_chat_by_group_web_token: {e}")
         return None
 
 
@@ -2481,7 +2481,7 @@ def update_chat_settings(chat_id: int, **kwargs) -> bool:
         # so a failed write used to be indistinguishable from success and the
         # handler went on to announce "done". The driver error stays in the
         # log; the exception message is generic so nothing leaks into chat.
-        logging.error(f"Error updating chat settings: {e}")
+        logging.exception(f"Error updating chat settings: {e}")
         raise databaseError("⚠️ Couldn't save that setting — please try again.") from e
 
 def create_rollcall(chat_id: int, title: str, timezone: str = 'Asia/Kolkata', web_token: Optional[str] = None) -> int:
@@ -2511,7 +2511,7 @@ def create_rollcall(chat_id: int, title: str, timezone: str = 'Asia/Kolkata', we
             _webhook("rollcall.opened", chat_id=chat_id, rollcall_id=rollcall_id, data={"title": title})
             return rollcall_id
     except Exception as e:
-        logging.error(f"Error creating rollcall: {e}")
+        logging.exception(f"Error creating rollcall: {e}")
         raise
 
 def ensure_rollcall_stats(rollcall_id: int) -> None:
@@ -2540,7 +2540,7 @@ def ensure_rollcall_stats(rollcall_id: int) -> None:
                 )
             logging.info(f"Ensured rollcall_stats row for rollcall {rollcall_id}")
     except Exception as e:
-        logging.error(f"Error ensuring rollcall_stats: {e}")
+        logging.exception(f"Error ensuring rollcall_stats: {e}")
 
 
 def get_rollcall(rollcall_id: int) -> Optional[Dict]:
@@ -2565,7 +2565,7 @@ def get_rollcall(rollcall_id: int) -> Optional[Dict]:
                 return dict(row)
             return None
     except Exception as e:
-        logging.error(f"Error getting rollcall: {e}")
+        logging.exception(f"Error getting rollcall: {e}")
         return None
 
 
@@ -2604,7 +2604,7 @@ def get_rollcall_by_web_token(token: str) -> Optional[Dict]:
             row = cursor.fetchone()
             return dict(row) if row else None
     except Exception as e:
-        logging.error(f"Error looking up rollcall by web_token: {e}")
+        logging.exception(f"Error looking up rollcall by web_token: {e}")
         return None
 
 
@@ -2672,7 +2672,7 @@ def update_rollcall(rollcall_id: int, **kwargs) -> bool:
             logging.info(f"Updated rollcall {rollcall_id}: {kwargs}")
             return True
     except Exception as e:
-        logging.error(f"Error updating rollcall: {e}")
+        logging.exception(f"Error updating rollcall: {e}")
         raise databaseError("⚠️ Couldn't save that change — please try again.") from e
 
 def get_active_rollcalls(chat_id: int) -> List[Dict]:
@@ -2702,7 +2702,7 @@ def get_active_rollcalls(chat_id: int) -> List[Dict]:
         
             return result
     except Exception as e:
-        logging.error(f"Error getting active rollcalls: {e}")
+        logging.exception(f"Error getting active rollcalls: {e}")
         return []
 
 def create_or_update_template(
@@ -2796,7 +2796,7 @@ def create_or_update_template(
         
             return True
     except Exception as e:
-        logging.error(f"Error creating/updating template: {e}")
+        logging.exception(f"Error creating/updating template: {e}")
         return False
 
 
@@ -2826,7 +2826,7 @@ def clear_rollcall_reminder(rollcall_id: int) -> bool:
             conn.rollback()
         except Exception:
             pass
-        logging.error(f"Error clearing rollcall reminder: {e}")
+        logging.exception(f"Error clearing rollcall reminder: {e}")
         return False
     finally:
         if cursor is not None:
@@ -2865,7 +2865,7 @@ def end_rollcall(rollcall_id: int) -> bool:
         # in-memory cache straight after this call, so swallowing left the
         # rollcall still active in the DB but gone from memory — and it came
         # back as active on the next restart.
-        logging.error(f"Error ending rollcall: {e}")
+        logging.exception(f"Error ending rollcall: {e}")
         raise databaseError("⚠️ Couldn't end the rollcall — please try again.") from e
 
 
@@ -2878,7 +2878,7 @@ def get_all_chat_ids() -> List[int]:
         cursor.execute("SELECT chat_id FROM chats")
         return [row['chat_id'] for row in cursor.fetchall()]
     except Exception as e:
-        logging.error(f"Error fetching all chat IDs: {e}")
+        logging.exception(f"Error fetching all chat IDs: {e}")
         return []
     finally:
         if cursor is not None:
@@ -3024,7 +3024,7 @@ def add_or_update_user(rollcall_id: int, user_id: int, first_name: str, username
                                       "guest": False}, "status": status, "comment": comment or ""})
             return True
     except Exception as e:
-        logging.error(f"Error add/update user: {e}")
+        logging.exception(f"Error add/update user: {e}")
         raise
 
 
@@ -3113,7 +3113,7 @@ def add_or_update_proxy_user(rollcall_id: int, name: str, status: str, comment: 
     except Exception as e:
         # A dropped proxy write means the vote exists in memory but not on
         # disk — it silently disappears at the next restart.
-        logging.error(f"Error adding/updating proxy user: {e}")
+        logging.exception(f"Error adding/updating proxy user: {e}")
         raise databaseError("⚠️ Couldn't save that vote — please try again.") from e
 
 def get_all_users(rollcall_id: int):
@@ -3179,7 +3179,7 @@ def get_all_users(rollcall_id: int):
             rows = cursor.fetchall()
             return [dict(r) for r in rows]
     except Exception as e:
-        logging.error(f"Error getting all users: {e}")
+        logging.exception(f"Error getting all users: {e}")
         return []
 
 
@@ -3222,7 +3222,7 @@ def get_proxy_users_by_status(rollcall_id: int, status: str) -> List[Dict]:
             rows = cursor.fetchall()
             return [dict(row) for row in rows]
     except Exception as e:
-        logging.error(f"Error getting proxy users: {e}")
+        logging.exception(f"Error getting proxy users: {e}")
         return []
 
 
@@ -3244,7 +3244,7 @@ def delete_template(chatid: int, name: str) -> bool:
                 )
             return cursor.rowcount > 0
     except Exception as e:
-        logging.error(f"Error deleting template: {e}")
+        logging.exception(f"Error deleting template: {e}")
         return False
 
 
@@ -3275,7 +3275,7 @@ def set_template_schedule(chatid: int, name: str, schedule_day: Optional[str], s
             )
             return cursor.rowcount > 0
     except Exception as e:
-        logging.error(f"Error setting template schedule: {e}")
+        logging.exception(f"Error setting template schedule: {e}")
         return False
 
 
@@ -3291,7 +3291,7 @@ def disable_template_schedule(chatid: int, name: str) -> bool:
             )
             return cursor.rowcount > 0
     except Exception as e:
-        logging.error(f"Error disabling template schedule: {e}")
+        logging.exception(f"Error disabling template schedule: {e}")
         return False
 
 
@@ -3317,7 +3317,7 @@ def enable_template_schedule(chatid: int, name: str, last_scheduled_date: Option
                 )
             return cursor.rowcount > 0
     except Exception as e:
-        logging.error(f"Error enabling template schedule: {e}")
+        logging.exception(f"Error enabling template schedule: {e}")
         return False
 
 
@@ -3340,7 +3340,7 @@ def update_template_last_scheduled_date(chatid: int, name: str, date_str: str) -
             )
             return cursor.rowcount > 0
     except Exception as e:
-        logging.error(f"Error updating last_scheduled_date: {e}")
+        logging.exception(f"Error updating last_scheduled_date: {e}")
         return False
 
 
@@ -3355,7 +3355,7 @@ def get_all_scheduled_templates() -> List[Dict]:
             rows = cursor.fetchall()
             return [dict(r) for r in rows]
     except Exception as e:
-        logging.error(f"Error fetching scheduled templates: {e}")
+        logging.exception(f"Error fetching scheduled templates: {e}")
         return []
 
 
@@ -3420,7 +3420,7 @@ def delete_user_by_name(rollcall_id: int, name: str) -> bool:
             return rows_deleted > 0
 
     except Exception as e:
-        logging.error(f"Error deleting user: {e}")
+        logging.exception(f"Error deleting user: {e}")
         return False
 
 
@@ -3448,7 +3448,7 @@ def delete_user_by_id(rollcall_id: int, user_id) -> bool:
                          data={"member": _member_ref(user_id)})
             return rows_deleted > 0
     except Exception as e:
-        logging.error(f"Error deleting user by id: {e}")
+        logging.exception(f"Error deleting user by id: {e}")
         return False
 
 def close_db():
@@ -3498,7 +3498,7 @@ def increment_user_stat(chat_id: int, user_id: int, field: str) -> None:
                     (chat_id, user_id),
                 )
     except Exception as e:
-        logging.error(f"Error incrementing user stat {field}: {e}")
+        logging.exception(f"Error incrementing user stat {field}: {e}")
 
 def increment_rollcall_stat(rollcall_id: int, field: str) -> None:
     """Increment a single numeric field in rollcall_stats."""
@@ -3535,7 +3535,7 @@ def increment_rollcall_stat(rollcall_id: int, field: str) -> None:
                     (rollcall_id,),
                 )
     except Exception as e:
-        logging.error(f"Error incrementing rollcall stat {field}: {e}")
+        logging.exception(f"Error incrementing rollcall stat {field}: {e}")
 
 
 def get_next_position(rollcall_id: int, status: str) -> int:
@@ -3590,7 +3590,7 @@ def get_templates(chatid: int) -> List[Dict]:
             else:
                 return [dict(r) for r in rows]
     except Exception as e:
-        logging.error(f"Error getting templates: {e}")
+        logging.exception(f"Error getting templates: {e}")
         return []
 
 def db_ping():
@@ -3608,7 +3608,7 @@ def db_ping():
         cursor.fetchone()
         return True
     except Exception as e:
-        logging.error(f"Database ping failed: {e}")
+        logging.exception(f"Database ping failed: {e}")
         return False
     finally:
         if cursor:
@@ -3641,7 +3641,7 @@ def get_template(chatid: int, name: str) -> Optional[Dict]:
                     return dict(row)
             return None
     except Exception as e:
-        logging.error(f"Error getting template: {e}")
+        logging.exception(f"Error getting template: {e}")
         return None
 
 
@@ -3661,7 +3661,7 @@ def get_ghost_count(chat_id: int, user_id: int) -> int:
             row = cursor.fetchone()
             return row[0] if row else 0
     except Exception as e:
-        logging.error(f"Error getting ghost count: {e}")
+        logging.exception(f"Error getting ghost count: {e}")
         return 0
 
 
@@ -3677,7 +3677,7 @@ def get_ghost_count_by_proxy_name(chat_id: int, proxy_name: str) -> int:
             row = cursor.fetchone()
             return row[0] if row else 0
     except Exception as e:
-        logging.error(f"Error getting ghost count by proxy name: {e}")
+        logging.exception(f"Error getting ghost count by proxy name: {e}")
         return 0
 
 
@@ -3744,7 +3744,7 @@ def increment_ghost_count(chat_id: int, user_id: int, user_name: str, proxy_name
             logging.info(f"Incremented ghost count for user {user_id}/{proxy_name} in chat {chat_id}")
             return True
     except Exception as e:
-        logging.error(f"Error incrementing ghost count: {e}")
+        logging.exception(f"Error incrementing ghost count: {e}")
         return False
 
 
@@ -3769,7 +3769,7 @@ def reset_ghost_count(chat_id: int, user_id: int, proxy_name: str = None) -> boo
             logging.info(f"Reset ghost count for user {user_id}/{proxy_name} in chat {chat_id}")
             return True
     except Exception as e:
-        logging.error(f"Error resetting ghost count: {e}")
+        logging.exception(f"Error resetting ghost count: {e}")
         return False
 
 
@@ -3796,7 +3796,7 @@ def decrement_ghost_count(chat_id: int, user_id: int, proxy_name: str = None) ->
                 cursor.execute(sql + f"user_id = {ph}", (chat_id, user_id))
             return True
     except Exception as e:
-        logging.error(f"Error decrementing ghost count: {e}")
+        logging.exception(f"Error decrementing ghost count: {e}")
         return False
 
 
@@ -3918,7 +3918,7 @@ def get_ghost_leaderboard(chat_id: int) -> List[Dict]:
         result.sort(key=lambda r: (r['ghost_count'] or 0, r['last_ghosted_at'] or ''), reverse=True)
         return result
     except Exception as e:
-        logging.error(f"Error getting ghost leaderboard: {e}")
+        logging.exception(f"Error getting ghost leaderboard: {e}")
         return []
 
 
@@ -3936,7 +3936,7 @@ def get_identity_link(chat_id: int, alias_proxy_name: str) -> Optional[Dict]:
             row = cursor.fetchone()
             return dict(row) if row else None
     except Exception as e:
-        logging.error(f"Error getting identity link: {e}")
+        logging.exception(f"Error getting identity link: {e}")
         return None
 
 
@@ -3961,7 +3961,7 @@ def get_links_by_canonical(chat_id: int, canonical_user_id: int = None,
                 )
             return [dict(row) for row in cursor.fetchall()]
     except Exception as e:
-        logging.error(f"Error getting links by canonical: {e}")
+        logging.exception(f"Error getting links by canonical: {e}")
         return []
 
 
@@ -4187,7 +4187,7 @@ def list_identity_links(chat_id: int, status: str = 'linked') -> List[Dict]:
             )
             return [dict(row) for row in cursor.fetchall()]
     except Exception as e:
-        logging.error(f"Error listing identity links: {e}")
+        logging.exception(f"Error listing identity links: {e}")
         return []
 
 
@@ -4254,7 +4254,7 @@ def get_all_proxy_names(chat_id: int) -> List[str]:
             )
             return [row["name"] for row in cursor.fetchall()]
     except Exception as e:
-        logging.error(f"Error getting all proxy names: {e}")
+        logging.exception(f"Error getting all proxy names: {e}")
         return []
 
 
@@ -4297,7 +4297,7 @@ def get_proxy_name_activity(chat_id: int) -> Dict[str, Dict]:
                                   "last_seen": _ts_str(row["last_seen"])}
                     for row in cursor.fetchall()}
     except Exception as e:
-        logging.error(f"Error getting proxy name activity: {e}")
+        logging.exception(f"Error getting proxy name activity: {e}")
         return {}
 
 
@@ -4322,7 +4322,7 @@ def get_identity_last_activity(chat_id: int, user_id: int = None,
             row = cursor.fetchone()
             return _ts_str(row["updated_at"]) if row else None
     except Exception as e:
-        logging.error(f"Error getting identity last activity: {e}")
+        logging.exception(f"Error getting identity last activity: {e}")
         return None
 
 
@@ -4338,7 +4338,7 @@ def get_user_ghost_count_by_name(chat_id: int, user_name: str) -> Optional[Dict]
             row = cursor.fetchone()
             return dict(row) if row else None
     except Exception as e:
-        logging.error(f"Error looking up ghost record by name: {e}")
+        logging.exception(f"Error looking up ghost record by name: {e}")
         return None
 
 
@@ -4355,7 +4355,7 @@ def mark_rollcall_absent_done(rollcall_id: int) -> bool:
             logging.info(f"Marked rollcall {rollcall_id} absent_marked=True")
             return True
     except Exception as e:
-        logging.error(f"Error marking rollcall absent done: {e}")
+        logging.exception(f"Error marking rollcall absent done: {e}")
         return False
 
 
@@ -4407,7 +4407,7 @@ def get_unprocessed_rollcalls(chat_id: int, days: int = 30) -> List[Dict]:
                 )
             return [dict(row) for row in cursor.fetchall()]
     except Exception as e:
-        logging.error(f"Error getting unprocessed rollcalls: {e}")
+        logging.exception(f"Error getting unprocessed rollcalls: {e}")
         return []
 
 
@@ -4423,7 +4423,7 @@ def add_ghost_event(rollcall_id: int, chat_id: int, user_id: int = None, user_na
             )
             return True
     except Exception as e:
-        logging.error(f"Error adding ghost event: {e}")
+        logging.exception(f"Error adding ghost event: {e}")
         return False
 
 
@@ -4463,7 +4463,7 @@ def get_rollcall_in_users(rollcall_id: int) -> List[Dict]:
 
             return real_rows + proxy_rows
     except Exception as e:
-        logging.error(f"Error getting rollcall IN users: {e}")
+        logging.exception(f"Error getting rollcall IN users: {e}")
         return []
 
 
@@ -4501,7 +4501,7 @@ def get_rollcall_out_users(rollcall_id: int) -> List[Dict]:
 
             return real_rows + proxy_rows
     except Exception as e:
-        logging.error(f"Error getting rollcall OUT users: {e}")
+        logging.exception(f"Error getting rollcall OUT users: {e}")
         return []
 
 
@@ -4523,7 +4523,7 @@ def save_ghost_selections(chat_id: int, rc_db_id: int, selected_ids: set) -> boo
             )
             return True
     except Exception as e:
-        logging.error(f"Error saving ghost selections: {e}")
+        logging.exception(f"Error saving ghost selections: {e}")
         return False
 
 
@@ -4549,7 +4549,7 @@ def load_ghost_selections(chat_id: int, rc_db_id: int) -> Optional[set]:
                 return set(ids)
             return None
     except Exception as e:
-        logging.error(f"Error loading ghost selections: {e}")
+        logging.exception(f"Error loading ghost selections: {e}")
         return None
 
 
@@ -4574,7 +4574,7 @@ def create_ghost_selections_table() -> None:
                     PRIMARY KEY (chat_id, rc_db_id)
                 )""")
     except Exception as e:
-        logging.error(f"Error creating ghost_selections table: {e}")
+        logging.exception(f"Error creating ghost_selections table: {e}")
 
 
 def get_streaks_for(chat_id: int, user_ids=(), proxy_names=()) -> Dict:
@@ -4772,7 +4772,7 @@ def get_chat_ended_rollcall_count(chat_id: int) -> int:
                 return int(next(iter(row.values())) or 0)
             return int(row[0] or 0)
     except Exception as e:
-        logging.error(f"Error counting ended rollcalls: {e}")
+        logging.exception(f"Error counting ended rollcalls: {e}")
         return 0
 
 
@@ -4806,7 +4806,7 @@ def get_user_attendance_count(chat_id: int, user_id: int) -> int:
                 return int(next(iter(row.values())) or 0)
             return int(row[0] or 0)
     except Exception as e:
-        logging.error(f"Error counting attendance: {e}")
+        logging.exception(f"Error counting attendance: {e}")
         return 0
 
 
@@ -4977,7 +4977,7 @@ def get_leaderboard_by_attendance(chat_id: int, limit: int = 10) -> List[Dict]:
             unified.sort(key=lambda x: (-x['attended'], x['total_rollcalls'], x['display_name'] or ''))
             return unified[:limit]
     except Exception as e:
-        logging.error(f"Error fetching attendance leaderboard: {e}")
+        logging.exception(f"Error fetching attendance leaderboard: {e}")
         return []
 
 
@@ -4999,7 +4999,7 @@ def get_proxy_attendance_count(chat_id: int, proxy_name: str) -> int:
                 return int(next(iter(row.values())) or 0)
             return int(row[0] or 0)
     except Exception as e:
-        logging.error(f"Error counting proxy attendance: {e}")
+        logging.exception(f"Error counting proxy attendance: {e}")
         return 0
 
 
@@ -5041,7 +5041,7 @@ def get_proxy_stats(chat_id: int, proxy_name: str) -> Dict:
                 'total_maybe':     int(row[3] or 0),
             }
     except Exception as e:
-        logging.error(f"Error fetching proxy stats: {e}")
+        logging.exception(f"Error fetching proxy stats: {e}")
         return {'total_rollcalls': 0, 'attended': 0, 'total_in': 0, 'total_out': 0, 'total_maybe': 0}
 
 
@@ -5145,7 +5145,7 @@ def get_group_attendance_totals(chat_id: int) -> Dict:
 
         return out
     except Exception as e:
-        logging.error(f"Error fetching group attendance totals: {e}")
+        logging.exception(f"Error fetching group attendance totals: {e}")
         return out
     finally:
         if cursor is not None:
@@ -5200,7 +5200,7 @@ def get_bot_attendance_totals() -> Dict:
 
         return out
     except Exception as e:
-        logging.error(f"Error fetching bot attendance totals: {e}")
+        logging.exception(f"Error fetching bot attendance totals: {e}")
         return out
     finally:
         if cursor is not None:
@@ -5223,7 +5223,7 @@ def find_proxy_in_chat(chat_id: int, name: str) -> bool:
             """, (chat_id, name))
             return cursor.fetchone() is not None
     except Exception as e:
-        logging.error(f"Error finding proxy in chat: {e}")
+        logging.exception(f"Error finding proxy in chat: {e}")
         return False
 
 
@@ -5245,7 +5245,7 @@ def find_user_by_username_for_stats(chat_id: int, username: str) -> Optional[Dic
             row = cursor.fetchone()
             return dict(row) if row else None
     except Exception as e:
-        logging.error(f"Error finding user by username for stats: {e}")
+        logging.exception(f"Error finding user by username for stats: {e}")
         return None
 
 
@@ -5269,7 +5269,7 @@ def find_users_by_name_for_stats(chat_id: int, name: str) -> List[Dict]:
             """, (chat_id, name))
             return [dict(r) for r in cursor.fetchall()]
     except Exception as e:
-        logging.error(f"Error finding users by name for stats: {e}")
+        logging.exception(f"Error finding users by name for stats: {e}")
         return []
 
 
@@ -5286,7 +5286,7 @@ def get_user_stats_row(chat_id: int, user_id: int) -> Optional[Dict]:
             row = cursor.fetchone()
             return dict(row) if row else None
     except Exception as e:
-        logging.error(f"Error fetching user_stats row: {e}")
+        logging.exception(f"Error fetching user_stats row: {e}")
         return None
 
 
@@ -5327,7 +5327,7 @@ def get_rollcall_history(chat_id: int, limit: int = 10, offset: int = 0) -> List
                 """, (chat_id, limit, offset))
             return [dict(row) for row in cursor.fetchall()]
     except Exception as e:
-        logging.error(f"Error getting rollcall history: {e}")
+        logging.exception(f"Error getting rollcall history: {e}")
         return []
 
 
@@ -5419,7 +5419,7 @@ def get_user_session_history(chat_id: int, user_id: int, limit: int = 15) -> Lis
             """, params)
             return [dict(row) for row in cursor.fetchall()]
     except Exception as e:
-        logging.error("Error getting user session history: %s", e)
+        logging.exception("Error getting user session history: %s", e)
         return []
 
 
@@ -5481,7 +5481,7 @@ def get_user_voted_chats(tg_user_id: int) -> List[Dict]:
         rows.sort(key=lambda r: -int(r.get("sessions_attended") or 0))
         return rows
     except Exception as e:
-        logging.error("Error in get_user_voted_chats: %s", e)
+        logging.exception("Error in get_user_voted_chats: %s", e)
         return []
 
 
@@ -5511,7 +5511,7 @@ def get_member_chats(user_id: int) -> List[Dict]:
             """, (user_id, active_val))
             return [dict(row) for row in cursor.fetchall()]
     except Exception as e:
-        logging.error("Error in get_member_chats: %s", e)
+        logging.exception("Error in get_member_chats: %s", e)
         return []
 
 
@@ -5532,7 +5532,7 @@ def get_user_rank_in_chat(chat_id: int, user_id: int) -> Optional[int]:
                 return i + 1
         return None
     except Exception as e:
-        logging.error(f"Error computing user rank: {e}")
+        logging.exception(f"Error computing user rank: {e}")
         return None
 
 def get_user_upcoming_scheduled_rollcalls(tg_user_id: int, limit: int = 10) -> List[Dict]:
@@ -5568,7 +5568,7 @@ def get_user_upcoming_scheduled_rollcalls(tg_user_id: int, limit: int = 10) -> L
                 """, (tg_user_id, limit))
             return [dict(row) for row in cursor.fetchall()]
     except Exception as e:
-        logging.error("Error in get_user_upcoming_scheduled_rollcalls: %s", e)
+        logging.exception("Error in get_user_upcoming_scheduled_rollcalls: %s", e)
         return []
 
 
@@ -5597,7 +5597,7 @@ def log_admin_action(
         )
         conn.commit()
     except Exception as e:
-        logging.error(f"Error logging admin action: {e}")
+        logging.exception(f"Error logging admin action: {e}")
         try:
             conn.rollback()
         except Exception:
@@ -5621,7 +5621,7 @@ def get_admin_audit_log(chat_id: int, limit: int = 15, offset: int = 0) -> List[
             )
             return [dict(row) for row in cursor.fetchall()]
     except Exception as e:
-        logging.error(f"Error fetching admin audit log: {e}")
+        logging.exception(f"Error fetching admin audit log: {e}")
         return []
 
 
@@ -5637,7 +5637,7 @@ def count_admin_audit_log(chat_id: int) -> int:
             row = cursor.fetchone()
             return row[0] if row else 0
     except Exception as e:
-        logging.error(f"Error counting admin audit log: {e}")
+        logging.exception(f"Error counting admin audit log: {e}")
         return 0
 
 
@@ -5672,7 +5672,7 @@ def upsert_chat_member(chat_id: int, user_id: int, first_name: str, username: st
                         last_seen  = excluded.last_seen
                 """, (chat_id, user_id, first_name, username, now))
     except Exception as e:
-        logging.error(f"Error upserting chat member: {e}")
+        logging.exception(f"Error upserting chat member: {e}")
 
 
 def mark_member_inactive(chat_id: int, user_id: int) -> None:
@@ -5686,7 +5686,7 @@ def mark_member_inactive(chat_id: int, user_id: int) -> None:
                 WHERE chat_id = {ph} AND user_id = {ph}
             """, (active_val, chat_id, user_id))
     except Exception as e:
-        logging.error(f"Error marking member inactive: {e}")
+        logging.exception(f"Error marking member inactive: {e}")
 
 
 def is_active_chat_member(chat_id: int, user_id: int) -> bool:
@@ -5705,7 +5705,7 @@ def is_active_chat_member(chat_id: int, user_id: int) -> bool:
             )
             return cursor.fetchone() is not None
     except Exception as e:
-        logging.error(f"Error checking is_active_chat_member: {e}")
+        logging.exception(f"Error checking is_active_chat_member: {e}")
         return False
 
 
@@ -5727,7 +5727,7 @@ def get_active_members(chat_id: int) -> List[Dict]:
             """, (chat_id, active_val))
             return [dict(row) for row in cursor.fetchall()]
     except Exception as e:
-        logging.error(f"Error getting active members: {e}")
+        logging.exception(f"Error getting active members: {e}")
         return []
 
 
@@ -5751,7 +5751,7 @@ def get_member_display_info(chat_id: int, user_id: int) -> Optional[Dict]:
                 return {'first_name': row['first_name'], 'username': row.get('username')}
             return {'first_name': row[0], 'username': row[1]}
     except Exception as e:
-        logging.error(f"Error getting member display info: {e}")
+        logging.exception(f"Error getting member display info: {e}")
         return None
 
 

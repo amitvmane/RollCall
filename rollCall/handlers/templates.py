@@ -12,7 +12,7 @@ import pytz
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot_state import (
-    bot, _sched_selection, _log_task_exc, _esc_md, reply_error, safe_edit_text,
+    bot, _sched_selection, _log_task_exc, _esc_md, guarded, reply_error, safe_edit_text,
     is_chat_admin, can_administer_chat,
 )
 from exceptions import insufficientPermissions, incorrectParameter, parameterMissing
@@ -77,6 +77,7 @@ def _template_from_token(cid: int, token: str):
 
 
 @bot.message_handler(func=lambda message: message.text.split(" ")[0].split("@")[0].lower() == "/templates")
+@guarded
 async def list_templates(message):
     cid = message.chat.id
     if not await admin_rights(message, manager):

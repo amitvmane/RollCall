@@ -7,7 +7,7 @@ import os
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot_state import bot, data_file_path, reply_error, send_long
+from bot_state import bot, data_file_path, guarded, reply_error, send_long
 from config import ADMINS
 from exceptions import insufficientPermissions, parameterMissing
 from functions import admin_rights, auto_complete_timezone
@@ -219,6 +219,7 @@ def _suggest_command(query):
     and len(m.text.split()) > 1
     and m.text.split()[1].startswith("v_")
 ))
+@guarded
 async def handle_tg_verify(message):
     """Telegram deep-link identity verification: /start v_{code}
 
@@ -342,17 +343,38 @@ async def on_new_chat_members(message):
         logging.exception("on_new_chat_members error")
 
 
+def _welcome_text(private: bool) -> str:
+    """What /start says: how to get going, in the order people need it."""
+    base = os.environ.get("WEB_BASE_URL", "").rstrip("/")
+    if private:
+        return ("👋 Hi! I'm RollCall — I run sign-ups for groups' games and events.\n\n"
+                "• Add me to your Telegram group, then an admin types /src Friday football\n"
+                "• Everyone taps ✅ IN, ❌ OUT or ❓ MAYBE on the rollcall\n"
+                + (f"• No Telegram in your group? Start on the web: {base}/web/?create=1\n" if base else "")
+                + "\n/help lists every command.")
+    return ("👋 Hi! I'm RollCall — I run sign-ups for this group's games and events.\n\n"
+            "Get started:\n"
+            "• /src Friday football — start a rollcall (admins)\n"
+            "• Everyone taps ✅ IN, ❌ OUT or ❓ MAYBE on it\n"
+            "• /weblink — the group's web page: vote, stats and dues, even without Telegram\n"
+            "• /teams — split the IN list into teams\n\n"
+            "/help lists every command · /help admin for admins")
+
+
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0] == "/start")
+@guarded
 async def welcome_and_explanation(message):
     cid = message.chat.id
     manager.get_chat(cid)
     if await admin_rights(message, manager) is False:
-        await bot.send_message(cid, "Error - User does not have sufficient permissions for this operation")
+        await bot.send_message(cid, "Admin-only mode is on in this group, so you don't have permission "
+                                    "to use commands here — vote with the buttons on a rollcall instead.")
         return
-    await bot.send_message(cid, 'Hi! im RollCall!\n\nUse /help to see all the commands')
+    await bot.send_message(cid, _welcome_text(private=cid > 0))
 
 
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/help")
+@guarded
 async def help_commands(message):
     """Five forms:
       /help              → quick-start + user-command list
@@ -717,7 +739,7 @@ async def version_command(message):
         await bot.send_message(message.chat.id, "Version information is currently unavailable.")
         return
     except json.JSONDecodeError as e:
-        logging.error(f"[version_command] Failed to parse version.json: {e}")
+        logging.exception(f"[version_command] Failed to parse version.json: {e}")
         await bot.send_message(message.chat.id, "Version information is currently unavailable.")
         return
 
@@ -733,6 +755,7 @@ async def version_command(message):
 
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/rollcalls")
 @bot.message_handler(func=lambda message: message.text.lower().split("@")[0].split(" ")[0] == "/r")
+@guarded
 async def show_reminders(message):
     cid = message.chat.id
     rollcalls = manager.get_rollcalls(cid)

@@ -3,7 +3,7 @@
 
 // Bump on any change to the caching strategy below. Note this is NOT the only
 // thing that ships new code any more — see the fetch handler.
-const CACHE = "rc-v6";
+const CACHE = "rc-v7";   // v7: new icons (cache-first for images, so a bump is how they refresh)
 // /shared/ is outside this worker's scope, but a controlled page's
 // subresources still pass through it — and without these the offline shell
 // renders with no theme tokens at all.
@@ -110,7 +110,8 @@ self.addEventListener("push", e => {
     self.registration.showNotification(data.title, {
       body:    data.body,
       icon:    "/web/icon-192.png",
-      badge:   "/web/icon-192.png",
+      // Android draws the badge as a silhouette: a white mark on transparent.
+      badge:   "/web/badge-96.png",
       vibrate: [200, 100, 200],
       data:    { url: data.url },
       // "Vote now" only where there is a vote to cast — not on a dues

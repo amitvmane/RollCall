@@ -245,6 +245,15 @@ def queue_rollcall_opened(chat_id: int, title: str) -> int:
 
 # ── Delivery (minute tick) ───────────────────────────────────────────────────
 
+def _current_email(principal_id: int) -> Optional[str]:
+    try:
+        from services import principals
+        return principals.binding_for(principal_id, principals.EMAIL)
+    except Exception:
+        logging.exception("[email_notify] email lookup failed")
+        return None
+
+
 def _sent_last_hour(cursor, now: int) -> int:
     cursor.execute(f"SELECT COUNT(*) FROM email_outbox WHERE status='sent' AND next_attempt>{_ph()}",
                    (now - 3600,))
@@ -276,8 +285,11 @@ async def deliver_due(budget_seconds: float = 20) -> int:
     for r in rows:
         if time.monotonic() > deadline:
             break
-        # Unsubscribed (or switched off) after this was queued: honour it now.
-        if r.get("tag") != SECURITY and get_pref(int(r["principal_id"])) == OFF:
+        # Unsubscribed (or switched off) after this was queued, or the sign-in
+        # email changed since: honour it now. (A security notice is meant
+        # for the address it was queued to — e.g. the OLD one, on a change.)
+        if r.get("tag") != SECURITY and (get_pref(int(r["principal_id"])) == OFF
+                                         or _current_email(int(r["principal_id"])) != r["email"]):
             with db._cursor(commit=True) as cursor:
                 cursor.execute(f"UPDATE email_outbox SET status='skipped' WHERE id={ph}", (r["id"],))
             continue

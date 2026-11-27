@@ -53,6 +53,21 @@ class TestManifest(unittest.TestCase):
         self.assertEqual(_png_size("apple-touch-icon.png"), (180, 180))
 
 
+class TestIcons(unittest.TestCase):
+    def test_notification_badge_is_a_transparent_silhouette(self):
+        """Android paints the badge as a silhouette — a full-colour square
+        icon there shows as a plain white square."""
+        from PIL import Image
+        im = Image.open(os.path.join(WEB, "badge-96.png")).convert("RGBA")
+        alphas = [a for *_rgb, a in im.getdata()]
+        self.assertGreater(alphas.count(0), len(alphas) // 3, "mostly transparent")
+        self.assertIn('badge:   "/web/badge-96.png"', _read("sw.js"))
+
+    def test_apple_touch_icon_has_no_alpha(self):
+        from PIL import Image
+        self.assertEqual(Image.open(os.path.join(WEB, "apple-touch-icon.png")).mode, "RGB")
+
+
 class TestServiceWorker(unittest.TestCase):
     def setUp(self):
         self.sw = _read("sw.js")

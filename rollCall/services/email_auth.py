@@ -33,8 +33,10 @@ import os
 import re
 import secrets
 import smtplib
+import ssl
 import time
 from email.message import EmailMessage
+from email.utils import formatdate, make_msgid, parseaddr
 from typing import Optional
 
 import db
@@ -99,19 +101,29 @@ def _send_blocking(to: str, subject: str, text: str, headers: Optional[dict] = N
     port = int(os.environ.get("SMTP_PORT", "587") or 587)
     user = os.environ.get("SMTP_USER", "").strip()
     password = os.environ.get("SMTP_PASSWORD", "")
+    sender = os.environ["SMTP_FROM"].strip()
     msg = EmailMessage()
-    msg["From"] = os.environ["SMTP_FROM"].strip()
+    msg["From"] = sender
     msg["To"] = to
     msg["Subject"] = subject
+    # Date and Message-ID: relays don't always add them, and mail without
+    # them scores as spam at the big providers.
+    msg["Date"] = formatdate(usegmt=True)
+    domain = parseaddr(sender)[1].rpartition("@")[2] or None
+    msg["Message-ID"] = make_msgid(domain=domain)
     for k, v in (headers or {}).items():
         msg[k] = v
     msg.set_content(text)
+    # A verifying TLS context. smtplib's own default for starttls() does NOT
+    # check the server's certificate, so anyone on the path could read every
+    # sign-in link.
+    tls = ssl.create_default_context()
     if port == 465:
-        server = smtplib.SMTP_SSL(host, port, timeout=20)
+        server = smtplib.SMTP_SSL(host, port, timeout=20, context=tls)
     else:
         server = smtplib.SMTP(host, port, timeout=20)
         if os.environ.get("SMTP_STARTTLS", "true").strip().lower() not in ("0", "false", "no"):
-            server.starttls()
+            server.starttls(context=tls)
     try:
         if user:
             server.login(user, password)

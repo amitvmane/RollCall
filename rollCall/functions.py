@@ -69,7 +69,7 @@ async def admin_rights(message, manager):
         return True
 
     except Exception as e:
-        logging.error(f"[{_ts()}] Error checking admin rights: {e}")
+        logging.exception(f"[{_ts()}] Error checking admin rights: {e}")
         return False
 
 
@@ -153,7 +153,7 @@ def auto_complete_timezone(timezone):
         
         return best_match
     except Exception as e:
-        logging.error(f"[{_ts()}] Error in auto_complete_timezone: {e}")
+        logging.exception(f"[{_ts()}] Error in auto_complete_timezone: {e}")
         return None
 
 

@@ -24,6 +24,8 @@ Handlers should raise the custom exception classes from `exceptions.py` for cura
 
 Do not use `await bot.send_message(cid, str(e))` for caught exceptions — use `await reply_error(message_or_cid, e)`.
 
+Every handler must answer even when it fails: wrap its body in try/except → `reply_error`, or decorate it with `@guarded` (bot_state) under the `@bot.message_handler` lines. `tests/test_handlers_never_silent.py` fails on a handler that does neither.
+
 ## REST: name rollcalls by id
 
 A rollcall's display number (#1, #2…) shifts when an earlier one ends; its

@@ -432,7 +432,8 @@ COMMANDS = [
         "name": "louder", "aliases": [], "scope": "admin", "category": "Settings",
         "args": "", "sample": "/louder",
         "summary": "Disable silent mode",
-        "details": "Restores per-vote ack messages.",
+        "details": ("Turns silent mode (/shh) off: each vote is acknowledged in the group again "
+                    "(\"Asha is now IN!\"). For a summary every few hours instead, see /vote_digest."),
     },
     {
         "name": "vote_digest", "aliases": [], "scope": "admin", "category": "Settings",

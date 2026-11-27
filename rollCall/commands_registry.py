@@ -97,22 +97,25 @@ COMMANDS = [
             "When the game ends, the summary lists the teams in place of the IN list.\n\n"
             "Each rollcall has its own teams. ::N picks the rollcall (as in /rollcalls); "
             "without it, rollcall #1.\n\n"
-            "Plays football or cricket? An admin sets /sport and 2 teams are shown on a pitch "
-            "(football) or by role (cricket) - see /lineup."
+            "Plays football or cricket? An admin sets /sport and the teams are shown on a pitch "
+            "(football) or by role (cricket) - see /lineup. Just a gathering? /sport event "
+            "turns teams off."
         ),
     },
     {
         "name": "lineup", "aliases": [], "scope": "user", "category": "View Lists",
         "args": "[pic] [::N]", "sample": "/lineup pic",
-        "summary": "Show the 2 teams by position (football) or role (cricket)",
+        "summary": "Show the teams by position (football) or role (cricket)",
         "details": (
-            "For groups with a sport set (/sport) and 2 teams. Football: who plays where "
+            "For groups with a sport set (/sport) and 2, 3 or 4 teams. Football: who plays where "
             "(GK, DEF, MID, FWD) and the subs. Cricket: each player's role - 🧤 WK, 🏏 BAT, "
             "⭐ AR (all-rounder), 🎯 BOWL - set on the web page (no pitch or formation for "
             "cricket). /lineup pic sends a picture.\n\n"
             "Football details:\n"
-            "Players per side starts at half the IN list (16 or 17 IN: 8-a-side) and can be "
-            "lowered for more subs. Each team picks its own formation. Drag players into "
+            "Players per side starts at the IN list split by the number of teams (16 or 17 IN "
+            "in 2 teams: 8-a-side; 20 IN in 3 teams: 6-a-side) and can be lowered for more subs. "
+            "2 teams face each other on one pitch; 3 or 4 teams get a half-pitch each (two play, "
+            "the rest wait). Each team picks its own formation. Drag players into "
             "positions on the group's web page (🏟 Arrange on web): drop one on another to swap. "
             "Teams are filled into positions when they're made; someone IN later is a sub, "
             "and someone who drops leaves an empty spot.\n\n"
@@ -122,14 +125,17 @@ COMMANDS = [
     },
     {
         "name": "sport", "aliases": [], "scope": "admin", "category": "Settings",
-        "args": "[football | cricket | off]", "sample": "/sport football",
-        "summary": "Set the sport the group plays",
+        "args": "[event | game | football | cricket]", "sample": "/sport football",
+        "summary": "Set what the group does: event, game, football or cricket",
         "details": (
-            "football: 2 teams are shown on a pitch with positions and formations. "
-            "cricket: each player in 2 teams gets a role - wicket-keeper, batter, "
-            "all-rounder, bowler (cricket doesn't need a formation view). See /lineup. "
-            "/sport off goes back to plain team lists. Alone, shows the current sport. "
-            "Also in the web page's group settings."
+            "event: a gathering - no teams, just who's coming. "
+            "game: split the IN list into 2, 3 or 4 teams (numbered lists). "
+            "football: the teams are shown on a pitch with positions and formations - 2 teams "
+            "face each other, 3 or 4 get a half-pitch each. "
+            "cricket: each player gets a role - wicket-keeper, batter, all-rounder, bowler "
+            "(cricket doesn't need a formation view). See /teams and /lineup. "
+            "/sport off drops the sport and keeps teams as they are. Alone, shows the current "
+            "setting. Also in the web page's group settings (🎯 What the group does)."
         ),
         "menu": False,
     },

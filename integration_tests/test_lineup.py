@@ -75,12 +75,64 @@ class TestLineupRules(_Base):
         self.assertEqual(lv["placed"], 8)
         self.assertEqual(sum(len(t["subs"]) for t in lv["teams"]), 1)
 
-    async def test_no_sport_or_three_teams_means_no_pitch(self):
-        rc = await self._game(9, teams=3)
-        self.assertFalse(_lu().view(rc)["available"])
+    async def test_no_sport_means_no_pitch(self):
+        await self._game(9)
         db.update_chat_settings(CHAT_ID, sport=None)
         _teams().form(self._rc(), 2, "Admin")
         self.assertFalse(_lu().view(self._rc())["available"])
+
+    async def test_two_teams_face_off_three_or_four_get_a_board_each(self):
+        rc = await self._game(10)
+        self.assertEqual(_lu().view(rc)["layout"], "faceoff")
+        for count in (3, 4):
+            _teams().form(self._rc(), count, "Admin", rng=random.Random(2))
+            lv = _lu().view(self._rc())
+            self.assertTrue(lv["available"], count)
+            self.assertEqual(lv["layout"], "boards")
+            self.assertEqual(len(lv["teams"]), count)
+            self.assertEqual(lv["side"], 4, "10 IN in 3–4 teams → the 4-a-side minimum")
+            self.assertEqual([t["formation"] for t in lv["teams"]],
+                             [_lu().FORMATIONS[4][i % 3] for i in range(count)], "presets vary by team")
+            self.assertEqual(lv["placed"], 10, "everyone placed when the teams are made")
+
+    async def test_side_splits_the_in_list_by_the_number_of_teams(self):
+        self.assertEqual(_lu().default_side(20, 3), 6)
+        self.assertEqual(_lu().default_side(17, 2), 8)
+        self.assertEqual(_lu().default_side(30, 4), 7)
+        self.assertEqual(_lu().default_side(6, 3), 4)
+
+    async def test_three_teams_place_move_formation_and_publish(self):
+        rc = await self._game(10, teams=3)
+        lv = _lu().view(rc)
+        t3 = next(t for t in lv["teams"] if t["no"] == 3)
+        key = next(s["key"] for s in t3["slots"] if s["key"])
+        # A player dropped onto team 1's empty spot crosses over; the old spot empties.
+        t1 = next(t for t in lv["teams"] if t["no"] == 1)
+        empty = next((s["pos"] for s in t1["slots"] if not s["key"]), None)
+        if empty is None:
+            lv = _lu().place(self._rc(), t1["slots"][-1]["key"], 1, None, "Admin")
+            empty = next(s["pos"] for s in next(t for t in lv["teams"] if t["no"] == 1)["slots"] if not s["key"])
+        lv = _lu().place(self._rc(), key, 1, empty, "Admin")
+        self.assertEqual(_where(lv, key), (1, empty))
+        lv = _lu().set_formation(self._rc(), 3, "1-1-1", "Admin")
+        self.assertEqual(next(t for t in lv["teams"] if t["no"] == 3)["formation"], "1-1-1")
+        text = _lu().render_text(self._rc(), lv)
+        self.assertIn("· 3 teams", text)
+        self.assertIn("🟢 Team C (1-1-1)", text)
+        from PIL import Image
+        img = Image.open(_lu().render_png(self._rc(), lv))
+        self.assertGreater(img.width, 1200, "three boards side by side")
+        _teams().form(self._rc(), 4, "Admin")
+        img = Image.open(_lu().render_png(self._rc(), _lu().view(self._rc())))
+        self.assertGreater(img.height, img.width, "four boards in a 2×2 grid")
+
+    async def test_board_spots_stay_on_the_half_pitch_and_apart(self):
+        for side, forms in _lu().FORMATIONS.items():
+            for f in forms:
+                pts = [_lu().pitch_xy(0, pos, f, board=True) for pos, _r in _lu().slots(f)]
+                for x, y in pts:
+                    self.assertTrue(5 <= x <= 95 and 10 <= y <= 88, (f, x, y))
+                self.assertEqual(len(set(pts)), len(pts), f)
 
     async def test_fewer_per_side_makes_subs_and_reflows_in_order(self):
         rc = await self._game(10)
@@ -174,8 +226,7 @@ class TestLineupRules(_Base):
 
     async def test_shared_picture_says_made_with_rollcall(self):
         from PIL import Image
-        rc = await self._game(8)
-        lv = _lu().view(self._rc())
+        await self._game(8)
         with patch.dict(os.environ, {"WEB_BASE_URL": "https://rc.example/"}):
             self.assertEqual(_lu().made_with(), ("Made with RollCall · rc.example", "https://rc.example/"))
             self.assertTrue(_lu().credit_caption("⚽ Lineup").endswith("\nMade with RollCall — https://rc.example/"))
@@ -272,6 +323,50 @@ class TestLineupSurfaces(_Base):
                               json={"id_token": issue_identity_token(ADMIN_USER["id"]), "sport": "football"})
         self.assertEqual(r.status_code, 204, r.text)
         self.assertEqual(_lu().sport(CHAT_ID), "football")
+
+    async def test_activity_sets_teams_and_sport_in_one_step(self):
+        from api.identity import issue_identity_token
+        self.mgr.set_admin_rights(CHAT_ID, True)
+        get_mock_bot().get_chat_member.return_value.status = "member"
+        r = self.client.patch(f"/api/v1/web/group/{self.token}/settings",
+                              json={"id_token": issue_identity_token(USERS[0]["id"]), "activity": "event"})
+        self.assertIn(r.status_code, (401, 403))
+        get_mock_bot().get_chat_member.return_value.status = "administrator"
+
+        def patch_(v):
+            r = self.client.patch(f"/api/v1/web/group/{self.token}/settings",
+                                  json={"id_token": issue_identity_token(ADMIN_USER["id"]), "activity": v})
+            self.assertEqual(r.status_code, 204, r.text)
+            return self.client.get(f"/api/v1/web/group/{self.token}").json()
+        page = patch_("event")
+        self.assertEqual((page["activity"], page["teams_enabled"]), ("event", False))
+        self.assertIsNone(page["rollcalls"][0]["teams"] if page["rollcalls"] else None)
+        page = patch_("game")
+        self.assertEqual((page["activity"], page["teams_enabled"], page["sport"]), ("game", True, None))
+        page = patch_("cricket")
+        self.assertEqual((page["activity"], page["sport"]), ("cricket", "cricket"))
+        r = self.client.patch(f"/api/v1/web/group/{self.token}/settings",
+                              json={"id_token": issue_identity_token(ADMIN_USER["id"]), "activity": "chess"})
+        self.assertEqual(r.status_code, 422)
+
+    async def test_activity_from_telegram(self):
+        from handlers.teams import sport_cmd
+        await self._game(8)
+        get_mock_bot().reset_mock()
+        await sport_cmd(self.msg("/sport event", ADMIN_USER))
+        self.assertFalse(_teams().enabled(CHAT_ID))
+        self.assertEqual(_lu().activity(CHAT_ID), "event")
+        self.assertIn("no teams", " ".join(self.sent_texts()))
+        await sport_cmd(self.msg("/sport football", ADMIN_USER))
+        self.assertTrue(_teams().enabled(CHAT_ID), "picking a sport turns teams on")
+        self.assertEqual(_lu().activity(CHAT_ID), "football")
+        await sport_cmd(self.msg("/sport off", ADMIN_USER))
+        self.assertEqual(_lu().activity(CHAT_ID), "game", "off drops the sport, teams stay on")
+        get_mock_bot().reset_mock()
+        await sport_cmd(self.msg("/sport", USERS[0]))
+        self.assertIn("Game", " ".join(self.sent_texts()))
+        await sport_cmd(self.msg("/sport quidditch", ADMIN_USER))
+        self.assertEqual(_lu().activity(CHAT_ID), "game")
 
     async def test_telegram_sport_command_is_admin_only(self):
         from handlers.teams import sport_cmd

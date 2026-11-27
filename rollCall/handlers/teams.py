@@ -14,7 +14,7 @@ Callback data: tm:<op>:<rollcall db id>[:<arg>]
   lock / unlock / pub / pubpic (admin)   back   return to the panel
   view      redraw
 
-With a sport set and 2 teams, the sheet is the lineup (services/lineup):
+With a sport set and 2–4 teams, the sheet is the lineup (services/lineup):
 positions are arranged on the web page (🏟 button); publish posts the
 text (pub) or a picture of the pitch (pubpic).
 
@@ -377,39 +377,25 @@ async def post_published(cid: int, rc, v: dict, teams_text: str, actor: str,
 
 @bot.message_handler(func=lambda m: bool(m.text) and m.text.split()[0].split("@")[0].lower() == "/sport")
 async def sport_cmd(message):
-    """/sport — show the group's sport; /sport football | off (admin)."""
+    """/sport — what the group does; /sport event | game | football | cricket (admin)."""
     cid = message.chat.id
     try:
         args = message.text.split()[1:]
         if not args:
-            cur = lineup_svc.sport(cid)
-            await bot.send_message(cid, (
-                f"{lineup_svc.SPORTS[cur]['emoji']} This group plays {lineup_svc.SPORTS[cur]['label']} — "
-                + ("2 teams are shown on a pitch." if lineup_svc.kind(cur) == "pitch"
-                   else "players in 2 teams get a role (WK, BAT, AR, BOWL).")
-                + " /sport off goes back to plain team lists."
-                if cur else
-                "No sport set — teams are plain lists. An admin can set one: /sport football or /sport cricket"))
+            cur = lineup_svc.activity(cid)
+            await bot.send_message(cid, "This group: " + lineup_svc.activity_note(cur)
+                                   + "\nAn admin can change it: /sport event · game · football · cricket")
             return
         if not await admin_rights(message, manager):
-            raise insufficientPermissions("Only an admin can set the group's sport.")
+            raise insufficientPermissions("Only an admin can set what the group does.")
         actor = message.from_user.first_name or message.from_user.username or "Admin"
         async with manager.get_chat_write_lock(cid):
-            new = lineup_svc.set_sport(cid, args[0], message.from_user.id, actor)
-            if new:
+            res = lineup_svc.set_activity(cid, args[0], message.from_user.id, actor)
+            if lineup_svc.ACTIVITIES[res["activity"]]["sport"]:
                 lineup_svc.autofill_open(cid, actor)
-        if new:
-            hint = "" if teams_svc.enabled(cid) else " Turn teams on with /teams on."
-            if lineup_svc.kind(new) == "pitch":
-                what = "make 2 teams and they're drawn on a pitch (/lineup)."
-            else:
-                what = ("cricket doesn't need a pitch or formation, so instead each player in "
-                        "2 teams gets a role: 🧤 wicket-keeper, 🏏 batter, ⭐ all-rounder or 🎯 bowler "
-                        "(set them on the group's web page; /lineup shows them).")
-            await bot.send_message(cid, f"{lineup_svc.SPORTS[new]['emoji']} Sport set to "
-                                        f"{lineup_svc.SPORTS[new]['label']} — {what}{hint}")
-        else:
-            await bot.send_message(cid, "Sport off — teams are plain lists again.")
+        await bot.send_message(cid, lineup_svc.activity_note(res["activity"]))
+        if res["teams_changed"]:
+            await _redraw_open_panels(cid)      # show or hide the ⚽ Teams button
     except Exception as e:
         await reply_error(message, e)
 
@@ -440,7 +426,7 @@ async def lineup_cmd(message):
         v = teams_svc.view(rc)
         lv = lineup_svc.view(rc, v)
         if not lv["available"]:
-            await bot.send_message(cid, "The lineup needs exactly 2 teams — make them with /teams.")
+            await bot.send_message(cid, "The lineup needs 2–4 teams — make them with /teams.")
             return
         url = _web_url(cid)
         markup = None

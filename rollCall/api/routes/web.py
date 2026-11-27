@@ -480,9 +480,23 @@ async def update_group_settings(
                 lineup_svc.autofill_open(chat_id, actor_name)
         await _send_event_notification(
             chat_id, (f"{lineup_svc.SPORTS[new_sport]['emoji']} Sport set to {lineup_svc.SPORTS[new_sport]['label']}"
-                      + (" — each player in 2 teams gets a role (WK, BAT, AR, BOWL)"
+                      + (" — each player in the teams gets a role (WK, BAT, AR, BOWL)"
                          if lineup_svc.kind(new_sport) == "roles" else "")
                       if new_sport else "Sport off — teams are plain lists") + f" (by {actor_name}, via web)")
+
+    if body.activity is not None:
+        actor_name = await _actor_display_name(chat_id, actor_user_id)
+        from services import lineup as lineup_svc
+        from rollcall_manager import manager as _mgr
+        async with _mgr.get_chat_write_lock(chat_id):
+            res = lineup_svc.set_activity(chat_id, body.activity, actor_user_id, actor_name)
+            if lineup_svc.ACTIVITIES[res["activity"]]["sport"]:
+                lineup_svc.autofill_open(chat_id, actor_name)
+        await _send_event_notification(
+            chat_id, f"{lineup_svc.activity_note(res['activity'])} (by {actor_name}, via web)")
+        if res["teams_changed"]:      # show or hide the ⚽ Teams button on open panels
+            for number in range(1, len(_mgr.get_rollcalls(chat_id)) + 1):
+                await _mirror_panel_to_telegram(chat_id, number)
 
     if body.teams_enabled is not None:
         actor_name = await _actor_display_name(chat_id, actor_user_id)

@@ -35,7 +35,7 @@ Legend: **you** = needs the owner (server, accounts, decisions) · **code** = ca
 | Late drops: a penalty ("teeth"). Late drops are recorded and shown since 738dfed, deliberately with no charge. | Watch the data first |
 | Embeddable voting widget and SDK for other sites. | After #7 |
 | Activity feed for web-only groups (Telegram groups see every change in the chat; a web-only group has only push/email per person). | Not built — ask first |
-| Lineup for more sports: hockey / futsal reuse the football pitch as-is (add to `SPORTS` + presets); basketball needs a court and 5 named positions; cricket could add batting order and captain / vice-captain. | Ideas — ask first |
+| Rotation helper for 3–4 teams ("Match 1: A vs B, then winner vs C") — the boards exist, fixtures don't. Lineup for more sports: hockey / futsal reuse the football pitch as-is (add to `SPORTS` + presets); basketball needs a court and 5 named positions; cricket could add batting order and captain / vice-captain. | Ideas — ask first |
 | `_ph()` placeholder helper is copied in ~15 modules; fold into one `db.ph()` when those files are next touched (not worth a churn-only change). | Refactor, low |
 
 ## Dropped — don't resurrect

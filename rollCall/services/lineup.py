@@ -1,13 +1,21 @@
 """
-Lineup — the two teams drawn on a pitch, each player in a position.
+Lineup — the teams drawn on a pitch, each player in a position.
 
 Built on services/teams.py (the sheet, its lock and its publish rules are
 unchanged); this only adds WHERE each player stands. Available when the
-group has picked a sport (chats.sport) and the game has exactly 2 teams —
-otherwise teams stay the numbered list.
+group has picked a sport (chats.sport) and the game has 2–4 teams —
+otherwise teams stay the numbered list. Two teams face each other on one
+pitch ("faceoff"); three or four get a half-pitch each ("boards") — usually
+a rotation where two play and one waits.
+
+What a group does is its "activity" (activity()/set_activity()): an event
+or gathering has no teams, a game has team lists, football and cricket add
+the pitch / roles. It is stored as the two settings it always was —
+chats.teams_enabled and chats.sport — so nothing else changes.
 
 Rules (agreed 2026-11-27):
-  - Players per side defaults to half the IN list (16 or 17 IN → 8-a-side),
+  - Players per side defaults to the IN list split by the number of teams
+    (16 or 17 IN in 2 teams → 8-a-side, 20 IN in 3 → 6-a-side),
     4–11; an admin or member picks fewer for more subs. Stored once set, so
     later votes don't keep resizing a lineup someone arranged.
   - Each team picks its own formation from the presets for that size.
@@ -57,6 +65,18 @@ def kind(sport_key: Optional[str]) -> Optional[str]:
     return SPORTS.get(sport_key or "", {}).get("kind")
 
 
+# What the group's rollcalls are: no teams for an event, team lists for any
+# game, and the pitch / roles for the sports above.
+ACTIVITIES = {
+    "event": {"label": "Event / gathering", "emoji": "🎉", "teams": False, "sport": None},
+    "game": {"label": "Game", "emoji": "🔢", "teams": True, "sport": None},
+    "football": {"label": "Football", "emoji": "⚽", "teams": True, "sport": "football"},
+    "cricket": {"label": "Cricket", "emoji": "🏏", "teams": True, "sport": "cricket"},
+}
+_ACTIVITY_ALIASES = {"gathering": "event", "meetup": "event", "social": "event", "teams": "game",
+                     "other": "game", "soccer": "football", "futsal": "football"}
+
+
 MIN_SIDE, MAX_SIDE = 4, 11
 
 # Presets by players per side: outfield lines, back to front (keeper implied).
@@ -92,10 +112,60 @@ def set_sport(chat_id: int, value: Optional[str], admin_user_id: int, admin_name
     return v
 
 
+def activity(chat_id: int) -> str:
+    from services import teams as teams_svc
+    if not teams_svc.enabled(chat_id):
+        return "event"
+    return sport(chat_id) or "game"
+
+
+def parse_activity(value: Optional[str]) -> str:
+    v = (value or "").strip().lower()
+    v = _ACTIVITY_ALIASES.get(v, v)
+    if v not in ACTIVITIES:
+        raise incorrectParameter("Pick one: event (no teams), game (team lists), football or cricket.")
+    return v
+
+
+def set_activity(chat_id: int, value: Optional[str], admin_user_id: int, admin_name: str) -> dict:
+    """Set what the group does — one choice that sets both teams on/off and
+    the sport. Returns {"activity", "teams_changed"}. Caller holds the chat
+    write lock and, for a sport, calls autofill_open() under it."""
+    from services import teams as teams_svc
+    was_on = teams_svc.enabled(chat_id)
+    if (value or "").strip().lower() in ("off", "none"):     # "/sport off": no sport, teams as they are
+        value = "game" if was_on else "event"
+    v = parse_activity(value)
+    a = ACTIVITIES[v]
+    if a["teams"] != was_on:
+        teams_svc.set_enabled(chat_id, a["teams"], admin_user_id, admin_name)
+    if a["teams"] and sport(chat_id) != a["sport"]:
+        set_sport(chat_id, a["sport"], admin_user_id, admin_name)
+    return {"activity": v, "teams_changed": a["teams"] != was_on}
+
+
+def activity_note(v: str) -> str:
+    """One line telling the group what the choice means."""
+    return {
+        "event": "🎉 Event / gathering — no teams, just who's coming.",
+        "game": "🔢 Game — split the IN list into 2, 3 or 4 teams (/teams); teams are numbered lists.",
+        "football": "⚽ Football — make 2, 3 or 4 teams and they're drawn on a pitch with positions (/lineup). "
+                    "2 teams face each other; 3 or 4 get a half-pitch each.",
+        "cricket": "🏏 Cricket — cricket doesn't need a pitch or formation, so instead each player gets a role: "
+                   "🧤 wicket-keeper, 🏏 batter, ⭐ all-rounder or 🎯 bowler "
+                   "(set them on the group's web page; /lineup shows them).",
+    }[v]
+
+
 # ── formations ──────────────────────────────────────────────────────────────
 
-def default_side(players_in: int) -> int:
-    return max(MIN_SIDE, min(MAX_SIDE, players_in // 2))
+def default_side(players_in: int, teams: int = 2) -> int:
+    return max(MIN_SIDE, min(MAX_SIDE, players_in // max(2, teams)))
+
+
+def layout_for(count: int) -> str:
+    """'faceoff': 2 teams on one pitch. 'boards': a half-pitch per team."""
+    return "faceoff" if count == 2 else "boards"
 
 
 def slots(formation: str) -> list[tuple[str, str]]:
@@ -117,18 +187,19 @@ def _stored(rc) -> dict:
         return {}
 
 
-def _settings(rc, players_in: int) -> tuple[int, bool, dict]:
+def _settings(rc, players_in: int, count: int = 2) -> tuple[int, bool, dict]:
     """(side, side_is_auto, {team_no: formation})."""
     st = _stored(rc)
     side = st.get("side")
     auto = not (isinstance(side, int) and MIN_SIDE <= side <= MAX_SIDE)
     if auto:
-        side = default_side(players_in)
+        side = default_side(players_in, count)
     forms = {}
     saved = st.get("formations") or {}
-    for no in (1, 2):
+    presets = FORMATIONS[side]
+    for no in range(1, count + 1):
         f = saved.get(str(no))
-        forms[no] = f if f in FORMATIONS[side] else FORMATIONS[side][0 if no == 1 else 1]
+        forms[no] = f if f in presets else presets[(no - 1) % len(presets)]
     return side, auto, forms
 
 
@@ -144,7 +215,7 @@ def available(rc, tv: Optional[dict] = None) -> bool:
     if sport(rc.chat_id) is None or not teams_svc.enabled(rc.chat_id):
         return False
     tv = tv if tv is not None else teams_svc.view(rc)
-    return bool(tv["formed"]) and tv["count"] == 2
+    return bool(tv["formed"]) and 2 <= tv["count"] <= teams_svc.MAX_TEAMS
 
 
 def view(rc, tv: Optional[dict] = None) -> dict:
@@ -156,14 +227,15 @@ def view(rc, tv: Optional[dict] = None) -> dict:
     from services import teams as teams_svc
     tv = tv if tv is not None else teams_svc.view(rc)
     sp = sport(rc.chat_id)
-    out = {"available": False, "sport": sp, "kind": kind(sp), "side": None, "side_auto": True,
+    out = {"available": False, "sport": sp, "kind": kind(sp), "layout": layout_for(tv.get("count") or 2),
+           "side": None, "side_auto": True,
            "options": [], "roles": [], "locked": bool(tv.get("locked")), "placed": 0, "teams": []}
     if not available(rc, tv):
         return out
     saved = {r["who_key"]: r for r in db.get_team_rows(rc_db_id(rc))}
     if kind(sp) == "roles":
         return _roles_view(out, tv, saved)
-    side, auto, forms = _settings(rc, tv["players_in"])
+    side, auto, forms = _settings(rc, tv["players_in"], tv["count"])
     out.update(available=True, kind="pitch", side=side, side_auto=auto, options=FORMATIONS[side])
     for team in tv["teams"]:
         layout = slots(forms[team["no"]])
@@ -222,7 +294,7 @@ def _editable(rc) -> tuple[dict, list[dict]]:
     teams_svc.check_editable(rc)
     tv = teams_svc.view(rc)
     if not available(rc, tv):
-        raise incorrectParameter("The pitch needs a sport set for the group and exactly 2 teams.")
+        raise incorrectParameter("The lineup needs a sport set for the group and 2–4 teams.")
     rows = teams_svc._sync(rc, tv["count"])
     return tv, rows
 
@@ -383,7 +455,8 @@ def render_text(rc, lv: dict) -> str:
     emoji = SPORTS.get(lv.get("sport") or "", {}).get("emoji", "⚽")
     if lv.get("kind") == "roles":
         return _roles_text(rc, lv, emoji)
-    lines = [f"{emoji} Lineup — {_title(rc)} · {lv['side']}-a-side"]
+    lines = [f"{emoji} Lineup — {_title(rc)} · {lv['side']}-a-side"
+             + (f" · {len(lv['teams'])} teams" if lv.get("layout") == "boards" else "")]
     for t in lv["teams"]:
         lines.append("")
         lines.append(f"{t['emoji']} Team {t['label']} ({t['formation']})")
@@ -453,19 +526,27 @@ def emit_published(rc, lv: dict) -> None:
         logging.exception("lineup.published webhook failed")
 
 
-def pitch_xy(team_index: int, pos: str, formation: str) -> tuple[float, float]:
-    """Where a spot sits on the pitch, in % (x across, y down). Team index 0
-    plays up from the bottom, 1 down from the top. The web board uses the
-    same numbers (app.js _lineupXY) so the picture matches the page."""
+# Half-pitch board (3–4 teams): every team attacks up, keeper at the bottom.
+BOARD_RATIO = (68, 62)
+
+
+def pitch_xy(team_index: int, pos: str, formation: str, board: bool = False) -> tuple[float, float]:
+    """Where a spot sits, in % (x across, y down). On the full pitch team
+    index 0 plays up from the bottom, 1 down from the top; on a half-pitch
+    board (board=True) every team plays up. The web uses the same numbers
+    (app.js _lineupXY) so the picture matches the page."""
     lines = [1] + [int(n) for n in formation.split("-")]
     li, i = (int(p) for p in pos.split(":"))
+    if board:
+        ys = [84, 61, 38, 15] if len(lines) == 4 else [84, 52, 20]
+        return (i + 1) / (lines[li] + 1) * 100, ys[li]
     ys = [91, 79.5, 68, 56.5] if len(lines) == 4 else [91, 75, 59]
     y = ys[li] if team_index == 0 else 100 - ys[li]
     return (i + 1) / (lines[li] + 1) * 100, y
 
 
 # Pitch picture (Pillow — already a dependency via utils/card_gen).
-_TEAM_RGB = {1: (229, 72, 77), 2: (62, 99, 221)}
+_TEAM_RGB = {1: (229, 72, 77), 2: (62, 99, 221), 3: (18, 165, 148), 4: (245, 165, 36)}
 _FOOT_H = 44
 
 
@@ -495,7 +576,8 @@ def _render_roles_png(rc, lv: dict) -> BytesIO:
     """Cricket: the two teams side by side, grouped by role."""
     from PIL import Image, ImageDraw
     from utils.card_gen import _font, _sanitize, _ellipsize, _text_w, _to_bytes
-    W, pad, col_w = 900, 40, 400
+    pad, col_w = 40, 400
+    W = pad * 2 + len(lv["teams"]) * col_w + (len(lv["teams"]) - 1) * 20
     rows_per_team = [sum(1 for c in _ROLE_CODES if any(s["role"] == c for s in t["slots"])) + (1 if t["subs"] else 0)
                      for t in lv["teams"]]
     names_h = max([sum(len(s["name"]) // 22 + 1 for s in t["slots"]) + len(t["subs"]) // 3 + 1
@@ -534,9 +616,75 @@ def _render_roles_png(rc, lv: dict) -> BytesIO:
     return _to_bytes(img)
 
 
+def _render_boards_png(rc, lv: dict) -> BytesIO:
+    """3–4 teams: a half-pitch per team, every team attacking up."""
+    from PIL import Image, ImageDraw
+    from utils.card_gen import _font, _sanitize, _ellipsize, _text_w, _to_bytes
+    n = len(lv["teams"])
+    cols = 2 if n == 4 else n
+    rows = -(-n // cols)
+    BW = 420
+    BH = BW * BOARD_RATIO[1] // BOARD_RATIO[0]
+    TAG, SUBS, GAP, HEAD, pad = 46, 64, 30, 120, 40
+    W = pad * 2 + cols * BW + (cols - 1) * GAP
+    H = HEAD + rows * (TAG + BH + SUBS) + (rows - 1) * GAP + 20 + _FOOT_H
+    img = Image.new("RGB", (W, H), (15, 23, 42))
+    d = ImageDraw.Draw(img)
+    f_title, f_sub = _font(38, True), _font(24)
+    f_name, f_disc, f_role, f_tag, f_subs = _font(19, True), _font(21, True), _font(15), _font(20, True), _font(19)
+    d.text((pad, 30), _sanitize(_ellipsize(f"Lineup — {_title(rc)}", 48), bold=True), font=f_title, fill=(255, 255, 255))
+    d.text((pad, 78), _sanitize(f"{lv['side']}-a-side · {n} teams · "
+                                + " · ".join(f"{t['label']} {t['formation']}" for t in lv["teams"])),
+           font=f_sub, fill=(148, 163, 184))
+    chalk, lw = (235, 245, 238), 2
+    for ti, t in enumerate(lv["teams"]):
+        color = _TEAM_RGB.get(t["no"], (100, 116, 139))
+        bx = pad + (ti % cols) * (BW + GAP)
+        by = HEAD + (ti // cols) * (TAG + BH + SUBS + GAP)
+        tag = _sanitize(f"Team {t['label']} · {len([s for s in t['slots'] if s['key']]) + len(t['subs'])}", bold=True)
+        d.rounded_rectangle([bx, by, bx + _text_w(d, tag, f_tag) + 28, by + 34], radius=17, fill=color)
+        d.text((bx + 14, by + 5), tag, font=f_tag, fill=(255, 255, 255))
+        y0, x0, x1, y1 = by + TAG, bx, bx + BW, by + TAG + BH
+        for i in range(8):
+            sy, ey = y0 + BH * i // 8, y0 + BH * (i + 1) // 8
+            d.rectangle([x0, sy, x1, ey], fill=(47, 138, 74) if i % 2 == 0 else (42, 125, 67))
+        m = 10
+        d.rectangle([x0 + m, y0 + m, x1 - m, y1 - m], outline=chalk, width=lw)
+        cx = (x0 + x1) / 2
+        r = BW * 0.15
+        d.arc([cx - r, y0 + m - r, cx + r, y0 + m + r], 0, 180, fill=chalk, width=lw)   # centre circle, half
+        bw_, bh_ = BW * 0.53, BH * 0.2
+        d.rectangle([cx - bw_ / 2, y1 - m - bh_, cx + bw_ / 2, y1 - m], outline=chalk, width=lw)
+        sw_, sh_ = BW * 0.24, BH * 0.07
+        d.rectangle([cx - sw_ / 2, y1 - m - sh_, cx + sw_ / 2, y1 - m], outline=chalk, width=lw)
+        for sl in t["slots"]:
+            px, py = pitch_xy(ti, sl["pos"], t["formation"], board=True)
+            px, py = x0 + BW * px / 100, y0 + BH * py / 100
+            rr = 22
+            if sl["key"]:
+                d.ellipse([px - rr, py - rr, px + rr, py + rr], fill=color, outline=(255, 255, 255), width=3)
+                ini, fnt, dy = _sanitize((sl["name"] or "?")[:2].upper(), bold=True), f_disc, 13
+            else:
+                d.ellipse([px - rr, py - rr, px + rr, py + rr], outline=(255, 255, 255), width=2)
+                ini, fnt, dy = sl["role"], f_role, 9
+            d.text((px - _text_w(d, ini, fnt) / 2, py - dy), ini, font=fnt, fill=(255, 255, 255))
+            if sl["name"]:
+                label = _sanitize(_ellipsize(sl["name"], 12), bold=True)
+                lx = px - _text_w(d, label, f_name) / 2
+                d.text((lx + 1, py + rr + 3), label, font=f_name, fill=(0, 0, 0))
+                d.text((lx, py + rr + 2), label, font=f_name, fill=(255, 255, 255))
+        if t["subs"]:
+            d.text((bx, y1 + 14), _sanitize(_ellipsize("Subs: " + ", ".join(s["name"] for s in t["subs"]), 40)),
+                   font=f_subs, fill=(226, 232, 240))
+    _draw_footer(d, W, H)
+    return _to_bytes(img)
+
+
 def render_png(rc, lv: dict) -> BytesIO:
     if lv.get("kind") == "roles":
         return _render_roles_png(rc, lv)
+    if lv.get("layout") == "boards":
+        return _render_boards_png(rc, lv)
     from PIL import Image, ImageDraw
     from utils.card_gen import _font, _sanitize, _ellipsize, _text_w, _to_bytes
 

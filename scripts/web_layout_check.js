@@ -1585,6 +1585,133 @@ const WIDTHS = [
     await page.close();
   }
 
+  // Lineup, 3 teams (services/lineup.py layout "boards"): a half-pitch per
+  // team. At a phone (320, stacked) and a laptop (1024, two per row — the
+  // page column is ~550px, and a third board would be too small) every spot sits
+  // inside its own board, no spot or name overlaps another, the page doesn't
+  // scroll sideways, and dragging a player onto another team's board works.
+  for (const width of [320, 1024]) {
+    const page = await browser.newPage();
+    await page.setViewport({ width, height: 1400 });
+    await page.setRequestInterception(true);
+    const slots = (form, team, names) => {
+      const lines = [1].concat(form.split("-").map(Number));
+      const roles = lines.length === 4 ? ["GK", "DEF", "MID", "FWD"] : ["GK", "DEF", "FWD"];
+      const out = []; let k = 0;
+      lines.forEach((n, li) => { for (let i = 0; i < n; i++) {
+        const name = names[k++] || null;
+        out.push({ pos: `${li}:${i}`, role: roles[li], key: name ? `u${team}${k}` : null, name });
+      } });
+      return out;
+    };
+    const lineup = {
+      available: true, sport: "football", kind: "pitch", layout: "boards", side: 6, side_auto: true,
+      options: ["2-2-1", "2-1-2", "3-1-1"], locked: false, placed: 17, text: "⚽ Lineup — Rotation · 6-a-side · 3 teams",
+      teams: [
+        { no: 1, label: "A", emoji: "🔴", formation: "2-2-1",
+          slots: slots("2-2-1", 1, ["Ravi", "Priya", "Sam", "Amit", null, "Leo"]), subs: [{ key: "pdev", name: "Dev" }] },
+        { no: 2, label: "B", emoji: "🔵", formation: "2-1-2",
+          slots: slots("2-1-2", 2, ["Arjun", "Zaid", "Neha", "Omar", "Tanvi", "Vikram"]), subs: [] },
+        { no: 3, label: "C", emoji: "🟢", formation: "3-1-1",
+          slots: slots("3-1-1", 3, ["Joel Fernandes-Long", "Kiran", "Meera", "Rohan", "Sahil", "Yash"]), subs: [] },
+      ],
+    };
+    const tl = lineup.teams.map(t => ({ no: t.no, label: t.label, emoji: t.emoji, players: [] }));
+    const teams = { formed: true, count: 3, locked: false, locked_by: null, players_in: 18, teams: tl, lineup };
+    const group = { group_name: "Test FC", bot_username: "TestBot", teams_enabled: true, sport: "football", activity: "football",
+                    rollcalls: [{ num: 1, id: 8, rollcall_id: 8, title: "Rotation", status: "open",
+                                  in: [], out: [], maybe: [], waiting: [], teams }] };
+    const posts = [];
+    page.on("request", req => {
+      const u = req.url();
+      if (/\/api\/v1\/web\/group\/testtoken123$/.test(u.split("?")[0]))
+        return req.respond({ status: 200, contentType: "application/json", body: JSON.stringify(group) });
+      if (/\/teams$/.test(u) && req.method() === "POST") {
+        posts.push(JSON.parse(req.postData() || "{}"));
+        return req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ ...teams, message: "" }) });
+      }
+      if (/\/admin-status/.test(u)) return req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ is_admin: false }) });
+      return u.startsWith(BASE) ? req.continue() : req.respond({ status: 200, contentType: "text/plain", body: "" });
+    });
+    const errs = [];
+    page.on("pageerror", e => errs.push(String(e.message)));
+    await page.goto(`${BASE}/web/group/testtoken123`, { waitUntil: "load" });
+    await page.evaluate(u => {
+      localStorage.clear();
+      localStorage.setItem("rc_verified_tg_user_id", String(u.user_id));
+      localStorage.setItem("rc_verified_tg_name", u.name);
+      localStorage.setItem("rc_identity_token", u.id_token);
+    }, EMAIL_USER);
+    await page.reload({ waitUntil: "load" });
+    await new Promise(r => setTimeout(r, 800));
+    const g = await page.evaluate(() => {
+      const card = document.getElementById("teams-card");
+      const boards = card ? [...card.querySelectorAll(".lu-board .lu-pitch")] : [];
+      let outside = 0, overlap = 0, spots = 0;
+      const rects = boards.map(b => b.getBoundingClientRect());
+      const tops = rects.map(r => Math.round(r.top));
+      let boardsOverlap = 0;
+      for (let i = 0; i < rects.length; i++) for (let j = i + 1; j < rects.length; j++) {
+        const a = rects[i], b = rects[j];
+        if (a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom) boardsOverlap++;
+      }
+      for (const pitch of boards) {
+        const pr = pitch.getBoundingClientRect();
+        const discs = [...pitch.querySelectorAll(".lu-disc")].map(d => d.getBoundingClientRect());
+        const labels = [...pitch.querySelectorAll(".lu-nm")].map(n => n.getBoundingClientRect());
+        spots += discs.length;
+        for (const r of discs.concat(labels))
+          if (r.left < pr.left - 1 || r.right > pr.right + 1 || r.top < pr.top - 1 || r.bottom > pr.bottom + 1) outside++;
+        const hit = (a, b) => a.left < b.right - 2 && b.left < a.right - 2 && a.top < b.bottom - 2 && b.top < a.bottom - 2;
+        for (let i = 0; i < discs.length; i++) for (let j = i + 1; j < discs.length; j++) if (hit(discs[i], discs[j])) overlap++;
+        for (const l of labels) for (const d of discs) if (hit(l, d)) overlap++;
+        for (let i = 0; i < labels.length; i++) for (let j = i + 1; j < labels.length; j++) if (hit(labels[i], labels[j])) overlap++;
+      }
+      return { boards: boards.length, spots, outside, overlap, boardsOverlap, rows: new Set(tops).size,
+               wide: document.documentElement.scrollWidth > window.innerWidth,
+               formSelects: card ? card.querySelectorAll(".lu-form select").length : 0,
+               w: boards[0] ? boards[0].getBoundingClientRect().width : 0 };
+    });
+    const tag = `lineup 3 teams @${width}`;
+    if (g.boards !== 3) failures.push(`${tag}: expected 3 half-pitch boards, got ${g.boards}`);
+    else {
+      if (g.spots !== 18) failures.push(`${tag}: expected 18 spots, got ${g.spots}`);
+      if (g.outside) failures.push(`${tag}: ${g.outside} spot(s)/name(s) spill outside their board`);
+      if (g.overlap) failures.push(`${tag}: ${g.overlap} spot/name overlap(s)`);
+      if (g.wide) failures.push(`${tag}: the page scrolls sideways`);
+      if (g.formSelects !== 3) failures.push(`${tag}: each team should have its own formation picker`);
+      if (g.boardsOverlap) failures.push(`${tag}: boards overlap each other`);
+      if (width >= 1024 && g.rows !== 2) failures.push(`${tag}: expected two boards per row on a laptop, got ${g.rows} rows`);
+      if (width <= 320 && g.rows !== 3) failures.push(`${tag}: boards should stack on a phone, got ${g.rows} rows`);
+      // Team C's player onto Team A's empty spot (another board): dragged on a
+      // laptop, where the boards sit side by side; tap-then-tap on a phone,
+      // where they're stacked and a drag would have to scroll.
+      if (width >= 1024) {
+        // A and C are in different rows; scroll so both are on screen.
+        await page.evaluate(() => document.querySelector(".lu-boards").scrollIntoView({ block: "start" }));
+        await new Promise(r => setTimeout(r, 200));
+        const box = sel => page.evaluate(s => { const r = document.querySelector(s).getBoundingClientRect();
+          return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }, sel);
+        const from = await box('.lu-slot[data-lu-key="u35"] .lu-disc');
+        const to = await box('.lu-slot[data-lu-team="1"][data-lu-pos="2:0"] .lu-disc');
+        await page.mouse.move(from.x, from.y); await page.mouse.down();
+        await page.mouse.move(from.x + 10, from.y - 10, { steps: 3 });
+        await page.mouse.move(to.x, to.y, { steps: 10 }); await page.mouse.up();
+      } else {
+        await page.evaluate(() => document.querySelector('.lu-slot[data-lu-key="u35"]').click());
+        await page.evaluate(() => document.querySelector('.lu-slot[data-lu-team="1"][data-lu-pos="2:0"]').click());
+      }
+      await new Promise(r => setTimeout(r, 400));
+      const drop = posts.find(p => p.action === "lineup_place");
+      if (!drop || drop.who_key !== "u35" || drop.team_no !== 1 || drop.position !== "2:0")
+        failures.push(`${tag}: placing across boards sent ${JSON.stringify(drop)}`);
+    }
+    if (errs.length) failures.push(`${tag}: JS error — ${errs[0]}`);
+    await page.evaluate(() => localStorage.clear());
+    console.log(`  ${tag}: ${g.boards} boards (${Math.round(g.w)}px), ${g.spots} spots inside, no overlaps, placed across boards`);
+    await page.close();
+  }
+
   // Landing page: both ways in (Telegram, and the web without it), at 320px.
   {
     const page = await browser.newPage();

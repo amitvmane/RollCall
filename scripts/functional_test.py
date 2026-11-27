@@ -1690,12 +1690,12 @@ async def phase_teams():
     ok, d = contains(out, "No sport set")
     record("/lineup without a sport says how to set one", ok and not _errors, d)
     out = await feed("/sport football", ALICE)
-    ok, d = contains(out, "Sport set to Football")
+    ok, d = contains(out, "⚽ Football", "3 or 4 get a half-pitch")
     lv = _lineup.view(rc)
     record("/sport football (admin) sets it and places the players of open games",
            ok and lv["available"] and lv["placed"] == 4 and not _errors, d or str(lv)[:200])
     out = await feed("/sport", CAROL)
-    ok, d = contains(out, "plays Football")
+    ok, d = contains(out, "This group: ⚽ Football", "/sport event")
     record("/sport alone shows the group's sport", ok, d)
     out = await feed("/lineup", CAROL)
     ok, d = contains(out, "Lineup — Teams Game", "4-a-side", "GK", "DEF")
@@ -1715,14 +1715,21 @@ async def phase_teams():
            bool(photos) and "Published by" in str(photos[0].get("caption", "")) and not _errors,
            error_msgs()[:2] or str(out)[:200])
     out = await feed("/sport cricket", ALICE)
-    ok, d = contains(out, "Sport set to Cricket", "doesn't need a pitch", "wicket-keeper")
+    ok, d = contains(out, "🏏 Cricket", "doesn't need a pitch", "wicket-keeper")
     record("/sport cricket explains roles instead of a pitch", ok and not _errors, d)
     out = await feed("/lineup", CAROL)
     ok, d = contains(out, "Teams — Teams Game", "No role yet", "WK wicket-keeper")
     record("/lineup for cricket lists the teams by role", ok and not _errors, d or error_msgs()[:2])
     out = await feed("/sport off", ALICE)
-    ok, d = contains(out, "Sport off")
+    ok, d = contains(out, "🔢 Game", "numbered lists")
     record("/sport off goes back to plain team lists", ok and _lineup.sport(CHAT_ID) is None, d)
+    out = await feed("/sport event", ALICE)
+    ok, d = contains(out, "🎉 Event", "no teams")
+    from services import teams as _teams_svc
+    record("/sport event turns teams off for a gathering", ok and not _teams_svc.enabled(CHAT_ID) and not _errors, d)
+    out = await feed("/sport game", ALICE)
+    record("/sport game turns team lists back on", _teams_svc.enabled(CHAT_ID) and _lineup.sport(CHAT_ID) is None
+           and not _errors, text_of(out)[:200])
 
     out = await feed_cb(f"tm:back:{rc.id}", BOB)
     record("🔙 Back returns to the vote panel", has_call(out, "edit_message_text") and not _errors,

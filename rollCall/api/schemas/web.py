@@ -48,6 +48,7 @@ class WebLineup(BaseModel):
     available: bool = False
     sport: Optional[str] = None
     kind: Optional[str] = Field(None, description="'pitch' (football: spots and formations) or 'roles' (cricket)")
+    layout: str = Field("faceoff", description="'faceoff': 2 teams on one pitch; 'boards': a half-pitch per team (3–4 teams)")
     roles: list[WebLineupRole] = Field(default_factory=list, description="Cricket: the roles a player can have")
     side: Optional[int] = Field(None, description="Players per side")
     side_auto: bool = True
@@ -66,7 +67,7 @@ class WebTeams(BaseModel):
     published_at: Optional[str] = None
     players_in: int = 0
     teams: list[WebTeam] = Field(default_factory=list)
-    lineup: Optional[WebLineup] = Field(None, description="The pitch view, when the group plays a sport and has 2 teams")
+    lineup: Optional[WebLineup] = Field(None, description="The pitch view, when the group plays a sport and has 2–4 teams")
 
 
 class WebRollcallResponse(BaseModel):
@@ -121,6 +122,7 @@ class WebGroupResponse(BaseModel):
     weather_alerts: bool = False
     teams_enabled: bool = False
     sport: Optional[str] = None   # services/lineup.SPORTS key; None = plain team lists
+    activity: str = "event"       # services/lineup.ACTIVITIES: event | game | football | cricket
     join_approval: bool = False   # joining from the link needs an admin's OK
     buzz_mute_after: int = 3      # skip members after N unanswered buzzes; 0 = never
     web_only: bool = False        # no Telegram chat behind this group
@@ -139,7 +141,10 @@ class WebGroupSettingsRequest(BaseModel):
     weather_alerts: Optional[bool] = Field(None, description="Forecast heads-up before games with a location")
     teams_enabled: Optional[bool] = Field(None, description="Teams on/off for the group (off by default)")
     sport: Optional[Literal["football", "cricket", "none"]] = Field(
-        None, description="football: 2 teams on a pitch; cricket: a role per player; none: plain lists")
+        None, description="football: 2–4 teams on a pitch; cricket: a role per player; none: plain lists")
+    activity: Optional[Literal["event", "game", "football", "cricket"]] = Field(
+        None, description="What the group does — event: no teams; game: team lists; football: teams on a "
+                          "pitch; cricket: a role per player. Sets teams_enabled and sport together")
     join_approval: Optional[bool] = Field(
         None, description="Joining from the group link needs an admin's approval; web votes from members only")
     buzz_mute_after: Optional[int] = Field(

@@ -90,7 +90,7 @@ class LineupTeam(BaseModel):
 
 class LineupResponse(BaseModel):
     rollcall_id: int
-    available: bool = Field(..., description="False when the group has no sport set or the game doesn't have 2 teams")
+    available: bool = Field(..., description="False when the group has no sport set or the game doesn't have 2–4 teams")
     sport: Optional[str] = Field(None, description="e.g. football")
     players_per_side: Optional[int] = None
     locked: bool

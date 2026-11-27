@@ -96,7 +96,9 @@ all go through `proxy-votes` with an `admin` key.
 `GET /chats/{chat_id}/rollcalls/by-id/{rollcall_id}/lineup` (scope `read`)
 returns who plays where — for a booking or turf screen, a scoring or stats
 app, a league table or a stream overlay. It has content when the group has set
-a sport and the game has two teams; otherwise `available` is `false`.
+a sport and the game has 2, 3 or 4 teams; otherwise `available` is `false`.
+`teams` has one entry per team. With 3 or 4 teams the group usually rotates
+(two play, the rest wait), so draw each team on its own half-pitch.
 
 ```json
 {

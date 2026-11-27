@@ -1441,10 +1441,18 @@ const _LU_LINES=`<svg class="lu-lines" viewBox="0 0 68 100" preserveAspectRatio=
   `<rect x="2" y="2" width="64" height="96"/><line x1="2" y1="50" x2="66" y2="50"/><circle cx="34" cy="50" r="8"/>`+
   `<rect x="16" y="2" width="36" height="14"/><rect x="25" y="2" width="18" height="5"/>`+
   `<rect x="16" y="84" width="36" height="14"/><rect x="25" y="93" width="18" height="5"/></svg>`;
+// A half-pitch (3–4 teams): goal at the bottom, halfway line at the top.
+const _LU_HALF=`<svg class="lu-lines" viewBox="0 0 68 62" preserveAspectRatio="none" aria-hidden="true">`+
+  `<rect x="2" y="2" width="64" height="58"/><path d="M24 2a10 10 0 0 0 20 0"/>`+
+  `<rect x="16" y="46" width="36" height="14"/><rect x="25" y="55" width="18" height="5"/></svg>`;
 // Same numbers as services/lineup.pitch_xy, so the page matches the picture.
-function _lineupXY(ti,pos,formation){
+function _lineupXY(ti,pos,formation,board){
   const lines=[1].concat(String(formation).split("-").map(Number));
   const [li,i]=String(pos).split(":").map(Number);
+  if(board){
+    const by=lines.length===4?[84,61,38,15]:[84,52,20];
+    return [(i+1)/(lines[li]+1)*100,by[li]];
+  }
   const ys=lines.length===4?[91,79.5,68,56.5]:[91,75,59];
   return [(i+1)/(lines[li]+1)*100,ti===0?ys[li]:100-ys[li]];
 }
@@ -1479,28 +1487,40 @@ function _lineupHtml(lu,canEdit){
         lu.options.map(f=>`<option value="${esc(f)}"${f===tm.formation?" selected":""}>${esc(f)}</option>`).join("")+`</select></label>`).join("")+
       `</div>`;
   }else{
-    h+=`<p class="teams-sub">${lu.side}-a-side · ${lu.teams.map(tm=>`Team ${esc(tm.label)} ${esc(tm.formation)}`).join(" vs ")}</p>`;
+    h+=`<p class="teams-sub">${lu.side}-a-side · ${lu.teams.map(tm=>`Team ${esc(tm.label)} ${esc(tm.formation)}`).join(lu.layout==="boards"?" · ":" vs ")}</p>`;
+  }
+  const board=lu.layout==="boards";
+  const slotHtml=(tm,ti,sl)=>{
+    const [x,y]=_lineupXY(ti,sl.pos,tm.formation,board);
+    const sel=_luSel&&sl.key&&_luSel.key===sl.key?" lu-sel":"";
+    const target=_luSel&&!sl.key?" lu-target":"";
+    return `<button type="button" class="lu-slot lu-t${tm.no}${sl.key?" lu-filled"+drag:""}${sel}${target}" style="left:${x.toFixed(2)}%;top:${y.toFixed(2)}%"`+
+      ` data-lu-team="${tm.no}" data-lu-pos="${esc(sl.pos)}"${sl.key?` data-lu-key="${esc(sl.key)}"`:""}`+
+      (canEdit?` data-on-click="lineupTapSlot" data-args="${rcArgs(tm.no,sl.pos,sl.key||"")}"`:"")+
+      ` aria-label="Team ${esc(tm.label)} ${esc(sl.role)}: ${sl.name?esc(sl.name):"empty"}">`+
+      `<span class="lu-disc">${sl.key?esc(_luInitials(sl.name)):esc(sl.role)}</span>${sl.name?`<span class="lu-nm">${esc(sl.name)}</span>`:""}</button>`;
+  };
+  const subsHtml=tm=>`<div class="lu-subrow lu-t${tm.no}" data-lu-team="${tm.no}" data-lu-subs="1"${canEdit?` data-on-click="lineupTapSubs" data-args="${rcArgs(tm.no)}"`:""}>`+
+    `<span class="lu-sublbl"><span class="lu-dot lu-t${tm.no}"></span>Subs ${esc(tm.label)}</span>`+
+    (tm.subs.length?tm.subs.map(p=>`<button type="button" class="lu-chip${drag}${_luSel&&_luSel.key===p.key?" lu-sel":""}" data-lu-key="${esc(p.key)}" data-lu-team="${tm.no}"`+
+      (canEdit?` data-on-click="lineupTapChip" data-args="${rcArgs(p.key,tm.no,RC_EVENT)}"`:"")+`>${esc(p.name)}</button>`).join("")
+      :`<span class="teams-sub">none</span>`)+`</div>`;
+  if(board){
+    // 3–4 teams: a half-pitch each, every team attacking up — usually a
+    // rotation where two play and the others wait.
+    h+=`<div class="lu-boards lu-n${lu.teams.length}">`+lu.teams.map((tm,ti)=>
+      `<div class="lu-board lu-t${tm.no}"><div class="lu-bhead"><span class="lu-btag">Team ${esc(tm.label)} · ${tm.slots.filter(sl=>sl.key).length+tm.subs.length}</span>`+
+      `<span class="teams-sub">${esc(tm.formation)}</span></div>`+
+      `<div class="lu-pitch lu-half" role="group" aria-label="Team ${esc(tm.label)} pitch">${_LU_HALF}`+
+      tm.slots.map(sl=>slotHtml(tm,ti,sl)).join("")+`</div>${subsHtml(tm)}</div>`).join("")+`</div>`;
+    return h;
   }
   h+=`<div class="lu-pitch" role="group" aria-label="Pitch">${_LU_LINES}`;
   lu.teams.forEach((tm,ti)=>{
     h+=`<span class="lu-tag lu-tag${ti} lu-t${tm.no}">Team ${esc(tm.label)}</span>`;
-    tm.slots.forEach(sl=>{
-      const [x,y]=_lineupXY(ti,sl.pos,tm.formation);
-      const sel=_luSel&&sl.key&&_luSel.key===sl.key?" lu-sel":"";
-      const target=_luSel&&!sl.key?" lu-target":"";
-      h+=`<button type="button" class="lu-slot lu-t${tm.no}${sl.key?" lu-filled"+drag:""}${sel}${target}" style="left:${x.toFixed(2)}%;top:${y.toFixed(2)}%"`+
-        ` data-lu-team="${tm.no}" data-lu-pos="${esc(sl.pos)}"${sl.key?` data-lu-key="${esc(sl.key)}"`:""}`+
-        (canEdit?` data-on-click="lineupTapSlot" data-args="${rcArgs(tm.no,sl.pos,sl.key||"")}"`:"")+
-        ` aria-label="Team ${esc(tm.label)} ${esc(sl.role)}: ${sl.name?esc(sl.name):"empty"}">`+
-        `<span class="lu-disc">${sl.key?esc(_luInitials(sl.name)):esc(sl.role)}</span>${sl.name?`<span class="lu-nm">${esc(sl.name)}</span>`:""}</button>`;
-    });
+    tm.slots.forEach(sl=>{h+=slotHtml(tm,ti,sl);});
   });
-  h+=`</div><div class="lu-subs">`+lu.teams.map(tm=>
-    `<div class="lu-subrow" data-lu-team="${tm.no}" data-lu-subs="1"${canEdit?` data-on-click="lineupTapSubs" data-args="${rcArgs(tm.no)}"`:""}>`+
-    `<span class="lu-sublbl"><span class="lu-dot lu-t${tm.no}"></span>Subs ${esc(tm.label)}</span>`+
-    (tm.subs.length?tm.subs.map(p=>`<button type="button" class="lu-chip${drag}${_luSel&&_luSel.key===p.key?" lu-sel":""}" data-lu-key="${esc(p.key)}" data-lu-team="${tm.no}"`+
-      (canEdit?` data-on-click="lineupTapChip" data-args="${rcArgs(p.key,tm.no,RC_EVENT)}"`:"")+`>${esc(p.name)}</button>`).join("")
-      :`<span class="teams-sub">none</span>`)+`</div>`).join("")+`</div>`;
+  h+=`</div><div class="lu-subs">`+lu.teams.map(subsHtml).join("")+`</div>`;
   return h;
 }
 
@@ -2483,6 +2503,31 @@ document.addEventListener("visibilitychange",()=>{
   if(document.visibilityState==="visible"&&_verifyCode)_pollVerify();
 });
 
+// Coming back to the page (from Telegram, another tab, a locked phone):
+// re-read the group so teams, votes and the lineup show what changed
+// elsewhere meanwhile. Never mid-interaction — a drag, a player picked to
+// place, or a field being typed in — and not for a glance under 5 seconds.
+let _hiddenAt=0, _returnBusy=false;
+function _busyOnPage(){
+  const a=document.activeElement;
+  return !!(_luDrag||_luSel||(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)));
+}
+async function _refreshOnReturn(){
+  if(!IS_GROUP||!groupData||_returnBusy||_busyOnPage())return;
+  _returnBusy=true;
+  try{await loadGroup();}catch(e){/* keep what's on screen; the next return tries again */}
+  finally{_returnBusy=false;}
+}
+document.addEventListener("visibilitychange",()=>{
+  if(document.visibilityState==="hidden"){_hiddenAt=Date.now();return;}
+  if(_hiddenAt&&Date.now()-_hiddenAt>=5000)_refreshOnReturn();
+  _hiddenAt=0;
+});
+if(tg&&typeof tg.onEvent==="function"){
+  // The Mini App inside Telegram: "activated" fires when it comes back to the front.
+  try{tg.onEvent("activated",()=>_refreshOnReturn());}catch(e){}
+}
+
 function _stopVerifyPoll(){
   if(_verifyPollTimer){clearInterval(_verifyPollTimer);_verifyPollTimer=null;}
   _verifyCode=null;
@@ -3197,10 +3242,8 @@ function _syncShhToggle(){
   if(hrs)hrs.value=groupData.vote_digest_hours||6;
   const wx=document.getElementById("weather-toggle");
   if(wx)wx.checked=!!groupData.weather_alerts;
-  const tm=document.getElementById("teams-toggle");
-  if(tm)tm.checked=!!groupData.teams_enabled;
-  const sp=document.getElementById("sport-select");
-  if(sp)sp.value=groupData.sport||"none";
+  const act=document.getElementById("activity-select");
+  if(act)act.value=groupData.activity||(groupData.teams_enabled?(groupData.sport||"game"):"event");
   const bm=document.getElementById("buzz-mute-select");
   if(bm){
     const v=String(groupData.buzz_mute_after??3);
@@ -3825,27 +3868,20 @@ window.toggleWeatherAlerts=async function(enabled){
   if(ok)toast(enabled?"🌦 Weather alerts ON":"🌦 Weather alerts OFF",2000);
 };
 
-window.toggleTeamsEnabled=async function(enabled){
-  const ok=await _patchGroupSetting({teams_enabled:enabled},()=>{
-    const tog=document.getElementById("teams-toggle");
-    if(tog)tog.checked=!enabled;
-  });
-  if(ok){
-    if(groupData)groupData.teams_enabled=enabled;
-    toast(enabled?"⚽ Teams ON":"⚽ Teams OFF",2000);
-    loadGroup().catch(()=>{});
-  }
-};
-
-window.setSport=async function(value){
-  const prev=(groupData&&groupData.sport)||"none";
-  const ok=await _patchGroupSetting({sport:value},()=>{
-    const sel=document.getElementById("sport-select");
+window.setActivity=async function(value){
+  const prev=(groupData&&groupData.activity)||"event";
+  const ok=await _patchGroupSetting({activity:value},()=>{
+    const sel=document.getElementById("activity-select");
     if(sel)sel.value=prev;
   });
   if(ok){
-    if(groupData)groupData.sport=value==="none"?null:value;
-    toast(value==="football"?"⚽ Football: 2 teams show on a pitch":value==="cricket"?"🏏 Cricket: give each player a role":"Sport off — teams are lists",2400);
+    if(groupData){
+      groupData.activity=value;
+      groupData.teams_enabled=value!=="event";
+      if(value!=="event")groupData.sport=(value==="football"||value==="cricket")?value:null;
+    }
+    toast({event:"🎉 Event — no teams",game:"🔢 Game — teams are numbered lists",
+      football:"⚽ Football — teams go on a pitch",cricket:"🏏 Cricket — give each player a role"}[value]||"Saved",2400);
     loadGroup().catch(()=>{});
   }
 };

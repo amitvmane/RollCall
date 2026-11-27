@@ -662,21 +662,11 @@
         </div>
         <div class="adm-row">
           <div>
-            <div class="adm-row-t">⚽ Teams</div>
-            <div class="adm-row-s">Let the group split the IN list into teams (/teams, the Teams button and card)</div>
+            <div class="adm-row-t">🎯 What the group does</div>
+            <div class="adm-row-s">Event: no teams. Game: split the IN list into 2–4 teams. Football: teams on a pitch with positions. Cricket: a role per player (/sport)</div>
           </div>
-          <label class="admin-toggle">
-            <input type="checkbox" id="teams-toggle" data-on-change="toggleTeamsEnabled" data-args='[{"$": "checked"}]'/>
-            <span class="admin-toggle-slider"></span>
-          </label>
-        </div>
-        <div class="adm-row">
-          <div>
-            <div class="adm-row-t">🏟 Sport</div>
-            <div class="adm-row-s">Football: 2 teams on a pitch with positions. Cricket: a role per player (/lineup)</div>
-          </div>
-          <select id="sport-select" data-on-change="setSport" data-args='[{"$": "value"}]'>
-            <option value="none">None (lists)</option><option value="football">⚽ Football</option><option value="cricket">🏏 Cricket</option>
+          <select id="activity-select" aria-label="What the group does" data-on-change="setActivity" data-args='[{"$": "value"}]'>
+            <option value="event">🎉 Event / gathering</option><option value="game">🔢 Game (team lists)</option><option value="football">⚽ Football</option><option value="cricket">🏏 Cricket</option>
           </select>
         </div>
         <div class="adm-row">

@@ -442,6 +442,8 @@ def get_rollcalls_by_group_token(group_token: str) -> dict:
         "weather_alerts": bool(int(chat.get("weather_alerts") or 0)),
         "teams_enabled": bool(int(chat.get("teams_enabled") or 0)),
         "sport": chat.get("sport") or None,
+        "activity": ("game" if not chat.get("sport") else chat.get("sport"))
+        if int(chat.get("teams_enabled") or 0) else "event",
         "join_approval": bool(int(chat.get("join_approval") or 0)),
         "buzz_mute_after": 3 if chat.get("buzz_mute_after") is None else int(chat.get("buzz_mute_after") or 0),
         "web_only": _is_local_chat(chat.get("chat_id")),
